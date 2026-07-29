@@ -16,6 +16,7 @@ from .jsonl import read_jsonl
 DEFAULT_INPUT = Path("data/raw/saol14-faksimil.jsonl")
 DEFAULT_OUTPUT = Path("reports/saol14-inflection-audit.html")
 DEFAULT_EXAMPLES = 50
+DEFAULT_BATCH_SIZE = 5
 DEFAULT_SEED = 14
 
 
@@ -119,23 +120,28 @@ def render_html(
     pattern_counts: dict[str, int],
     flag_counts: dict[str, int],
     examples_per_pattern: int,
+    batch_size: int,
     seed: int,
 ) -> str:
+    if batch_size < 1:
+        raise ValueError("batch_size must be at least 1")
+
     total_supported = sum(pattern_counts.values())
     sections: list[str] = []
 
-    for pattern in COMMON_PATTERNS:
+    for section_index, pattern in enumerate(COMMON_PATTERNS):
         rows = samples.get(pattern, [])
         body_rows: list[str] = []
-        for row in rows:
+        for row_index, row in enumerate(rows):
             key = html.escape(_row_key(row), quote=True)
             flags = " ".join(
                 f'<span class="flag">{html.escape(flag)}</span>' for flag in row.flags
             ) or '<span class="muted">inga</span>'
             forms = ", ".join(html.escape(form) for form in row.forms)
             source_link = _source_link(row.source)
+            hidden_class = " audit-hidden" if row_index >= batch_size else ""
             body_rows.append(
-                "<tr>"
+                f'<tr class="audit-row{hidden_class}" data-index="{row_index}">'
                 f"<td><strong>{html.escape(row.lemma)}</strong><br>"
                 f'<span class="muted">{html.escape(row.upos)} · {html.escape(row.ordkl)} · {source_link}</span></td>'
                 f"<td><code>{html.escape(row.pattern)}</code></td>"
@@ -149,15 +155,22 @@ def render_html(
                 "</tr>"
             )
 
+        visible = min(batch_size, len(rows))
+        button = (
+            f'<button class="more" data-target="pattern-{section_index}" data-batch="{batch_size}">'
+            f'Nästa {batch_size} exempel</button>'
+            if len(rows) > batch_size
+            else ""
+        )
         sections.append(
-            f'<section id="pattern-{len(sections)}">'
+            f'<section id="pattern-{section_index}">'
             f"<h2><code>{html.escape(pattern)}</code></h2>"
             f'<p class="muted">{pattern_counts.get(pattern, 0)} poster totalt; '
-            f"{len(rows)} granskningsexempel.</p>"
+            f'<span class="shown-count">{visible}</span> av {len(rows)} urvalda exempel visas.</p>'
             "<table><thead><tr><th>Lemma</th><th>Notation</th><th>Genererade former</th>"
             "<th>Flaggor</th><th>Bedömning</th></tr></thead><tbody>"
             + "".join(body_rows)
-            + "</tbody></table></section>"
+            + f"</tbody></table><p>{button}</p></section>"
         )
 
     flag_summary = "".join(
@@ -183,6 +196,7 @@ th {{ background: #eef0f2; }} code {{ white-space: nowrap; }}
 .flag {{ display: inline-block; padding: 2px 6px; margin: 1px; border-radius: 999px; background: #ffe7a8; }}
 .muted {{ color: #666; font-size: .9em; }}
 .ref {{ white-space: nowrap; font-weight: 600; }}
+.audit-hidden {{ display: none; }}
 button {{ padding: 8px 12px; margin-right: 8px; }}
 .summary {{ display: flex; gap: 24px; flex-wrap: wrap; }}
 @media (max-width: 800px) {{ main {{ padding: 12px; }} table {{ font-size: .88rem; }} th, td {{ padding: 6px; }} }}
@@ -193,7 +207,8 @@ button {{ padding: 8px 12px; margin-right: 8px; }}
 <h1>SAOL14 – böjningsgranskning</h1>
 <div class="summary">
 <span><strong>{total_supported}</strong> stödda poster</span>
-<span><strong>{examples_per_pattern}</strong> exempel per mönster</span>
+<span><strong>{batch_size}</strong> exempel per mönster visas först</span>
+<span>upp till <strong>{examples_per_pattern}</strong> finns per mönster</span>
 <span>slumpfrö <strong>{seed}</strong></span>
 <span id="progress">0 bedömda</span>
 </div>
@@ -215,6 +230,16 @@ radios.forEach(radio => radio.addEventListener('change', () => {{
   reviews[radio.name] = radio.value;
   localStorage.setItem(storageKey, JSON.stringify(reviews));
   refresh();
+}}));
+document.querySelectorAll('.more').forEach(button => button.addEventListener('click', () => {{
+  const section = document.getElementById(button.dataset.target);
+  const hidden = [...section.querySelectorAll('.audit-row.audit-hidden')];
+  const batch = Number(button.dataset.batch);
+  hidden.slice(0, batch).forEach(row => row.classList.remove('audit-hidden'));
+  const remaining = section.querySelectorAll('.audit-row.audit-hidden').length;
+  const shown = section.querySelectorAll('.audit-row:not(.audit-hidden)').length;
+  section.querySelector('.shown-count').textContent = shown;
+  if (!remaining) button.remove();
 }}));
 document.getElementById('clear').addEventListener('click', () => {{
   if (confirm('Rensa alla sparade bedömningar?')) {{ reviews = {{}}; localStorage.removeItem(storageKey); refresh(); }}
@@ -238,13 +263,14 @@ def build_audit(
     input_path: Path,
     output_path: Path,
     examples_per_pattern: int = DEFAULT_EXAMPLES,
+    batch_size: int = DEFAULT_BATCH_SIZE,
     seed: int = DEFAULT_SEED,
 ) -> dict[str, Any]:
     samples, pattern_counts, flag_counts = sample_rows(
         read_jsonl(input_path), examples_per_pattern, seed
     )
     document = render_html(
-        samples, pattern_counts, flag_counts, examples_per_pattern, seed
+        samples, pattern_counts, flag_counts, examples_per_pattern, batch_size, seed
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(document, encoding="utf-8")
@@ -256,6 +282,7 @@ def build_audit(
         "pattern_counts": pattern_counts,
         "flag_counts": flag_counts,
         "examples_per_pattern": examples_per_pattern,
+        "batch_size": batch_size,
         "seed": seed,
     }
 
@@ -267,15 +294,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("input", nargs="?", type=Path, default=DEFAULT_INPUT)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--examples", type=int, default=DEFAULT_EXAMPLES)
+    parser.add_argument("--batch", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     return parser
 
 
 def main() -> None:
     args = build_parser().parse_args()
-    report = build_audit(args.input, args.output, args.examples, args.seed)
+    report = build_audit(args.input, args.output, args.examples, args.batch, args.seed)
     print(f"Stödda poster: {report['supported_records']}")
-    print(f"Granskningsexempel: {report['sampled_records']}")
+    print(f"Granskningsexempel i rapporten: {report['sampled_records']}")
+    print(f"Visas först per mönster: {report['batch_size']}")
     print(f"Mönster i rapporten: {report['patterns']}")
     print(f"HTML-rapport: {args.output}")
 
