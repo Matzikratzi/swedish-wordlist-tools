@@ -29,12 +29,14 @@ class AuditTests(unittest.TestCase):
                 "text": "+en +er",
                 "upos": "NOUN",
                 "ordkl": "s.",
+                "source": "https://example.test/saol14/page.pdf",
             }
         )
         self.assertIsNotNone(row)
         assert row is not None
         self.assertEqual(row.record_id, "abc")
         self.assertEqual(row.forms, ("abakus", "abakusen", "abakuser"))
+        self.assertEqual(row.source, "https://example.test/saol14/page.pdf")
 
     def test_sampling_is_deterministic_and_limited(self) -> None:
         records = [
@@ -57,7 +59,7 @@ class AuditTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             sample_rows([], examples_per_pattern=0, seed=14)
 
-    def test_builds_html_with_review_controls(self) -> None:
+    def test_builds_html_with_review_controls_and_facsimile_links(self) -> None:
         fixture = Path(__file__).parent / "fixtures" / "sample.jsonl"
         with TemporaryDirectory() as directory:
             output = Path(directory) / "audit.html"
@@ -69,6 +71,8 @@ class AuditTests(unittest.TestCase):
         self.assertIn("abakusen", document)
         self.assertIn("Exportera bedömningar som JSON", document)
         self.assertIn('value="wrong"', document)
+        self.assertIn('target="_blank"', document)
+        self.assertIn("Ref ↗", document)
 
 
 if __name__ == "__main__":
