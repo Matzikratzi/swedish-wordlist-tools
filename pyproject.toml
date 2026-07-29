@@ -16,6 +16,7 @@ dependencies = []
 saol14-download = "swedish_wordlist_tools.download:main"
 saol14-inspect = "swedish_wordlist_tools.inspect:main"
 saol14-generate = "swedish_wordlist_tools.inflect:main"
+saol14-audit = "swedish_wordlist_tools.audit:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
