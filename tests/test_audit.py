@@ -59,20 +59,29 @@ class AuditTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             sample_rows([], examples_per_pattern=0, seed=14)
 
-    def test_builds_html_with_review_controls_and_facsimile_links(self) -> None:
+    def test_builds_html_with_review_controls_facsimile_links_and_batches(self) -> None:
         fixture = Path(__file__).parent / "fixtures" / "sample.jsonl"
         with TemporaryDirectory() as directory:
             output = Path(directory) / "audit.html"
-            report = build_audit(fixture, output, examples_per_pattern=2, seed=14)
+            report = build_audit(
+                fixture,
+                output,
+                examples_per_pattern=2,
+                batch_size=1,
+                seed=14,
+            )
             document = output.read_text(encoding="utf-8")
 
         self.assertEqual(report["supported_records"], 2)
         self.assertEqual(report["sampled_records"], 2)
+        self.assertEqual(report["batch_size"], 1)
         self.assertIn("abakusen", document)
         self.assertIn("Exportera bedömningar som JSON", document)
         self.assertIn('value="wrong"', document)
         self.assertIn('target="_blank"', document)
         self.assertIn("Ref ↗", document)
+        self.assertIn("Nästa 1 exempel", document)
+        self.assertIn("audit-hidden", document)
 
 
 if __name__ == "__main__":
