@@ -27,6 +27,7 @@ class AuditRow:
     forms: tuple[str, ...]
     upos: str
     ordkl: str
+    source: str
     flags: tuple[str, ...]
 
 
@@ -61,6 +62,7 @@ def make_audit_row(record: dict[str, Any]) -> AuditRow | None:
         forms=entry.forms,
         upos=str(record.get("upos", "")),
         ordkl=str(record.get("ordkl", "")),
+        source=str(record.get("source", "")).strip(),
         flags=audit_flags(record, entry),
     )
 
@@ -105,6 +107,13 @@ def _row_key(row: AuditRow) -> str:
     return f"{row.record_id}:{row.pattern}:{row.lemma}"
 
 
+def _source_link(source: str) -> str:
+    if not source:
+        return '<span class="muted">ingen ref</span>'
+    escaped = html.escape(source, quote=True)
+    return f'<a class="ref" href="{escaped}" target="_blank" rel="noopener noreferrer">Ref ↗</a>'
+
+
 def render_html(
     samples: dict[str, list[AuditRow]],
     pattern_counts: dict[str, int],
@@ -124,10 +133,11 @@ def render_html(
                 f'<span class="flag">{html.escape(flag)}</span>' for flag in row.flags
             ) or '<span class="muted">inga</span>'
             forms = ", ".join(html.escape(form) for form in row.forms)
+            source_link = _source_link(row.source)
             body_rows.append(
                 "<tr>"
                 f"<td><strong>{html.escape(row.lemma)}</strong><br>"
-                f'<span class="muted">{html.escape(row.upos)} · {html.escape(row.ordkl)}</span></td>'
+                f'<span class="muted">{html.escape(row.upos)} · {html.escape(row.ordkl)} · {source_link}</span></td>'
                 f"<td><code>{html.escape(row.pattern)}</code></td>"
                 f"<td>{forms}</td>"
                 f"<td>{flags}</td>"
@@ -172,6 +182,7 @@ th {{ background: #eef0f2; }} code {{ white-space: nowrap; }}
 .choice label {{ display: block; margin-bottom: 5px; white-space: nowrap; }}
 .flag {{ display: inline-block; padding: 2px 6px; margin: 1px; border-radius: 999px; background: #ffe7a8; }}
 .muted {{ color: #666; font-size: .9em; }}
+.ref {{ white-space: nowrap; font-weight: 600; }}
 button {{ padding: 8px 12px; margin-right: 8px; }}
 .summary {{ display: flex; gap: 24px; flex-wrap: wrap; }}
 @media (max-width: 800px) {{ main {{ padding: 12px; }} table {{ font-size: .88rem; }} th, td {{ padding: 6px; }} }}
