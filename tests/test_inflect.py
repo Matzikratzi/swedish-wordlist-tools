@@ -67,10 +67,11 @@ class InflectTests(unittest.TestCase):
             forms = output.read_text(encoding="utf-8").splitlines()
 
         self.assertEqual(report["source_records"], 4)
-        self.assertEqual(report["supported_records"], 3)
-        self.assertEqual(report["coverage_percent"], 75.0)
+        self.assertEqual(report["supported_records"], 2)
+        self.assertEqual(report["coverage_percent"], 50.0)
         self.assertIn("abakusen", forms)
-        self.assertIn("abbedissor", forms)
+        self.assertIn("A-avdraget", forms)
+        self.assertNotIn("abbedissor", forms)
         self.assertNotIn("a", forms)
 
 
