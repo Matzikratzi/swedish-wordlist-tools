@@ -1,3 +1,4 @@
-{"ingångsord":"koala","ordklass":"NOUN","ord":"koala","homograf":"","morfosyntax":"subst.","relaterat ord":"koala","källa":"example.pdf","text":"+n, koalor"}
-{"ingångsord":"gå","ordklass":"VERB","ord":"gå","homograf":"","morfosyntax":"verb","relaterat ord":"gå","källa":"example.pdf","text":"går, gick, gått"}
-{"ingångsord":"rå","ordklass":"ADJ","ord":"rå¹","homograf":"1","morfosyntax":"adj.","relaterat ord":"rå","källa":"example.pdf","text":"rått, råa"}
+{"normaliserat_ord":"a","homonr":"2","ordkl":"prep.","stycke":"<sup>2</sup>a","sidnr1":1,"sidnr2":1,"urspr_lopnr":435709,"subnr":435709,"text":"(null)","source":"example.png","upos":"X","ord":"<sup>2</sup>a"}
+{"normaliserat_ord":"A-avdrag","homonr":"1","ordkl":"s. <i>+et; pl. +</i>","stycke":"A-av·drag","sidnr1":1,"sidnr2":1,"urspr_lopnr":435722,"subnr":435722,"text":"+et; pl. +","source":"example.png","upos":"NOUN","ord":"A-av·drag"}
+{"normaliserat_ord":"abakus","homonr":"1","ordkl":"s. <i>+en +er</i>","stycke":"abak·us","sidnr1":1,"sidnr2":1,"urspr_lopnr":435725,"subnr":435725,"text":"+en +er","source":"example.png","upos":"NOUN","ord":"abak·us"}
+{"normaliserat_ord":"abbedissa","homonr":"1","ordkl":"s. <i>+n abbedissor</i>","stycke":"abb·ed·issa","sidnr1":1,"sidnr2":1,"urspr_lopnr":435956,"subnr":435956,"text":"+n abbedissor","source":"example.png","upos":"NOUN","ord":"abb·ed·issa"}
