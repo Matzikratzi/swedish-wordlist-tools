@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "swedish-wordlist-tools"
+version = "0.1.0"
+description = "Tools for analysing SAOL 14 and generating Swedish word lists"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "Mats Järgenstedt"}]
+dependencies = []
+
+[project.scripts]
+saol14-download = "swedish_wordlist_tools.download:main"
+saol14-inspect = "swedish_wordlist_tools.inspect:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
