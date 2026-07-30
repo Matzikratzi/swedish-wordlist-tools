@@ -35,6 +35,46 @@ class InflectTests(unittest.TestCase):
         assert entry is not None
         self.assertEqual(entry.pattern_group, EXPLICIT_PATTERN_GROUP)
 
+    def test_replaces_final_compound_component(self) -> None:
+        self.assertEqual(
+            generate_forms("bagagekärra", "+n -kärror"),
+            ("bagagekärra", "bagagekärran", "bagagekärror"),
+        )
+        self.assertEqual(
+            generate_forms("damcykel", "+n -cyklar"),
+            ("damcykel", "damcykeln", "damcyklar"),
+        )
+        self.assertEqual(
+            generate_forms("sondotter", "+n -döttrar"),
+            ("sondotter", "sondottern", "sondöttrar"),
+        )
+        self.assertEqual(
+            generate_forms("utskriva", "-skrev -skrivit"),
+            ("utskriva", "utskrev", "utskrivit"),
+        )
+
+    def test_tracks_definite_plural_separately(self) -> None:
+        entry = generate_entry({
+            "normaliserat_ord": "dyrkare",
+            "text": "+n; pl. +, best. pl. dyrkarna",
+        })
+        self.assertIsNotNone(entry)
+        assert entry is not None
+        self.assertEqual(entry.forms, ("dyrkare", "dyrkaren", "dyrkarna"))
+        self.assertEqual(entry.form_kinds, ("lemma", "derived", "definite_plural"))
+
+        compound = generate_entry({
+            "normaliserat_ord": "förlossningsläkare",
+            "text": "+n; pl. +, best. pl. -läkarna",
+        })
+        self.assertIsNotNone(compound)
+        assert compound is not None
+        self.assertEqual(
+            compound.forms,
+            ("förlossningsläkare", "förlossningsläkaren", "förlossningsläkarna"),
+        )
+        self.assertEqual(compound.form_kinds[-1], "definite_plural")
+
     def test_plural_plus_does_not_duplicate_lemma(self) -> None:
         self.assertEqual(generate_forms("A-avdrag", "+et; pl. +"), ("A-avdrag", "A-avdraget"))
 
@@ -65,6 +105,7 @@ class InflectTests(unittest.TestCase):
         self.assertIn("abakusen", forms)
         self.assertIn("A-avdraget", forms)
         self.assertIn("abbedissor", forms)
+        self.assertIn("form_kind_counts", report)
         self.assertNotIn("a", forms)
 
 
