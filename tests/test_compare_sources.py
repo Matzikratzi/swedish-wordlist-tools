@@ -14,6 +14,19 @@ SALDO_XML = """<?xml version="1.0" encoding="UTF-8"?>
       <WordForm><FormRepresentation><feat att="writtenForm" val="abakusen"/></FormRepresentation></WordForm>
       <WordForm><FormRepresentation><feat att="writtenForm" val="abakuser"/></FormRepresentation></WordForm>
     </LexicalEntry>
+    <LexicalEntry id="fil..nn.1">
+      <Lemma><FormRepresentation><feat att="writtenForm" val="fil"/></FormRepresentation></Lemma>
+      <WordForm><FormRepresentation><feat att="writtenForm" val="filen"/></FormRepresentation></WordForm>
+    </LexicalEntry>
+    <LexicalEntry id="fil..vb.1">
+      <Lemma><FormRepresentation><feat att="writtenForm" val="fil"/></FormRepresentation></Lemma>
+      <WordForm><FormRepresentation><feat att="writtenForm" val="filar"/></FormRepresentation></WordForm>
+      <WordForm><FormRepresentation><feat att="writtenForm" val="filade"/></FormRepresentation></WordForm>
+    </LexicalEntry>
+    <LexicalEntry id="oklar..nn.1">
+      <Lemma><FormRepresentation><feat att="writtenForm" val="oklar"/></FormRepresentation></Lemma>
+      <WordForm><FormRepresentation><feat att="writtenForm" val="oklaren"/></FormRepresentation></WordForm>
+    </LexicalEntry>
     <LexicalEntry id="saldo-only..nn.1">
       <Lemma><FormRepresentation><feat att="writtenForm" val="saldoord"/></FormRepresentation></Lemma>
       <WordForm><FormRepresentation><feat att="writtenForm" val="saldoordet"/></FormRepresentation></WordForm>
@@ -23,47 +36,71 @@ SALDO_XML = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 SAOL_JSONL = """{"id":"1","normaliserat_ord":"abakus","text":"+en +er","upos":"NOUN"}
-{"id":"2","normaliserat_ord":"saolord","text":"+et; pl. +","upos":"NOUN"}
+{"id":"2","normaliserat_ord":"fil","text":"+ar +ade","upos":"VERB","homonr":"2"}
+{"id":"3","normaliserat_ord":"oklar","text":"","upos":"ADJ"}
+{"id":"4","normaliserat_ord":"saolord","text":"+et; pl. +","upos":"NOUN"}
 """
 
 
 class CompareSourcesTests(unittest.TestCase):
-    def test_reads_namespaced_saldo_written_forms(self) -> None:
+    def test_reads_namespaced_saldo_analyses_and_word_classes(self) -> None:
         with TemporaryDirectory() as directory:
             saldo_path = Path(directory) / "saldo.xml"
             saldo_path.write_text(SALDO_XML, encoding="utf-8")
             saldo = read_saldo(saldo_path)
-        self.assertEqual(saldo["abakus"]["forms"], {"abakus", "abakusen", "abakuser"})
 
-    def test_builds_target_and_two_exception_lists(self) -> None:
+        self.assertEqual(len(saldo["fil"]), 2)
+        by_pos = {analysis["upos"]: analysis for analysis in saldo["fil"]}
+        self.assertEqual(by_pos["NOUN"]["forms"], {"fil", "filen"})
+        self.assertEqual(by_pos["VERB"]["forms"], {"fil", "filar", "filade"})
+
+    def test_builds_target_and_three_exception_lists(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
             saol_path = root / "saol.jsonl"
             saldo_path = root / "saldo.xml"
             target = root / "target.txt"
             saol_only = root / "saol-only.jsonl"
+            ambiguous = root / "ambiguous.jsonl"
             saldo_only = root / "saldo-only.jsonl"
             report_path = root / "report.json"
             saol_path.write_text(SAOL_JSONL, encoding="utf-8")
             saldo_path.write_text(SALDO_XML, encoding="utf-8")
 
             report = compare_sources(
-                saol_path, saldo_path, target, saol_only, saldo_only, report_path
+                saol_path,
+                saldo_path,
+                target,
+                saol_only,
+                ambiguous,
+                saldo_only,
+                report_path,
             )
 
             target_forms = target.read_text(encoding="utf-8").splitlines()
             saol_rows = [json.loads(line) for line in saol_only.read_text(encoding="utf-8").splitlines()]
+            ambiguous_rows = [
+                json.loads(line) for line in ambiguous.read_text(encoding="utf-8").splitlines()
+            ]
             saldo_rows = [json.loads(line) for line in saldo_only.read_text(encoding="utf-8").splitlines()]
 
-        self.assertEqual(target_forms, ["abakus", "abakusen", "abakuser"])
+        self.assertEqual(
+            target_forms,
+            ["abakus", "abakusen", "abakuser", "fil", "filade", "filar"],
+        )
+        self.assertNotIn("filen", target_forms)
+        self.assertNotIn("oklar", target_forms)
         self.assertEqual(saol_rows[0]["lemma"], "saolord")
         self.assertEqual(saol_rows[0]["generated_forms"], ["saolord", "saolordet"])
+        self.assertEqual(ambiguous_rows[0]["lemma"], "oklar")
+        self.assertEqual(ambiguous_rows[0]["saldo_word_classes"], ["NOUN"])
         self.assertEqual(saldo_rows[0]["lemmas"], ["saldoord"])
         self.assertNotIn("saldoord", target_forms)
-        self.assertEqual(report["saol_matched_records"], 1)
+        self.assertEqual(report["saol_matched_records"], 2)
         self.assertEqual(report["saol_only_records"], 1)
+        self.assertEqual(report["ambiguous_records"], 1)
         self.assertEqual(report["saldo_only_lemmas"], 1)
-        self.assertEqual(report["target_unique_forms"], 3)
+        self.assertEqual(report["target_unique_forms"], 6)
 
 
 if __name__ == "__main__":
