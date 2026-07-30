@@ -30,7 +30,7 @@ SALDO_XML = """<?xml version="1.0" encoding="UTF-8"?>
       <Lemma><FormRepresentation><feat att="writtenForm" val="Afrika"/></FormRepresentation></Lemma>
       <WordForm><FormRepresentation><feat att="writtenForm" val="Afrikas"/></FormRepresentation></WordForm>
     </LexicalEntry>
-    <LexicalEntry id="adressera_sig..x.1">
+    <LexicalEntry id="adressera_sig">
       <Lemma><FormRepresentation><feat att="writtenForm" val="adressera sig"/></FormRepresentation></Lemma>
       <WordForm><FormRepresentation><feat att="writtenForm" val="adressera"/></FormRepresentation></WordForm>
       <WordForm><FormRepresentation><feat att="writtenForm" val="adresserade"/></FormRepresentation></WordForm>
@@ -75,6 +75,7 @@ class CompareSourcesTests(unittest.TestCase):
         by_pos = {analysis["upos"]: analysis for analysis in saldo["fil"]}
         self.assertEqual(by_pos["NOUN"]["forms"], {"fil", "filen"})
         self.assertEqual(by_pos["VERB"]["forms"], {"fil", "filar", "filade"})
+        self.assertEqual(saldo["adressera sig"][0]["upos"], "")
 
     def test_builds_target_with_safe_fallbacks_and_filters_affixes(self) -> None:
         with TemporaryDirectory() as directory:
