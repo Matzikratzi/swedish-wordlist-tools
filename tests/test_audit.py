@@ -55,6 +55,18 @@ class AuditTests(unittest.TestCase):
         self.assertIn("JSON.stringify(reviews, null, 2) + '\\n'", document)
         self.assertNotIn("JSON.stringify(reviews, null, 2) + '\n'", document)
 
+    def test_places_all_right_button_under_generated_forms(self) -> None:
+        fixture = Path(__file__).parent / "fixtures" / "sample.jsonl"
+        with TemporaryDirectory() as directory:
+            output = Path(directory) / "audit.html"
+            build_audit(fixture, output, examples_per_pattern=2, batch_size=1, seed=14)
+            document = output.read_text(encoding="utf-8")
+        self.assertIn('<tr class="category-actions"><td></td><td></td><td>', document)
+        self.assertIn('class="all-right"', document)
+        self.assertIn("Alla rätt", document)
+        self.assertIn("markerar synliga obesvarade", document)
+        self.assertIn("if (right && !reviews[right.name])", document)
+
 
 if __name__ == "__main__":
     unittest.main()
