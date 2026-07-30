@@ -24,7 +24,7 @@ class SaldoWordForm:
     """One SALDO WordForm with a losslessly parsed MSD value."""
 
     written_form: str
-    msd: Msd = Msd(raw="", tags=())
+    msd: Msd = Msd("")
     features: tuple[tuple[str, str], ...] = ()
 
 
