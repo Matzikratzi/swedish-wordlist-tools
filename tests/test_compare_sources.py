@@ -23,6 +23,13 @@ SALDO_XML = """<?xml version="1.0" encoding="UTF-8"?>
       <WordForm><FormRepresentation><feat att="writtenForm" val="filar"/></FormRepresentation></WordForm>
       <WordForm><FormRepresentation><feat att="writtenForm" val="filade"/></FormRepresentation></WordForm>
     </LexicalEntry>
+    <LexicalEntry id="ack..in.1">
+      <Lemma><FormRepresentation><feat att="writtenForm" val="ack"/></FormRepresentation></Lemma>
+    </LexicalEntry>
+    <LexicalEntry id="afrika..pm.1">
+      <Lemma><FormRepresentation><feat att="writtenForm" val="Afrika"/></FormRepresentation></Lemma>
+      <WordForm><FormRepresentation><feat att="writtenForm" val="Afrikas"/></FormRepresentation></WordForm>
+    </LexicalEntry>
     <LexicalEntry id="oklar..nn.1">
       <Lemma><FormRepresentation><feat att="writtenForm" val="oklar"/></FormRepresentation></Lemma>
       <WordForm><FormRepresentation><feat att="writtenForm" val="oklaren"/></FormRepresentation></WordForm>
@@ -35,10 +42,13 @@ SALDO_XML = """<?xml version="1.0" encoding="UTF-8"?>
 </LexicalResource>
 """
 
-SAOL_JSONL = """{"id":"1","normaliserat_ord":"abakus","text":"+en +er","upos":"NOUN"}
-{"id":"2","normaliserat_ord":"fil","text":"+ar +ade","upos":"VERB","homonr":"2"}
-{"id":"3","normaliserat_ord":"oklar","text":"","upos":"ADJ"}
-{"id":"4","normaliserat_ord":"saolord","text":"+et; pl. +","upos":"NOUN"}
+SAOL_JSONL = """{"id":"1","normaliserat_ord":"abakus","text":"+en +er","upos":"NOUN","ordkl":"subst."}
+{"id":"2","normaliserat_ord":"fil","text":"+ar +ade","upos":"NOUN","ordkl":"verb","homonr":"2"}
+{"id":"3","normaliserat_ord":"ack","text":"(null)","upos":"X","ordkl":"interj."}
+{"id":"4","normaliserat_ord":"Afrika","text":"(null)","upos":"X","ordkl":"namn"}
+{"id":"5","normaliserat_ord":"oklar","text":"","upos":"ADJ","ordkl":"adj."}
+{"id":"6","normaliserat_ord":"saolord","text":"+et; pl. +","upos":"NOUN","ordkl":"s."}
+{"id":"7","normaliserat_ord":"-aktig","text":"+t +a","upos":"ADJ","ordkl":"adjektiviskt slutled"}
 """
 
 
@@ -54,7 +64,7 @@ class CompareSourcesTests(unittest.TestCase):
         self.assertEqual(by_pos["NOUN"]["forms"], {"fil", "filen"})
         self.assertEqual(by_pos["VERB"]["forms"], {"fil", "filar", "filade"})
 
-    def test_builds_target_and_three_exception_lists(self) -> None:
+    def test_builds_target_normalizes_word_classes_and_filters_affixes(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
             saol_path = root / "saol.jsonl"
@@ -86,21 +96,25 @@ class CompareSourcesTests(unittest.TestCase):
 
         self.assertEqual(
             target_forms,
-            ["abakus", "abakusen", "abakuser", "fil", "filade", "filar"],
+            ["abakus", "abakusen", "abakuser", "ack", "Afrika", "Afrikas", "fil", "filade", "filar"],
         )
         self.assertNotIn("filen", target_forms)
-        self.assertNotIn("oklar", target_forms)
+        self.assertNotIn("-aktig", target_forms)
         self.assertEqual(saol_rows[0]["lemma"], "saolord")
+        self.assertEqual(saol_rows[0]["reason"], "no_saldo_lemma")
         self.assertEqual(saol_rows[0]["generated_forms"], ["saolord", "saolordet"])
         self.assertEqual(ambiguous_rows[0]["lemma"], "oklar")
         self.assertEqual(ambiguous_rows[0]["saldo_word_classes"], ["NOUN"])
         self.assertEqual(saldo_rows[0]["lemmas"], ["saldoord"])
         self.assertNotIn("saldoord", target_forms)
-        self.assertEqual(report["saol_matched_records"], 2)
+        self.assertEqual(report["saol_source_records"], 7)
+        self.assertEqual(report["saol_filtered_affix_records"], 1)
+        self.assertEqual(report["saol_compared_records"], 6)
+        self.assertEqual(report["saol_matched_records"], 4)
         self.assertEqual(report["saol_only_records"], 1)
         self.assertEqual(report["ambiguous_records"], 1)
         self.assertEqual(report["saldo_only_lemmas"], 1)
-        self.assertEqual(report["target_unique_forms"], 6)
+        self.assertEqual(report["target_unique_forms"], 9)
 
 
 if __name__ == "__main__":
