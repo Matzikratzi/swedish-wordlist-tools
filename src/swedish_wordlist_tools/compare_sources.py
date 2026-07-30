@@ -95,6 +95,40 @@ def _saldo_pos(element: ET.Element) -> str:
     return ""
 
 
+def _saol_upos(record: dict[str, Any]) -> str:
+    """Resolve SAOL word class primarily from the more detailed ordkl field."""
+    ordkl = _normalise(str(record.get("ordkl", ""))).casefold()
+
+    rules = (
+        (("namn",), "PROPN"),
+        (("interj",), "INTJ"),
+        (("prep",), "ADP"),
+        (("konj", "samordnande"), "CCONJ"),
+        (("subj", "underordnande"), "SCONJ"),
+        (("pron",), "PRON"),
+        (("räkn", "räkneord"), "NUM"),
+        (("adv",), "ADV"),
+        (("adj", "adjektiv"), "ADJ"),
+        (("rxv", "verb"), "VERB"),
+        (("subst", "substantiv"), "NOUN"),
+    )
+    for markers, upos in rules:
+        if any(marker in ordkl for marker in markers):
+            return upos
+
+    if re.match(r"^s\.(?:\s|<|$)", ordkl):
+        return "NOUN"
+    if re.match(r"^v\.(?:\s|<|$)", ordkl):
+        return "VERB"
+
+    return _normalise(str(record.get("upos", ""))).upper()
+
+
+def _is_affix_entry(record: dict[str, Any], lemma: str) -> bool:
+    ordkl = _normalise(str(record.get("ordkl", ""))).casefold()
+    return lemma.startswith("-") or "slutled" in ordkl
+
+
 def read_saldo(path: Path) -> dict[str, list[dict[str, Any]]]:
     """Read SALDO analyses grouped by lemma without loading the full XML tree."""
     entries: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -128,7 +162,8 @@ def _saol_row(record: dict[str, Any], lemma: str) -> dict[str, Any]:
         "lemma": lemma,
         "homonym_number": str(record.get("homonr", "")),
         "record_id": str(record.get("id") or record.get("subnr") or ""),
-        "upos": str(record.get("upos", "")),
+        "upos": _saol_upos(record),
+        "source_upos": str(record.get("upos", "")),
         "ordkl": str(record.get("ordkl", "")),
         "notation": str(record.get("text", "")),
         "generated_forms": list(generated.forms) if generated else [],
@@ -158,6 +193,7 @@ def compare_sources(
     saol_only: list[dict[str, Any]] = []
     ambiguous: list[dict[str, Any]] = []
     matched_records = 0
+    filtered_affix_records = 0
     source_records = 0
 
     for record in read_jsonl(saol_path):
@@ -165,15 +201,20 @@ def compare_sources(
         lemma = _normalise(str(record.get("normaliserat_ord", "")))
         if not lemma:
             continue
+        if _is_affix_entry(record, lemma):
+            filtered_affix_records += 1
+            continue
 
         lemma_key = _key(lemma)
         saol_lemma_keys.add(lemma_key)
         analyses = saldo.get(lemma_key, [])
         if not analyses:
-            saol_only.append(_saol_row(record, lemma))
+            row = _saol_row(record, lemma)
+            row["reason"] = "no_saldo_lemma"
+            saol_only.append(row)
             continue
 
-        saol_upos = str(record.get("upos", "")).upper().strip()
+        saol_upos = _saol_upos(record)
         matching = [analysis for analysis in analyses if analysis["upos"] == saol_upos]
         if saol_upos and matching:
             matched_records += 1
@@ -236,8 +277,11 @@ def compare_sources(
         sorted(saldo_only, key=lambda row: row["lemmas"][0].casefold() if row["lemmas"] else ""),
     )
 
+    compared_records = source_records - filtered_affix_records
     report = {
         "saol_source_records": source_records,
+        "saol_filtered_affix_records": filtered_affix_records,
+        "saol_compared_records": compared_records,
         "saol_matched_records": matched_records,
         "saol_only_records": len(saol_only),
         "ambiguous_records": len(ambiguous),
@@ -282,6 +326,8 @@ def main() -> None:
         args.report,
     )
     print(f"SAOL-poster: {report['saol_source_records']}")
+    print(f"Bortfiltrerade slutled: {report['saol_filtered_affix_records']}")
+    print(f"Jämförda SAOL-poster: {report['saol_compared_records']}")
     print(f"Säkert matchade SAOL-poster: {report['saol_matched_records']}")
     print(f"Endast i SAOL: {report['saol_only_records']}")
     print(f"Tvetydiga lemmaträffar: {report['ambiguous_records']}")
