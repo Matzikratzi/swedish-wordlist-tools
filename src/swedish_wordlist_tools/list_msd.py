@@ -8,7 +8,7 @@ from typing import Any
 
 from .saldo import read_saldo_analyses
 
-DEFAULT_SALDO = Path("data/raw/saldo.xml")
+DEFAULT_SALDO = Path("data/raw/saldom.xml")
 
 
 def inventory_msd(path: Path) -> dict[str, Any]:
