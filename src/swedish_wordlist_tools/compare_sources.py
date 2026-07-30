@@ -109,7 +109,7 @@ def _saol_upos(record: dict[str, Any]) -> str:
         (("räkn", "räkneord"), "NUM"),
         (("adv",), "ADV"),
         (("adj", "adjektiv"), "ADJ"),
-        (("rxv", "verb"), "VERB"),
+        (("rxv", "ptv", "verb"), "VERB"),
         (("subst", "substantiv"), "NOUN"),
     )
     for markers, upos in rules:
@@ -126,7 +126,13 @@ def _saol_upos(record: dict[str, Any]) -> str:
 
 def _is_affix_entry(record: dict[str, Any], lemma: str) -> bool:
     ordkl = _normalise(str(record.get("ordkl", ""))).casefold()
-    return lemma.startswith("-") or "slutled" in ordkl
+    return (
+        lemma.startswith("-")
+        or lemma.endswith("-")
+        or "slutled" in ordkl
+        or "i sms." in ordkl
+        or "i sms " in ordkl
+    )
 
 
 def read_saldo(path: Path) -> dict[str, list[dict[str, Any]]]:
@@ -156,6 +162,23 @@ def read_saldo(path: Path) -> dict[str, list[dict[str, Any]]]:
     return dict(entries)
 
 
+def _build_form_index(
+    saldo: dict[str, list[dict[str, Any]]],
+) -> dict[str, list[dict[str, Any]]]:
+    form_index: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    seen: set[tuple[str, int]] = set()
+    for analyses in saldo.values():
+        for analysis in analyses:
+            identity = id(analysis)
+            for form in analysis["forms"]:
+                form_key = _key(form)
+                marker = (form_key, identity)
+                if marker not in seen:
+                    form_index[form_key].append(analysis)
+                    seen.add(marker)
+    return dict(form_index)
+
+
 def _saol_row(record: dict[str, Any], lemma: str) -> dict[str, Any]:
     generated = generate_entry(record)
     return {
@@ -178,6 +201,15 @@ def _write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
             handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
 
 
+def _saldo_lemma_keys(analyses: Iterable[dict[str, Any]]) -> set[str]:
+    return {
+        _key(lemma)
+        for analysis in analyses
+        for lemma in analysis["lemmas"]
+        if lemma
+    }
+
+
 def compare_sources(
     saol_path: Path,
     saldo_path: Path,
@@ -188,11 +220,15 @@ def compare_sources(
     report_path: Path = DEFAULT_REPORT,
 ) -> dict[str, Any]:
     saldo = read_saldo(saldo_path)
+    saldo_forms = _build_form_index(saldo)
     saol_lemma_keys: set[str] = set()
+    matched_saldo_lemma_keys: set[str] = set()
     target_forms: set[str] = set()
     saol_only: list[dict[str, Any]] = []
     ambiguous: list[dict[str, Any]] = []
     matched_records = 0
+    unknown_pos_matched_records = 0
+    form_matched_records = 0
     filtered_affix_records = 0
     source_records = 0
 
@@ -207,45 +243,82 @@ def compare_sources(
 
         lemma_key = _key(lemma)
         saol_lemma_keys.add(lemma_key)
-        analyses = saldo.get(lemma_key, [])
-        if not analyses:
-            row = _saol_row(record, lemma)
-            row["reason"] = "no_saldo_lemma"
-            saol_only.append(row)
-            continue
-
         saol_upos = _saol_upos(record)
-        matching = [analysis for analysis in analyses if analysis["upos"] == saol_upos]
-        if saol_upos and matching:
-            matched_records += 1
-            for analysis in matching:
-                target_forms.update(analysis["forms"])
+        analyses = saldo.get(lemma_key, [])
+
+        if analyses:
+            matching = [analysis for analysis in analyses if analysis["upos"] == saol_upos]
+            if saol_upos and matching:
+                matched_records += 1
+                matched_saldo_lemma_keys.update(_saldo_lemma_keys(matching))
+                for analysis in matching:
+                    target_forms.update(analysis["forms"])
+                continue
+
+            unknown = [analysis for analysis in analyses if not analysis["upos"]]
+            if saol_upos and len(unknown) == 1:
+                matched_records += 1
+                unknown_pos_matched_records += 1
+                matched_saldo_lemma_keys.update(_saldo_lemma_keys(unknown))
+                target_forms.update(unknown[0]["forms"])
+                continue
+
+            available_classes = sorted(
+                {analysis["upos"] or "UNKNOWN" for analysis in analyses},
+                key=str.casefold,
+            )
+            row = _saol_row(record, lemma)
+            row.update(
+                {
+                    "reason": "lemma_match_but_word_class_not_resolved",
+                    "saldo_word_classes": available_classes,
+                    "saldo_analyses": [
+                        {
+                            "id": analysis["id"],
+                            "upos": analysis["upos"],
+                            "lemmas": sorted(analysis["lemmas"], key=str.casefold),
+                            "forms": sorted(analysis["forms"], key=str.casefold),
+                        }
+                        for analysis in analyses
+                    ],
+                }
+            )
+            ambiguous.append(row)
             continue
 
-        available_classes = sorted(
-            {analysis["upos"] or "UNKNOWN" for analysis in analyses}, key=str.casefold
-        )
+        form_candidates = [
+            analysis
+            for analysis in saldo_forms.get(lemma_key, [])
+            if saol_upos and analysis["upos"] == saol_upos
+        ]
+        if len(form_candidates) == 1:
+            matched_records += 1
+            form_matched_records += 1
+            matched_saldo_lemma_keys.update(_saldo_lemma_keys(form_candidates))
+            target_forms.update(form_candidates[0]["forms"])
+            continue
+
         row = _saol_row(record, lemma)
-        row.update(
-            {
-                "reason": "lemma_match_but_word_class_not_resolved",
-                "saldo_word_classes": available_classes,
-                "saldo_analyses": [
-                    {
-                        "id": analysis["id"],
-                        "upos": analysis["upos"],
-                        "lemmas": sorted(analysis["lemmas"], key=str.casefold),
-                        "forms": sorted(analysis["forms"], key=str.casefold),
-                    }
-                    for analysis in analyses
-                ],
-            }
-        )
-        ambiguous.append(row)
+        if form_candidates:
+            row["reason"] = "multiple_saldo_form_matches"
+            row["saldo_form_analyses"] = [
+                {
+                    "id": analysis["id"],
+                    "upos": analysis["upos"],
+                    "lemmas": sorted(analysis["lemmas"], key=str.casefold),
+                    "forms": sorted(analysis["forms"], key=str.casefold),
+                }
+                for analysis in form_candidates
+            ]
+            ambiguous.append(row)
+        else:
+            row["reason"] = "no_saldo_lemma_or_unique_form"
+            saol_only.append(row)
 
     saldo_only = []
+    covered_saldo_keys = saol_lemma_keys | matched_saldo_lemma_keys
     for lemma_key, analyses in saldo.items():
-        if lemma_key in saol_lemma_keys:
+        if lemma_key in covered_saldo_keys:
             continue
         lemmas = sorted(
             {lemma for analysis in analyses for lemma in analysis["lemmas"]},
@@ -283,6 +356,8 @@ def compare_sources(
         "saol_filtered_affix_records": filtered_affix_records,
         "saol_compared_records": compared_records,
         "saol_matched_records": matched_records,
+        "saol_unknown_pos_matched_records": unknown_pos_matched_records,
+        "saol_form_matched_records": form_matched_records,
         "saol_only_records": len(saol_only),
         "ambiguous_records": len(ambiguous),
         "saldo_lemmas": len(saldo),
@@ -326,9 +401,11 @@ def main() -> None:
         args.report,
     )
     print(f"SAOL-poster: {report['saol_source_records']}")
-    print(f"Bortfiltrerade slutled: {report['saol_filtered_affix_records']}")
+    print(f"Bortfiltrerade affix/sammansättningsposter: {report['saol_filtered_affix_records']}")
     print(f"Jämförda SAOL-poster: {report['saol_compared_records']}")
     print(f"Säkert matchade SAOL-poster: {report['saol_matched_records']}")
+    print(f"  via okänd SALDO-ordklass: {report['saol_unknown_pos_matched_records']}")
+    print(f"  via unik SALDO-böjningsform: {report['saol_form_matched_records']}")
     print(f"Endast i SAOL: {report['saol_only_records']}")
     print(f"Tvetydiga lemmaträffar: {report['ambiguous_records']}")
     print(f"Endast i SALDO: {report['saldo_only_lemmas']}")
