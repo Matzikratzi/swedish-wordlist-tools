@@ -35,6 +35,19 @@ class InflectTests(unittest.TestCase):
         assert entry is not None
         self.assertEqual(entry.pattern_group, EXPLICIT_PATTERN_GROUP)
 
+    def test_supports_alternative_suffixes(self) -> None:
+        self.assertEqual(
+            generate_forms("bikarbonat", "+en el. +et; pl. +er"),
+            ("bikarbonat", "bikarbonaten", "bikarbonatet", "bikarbonater"),
+        )
+        entry = generate_entry({
+            "normaliserat_ord": "bikarbonat",
+            "text": "+en el. +et; pl. +er",
+        })
+        self.assertIsNotNone(entry)
+        assert entry is not None
+        self.assertEqual(entry.form_kinds, ("lemma", "derived", "derived", "plural"))
+
     def test_replaces_final_compound_component(self) -> None:
         self.assertEqual(
             generate_forms("bagagekärra", "+n -kärror"),
