@@ -7,6 +7,8 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
+from .msd import Msd, parse_msd
+
 
 SALDO_POS_TO_UPOS = {
     "nn": "NOUN", "nnm": "NOUN", "nna": "NOUN", "pm": "PROPN",
@@ -19,10 +21,10 @@ SALDO_POS_TO_UPOS = {
 
 @dataclass(frozen=True)
 class SaldoWordForm:
-    """One SALDO WordForm, preserving SALDO's own MSD string verbatim."""
+    """One SALDO WordForm with a losslessly parsed MSD value."""
 
     written_form: str
-    msd: str = ""
+    msd: Msd = Msd(raw="", tags=())
     features: tuple[tuple[str, str], ...] = ()
 
 
@@ -39,8 +41,8 @@ class SaldoAnalysis:
     def forms(self) -> frozenset[str]:
         return frozenset(form.written_form for form in self.word_forms)
 
-    def forms_for_msd(self, msd: str) -> tuple[str, ...]:
-        wanted = msd.casefold()
+    def forms_for_msd(self, msd: str | Msd) -> tuple[str, ...]:
+        wanted = parse_msd(msd).casefold()
         return tuple(
             form.written_form
             for form in self.word_forms
@@ -57,7 +59,7 @@ class SaldoAnalysis:
             "word_forms": [
                 {
                     "writtenForm": form.written_form,
-                    "msd": form.msd,
+                    "msd": str(form.msd),
                     "features": dict(form.features),
                 }
                 for form in self.word_forms
@@ -125,10 +127,10 @@ def _parse_word_forms(element: ET.Element) -> tuple[SaldoWordForm, ...]:
         features = _features(child)
         forms = [value for name, value in features if name.casefold() == "writtenform"]
         msd_values = [value for name, value in features if name.casefold() == "msd"]
-        msd = msd_values[0] if msd_values else ""
+        msd = parse_msd(msd_values[0] if msd_values else "")
         for written_form in forms:
             item = SaldoWordForm(written_form, msd, features)
-            marker = (item.written_form, item.msd, item.features)
+            marker = (item.written_form, str(item.msd), item.features)
             if marker not in seen:
                 seen.add(marker)
                 result.append(item)
