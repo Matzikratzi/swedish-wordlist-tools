@@ -15,7 +15,6 @@ DEFAULT_OUTPUT = Path("data/processed/saol14-common-forms.txt")
 DEFAULT_REPORT = Path("reports/saol14-common-forms.json")
 EXPLICIT_PATTERN_GROUP = "explicit böjningsform"
 
-# Exact suffix-only patterns that have been manually reviewed.
 COMMON_PATTERNS: dict[str, tuple[str, ...]] = {
     "+en +er": ("en", "er"),
     "+en +ar": ("en", "ar"),
@@ -34,7 +33,11 @@ _LABELS = {
     "pl.", "best.", "pres.", "pret.", "sup.", "imper.", "komp.", "superl.",
     "pl", "best", "pres", "pret", "sup", "imper", "komp", "superl",
 }
+_ALTERNATIVE_MARKERS = {"el.", "el"}
 _CONTROL_MARKERS = {"H"}
+_TOKEN_RE = re.compile(
+    r"[+\-]?[A-Za-zÅÄÖåäöÉéÜü]+|pl\.|best\.|pres\.|pret\.|sup\.|imper\.|komp\.|superl\.|el\.|[;,]"
+)
 
 
 @dataclass(frozen=True)
@@ -43,8 +46,6 @@ class GeneratedEntry:
     pattern: str
     forms: tuple[str, ...]
     pattern_group: str = ""
-    # Parallel metadata prevents a later stage from treating an already definite
-    # plural form as an indefinite plural and adding another definite ending.
     form_kinds: tuple[str, ...] = ()
 
 
@@ -63,18 +64,11 @@ def _split_inflected_word(lemma: str) -> tuple[str, str]:
 
 
 def _attach_suffix(lemma: str, suffix: str) -> str:
-    """Attach a suffix to the inflected word, not a following particle/pronoun."""
     head, tail = _split_inflected_word(lemma)
     return head + suffix + tail
 
 
 def _replace_final_component(lemma: str, replacement: str) -> str | None:
-    """Expand SAOL's leading-hyphen notation for a replaced final component.
-
-    Examples: bagagekärra + ``-kärror`` -> bagagekärror,
-    damcykel + ``-cyklar`` -> damcyklar, utskriva + ``-skrev`` -> utskrev.
-    The first letter of the replacement anchors the final component in the lemma.
-    """
     replacement = replacement.lstrip("-")
     if not replacement:
         return None
@@ -83,10 +77,7 @@ def _replace_final_component(lemma: str, replacement: str) -> str | None:
     positions = [index for index, char in enumerate(head) if char.casefold() == anchor]
     if not positions:
         return None
-    # SAOL's hyphen denotes the final compound component, so the last matching
-    # component start is the conservative choice.
-    start = positions[-1]
-    return head[:start] + replacement + tail
+    return head[: positions[-1]] + replacement + tail
 
 
 def _context_kind(context: str, explicit: bool) -> str:
@@ -112,19 +103,23 @@ def _deduplicate_tagged(forms: Iterable[tuple[str, str]]) -> tuple[tuple[str, ..
 
 
 def _explicit_pattern_forms(lemma: str, pattern: str) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
-    """Interpret conservative explicit and final-component replacement forms."""
-    tokens = re.findall(r"[+\-]?[A-Za-zÅÄÖåäöÉéÜü]+|pl\.|best\.|pres\.|pret\.|sup\.|imper\.|komp\.|superl\.|[;,]", pattern)
+    tokens = _TOKEN_RE.findall(pattern)
     tagged: list[tuple[str, str]] = [(lemma, "lemma")]
     context = "default"
     saw_explicit = False
+    saw_alternative = False
     pending_best = False
 
     for raw in tokens:
         token = raw.strip()
         lower = token.casefold()
+
         if token in {";", ","}:
             continue
         if token in _CONTROL_MARKERS:
+            continue
+        if lower in _ALTERNATIVE_MARKERS:
+            saw_alternative = True
             continue
         if lower in {label.casefold() for label in _LABELS}:
             if lower.startswith("best"):
@@ -134,12 +129,9 @@ def _explicit_pattern_forms(lemma: str, pattern: str) -> tuple[tuple[str, ...], 
                 context = "definite_plural" if pending_best else "plural"
                 pending_best = False
             continue
-
         if token.startswith("+"):
-            form = _attach_suffix(lemma, token[1:])
-            tagged.append((form, _context_kind(context, explicit=False)))
+            tagged.append((_attach_suffix(lemma, token[1:]), _context_kind(context, explicit=False)))
             continue
-
         if token.startswith("-"):
             form = _replace_final_component(lemma, token)
             if form is None:
@@ -147,16 +139,13 @@ def _explicit_pattern_forms(lemma: str, pattern: str) -> tuple[tuple[str, ...], 
             tagged.append((form, _context_kind(context, explicit=True)))
             saw_explicit = True
             continue
-
         if re.fullmatch(r"[A-Za-zÅÄÖåäöÉéÜü]+", token):
-            # A non-hyphenated explicit form is complete as written by SAOL.
             tagged.append((token, _context_kind(context, explicit=True)))
             saw_explicit = True
             continue
-
         return None
 
-    if not saw_explicit:
+    if not (saw_explicit or saw_alternative):
         return None
     return _deduplicate_tagged(tagged)
 
@@ -165,7 +154,6 @@ def generate_forms(lemma: str, pattern: str | None) -> tuple[str, ...] | None:
     lemma = lemma.strip()
     if not lemma or pattern is None:
         return None
-
     if pattern in COMMON_PATTERNS:
         forms, _ = _deduplicate_tagged(
             [(lemma, "lemma"), *[(_attach_suffix(lemma, suffix), "derived") for suffix in COMMON_PATTERNS[pattern]]]
@@ -193,13 +181,7 @@ def generate_entry(record: dict[str, Any]) -> GeneratedEntry | None:
         forms, kinds = explicit
         group = EXPLICIT_PATTERN_GROUP
 
-    return GeneratedEntry(
-        lemma=lemma,
-        pattern=pattern,
-        forms=forms,
-        pattern_group=group,
-        form_kinds=kinds,
-    )
+    return GeneratedEntry(lemma, pattern, forms, group, kinds)
 
 
 def iter_generated_entries(records: Iterable[dict[str, Any]]) -> Iterable[GeneratedEntry]:
