@@ -9,26 +9,11 @@ from pathlib import Path
 
 
 SALDO_POS_TO_UPOS = {
-    "nn": "NOUN",
-    "nnm": "NOUN",
-    "nna": "NOUN",
-    "pm": "PROPN",
-    "vb": "VERB",
-    "av": "ADJ",
-    "ab": "ADV",
-    "pn": "PRON",
-    "dt": "DET",
-    "pp": "ADP",
-    "kn": "CCONJ",
-    "sn": "SCONJ",
-    "in": "INTJ",
-    "rg": "NUM",
-    "hp": "PRON",
-    "ha": "ADV",
-    "hd": "DET",
-    "ie": "PART",
-    "pc": "ADJ",
-    "al": "X",
+    "nn": "NOUN", "nnm": "NOUN", "nna": "NOUN", "pm": "PROPN",
+    "vb": "VERB", "av": "ADJ", "ab": "ADV", "pn": "PRON",
+    "dt": "DET", "pp": "ADP", "kn": "CCONJ", "sn": "SCONJ",
+    "in": "INTJ", "rg": "NUM", "hp": "PRON", "ha": "ADV",
+    "hd": "DET", "ie": "PART", "pc": "ADJ", "al": "X",
 }
 
 
@@ -43,7 +28,7 @@ class SaldoWordForm:
 
 @dataclass(frozen=True)
 class SaldoAnalysis:
-    """One SALDO LexicalEntry with lemma and all WordForm records."""
+    """One SALDO LexicalEntry with lemma and exact WordForm records."""
 
     entry_id: str
     upos: str
@@ -68,7 +53,7 @@ class SaldoAnalysis:
             "id": self.entry_id,
             "upos": self.upos,
             "lemmas": set(self.lemmas),
-            "forms": set(self.forms),
+            "forms": set(self.forms) | set(self.lemmas),
             "word_forms": [
                 {
                     "writtenForm": form.written_form,
@@ -131,10 +116,9 @@ def _saldo_pos(element: ET.Element) -> str:
     return ""
 
 
-def _parse_word_forms(element: ET.Element, lemmas: list[str]) -> tuple[SaldoWordForm, ...]:
+def _parse_word_forms(element: ET.Element) -> tuple[SaldoWordForm, ...]:
     result: list[SaldoWordForm] = []
     seen: set[tuple[str, str, tuple[tuple[str, str], ...]]] = set()
-
     for child in element:
         if _local_name(child.tag).casefold() != "wordform":
             continue
@@ -148,13 +132,6 @@ def _parse_word_forms(element: ET.Element, lemmas: list[str]) -> tuple[SaldoWord
             if marker not in seen:
                 seen.add(marker)
                 result.append(item)
-
-    represented = {form.written_form for form in result}
-    for lemma in lemmas:
-        if lemma not in represented:
-            result.insert(0, SaldoWordForm(lemma, "ci", (("writtenForm", lemma), ("msd", "ci"))))
-            represented.add(lemma)
-
     return tuple(result)
 
 
@@ -170,7 +147,7 @@ def read_saldo_analyses(path: Path) -> dict[str, list[SaldoAnalysis]]:
             if _local_name(child.tag).casefold() == "lemma":
                 lemmas.extend(_feature_values(child, "writtenForm"))
 
-        word_forms = _parse_word_forms(element, lemmas)
+        word_forms = _parse_word_forms(element)
         if not lemmas and word_forms:
             citation_forms = [form.written_form for form in word_forms if form.msd.casefold() == "ci"]
             lemmas = citation_forms or [word_forms[0].written_form]
@@ -184,7 +161,6 @@ def read_saldo_analyses(path: Path) -> dict[str, list[SaldoAnalysis]]:
         for lemma in lemmas:
             entries[_key(lemma)].append(analysis)
         element.clear()
-
     return dict(entries)
 
 
