@@ -35,6 +35,10 @@ SALDO_XML = """<?xml version="1.0" encoding="UTF-8"?>
       <WordForm><FormRepresentation><feat att="writtenForm" val="adressera"/></FormRepresentation></WordForm>
       <WordForm><FormRepresentation><feat att="writtenForm" val="adresserade"/></FormRepresentation></WordForm>
     </LexicalEntry>
+    <LexicalEntry id="akne..nn.1">
+      <Lemma><FormRepresentation><feat att="writtenForm" val="akne"/></FormRepresentation></Lemma>
+      <WordForm><FormRepresentation><feat att="writtenForm" val="aknen"/></FormRepresentation></WordForm>
+    </LexicalEntry>
     <LexicalEntry id="kvist..nn.1">
       <Lemma><FormRepresentation><feat att="writtenForm" val="kvist"/></FormRepresentation></Lemma>
       <WordForm><FormRepresentation><feat att="writtenForm" val="kvisten"/></FormRepresentation></WordForm>
@@ -56,11 +60,12 @@ SAOL_JSONL = """{"id":"1","normaliserat_ord":"abakus","text":"+en +er","upos":"N
 {"id":"3","normaliserat_ord":"ack","text":"(null)","upos":"X","ordkl":"interj."}
 {"id":"4","normaliserat_ord":"Afrika","text":"(null)","upos":"X","ordkl":"namn"}
 {"id":"5","normaliserat_ord":"adressera sig","text":"+de +t","upos":"VERB","ordkl":"rxv."}
-{"id":"6","normaliserat_ord":"kvisten","text":"","upos":"NOUN","ordkl":"s."}
-{"id":"7","normaliserat_ord":"oklar","text":"","upos":"ADJ","ordkl":"adj."}
-{"id":"8","normaliserat_ord":"saolord","text":"+et; pl. +","upos":"NOUN","ordkl":"s."}
-{"id":"9","normaliserat_ord":"-aktig","text":"+t +a","upos":"ADJ","ordkl":"adjektiviskt slutled"}
-{"id":"10","normaliserat_ord":"förled-","text":"","upos":"X","ordkl":"i sms."}
+{"id":"6","normaliserat_ord":"akne","text":"+n","upos":"X","ordkl":"(hv)"}
+{"id":"7","normaliserat_ord":"kvisten","text":"","upos":"NOUN","ordkl":"s."}
+{"id":"8","normaliserat_ord":"oklar","text":"","upos":"ADJ","ordkl":"adj."}
+{"id":"9","normaliserat_ord":"saolord","text":"+et; pl. +","upos":"NOUN","ordkl":"s."}
+{"id":"10","normaliserat_ord":"-aktig","text":"+t +a","upos":"ADJ","ordkl":"adjektiviskt slutled"}
+{"id":"11","normaliserat_ord":"förled-","text":"","upos":"X","ordkl":"i sms."}
 """
 
 
@@ -119,6 +124,8 @@ class CompareSourcesTests(unittest.TestCase):
                 "adresserade",
                 "Afrika",
                 "Afrikas",
+                "akne",
+                "aknen",
                 "fil",
                 "filade",
                 "filar",
@@ -135,16 +142,17 @@ class CompareSourcesTests(unittest.TestCase):
         self.assertEqual(ambiguous_rows[0]["saldo_word_classes"], ["NOUN"])
         self.assertEqual(saldo_rows[0]["lemmas"], ["saldoord"])
         self.assertNotIn("kvist", [row["lemmas"][0] for row in saldo_rows])
-        self.assertEqual(report["saol_source_records"], 10)
+        self.assertEqual(report["saol_source_records"], 11)
         self.assertEqual(report["saol_filtered_affix_records"], 2)
-        self.assertEqual(report["saol_compared_records"], 8)
-        self.assertEqual(report["saol_matched_records"], 6)
+        self.assertEqual(report["saol_compared_records"], 9)
+        self.assertEqual(report["saol_matched_records"], 7)
         self.assertEqual(report["saol_unknown_pos_matched_records"], 1)
+        self.assertEqual(report["saol_inferred_pos_matched_records"], 1)
         self.assertEqual(report["saol_form_matched_records"], 1)
         self.assertEqual(report["saol_only_records"], 1)
         self.assertEqual(report["ambiguous_records"], 1)
         self.assertEqual(report["saldo_only_lemmas"], 1)
-        self.assertEqual(report["target_unique_forms"], 14)
+        self.assertEqual(report["target_unique_forms"], 16)
 
 
 if __name__ == "__main__":
