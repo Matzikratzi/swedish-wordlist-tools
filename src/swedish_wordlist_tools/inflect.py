@@ -30,7 +30,11 @@ COMMON_PATTERNS: dict[str, tuple[str, ...]] = {
     "+n +er": ("n", "er"),
 }
 
-_LABELS = {"pl.", "best.", "pres.", "pret.", "sup.", "imper.", "komp.", "superl."}
+_LABELS = {
+    "pl.", "best.", "pres.", "pret.", "sup.", "imper.", "komp.", "superl.",
+    "pl", "best", "pres", "pret", "sup", "imper", "komp", "superl",
+}
+_CONTROL_MARKERS = {"H"}
 
 
 @dataclass(frozen=True)
@@ -39,6 +43,9 @@ class GeneratedEntry:
     pattern: str
     forms: tuple[str, ...]
     pattern_group: str = ""
+    # Parallel metadata prevents a later stage from treating an already definite
+    # plural form as an indefinite plural and adding another definite ending.
+    form_kinds: tuple[str, ...] = ()
 
 
 def normalise_pattern(value: Any) -> str | None:
@@ -50,45 +57,108 @@ def normalise_pattern(value: Any) -> str | None:
     return pattern
 
 
+def _split_inflected_word(lemma: str) -> tuple[str, str]:
+    head, separator, tail = lemma.partition(" ")
+    return head, separator + tail if separator else ""
+
+
 def _attach_suffix(lemma: str, suffix: str) -> str:
     """Attach a suffix to the inflected word, not a following particle/pronoun."""
-    head, separator, tail = lemma.partition(" ")
-    inflected = head + suffix
-    return inflected + (separator + tail if separator else "")
+    head, tail = _split_inflected_word(lemma)
+    return head + suffix + tail
 
 
-def _explicit_pattern_forms(lemma: str, pattern: str) -> tuple[str, ...] | None:
-    """Read conservative patterns containing complete forms, e.g. '+n klockor'."""
-    cleaned = pattern.replace(";", " ; ")
-    tokens = cleaned.split()
-    candidates: list[str] = []
-    for token in tokens:
-        stripped = token.strip(",;")
-        if not stripped or stripped in _LABELS or stripped == ";":
-            continue
-        if stripped.startswith("+"):
-            candidates.append(_attach_suffix(lemma, stripped[1:]))
-        elif re.fullmatch(r"[A-Za-zÅÄÖåäöÉéÜü-]+", stripped):
-            # An explicit SAOL form is already complete and must not be appended.
-            candidates.append(stripped)
-        else:
-            return None
+def _replace_final_component(lemma: str, replacement: str) -> str | None:
+    """Expand SAOL's leading-hyphen notation for a replaced final component.
 
-    # Only classify this as an explicit pattern when at least one complete form occurs.
-    if not any(not token.strip(",;").startswith("+") and token.strip(",;") not in _LABELS
-               for token in tokens if token.strip(",;") and token.strip(",;") != ";"):
+    Examples: bagagekärra + ``-kärror`` -> bagagekärror,
+    damcykel + ``-cyklar`` -> damcyklar, utskriva + ``-skrev`` -> utskrev.
+    The first letter of the replacement anchors the final component in the lemma.
+    """
+    replacement = replacement.lstrip("-")
+    if not replacement:
         return None
-    return _deduplicate((lemma, *candidates))
+    head, tail = _split_inflected_word(lemma)
+    anchor = replacement[0].casefold()
+    positions = [index for index, char in enumerate(head) if char.casefold() == anchor]
+    if not positions:
+        return None
+    # SAOL's hyphen denotes the final compound component, so the last matching
+    # component start is the conservative choice.
+    start = positions[-1]
+    return head[:start] + replacement + tail
 
 
-def _deduplicate(forms: Iterable[str]) -> tuple[str, ...]:
+def _context_kind(context: str, explicit: bool) -> str:
+    if context == "definite_plural":
+        return "definite_plural"
+    if context == "plural":
+        return "plural"
+    if context == "definite":
+        return "definite_singular"
+    return "explicit" if explicit else "derived"
+
+
+def _deduplicate_tagged(forms: Iterable[tuple[str, str]]) -> tuple[tuple[str, ...], tuple[str, ...]]:
     result: list[str] = []
+    kinds: list[str] = []
     seen: set[str] = set()
-    for form in forms:
+    for form, kind in forms:
         if form and form not in seen:
             seen.add(form)
             result.append(form)
-    return tuple(result)
+            kinds.append(kind)
+    return tuple(result), tuple(kinds)
+
+
+def _explicit_pattern_forms(lemma: str, pattern: str) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+    """Interpret conservative explicit and final-component replacement forms."""
+    tokens = re.findall(r"[+\-]?[A-Za-zÅÄÖåäöÉéÜü]+|pl\.|best\.|pres\.|pret\.|sup\.|imper\.|komp\.|superl\.|[;,]", pattern)
+    tagged: list[tuple[str, str]] = [(lemma, "lemma")]
+    context = "default"
+    saw_explicit = False
+    pending_best = False
+
+    for raw in tokens:
+        token = raw.strip()
+        lower = token.casefold()
+        if token in {";", ","}:
+            continue
+        if token in _CONTROL_MARKERS:
+            continue
+        if lower in {label.casefold() for label in _LABELS}:
+            if lower.startswith("best"):
+                pending_best = True
+                context = "definite"
+            elif lower.startswith("pl"):
+                context = "definite_plural" if pending_best else "plural"
+                pending_best = False
+            continue
+
+        if token.startswith("+"):
+            form = _attach_suffix(lemma, token[1:])
+            tagged.append((form, _context_kind(context, explicit=False)))
+            continue
+
+        if token.startswith("-"):
+            form = _replace_final_component(lemma, token)
+            if form is None:
+                return None
+            tagged.append((form, _context_kind(context, explicit=True)))
+            saw_explicit = True
+            continue
+
+        if re.fullmatch(r"[A-Za-zÅÄÖåäöÉéÜü]+", token):
+            # A non-hyphenated explicit form is complete as written by SAOL.
+            tagged.append((token, _context_kind(context, explicit=True)))
+            saw_explicit = True
+            continue
+
+        return None
+
+    if not saw_explicit:
+        return None
+    return _deduplicate_tagged(tagged)
 
 
 def generate_forms(lemma: str, pattern: str | None) -> tuple[str, ...] | None:
@@ -97,20 +167,39 @@ def generate_forms(lemma: str, pattern: str | None) -> tuple[str, ...] | None:
         return None
 
     if pattern in COMMON_PATTERNS:
-        return _deduplicate(
-            (lemma, *(_attach_suffix(lemma, suffix) for suffix in COMMON_PATTERNS[pattern]))
+        forms, _ = _deduplicate_tagged(
+            [(lemma, "lemma"), *[(_attach_suffix(lemma, suffix), "derived") for suffix in COMMON_PATTERNS[pattern]]]
         )
-    return _explicit_pattern_forms(lemma, pattern)
+        return forms
+    explicit = _explicit_pattern_forms(lemma, pattern)
+    return explicit[0] if explicit else None
 
 
 def generate_entry(record: dict[str, Any]) -> GeneratedEntry | None:
     lemma = str(record.get("normaliserat_ord", "")).strip()
     pattern = normalise_pattern(record.get("text"))
-    forms = generate_forms(lemma, pattern)
-    if forms is None or pattern is None:
+    if not lemma or pattern is None:
         return None
-    group = pattern if pattern in COMMON_PATTERNS else EXPLICIT_PATTERN_GROUP
-    return GeneratedEntry(lemma=lemma, pattern=pattern, forms=forms, pattern_group=group)
+
+    if pattern in COMMON_PATTERNS:
+        forms, kinds = _deduplicate_tagged(
+            [(lemma, "lemma"), *[(_attach_suffix(lemma, suffix), "derived") for suffix in COMMON_PATTERNS[pattern]]]
+        )
+        group = pattern
+    else:
+        explicit = _explicit_pattern_forms(lemma, pattern)
+        if explicit is None:
+            return None
+        forms, kinds = explicit
+        group = EXPLICIT_PATTERN_GROUP
+
+    return GeneratedEntry(
+        lemma=lemma,
+        pattern=pattern,
+        forms=forms,
+        pattern_group=group,
+        form_kinds=kinds,
+    )
 
 
 def iter_generated_entries(records: Iterable[dict[str, Any]]) -> Iterable[GeneratedEntry]:
@@ -125,6 +214,7 @@ def build_wordlist(input_path: Path, output_path: Path) -> dict[str, Any]:
     supported_records = 0
     duplicate_forms = 0
     pattern_counts: Counter[str] = Counter()
+    form_kind_counts: Counter[str] = Counter()
     forms: list[str] = []
     seen: set[str] = set()
 
@@ -135,6 +225,7 @@ def build_wordlist(input_path: Path, output_path: Path) -> dict[str, Any]:
             continue
         supported_records += 1
         pattern_counts[entry.pattern_group] += 1
+        form_kind_counts.update(entry.form_kinds)
         for form in entry.forms:
             if form in seen:
                 duplicate_forms += 1
@@ -154,6 +245,7 @@ def build_wordlist(input_path: Path, output_path: Path) -> dict[str, Any]:
         "unique_forms": len(forms),
         "duplicate_forms": duplicate_forms,
         "pattern_counts": dict(pattern_counts.most_common()),
+        "form_kind_counts": dict(form_kind_counts.most_common()),
     }
 
 
