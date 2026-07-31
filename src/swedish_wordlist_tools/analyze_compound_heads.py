@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import unicodedata
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable
@@ -19,9 +18,14 @@ DEFAULT_CSV = Path("reports/saol14-compound-heads.csv")
 DEFAULT_SUMMARY = Path("reports/saol14-compound-heads-summary.json")
 
 
-def accentless(value: str) -> str:
-    decomposed = unicodedata.normalize("NFKD", compact_word(value))
-    return "".join(char for char in decomposed if not unicodedata.combining(char))
+def exact_key(value: str) -> str:
+    """Return the comparison key without removing Swedish diacritics."""
+    return compact_word(value)
+
+
+def usable_form(form: str) -> bool:
+    """Exclude SALDO composition forms such as ``grund-`` and ``grunds-``."""
+    return bool(form) and not form.rstrip().endswith("-")
 
 
 def analysis_marker(analysis: SaldoAnalysis) -> tuple[str, str, tuple[str, ...]]:
@@ -29,16 +33,28 @@ def analysis_marker(analysis: SaldoAnalysis) -> tuple[str, str, tuple[str, ...]]
 
 
 def build_head_index(saldo: dict[str, list[SaldoAnalysis]]) -> dict[str, list[SaldoAnalysis]]:
+    """Index SALDO analyses by exact lemma and exact usable word forms.
+
+    Matching is case-insensitive and ignores layout punctuation through
+    ``compact_word``, but it preserves letters and diacritics. Thus ``nöt``
+    does not match ``not`` and ``träd`` does not match ``trad`` or ``tråd``.
+    """
     index: dict[str, list[SaldoAnalysis]] = defaultdict(list)
-    seen: set[tuple[str, str, tuple[str, ...]]] = set()
+    seen_analyses: set[tuple[str, str, tuple[str, ...]]] = set()
+
     for analyses in saldo.values():
         for analysis in analyses:
             marker = analysis_marker(analysis)
-            if marker in seen:
+            if marker in seen_analyses:
                 continue
-            seen.add(marker)
-            for lemma in analysis.lemmas:
-                index[accentless(lemma)].append(analysis)
+            seen_analyses.add(marker)
+
+            keys = {exact_key(lemma) for lemma in analysis.lemmas}
+            keys.update(exact_key(form) for form in analysis.forms if usable_form(form))
+            keys.discard("")
+            for key in keys:
+                index[key].append(analysis)
+
     return dict(index)
 
 
@@ -59,7 +75,7 @@ def candidate_dict(analysis: SaldoAnalysis) -> dict[str, Any]:
         "id": analysis.entry_id,
         "upos": analysis.upos,
         "lemmas": sorted(analysis.lemmas, key=str.casefold),
-        "forms": sorted(analysis.forms, key=str.casefold),
+        "forms": sorted((form for form in analysis.forms if usable_form(form)), key=str.casefold),
     }
 
 
@@ -83,7 +99,7 @@ def analyse_row(row: dict[str, Any], head_index: dict[str, list[SaldoAnalysis]])
 
     left, head = recovered
     upos = str(row.get("upos", "")).upper()
-    candidates = head_index.get(accentless(head), [])
+    candidates = head_index.get(exact_key(head), [])
     same_pos = [candidate for candidate in candidates if upos and candidate.upos == upos]
     chosen = same_pos if same_pos else candidates
 
@@ -170,7 +186,7 @@ def analyse_compound_heads(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Match the rightmost SAOL compound part against SALDO")
+    parser = argparse.ArgumentParser(description="Match the rightmost SAOL compound part exactly against SALDO")
     parser.add_argument("input", nargs="?", type=Path, default=DEFAULT_INPUT)
     parser.add_argument("saldo", nargs="?", type=Path, default=DEFAULT_SALDO)
     parser.add_argument("--jsonl", type=Path, default=DEFAULT_JSONL)
