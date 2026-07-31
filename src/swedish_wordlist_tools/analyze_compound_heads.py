@@ -45,8 +45,9 @@ def build_head_indexes(
     """Build separate exact lemma and usable-word-form indexes.
 
     Word-form entries retain the matching SALDO WordForm records and their MSD
-    values. Compound heads first match the lemma index; word forms are only a
-    fallback when there is no exact lemma match.
+    values. Exact lemmas still have priority when they are compatible with the
+    SAOL word class. If exact lemmas exist but none is compatible, a compatible
+    exact word form may be used as a fallback.
     """
     lemma_index: dict[str, list[HeadCandidate]] = defaultdict(list)
     form_parts: dict[str, dict[tuple[str, str, tuple[str, ...]], tuple[SaldoAnalysis, list[SaldoWordForm]]]] = defaultdict(dict)
@@ -119,6 +120,35 @@ def _compatible_with_upos(candidate: HeadCandidate, upos: str) -> bool:
     return upos == "ADJ" and any(_is_participle(form) for form in candidate.matched_forms)
 
 
+def _select_candidates(
+    key: str,
+    upos: str,
+    lemma_index: dict[str, list[HeadCandidate]],
+    form_index: dict[str, list[HeadCandidate]],
+) -> tuple[list[HeadCandidate], bool]:
+    """Choose candidates while preserving lemma-first matching.
+
+    Compatible exact lemmas always win. If exact lemmas exist but all have an
+    incompatible word class, a compatible exact word-form match is preferred.
+    This lets an SAOL adjective such as ``framkallande`` match the participial
+    WordForm under the SALDO verb ``framkalla`` instead of being blocked by the
+    unrelated noun lemma ``framkallande``.
+    """
+    lemma_candidates = lemma_index.get(key, [])
+    compatible_lemmas = [candidate for candidate in lemma_candidates if _compatible_with_upos(candidate, upos)]
+    if compatible_lemmas:
+        return compatible_lemmas, True
+
+    form_candidates = form_index.get(key, [])
+    compatible_forms = [candidate for candidate in form_candidates if _compatible_with_upos(candidate, upos)]
+    if compatible_forms:
+        return compatible_forms, True
+
+    if lemma_candidates:
+        return lemma_candidates, False
+    return form_candidates, False
+
+
 def analyse_row(
     row: dict[str, Any],
     lemma_index: dict[str, list[HeadCandidate]],
@@ -138,10 +168,7 @@ def analyse_row(
     left, head = recovered
     upos = str(row.get("upos", "")).upper()
     key = exact_key(head)
-    lemma_candidates = lemma_index.get(key, [])
-    candidates = lemma_candidates if lemma_candidates else form_index.get(key, [])
-    compatible = [candidate for candidate in candidates if _compatible_with_upos(candidate, upos)]
-    chosen = compatible if compatible else candidates
+    chosen, compatible = _select_candidates(key, upos, lemma_index, form_index)
 
     unique: list[HeadCandidate] = []
     seen = set()
