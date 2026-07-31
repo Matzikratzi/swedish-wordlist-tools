@@ -22,6 +22,7 @@ saol14-list-msd = "swedish_wordlist_tools.list_msd:main"
 saol14-game-wordlist = "swedish_wordlist_tools.game_wordlist:main"
 saol14-analyze-unmatched = "swedish_wordlist_tools.analyze_unmatched:main"
 saol14-analyze-compounds = "swedish_wordlist_tools.analyze_compounds:main"
+saol14-analyze-saol-bars = "swedish_wordlist_tools.analyze_saol_bars:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
