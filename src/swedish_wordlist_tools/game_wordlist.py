@@ -1,0 +1,98 @@
+from __future__ import annotations
+
+import argparse
+import json
+import unicodedata
+from pathlib import Path
+from typing import Iterable
+
+DEFAULT_INPUT = Path("data/processed/saol14-saldo-forms.txt")
+DEFAULT_OUTPUT = Path("data/processed/saol14-game-words.txt")
+DEFAULT_REPORT = Path("reports/saol14-game-words.json")
+
+
+def normalise_game_word(value: str) -> str | None:
+    """Return a playable lowercase word, or None for non-playable SALDO forms.
+
+    The board uses letter tiles only. Multiword expressions, hyphenated forms,
+    apostrophes, digits, punctuation and detached affixes therefore stay in the
+    linguistic SALDO export but are excluded from the game list.
+    """
+    word = unicodedata.normalize("NFC", value.strip()).casefold()
+    if not word or len(word) < 2:
+        return None
+    if not word.isalpha():
+        return None
+    return word
+
+
+def filter_game_words(forms: Iterable[str]) -> tuple[list[str], dict[str, int]]:
+    words: list[str] = []
+    seen: set[str] = set()
+    source_forms = 0
+    rejected_forms = 0
+    duplicate_forms = 0
+
+    for raw in forms:
+        source_forms += 1
+        word = normalise_game_word(raw)
+        if word is None:
+            rejected_forms += 1
+            continue
+        if word in seen:
+            duplicate_forms += 1
+            continue
+        seen.add(word)
+        words.append(word)
+
+    words.sort()
+    return words, {
+        "source_forms": source_forms,
+        "rejected_non_playable_forms": rejected_forms,
+        "duplicate_after_normalisation": duplicate_forms,
+        "game_words": len(words),
+    }
+
+
+def build_game_wordlist(
+    input_path: Path = DEFAULT_INPUT,
+    output_path: Path = DEFAULT_OUTPUT,
+    report_path: Path = DEFAULT_REPORT,
+) -> dict[str, object]:
+    words, counts = filter_game_words(input_path.read_text(encoding="utf-8").splitlines())
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n".join(words) + ("\n" if words else ""), encoding="utf-8")
+
+    report: dict[str, object] = {
+        "source": str(input_path),
+        "output": str(output_path),
+        **counts,
+    }
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return report
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Filter verified SAOL/SALDO forms into a tile-game wordlist"
+    )
+    parser.add_argument("input", nargs="?", type=Path, default=DEFAULT_INPUT)
+    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
+    return parser
+
+
+def main() -> None:
+    args = build_parser().parse_args()
+    report = build_game_wordlist(args.input, args.output, args.report)
+    print(f"Verifierade SALDO-former: {report['source_forms']}")
+    print(f"Bortfiltrerade icke spelbara former: {report['rejected_non_playable_forms']}")
+    print(f"Dubletter efter gemener/normalisering: {report['duplicate_after_normalisation']}")
+    print(f"Ord i spelordlistan: {report['game_words']}")
+    print(f"Spelordlista: {report['output']}")
+    print(f"Rapport: {args.report}")
+
+
+if __name__ == "__main__":
+    main()
