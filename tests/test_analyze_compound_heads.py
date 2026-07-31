@@ -112,6 +112,37 @@ class CompoundHeadTests(unittest.TestCase):
         result = self.analyse(row, saldo)
         self.assertEqual(result["head_match_reason"], "unique_head_upos_mismatch")
 
+    def test_non_adjective_does_not_bypass_incompatible_exact_lemma(self) -> None:
+        saldo = {
+            "saker": [analysis("saker..av.1", "ADJ", "saker", "saker")],
+            "sak": [analysis_with_msd("sak..nn.1", "NOUN", "sak", ("saker", "pl indef nom"))],
+        }
+        row = {"lemma": "julsaker", "upos": "NOUN", "saol_bar_reason": "unique_saol_bar_split",
+               "saol_bar_splits": [{"compact_parts": ["jul", "saker"]}]}
+        result = self.analyse(row, saldo)
+        self.assertEqual(result["head_match_reason"], "unique_head_upos_mismatch")
+        self.assertEqual([candidate["id"] for candidate in result["head_candidates"]], ["saker..av.1"])
+
+    def test_accepts_candidate_when_same_form_has_supine_and_participle_msds(self) -> None:
+        saldo = {
+            "belysa": [analysis_with_msd(
+                "belysa..vb.1", "VERB", "belysa",
+                ("belyst", "sup aktiv"),
+                ("belyst", "pret_part indef sg u nom"),
+            )],
+        }
+        row = {"lemma": "fasadbelyst", "upos": "ADJ", "saol_bar_reason": "unique_saol_bar_split",
+               "saol_bar_splits": [{"compact_parts": ["fasad", "belyst"]}]}
+        result = self.analyse(row, saldo)
+        self.assertEqual(result["head_match_reason"], "unique_head_same_upos")
+        self.assertEqual(
+            result["head_candidates"][0]["matched_word_forms"],
+            [
+                {"written_form": "belyst", "msd": "sup aktiv"},
+                {"written_form": "belyst", "msd": "pret_part indef sg u nom"},
+            ],
+        )
+
     def test_preserves_swedish_diacritics(self) -> None:
         saldo = {"not": [analysis("not..nn.1", "NOUN", "not", "not")], "nöt": [analysis("nöt..nn.1", "NOUN", "nöt", "nöt", "nötter")]}
         row = {"lemma": "acajounöt", "upos": "NOUN", "saol_bar_reason": "unique_saol_bar_split",
