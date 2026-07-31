@@ -5,11 +5,13 @@ import unittest
 from swedish_wordlist_tools.inflect import (
     COMMON_PATTERNS,
     EXPLICIT_PATTERN_GROUP,
+    GeneratedWordForm,
     build_wordlist,
     generate_entry,
     generate_forms,
     normalise_pattern,
 )
+from swedish_wordlist_tools.msd import Msd
 
 
 class InflectTests(unittest.TestCase):
@@ -88,8 +90,23 @@ class InflectTests(unittest.TestCase):
         )
         self.assertEqual(compound.form_kinds[-1], "definite_plural")
 
-    def test_plural_plus_does_not_duplicate_lemma(self) -> None:
+    def test_plural_plus_does_not_duplicate_exported_spelling(self) -> None:
         self.assertEqual(generate_forms("A-avdrag", "+et; pl. +"), ("A-avdrag", "A-avdraget"))
+        entry = generate_entry({
+            "normaliserat_ord": "A-avdrag",
+            "text": "+et; pl. +",
+            "upos": "NOUN",
+        })
+        self.assertIsNotNone(entry)
+        assert entry is not None
+        self.assertEqual(
+            [(form.written_form, str(form.msd)) for form in entry.word_forms],
+            [
+                ("A-avdrag", "ci"),
+                ("A-avdraget", "sg def nom"),
+                ("A-avdrag", "pl indef nom"),
+            ],
+        )
 
     def test_rejects_missing_and_malformed_patterns(self) -> None:
         self.assertIsNone(generate_forms("gå", None))
@@ -100,11 +117,38 @@ class InflectTests(unittest.TestCase):
     def test_all_initial_patterns_are_registered(self) -> None:
         self.assertEqual(len(COMMON_PATTERNS), 11)
 
-    def test_generates_entry_from_real_saol14_fields(self) -> None:
+    def test_generates_typed_noun_word_forms(self) -> None:
         entry = generate_entry({"normaliserat_ord": "aktie", "text": "+n +r", "upos": "NOUN"})
         self.assertIsNotNone(entry)
         assert entry is not None
         self.assertEqual(entry.forms, ("aktie", "aktien", "aktier"))
+        self.assertTrue(all(isinstance(form, GeneratedWordForm) for form in entry.word_forms))
+        self.assertTrue(all(isinstance(form.msd, Msd) for form in entry.word_forms))
+        self.assertEqual(
+            [str(form.msd) for form in entry.word_forms],
+            ["ci", "sg def nom", "pl indef nom"],
+        )
+
+    def test_generates_typed_verb_word_forms(self) -> None:
+        entry = generate_entry({"normaliserat_ord": "abonnera", "text": "+de +t", "upos": "VERB"})
+        self.assertIsNotNone(entry)
+        assert entry is not None
+        self.assertEqual(
+            [(form.written_form, str(form.msd)) for form in entry.word_forms],
+            [
+                ("abonnera", "ci"),
+                ("abonnerade", "pret ind aktiv"),
+                ("abonnerat", "sup aktiv"),
+            ],
+        )
+
+    def test_does_not_invent_ambiguous_adjective_msd(self) -> None:
+        entry = generate_entry({"normaliserat_ord": "abchazisk", "text": "+t +a", "upos": "ADJ"})
+        self.assertIsNotNone(entry)
+        assert entry is not None
+        self.assertEqual(str(entry.word_forms[0].msd), "ci")
+        self.assertEqual(str(entry.word_forms[1].msd), "pos indef sg n nom")
+        self.assertIsNone(entry.word_forms[2].msd)
 
     def test_builds_deduplicated_wordlist_and_report(self) -> None:
         fixture = Path(__file__).parent / "fixtures" / "sample.jsonl"
@@ -119,6 +163,8 @@ class InflectTests(unittest.TestCase):
         self.assertIn("A-avdraget", forms)
         self.assertIn("abbedissor", forms)
         self.assertIn("form_kind_counts", report)
+        self.assertIn("typed_msd_counts", report)
+        self.assertIn("untyped_word_forms", report)
         self.assertNotIn("a", forms)
 
 
