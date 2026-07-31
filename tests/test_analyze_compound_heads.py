@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from swedish_wordlist_tools.analyze_compound_heads import analyse_row, build_head_index, recovered_parts
+from swedish_wordlist_tools.analyze_compound_heads import analyse_row, build_head_index, candidate_dict, recovered_parts
 from swedish_wordlist_tools.msd import Msd
 from swedish_wordlist_tools.saldo import SaldoAnalysis, SaldoWordForm
 
@@ -53,6 +53,41 @@ class CompoundHeadTests(unittest.TestCase):
         result = analyse_row(row, index)
         self.assertEqual(result["head_match_reason"], "unique_head_same_upos")
         self.assertEqual(result["head_candidates"][0]["upos"], "ADJ")
+
+    def test_matches_exact_inflected_word_form(self) -> None:
+        saldo = {"svårighet": [analysis("svårighet..nn.1", "NOUN", "svårighet", "svårighet", "svårigheter")]}
+        index = build_head_index(saldo)
+        row = {
+            "lemma": "acklimatiseringssvårigheter",
+            "upos": "NOUN",
+            "saol_bar_reason": "unique_saol_bar_split",
+            "saol_bar_splits": [{"compact_parts": ["acklimatiserings", "svårigheter"]}],
+        }
+        result = analyse_row(row, index)
+        self.assertEqual(result["head_match_reason"], "unique_head_same_upos")
+        self.assertEqual(result["head_candidates"][0]["id"], "svårighet..nn.1")
+
+    def test_preserves_swedish_diacritics(self) -> None:
+        saldo = {
+            "not": [analysis("not..nn.1", "NOUN", "not", "not")],
+            "nöt": [analysis("nöt..nn.1", "NOUN", "nöt", "nöt", "nötter")],
+        }
+        index = build_head_index(saldo)
+        row = {
+            "lemma": "acajounöt",
+            "upos": "NOUN",
+            "saol_bar_reason": "unique_saol_bar_split",
+            "saol_bar_splits": [{"compact_parts": ["acajou", "nöt"]}],
+        }
+        result = analyse_row(row, index)
+        self.assertEqual(result["head_match_reason"], "unique_head_same_upos")
+        self.assertEqual([candidate["id"] for candidate in result["head_candidates"]], ["nöt..nn.1"])
+
+    def test_excludes_hyphen_terminated_composition_forms(self) -> None:
+        candidate = candidate_dict(
+            analysis("grund..nn.1", "NOUN", "grund", "grund", "grund-", "grunden", "grunds", "grunds-")
+        )
+        self.assertEqual(candidate["forms"], ["grund", "grunden", "grunds"])
 
     def test_reports_missing_head(self) -> None:
         row = {
