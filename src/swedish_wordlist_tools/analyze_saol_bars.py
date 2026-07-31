@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import html
 import json
 import unicodedata
 from collections import Counter, defaultdict
@@ -21,8 +22,26 @@ def _normalise(value: str) -> str:
     return unicodedata.normalize("NFC", value.strip()).casefold()
 
 
+def _plain_text(value: str) -> str:
+    value = html.unescape(value)
+    while "<" in value and ">" in value:
+        start = value.find("<")
+        end = value.find(">", start)
+        if end < 0:
+            break
+        value = value[:start] + value[end + 1 :]
+    return value
+
+
 def compact_word(value: str) -> str:
-    return "".join(char for char in _normalise(value) if char.isalpha())
+    return "".join(char for char in _normalise(_plain_text(value)) if char.isalpha())
+
+
+def compact_lemma(value: str) -> str:
+    plain = _plain_text(value).strip()
+    if plain.casefold().endswith(" sig"):
+        plain = plain[:-4]
+    return compact_word(plain)
 
 
 def _record_id(record: dict[str, Any]) -> str:
@@ -44,7 +63,6 @@ def _stycke_values(value: Any, *, key: str = "") -> list[str]:
 
 
 def extract_bar_candidates(record: dict[str, Any]) -> list[str]:
-    """Return unique SAOL stycke strings containing one or more lodstreck."""
     values = _stycke_values(record)
     direct = record.get("stycke")
     if isinstance(direct, str):
@@ -69,7 +87,7 @@ def classify_candidate(lemma: str, value: str) -> tuple[str, list[str]]:
     parts = split_bar_candidate(value)
     if len(parts) < 2:
         return "invalid_saol_bar", parts
-    if compact_word("".join(parts)) == compact_word(lemma):
+    if compact_word("".join(parts)) == compact_lemma(lemma):
         return "saol_bar_matches_lemma", parts
     return "saol_bar_does_not_match_lemma", parts
 
@@ -83,7 +101,7 @@ def build_saol_indexes(
         record_id = _record_id(record)
         if record_id:
             by_id[record_id].append(record)
-        lemma = compact_word(str(record.get("normaliserat_ord", "")))
+        lemma = compact_lemma(str(record.get("normaliserat_ord", "")))
         if lemma:
             by_lemma[lemma].append(record)
     return dict(by_id), dict(by_lemma)
@@ -97,7 +115,7 @@ def _source_records(
     record_id = str(row.get("record_id", ""))
     if record_id and record_id in by_id:
         return by_id[record_id]
-    return by_lemma.get(compact_word(str(row.get("lemma", ""))), [])
+    return by_lemma.get(compact_lemma(str(row.get("lemma", ""))), [])
 
 
 def analyse_rows(
@@ -131,11 +149,7 @@ def analyse_rows(
                     }
                 )
 
-        matching = [
-            candidate
-            for candidate in candidates
-            if candidate["reason"] == "saol_bar_matches_lemma"
-        ]
+        matching = [candidate for candidate in candidates if candidate["reason"] == "saol_bar_matches_lemma"]
         if len(matching) == 1:
             reason = "unique_saol_bar_split"
         elif len(matching) > 1:
@@ -148,6 +162,7 @@ def analyse_rows(
 
         output = dict(row)
         output["saol_bar_reason"] = reason
+        output["compact_lemma"] = compact_lemma(lemma)
         output["saol_bar_candidates"] = candidates
         output["saol_bar_splits"] = matching
         result.append(output)
@@ -165,10 +180,7 @@ def _write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
 def _write_csv(path: Path, rows: Iterable[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(
-            handle,
-            fieldnames=["lemma", "upos", "ordkl", "saol_bar_reason", "stycke", "parts"],
-        )
+        writer = csv.DictWriter(handle, fieldnames=["lemma", "upos", "ordkl", "saol_bar_reason", "stycke", "parts"])
         writer.writeheader()
         for row in rows:
             matches = row.get("saol_bar_splits", [])
@@ -209,17 +221,12 @@ def analyse_saol_bars(
         "csv": str(csv_path),
     }
     summary_path.parent.mkdir(parents=True, exist_ok=True)
-    summary_path.write_text(
-        json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return summary
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Analyse unmatched SAOL compounds using explicit lodstreck in stycke"
-    )
+    parser = argparse.ArgumentParser(description="Analyse unmatched SAOL compounds using explicit lodstreck in stycke")
     parser.add_argument("input", nargs="?", type=Path, default=DEFAULT_INPUT)
     parser.add_argument("saol", nargs="?", type=Path, default=DEFAULT_SAOL)
     parser.add_argument("--jsonl", type=Path, default=DEFAULT_JSONL)
@@ -230,13 +237,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
-    summary = analyse_saol_bars(
-        args.input,
-        args.saol,
-        args.jsonl,
-        args.csv,
-        args.summary,
-    )
+    summary = analyse_saol_bars(args.input, args.saol, args.jsonl, args.csv, args.summary)
     print(f"Analyserade no_candidate-poster: {summary['records']}")
     for reason, count in summary["counts"].items():
         print(f"{reason}: {count}")
