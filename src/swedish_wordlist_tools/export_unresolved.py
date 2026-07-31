@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import unicodedata
+from collections import Counter
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -17,7 +18,7 @@ DEFAULT_OUTPUT = Path("reports/saol14-unresolved.jsonl")
 
 SOLVED_COMPOUND_REASON = "unique_head_same_upos"
 
-Selector = tuple[str, str]
+Selector = tuple[str, str, str, str, str, str, str]
 
 
 def _normalise(value: str) -> str:
@@ -25,46 +26,74 @@ def _normalise(value: str) -> str:
 
 
 def _selector(row: dict[str, Any]) -> Selector | None:
+    """Build the same stable record key from source and generated report rows.
+
+    ``record_id``/``subnr`` is not unique in the SAOL source. Include the lemma,
+    homonym number, word classes, notation, and source to distinguish records.
+    A Counter is still used because completely identical records may occur more
+    than once and must not be collapsed.
+    """
     record_id = str(row.get("record_id") or row.get("id") or row.get("subnr") or "")
-    if record_id:
-        return "id", record_id
-
     lemma = _normalise(str(row.get("lemma") or row.get("normaliserat_ord") or ""))
-    if lemma:
-        homonym = str(row.get("homonym_number") or row.get("homonr") or "")
-        upos = str(row.get("upos") or "").upper()
-        return "fallback", "\x1f".join((lemma, homonym, upos))
-    return None
+    homonym = str(row.get("homonym_number") or row.get("homonr") or "")
+    source_upos = _normalise(str(row.get("source_upos") or row.get("upos") or ""))
+    ordkl = _normalise(str(row.get("ordkl") or ""))
+    notation = _normalise(str(row.get("notation") or row.get("text") or ""))
+    source = _normalise(str(row.get("source") or ""))
+    if not any((record_id, lemma, homonym, source_upos, ordkl, notation, source)):
+        return None
+    return record_id, lemma, homonym, source_upos, ordkl, notation, source
 
 
-def selectors(rows: Iterable[dict[str, Any]]) -> set[Selector]:
-    result: set[Selector] = set()
+def selector_counts(rows: Iterable[dict[str, Any]]) -> Counter[Selector]:
+    result: Counter[Selector] = Counter()
     for row in rows:
         selector = _selector(row)
         if selector is not None:
-            result.add(selector)
+            result[selector] += 1
     return result
 
 
-def solved_compound_selectors(rows: Iterable[dict[str, Any]]) -> set[Selector]:
-    return selectors(
+def solved_compound_counts(rows: Iterable[dict[str, Any]]) -> Counter[Selector]:
+    return selector_counts(
         row
         for row in rows
         if str(row.get("head_match_reason", "")) == SOLVED_COMPOUND_REASON
     )
 
 
-def filter_unresolved(
-    saol_rows: Iterable[dict[str, Any]],
-    baseline_unresolved: set[Selector],
-    solved_compounds: set[Selector],
+def subtract_counts(
+    baseline: Counter[Selector], solved: Counter[Selector]
+) -> tuple[Counter[Selector], int]:
+    remaining = baseline.copy()
+    removed = 0
+    for selector, count in solved.items():
+        matched = min(count, remaining[selector])
+        if matched:
+            remaining[selector] -= matched
+            removed += matched
+            if remaining[selector] == 0:
+                del remaining[selector]
+    return remaining, removed
+
+
+def filter_by_counts(
+    saol_rows: Iterable[dict[str, Any]], wanted: Counter[Selector]
 ) -> list[dict[str, Any]]:
-    wanted = baseline_unresolved - solved_compounds
+    remaining = wanted.copy()
     result: list[dict[str, Any]] = []
     for row in saol_rows:
         selector = _selector(row)
-        if selector in wanted:
+        if selector is not None and remaining[selector] > 0:
             result.append(row)
+            remaining[selector] -= 1
+            if remaining[selector] == 0:
+                del remaining[selector]
+    if remaining:
+        missing = sum(remaining.values())
+        raise RuntimeError(
+            f"Kunde inte hitta {missing} olösta rapportposter i SAOL-originalet. Ingen fil skrevs."
+        )
     return result
 
 
@@ -87,29 +116,33 @@ def export_unresolved(
     total = int(comparison["saol_compared_records"])
     direct = int(comparison["saol_matched_records"])
 
-    baseline_unresolved = selectors(
-        [*read_jsonl(saol_only_path), *read_jsonl(ambiguous_path)]
-    )
-    solved_compounds = solved_compound_selectors(read_jsonl(compounds_path))
-
+    baseline_rows = [*read_jsonl(saol_only_path), *read_jsonl(ambiguous_path)]
+    baseline = selector_counts(baseline_rows)
+    baseline_records = sum(baseline.values())
     expected_baseline = total - direct
-    if len(baseline_unresolved) != expected_baseline:
+    if baseline_records != expected_baseline:
         raise RuntimeError(
             "Baslinjen stämmer inte: "
-            f"{len(baseline_unresolved)} unika poster i saol14-only + ambiguous, "
+            f"{baseline_records} poster i saol14-only + ambiguous, "
             f"men jämförelserapporten kräver {expected_baseline}."
         )
 
-    solved_compounds_in_baseline = solved_compounds & baseline_unresolved
-    rows = filter_unresolved(
-        read_jsonl(saol_path), baseline_unresolved, solved_compounds_in_baseline
-    )
-    expected_output = total - direct - len(solved_compounds_in_baseline)
+    solved = solved_compound_counts(read_jsonl(compounds_path))
+    unresolved, solved_in_baseline = subtract_counts(baseline, solved)
+    expected_output = total - direct - solved_in_baseline
+    unresolved_records = sum(unresolved.values())
+    if unresolved_records != expected_output:
+        raise RuntimeError(
+            "Subtraktionskontrollen misslyckades: "
+            f"{total} != {direct} + {solved_in_baseline} + {unresolved_records}. "
+            "Ingen fil skrevs."
+        )
 
+    rows = filter_by_counts(read_jsonl(saol_path), unresolved)
     if len(rows) != expected_output:
         raise RuntimeError(
             "Exportkontrollen misslyckades: "
-            f"{total} != {direct} + {len(solved_compounds_in_baseline)} + {len(rows)}. "
+            f"{total} != {direct} + {solved_in_baseline} + {len(rows)}. "
             "Ingen fil skrevs."
         )
 
@@ -117,8 +150,8 @@ def export_unresolved(
     return {
         "total": total,
         "direct": direct,
-        "baseline_unresolved": len(baseline_unresolved),
-        "solved_compounds": len(solved_compounds_in_baseline),
+        "baseline_unresolved": baseline_records,
+        "solved_compounds": solved_in_baseline,
         "records": len(rows),
         "output": str(output_path),
     }
@@ -151,7 +184,10 @@ def main() -> None:
     print(f"Direkt lösta:                   {summary['direct']}")
     print(f"Säkra sammansättningar:         {summary['solved_compounds']}")
     print(f"Olösta SAOL-poster:             {summary['records']}")
-    print(f"Kontroll: {summary['total']} = {summary['direct']} + {summary['solved_compounds']} + {summary['records']} (OK)")
+    print(
+        f"Kontroll: {summary['total']} = {summary['direct']} + "
+        f"{summary['solved_compounds']} + {summary['records']} (OK)"
+    )
     print(f"JSONL: {summary['output']}")
 
 
