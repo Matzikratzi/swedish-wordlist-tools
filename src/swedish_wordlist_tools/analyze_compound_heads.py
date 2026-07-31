@@ -32,14 +32,18 @@ def analysis_marker(analysis: SaldoAnalysis) -> tuple[str, str, tuple[str, ...]]
     return analysis.entry_id, analysis.upos, tuple(sorted(analysis.lemmas, key=str.casefold))
 
 
-def build_head_index(saldo: dict[str, list[SaldoAnalysis]]) -> dict[str, list[SaldoAnalysis]]:
-    """Index SALDO analyses by exact lemma and exact usable word forms.
+def build_head_indexes(
+    saldo: dict[str, list[SaldoAnalysis]],
+) -> tuple[dict[str, list[SaldoAnalysis]], dict[str, list[SaldoAnalysis]]]:
+    """Build separate exact lemma and usable-word-form indexes.
 
-    Matching is case-insensitive and ignores layout punctuation through
-    ``compact_word``, but it preserves letters and diacritics. Thus ``nöt``
-    does not match ``not`` and ``träd`` does not match ``trad`` or ``tråd``.
+    Compound heads first match the lemma index. The word-form index is only a
+    fallback when there is no exact lemma match. Matching is case-insensitive
+    and ignores layout punctuation through ``compact_word``, while preserving
+    Swedish letters and diacritics.
     """
-    index: dict[str, list[SaldoAnalysis]] = defaultdict(list)
+    lemma_index: dict[str, list[SaldoAnalysis]] = defaultdict(list)
+    form_index: dict[str, list[SaldoAnalysis]] = defaultdict(list)
     seen_analyses: set[tuple[str, str, tuple[str, ...]]] = set()
 
     for analyses in saldo.values():
@@ -49,13 +53,21 @@ def build_head_index(saldo: dict[str, list[SaldoAnalysis]]) -> dict[str, list[Sa
                 continue
             seen_analyses.add(marker)
 
-            keys = {exact_key(lemma) for lemma in analysis.lemmas}
-            keys.update(exact_key(form) for form in analysis.forms if usable_form(form))
-            keys.discard("")
-            for key in keys:
-                index[key].append(analysis)
+            lemma_keys = {exact_key(lemma) for lemma in analysis.lemmas}
+            lemma_keys.discard("")
+            for key in lemma_keys:
+                lemma_index[key].append(analysis)
 
-    return dict(index)
+            form_keys = {
+                exact_key(form)
+                for form in analysis.forms
+                if usable_form(form)
+            }
+            form_keys.discard("")
+            for key in form_keys:
+                form_index[key].append(analysis)
+
+    return dict(lemma_index), dict(form_index)
 
 
 def recovered_parts(row: dict[str, Any], split: dict[str, Any]) -> tuple[str, str] | None:
@@ -79,7 +91,11 @@ def candidate_dict(analysis: SaldoAnalysis) -> dict[str, Any]:
     }
 
 
-def analyse_row(row: dict[str, Any], head_index: dict[str, list[SaldoAnalysis]]) -> dict[str, Any]:
+def analyse_row(
+    row: dict[str, Any],
+    lemma_index: dict[str, list[SaldoAnalysis]],
+    form_index: dict[str, list[SaldoAnalysis]],
+) -> dict[str, Any]:
     result = dict(row)
     splits = row.get("saol_bar_splits", [])
     if row.get("saol_bar_reason") != "unique_saol_bar_split" or len(splits) != 1:
@@ -99,7 +115,9 @@ def analyse_row(row: dict[str, Any], head_index: dict[str, list[SaldoAnalysis]])
 
     left, head = recovered
     upos = str(row.get("upos", "")).upper()
-    candidates = head_index.get(exact_key(head), [])
+    key = exact_key(head)
+    lemma_candidates = lemma_index.get(key, [])
+    candidates = lemma_candidates if lemma_candidates else form_index.get(key, [])
     same_pos = [candidate for candidate in candidates if upos and candidate.upos == upos]
     chosen = same_pos if same_pos else candidates
 
@@ -129,8 +147,12 @@ def analyse_row(row: dict[str, Any], head_index: dict[str, list[SaldoAnalysis]])
     return result
 
 
-def analyse_rows(rows: Iterable[dict[str, Any]], head_index: dict[str, list[SaldoAnalysis]]) -> list[dict[str, Any]]:
-    return [analyse_row(row, head_index) for row in rows]
+def analyse_rows(
+    rows: Iterable[dict[str, Any]],
+    lemma_index: dict[str, list[SaldoAnalysis]],
+    form_index: dict[str, list[SaldoAnalysis]],
+) -> list[dict[str, Any]]:
+    return [analyse_row(row, lemma_index, form_index) for row in rows]
 
 
 def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
@@ -166,8 +188,8 @@ def analyse_compound_heads(
     csv_path: Path = DEFAULT_CSV,
     summary_path: Path = DEFAULT_SUMMARY,
 ) -> dict[str, Any]:
-    head_index = build_head_index(read_saldo_analyses(saldo_path))
-    rows = analyse_rows(read_jsonl(input_path), head_index)
+    lemma_index, form_index = build_head_indexes(read_saldo_analyses(saldo_path))
+    rows = analyse_rows(read_jsonl(input_path), lemma_index, form_index)
     rows.sort(key=lambda row: (str(row.get("head_match_reason", "")), str(row.get("lemma", "")).casefold()))
     counts = Counter(str(row.get("head_match_reason", "")) for row in rows)
     write_jsonl(jsonl_path, rows)
