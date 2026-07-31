@@ -4,6 +4,7 @@ import argparse
 import csv
 import json
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -32,14 +33,21 @@ def analysis_marker(analysis: SaldoAnalysis) -> tuple[str, str, tuple[str, ...]]
     return analysis.entry_id, analysis.upos, tuple(sorted(analysis.lemmas, key=str.casefold))
 
 
-def build_head_index(saldo: dict[str, list[SaldoAnalysis]]) -> dict[str, list[SaldoAnalysis]]:
-    """Index SALDO analyses by exact lemma and exact usable word forms.
+@dataclass(frozen=True)
+class HeadIndex:
+    lemmas: dict[str, list[SaldoAnalysis]]
+    word_forms: dict[str, list[SaldoAnalysis]]
+
+
+def build_head_index(saldo: dict[str, list[SaldoAnalysis]]) -> HeadIndex:
+    """Index SALDO analyses separately by exact lemma and usable word forms.
 
     Matching is case-insensitive and ignores layout punctuation through
     ``compact_word``, but it preserves letters and diacritics. Thus ``nöt``
     does not match ``not`` and ``träd`` does not match ``trad`` or ``tråd``.
     """
-    index: dict[str, list[SaldoAnalysis]] = defaultdict(list)
+    lemma_index: dict[str, list[SaldoAnalysis]] = defaultdict(list)
+    word_form_index: dict[str, list[SaldoAnalysis]] = defaultdict(list)
     seen_analyses: set[tuple[str, str, tuple[str, ...]]] = set()
 
     for analyses in saldo.values():
@@ -49,13 +57,17 @@ def build_head_index(saldo: dict[str, list[SaldoAnalysis]]) -> dict[str, list[Sa
                 continue
             seen_analyses.add(marker)
 
-            keys = {exact_key(lemma) for lemma in analysis.lemmas}
-            keys.update(exact_key(form) for form in analysis.forms if usable_form(form))
-            keys.discard("")
-            for key in keys:
-                index[key].append(analysis)
+            lemma_keys = {exact_key(lemma) for lemma in analysis.lemmas}
+            lemma_keys.discard("")
+            for key in lemma_keys:
+                lemma_index[key].append(analysis)
 
-    return dict(index)
+            word_form_keys = {exact_key(form) for form in analysis.forms if usable_form(form)}
+            word_form_keys.discard("")
+            for key in word_form_keys:
+                word_form_index[key].append(analysis)
+
+    return HeadIndex(lemmas=dict(lemma_index), word_forms=dict(word_form_index))
 
 
 def recovered_parts(row: dict[str, Any], split: dict[str, Any]) -> tuple[str, str] | None:
@@ -79,7 +91,7 @@ def candidate_dict(analysis: SaldoAnalysis) -> dict[str, Any]:
     }
 
 
-def analyse_row(row: dict[str, Any], head_index: dict[str, list[SaldoAnalysis]]) -> dict[str, Any]:
+def analyse_row(row: dict[str, Any], head_index: HeadIndex) -> dict[str, Any]:
     result = dict(row)
     splits = row.get("saol_bar_splits", [])
     if row.get("saol_bar_reason") != "unique_saol_bar_split" or len(splits) != 1:
@@ -99,7 +111,10 @@ def analyse_row(row: dict[str, Any], head_index: dict[str, list[SaldoAnalysis]])
 
     left, head = recovered
     upos = str(row.get("upos", "")).upper()
-    candidates = head_index.get(exact_key(head), [])
+    key = exact_key(head)
+    candidates = head_index.lemmas.get(key, [])
+    if not candidates:
+        candidates = head_index.word_forms.get(key, [])
     same_pos = [candidate for candidate in candidates if upos and candidate.upos == upos]
     chosen = same_pos if same_pos else candidates
 
@@ -129,7 +144,7 @@ def analyse_row(row: dict[str, Any], head_index: dict[str, list[SaldoAnalysis]])
     return result
 
 
-def analyse_rows(rows: Iterable[dict[str, Any]], head_index: dict[str, list[SaldoAnalysis]]) -> list[dict[str, Any]]:
+def analyse_rows(rows: Iterable[dict[str, Any]], head_index: HeadIndex) -> list[dict[str, Any]]:
     return [analyse_row(row, head_index) for row in rows]
 
 
