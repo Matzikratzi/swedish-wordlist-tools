@@ -57,7 +57,7 @@ class CompoundHeadTests(unittest.TestCase):
         self.assertEqual(result["head_match_reason"], "unique_head_same_upos")
         self.assertEqual(result["head_candidates"][0]["upos"], "ADJ")
 
-    def test_uses_only_exact_lemma_candidates_when_lemma_exists(self) -> None:
+    def test_uses_only_compatible_exact_lemma_candidates_when_available(self) -> None:
         saldo = {"val": [analysis("val..nn.1", "NOUN", "val", "val", "valet")],
                  "vala": [analysis("vala..vb.1", "VERB", "vala", "val", "valar")]}
         row = {"lemma": "språkval", "upos": "NOUN", "saol_bar_reason": "unique_saol_bar_split",
@@ -84,6 +84,23 @@ class CompoundHeadTests(unittest.TestCase):
         result = self.analyse(row, saldo)
         self.assertEqual(result["head_match_reason"], "unique_head_same_upos")
         self.assertEqual(result["head_candidates"][0]["id"], "framkalla..vb.1")
+        self.assertEqual(result["head_candidates"][0]["matched_word_forms"], [
+            {"written_form": "framkallande", "msd": "pres_part nom"}
+        ])
+
+    def test_participle_fallback_bypasses_incompatible_exact_noun_lemma(self) -> None:
+        saldo = {
+            "framkallande": [analysis("framkallande..nn.1", "NOUN", "framkallande", "framkallandet")],
+            "framkalla": [analysis_with_msd(
+                "framkalla..vb.1", "VERB", "framkalla",
+                ("framkallande", "pres_part nom"),
+            )],
+        }
+        row = {"lemma": "abortframkallande", "upos": "ADJ", "saol_bar_reason": "unique_saol_bar_split",
+               "saol_bar_splits": [{"compact_parts": ["abort", "framkallande"]}]}
+        result = self.analyse(row, saldo)
+        self.assertEqual(result["head_match_reason"], "unique_head_same_upos")
+        self.assertEqual([candidate["id"] for candidate in result["head_candidates"]], ["framkalla..vb.1"])
         self.assertEqual(result["head_candidates"][0]["matched_word_forms"], [
             {"written_form": "framkallande", "msd": "pres_part nom"}
         ])
