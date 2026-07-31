@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .jsonl import read_jsonl
+from .msd import Msd, parse_msd
 
 DEFAULT_INPUT = Path("data/raw/saol14-faksimil.jsonl")
 DEFAULT_OUTPUT = Path("data/processed/saol14-common-forms.txt")
@@ -39,14 +40,38 @@ _TOKEN_RE = re.compile(
     r"[+\-]?[A-Za-zÅÄÖåäöÉéÜü]+|pl\.|best\.|pres\.|pret\.|sup\.|imper\.|komp\.|superl\.|el\.|[;,]"
 )
 
+_CI = parse_msd("ci")
+_SG_DEF_NOM = parse_msd("sg def nom")
+_PL_INDEF_NOM = parse_msd("pl indef nom")
+_POS_INDEF_SG_N_NOM = parse_msd("pos indef sg n nom")
+_PRET_IND_AKTIV = parse_msd("pret ind aktiv")
+_SUP_AKTIV = parse_msd("sup aktiv")
+
+
+@dataclass(frozen=True)
+class GeneratedWordForm:
+    written_form: str
+    msd: Msd | None
+    kind: str
+
 
 @dataclass(frozen=True)
 class GeneratedEntry:
     lemma: str
     pattern: str
-    forms: tuple[str, ...]
+    word_forms: tuple[GeneratedWordForm, ...]
     pattern_group: str = ""
-    form_kinds: tuple[str, ...] = ()
+
+    @property
+    def forms(self) -> tuple[str, ...]:
+        return tuple(dict.fromkeys(word_form.written_form for word_form in self.word_forms))
+
+    @property
+    def form_kinds(self) -> tuple[str, ...]:
+        first_kind: dict[str, str] = {}
+        for word_form in self.word_forms:
+            first_kind.setdefault(word_form.written_form, word_form.kind)
+        return tuple(first_kind[form] for form in self.forms)
 
 
 def normalise_pattern(value: Any) -> str | None:
@@ -102,6 +127,20 @@ def _deduplicate_tagged(forms: Iterable[tuple[str, str]]) -> tuple[tuple[str, ..
     return tuple(result), tuple(kinds)
 
 
+def _deduplicate_word_forms(forms: Iterable[GeneratedWordForm]) -> tuple[GeneratedWordForm, ...]:
+    result: list[GeneratedWordForm] = []
+    seen: set[tuple[str, str | None]] = set()
+    for word_form in forms:
+        marker = (
+            word_form.written_form,
+            str(word_form.msd) if word_form.msd is not None else None,
+        )
+        if word_form.written_form and marker not in seen:
+            seen.add(marker)
+            result.append(word_form)
+    return tuple(result)
+
+
 def _explicit_pattern_forms(lemma: str, pattern: str) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
     tokens = _TOKEN_RE.findall(pattern)
     tagged: list[tuple[str, str]] = [(lemma, "lemma")]
@@ -150,15 +189,46 @@ def _explicit_pattern_forms(lemma: str, pattern: str) -> tuple[tuple[str, ...], 
     return _deduplicate_tagged(tagged)
 
 
+def _known_common_msds(upos: str, pattern: str) -> tuple[Msd | None, ...]:
+    if upos == "NOUN":
+        return {
+            "+en +er": (_CI, _SG_DEF_NOM, _PL_INDEF_NOM),
+            "+en +ar": (_CI, _SG_DEF_NOM, _PL_INDEF_NOM),
+            "+et; pl. +": (_CI, _SG_DEF_NOM, _PL_INDEF_NOM),
+            "+en": (_CI, _SG_DEF_NOM),
+            "+n": (_CI, _SG_DEF_NOM),
+            "+et": (_CI, _SG_DEF_NOM),
+            "+n +r": (_CI, _SG_DEF_NOM, _PL_INDEF_NOM),
+            "+n +er": (_CI, _SG_DEF_NOM, _PL_INDEF_NOM),
+        }.get(pattern, ())
+    if upos == "ADJ" and pattern == "+t +a":
+        return (_CI, _POS_INDEF_SG_N_NOM, None)
+    if upos == "VERB" and pattern == "+de +t":
+        return (_CI, _PRET_IND_AKTIV, _SUP_AKTIV)
+    return ()
+
+
+def _common_word_forms(lemma: str, pattern: str, upos: str) -> tuple[GeneratedWordForm, ...]:
+    spellings = (lemma, *(_attach_suffix(lemma, suffix) for suffix in COMMON_PATTERNS[pattern]))
+    msds = _known_common_msds(upos, pattern)
+    return _deduplicate_word_forms(
+        GeneratedWordForm(
+            spelling,
+            msds[index] if index < len(msds) else None,
+            "lemma" if index == 0 else "derived",
+        )
+        for index, spelling in enumerate(spellings)
+    )
+
+
 def generate_forms(lemma: str, pattern: str | None) -> tuple[str, ...] | None:
     lemma = lemma.strip()
     if not lemma or pattern is None:
         return None
     if pattern in COMMON_PATTERNS:
-        forms, _ = _deduplicate_tagged(
-            [(lemma, "lemma"), *[(_attach_suffix(lemma, suffix), "derived") for suffix in COMMON_PATTERNS[pattern]]]
-        )
-        return forms
+        return GeneratedEntry(
+            lemma, pattern, _common_word_forms(lemma, pattern, ""), pattern
+        ).forms
     explicit = _explicit_pattern_forms(lemma, pattern)
     return explicit[0] if explicit else None
 
@@ -166,22 +236,25 @@ def generate_forms(lemma: str, pattern: str | None) -> tuple[str, ...] | None:
 def generate_entry(record: dict[str, Any]) -> GeneratedEntry | None:
     lemma = str(record.get("normaliserat_ord", "")).strip()
     pattern = normalise_pattern(record.get("text"))
+    upos = str(record.get("upos", "")).strip().upper()
     if not lemma or pattern is None:
         return None
 
     if pattern in COMMON_PATTERNS:
-        forms, kinds = _deduplicate_tagged(
-            [(lemma, "lemma"), *[(_attach_suffix(lemma, suffix), "derived") for suffix in COMMON_PATTERNS[pattern]]]
-        )
+        word_forms = _common_word_forms(lemma, pattern, upos)
         group = pattern
     else:
         explicit = _explicit_pattern_forms(lemma, pattern)
         if explicit is None:
             return None
         forms, kinds = explicit
+        word_forms = tuple(
+            GeneratedWordForm(form, _CI if kind == "lemma" else None, kind)
+            for form, kind in zip(forms, kinds)
+        )
         group = EXPLICIT_PATTERN_GROUP
 
-    return GeneratedEntry(lemma, pattern, forms, group, kinds)
+    return GeneratedEntry(lemma, pattern, word_forms, group)
 
 
 def iter_generated_entries(records: Iterable[dict[str, Any]]) -> Iterable[GeneratedEntry]:
@@ -197,6 +270,8 @@ def build_wordlist(input_path: Path, output_path: Path) -> dict[str, Any]:
     duplicate_forms = 0
     pattern_counts: Counter[str] = Counter()
     form_kind_counts: Counter[str] = Counter()
+    typed_msd_counts: Counter[str] = Counter()
+    untyped_word_forms = 0
     forms: list[str] = []
     seen: set[str] = set()
 
@@ -208,6 +283,11 @@ def build_wordlist(input_path: Path, output_path: Path) -> dict[str, Any]:
         supported_records += 1
         pattern_counts[entry.pattern_group] += 1
         form_kind_counts.update(entry.form_kinds)
+        for word_form in entry.word_forms:
+            if word_form.msd is None:
+                untyped_word_forms += 1
+            else:
+                typed_msd_counts[str(word_form.msd)] += 1
         for form in entry.forms:
             if form in seen:
                 duplicate_forms += 1
@@ -228,6 +308,8 @@ def build_wordlist(input_path: Path, output_path: Path) -> dict[str, Any]:
         "duplicate_forms": duplicate_forms,
         "pattern_counts": dict(pattern_counts.most_common()),
         "form_kind_counts": dict(form_kind_counts.most_common()),
+        "typed_msd_counts": dict(typed_msd_counts.most_common()),
+        "untyped_word_forms": untyped_word_forms,
     }
 
 
