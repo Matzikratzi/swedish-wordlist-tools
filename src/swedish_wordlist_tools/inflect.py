@@ -83,6 +83,17 @@ def normalise_pattern(value: Any) -> str | None:
     return pattern
 
 
+def _is_detached_suffix_row(lemma: str, pattern: str) -> bool:
+    """Reject OCR rows where suffixes became standalone words.
+
+    A one-letter lemma followed by an unmarked explicit pattern is not safe to
+    expand. In the source this can represent a broken row such as `a` followed
+    by the suffixes `et n na`; treating those tokens as complete forms would
+    incorrectly export `et`, `n` and `na` as words.
+    """
+    return len(lemma) == 1 and pattern not in COMMON_PATTERNS
+
+
 def _split_inflected_word(lemma: str) -> tuple[str, str]:
     head, separator, tail = lemma.partition(" ")
     return head, separator + tail if separator else ""
@@ -223,7 +234,7 @@ def _common_word_forms(lemma: str, pattern: str, upos: str) -> tuple[GeneratedWo
 
 def generate_forms(lemma: str, pattern: str | None) -> tuple[str, ...] | None:
     lemma = lemma.strip()
-    if not lemma or pattern is None:
+    if not lemma or pattern is None or _is_detached_suffix_row(lemma, pattern):
         return None
     if pattern in COMMON_PATTERNS:
         return GeneratedEntry(
@@ -237,7 +248,7 @@ def generate_entry(record: dict[str, Any]) -> GeneratedEntry | None:
     lemma = str(record.get("normaliserat_ord", "")).strip()
     pattern = normalise_pattern(record.get("text"))
     upos = str(record.get("upos", "")).strip().upper()
-    if not lemma or pattern is None:
+    if not lemma or pattern is None or _is_detached_suffix_row(lemma, pattern):
         return None
 
     if pattern in COMMON_PATTERNS:
