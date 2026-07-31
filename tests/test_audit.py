@@ -3,16 +3,37 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from swedish_wordlist_tools.audit import audit_flags, build_audit, make_audit_row, sample_rows
-from swedish_wordlist_tools.inflect import EXPLICIT_PATTERN_GROUP, GeneratedEntry
+from swedish_wordlist_tools.inflect import (
+    EXPLICIT_PATTERN_GROUP,
+    GeneratedEntry,
+    GeneratedWordForm,
+)
 
 
 class AuditTests(unittest.TestCase):
     def test_flags_special_lemmas_and_upos_x(self) -> None:
-        entry = GeneratedEntry("A-avdrag", "+et; pl. +", ("A-avdrag", "A-avdraget"), "+et; pl. +")
+        entry = GeneratedEntry(
+            "A-avdrag",
+            "+et; pl. +",
+            (
+                GeneratedWordForm("A-avdrag", None, "lemma"),
+                GeneratedWordForm("A-avdraget", None, "derived"),
+            ),
+            "+et; pl. +",
+        )
         self.assertEqual(audit_flags({"upos": "X"}, entry), ("upos-X", "versal", "bindestreck"))
 
     def test_flags_explicit_forms(self) -> None:
-        entry = GeneratedEntry("klocka", "+n klockor", ("klocka", "klockan", "klockor"), EXPLICIT_PATTERN_GROUP)
+        entry = GeneratedEntry(
+            "klocka",
+            "+n klockor",
+            (
+                GeneratedWordForm("klocka", None, "lemma"),
+                GeneratedWordForm("klockan", None, "derived"),
+                GeneratedWordForm("klockor", None, "explicit"),
+            ),
+            EXPLICIT_PATTERN_GROUP,
+        )
         self.assertEqual(audit_flags({"upos": "NOUN"}, entry), ("explicit-form",))
 
     def test_makes_row_from_real_fields(self) -> None:
