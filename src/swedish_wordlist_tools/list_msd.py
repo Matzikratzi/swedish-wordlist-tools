@@ -50,6 +50,17 @@ def inventory_msd(path: Path) -> dict[str, Any]:
     }
 
 
+def format_summary(report: dict[str, Any], output: Path | None = None) -> str:
+    summary = (
+        f"LexicalEntry: {report['lexical_entries']}, "
+        f"WordForm: {report['word_forms']}, "
+        f"unika msd-koder: {report['unique_msd']}"
+    )
+    if output is not None:
+        summary += f". Skrev {output}"
+    return summary + "\n"
+
+
 def format_text(report: dict[str, Any]) -> str:
     lines = [
         f"LexicalEntry: {report['lexical_entries']}",
@@ -80,13 +91,15 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = build_parser().parse_args()
     report = inventory_msd(args.saldo)
-    print(format_text(report), end="")
     if args.json_path:
         args.json_path.parent.mkdir(parents=True, exist_ok=True)
         args.json_path.write_text(
             json.dumps(report, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
+        print(format_summary(report, args.json_path), end="")
+    else:
+        print(format_text(report), end="")
 
 
 if __name__ == "__main__":
