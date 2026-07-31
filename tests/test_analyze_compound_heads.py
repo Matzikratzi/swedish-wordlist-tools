@@ -67,6 +67,38 @@ class CompoundHeadTests(unittest.TestCase):
         self.assertEqual(result["head_match_reason"], "unique_head_same_upos")
         self.assertEqual(result["head_candidates"][0]["id"], "svårighet..nn.1")
 
+    def test_prefers_exact_lemma_over_exact_word_forms(self) -> None:
+        saldo = {
+            "plan": [analysis("plan..nn.1", "NOUN", "plan", "plan", "planen")],
+            "plån": [analysis("plån..nn.1", "NOUN", "plån", "plån", "plan")],
+        }
+        index = build_head_index(saldo)
+        row = {
+            "lemma": "affärsplan",
+            "upos": "NOUN",
+            "saol_bar_reason": "unique_saol_bar_split",
+            "saol_bar_splits": [{"compact_parts": ["affärs", "plan"]}],
+        }
+        result = analyse_row(row, index)
+        self.assertEqual(result["head_match_reason"], "unique_head_same_upos")
+        self.assertEqual([candidate["id"] for candidate in result["head_candidates"]], ["plan..nn.1"])
+
+    def test_chooses_lemma_candidates_before_filtering_by_upos(self) -> None:
+        saldo = {
+            "plan": [analysis("plan..vb.1", "VERB", "plan", "plan")],
+            "plån": [analysis("plån..nn.1", "NOUN", "plån", "plån", "plan")],
+        }
+        index = build_head_index(saldo)
+        row = {
+            "lemma": "affärsplan",
+            "upos": "NOUN",
+            "saol_bar_reason": "unique_saol_bar_split",
+            "saol_bar_splits": [{"compact_parts": ["affärs", "plan"]}],
+        }
+        result = analyse_row(row, index)
+        self.assertEqual(result["head_match_reason"], "unique_head_upos_mismatch")
+        self.assertEqual([candidate["id"] for candidate in result["head_candidates"]], ["plan..vb.1"])
+
     def test_preserves_swedish_diacritics(self) -> None:
         saldo = {
             "not": [analysis("not..nn.1", "NOUN", "not", "not")],
@@ -89,6 +121,15 @@ class CompoundHeadTests(unittest.TestCase):
         )
         self.assertEqual(candidate["forms"], ["grund", "grunden", "grunds"])
 
+        index = build_head_index({"grund": [analysis("grund..nn.1", "NOUN", "grund", "grunds-")]})
+        row = {
+            "lemma": "bakgrunds",
+            "upos": "NOUN",
+            "saol_bar_reason": "unique_saol_bar_split",
+            "saol_bar_splits": [{"compact_parts": ["bak", "grunds"]}],
+        }
+        self.assertEqual(analyse_row(row, index)["head_match_reason"], "head_not_in_saldo")
+
     def test_reports_missing_head(self) -> None:
         row = {
             "lemma": "påhittadxyz",
@@ -96,11 +137,13 @@ class CompoundHeadTests(unittest.TestCase):
             "saol_bar_reason": "unique_saol_bar_split",
             "saol_bar_splits": [{"compact_parts": ["påhittad", "xyz"]}],
         }
-        result = analyse_row(row, {})
+        result = analyse_row(row, build_head_index({}))
         self.assertEqual(result["head_match_reason"], "head_not_in_saldo")
 
     def test_skips_non_unique_bar_split(self) -> None:
-        result = analyse_row({"lemma": "himlabryn", "saol_bar_reason": "saol_bar_does_not_match_lemma"}, {})
+        result = analyse_row(
+            {"lemma": "himlabryn", "saol_bar_reason": "saol_bar_does_not_match_lemma"}, build_head_index({})
+        )
         self.assertEqual(result["head_match_reason"], "not_unique_saol_bar_split")
 
 
