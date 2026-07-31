@@ -2,7 +2,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from swedish_wordlist_tools.list_msd import format_text, inventory_msd
+from swedish_wordlist_tools.list_msd import format_summary, format_text, inventory_msd
 
 
 SALDO_XML = """<?xml version="1.0" encoding="UTF-8"?>
@@ -51,6 +51,19 @@ class ListMsdTests(unittest.TestCase):
         self.assertIn("Unika msd-koder: 1", text)
         self.assertIn("        1  ci", text)
         self.assertIn("NOUN:", text)
+
+    def test_formats_concise_summary_for_output_file(self) -> None:
+        report = {
+            "lexical_entries": 2,
+            "word_forms": 5,
+            "unique_msd": 4,
+        }
+        text = format_summary(report, Path("report.json"))
+        self.assertEqual(
+            text,
+            "LexicalEntry: 2, WordForm: 5, unika msd-koder: 4. Skrev report.json\n",
+        )
+        self.assertNotIn("Alla msd-koder", text)
 
 
 if __name__ == "__main__":
