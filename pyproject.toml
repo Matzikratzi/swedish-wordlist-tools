@@ -20,6 +20,7 @@ saol14-audit = "swedish_wordlist_tools.audit:main"
 saol14-compare-saldo = "swedish_wordlist_tools.compare_sources:main"
 saol14-list-msd = "swedish_wordlist_tools.list_msd:main"
 saol14-game-wordlist = "swedish_wordlist_tools.game_wordlist:main"
+saol14-analyze-unmatched = "swedish_wordlist_tools.analyze_unmatched:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
