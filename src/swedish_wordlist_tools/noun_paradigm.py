@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from typing import Any
 
@@ -32,6 +33,11 @@ _SINGULAR_ONLY_PATTERNS = {
     "+et",
     "+t",
 }
+
+_EXPLICIT_USED_PLURAL_RE = re.compile(
+    r"^best\.\s*\+;\s*i:\s*pl\.\s*används:\s*(\S+)\s*$",
+    re.IGNORECASE,
+)
 
 
 def _genitive(form: str) -> str:
@@ -74,6 +80,49 @@ def _entry_from_full_pattern(
             GeneratedWordForm(lemma, _CI, "lemma"),
             GeneratedWordForm(_attach_suffix(lemma, singular_suffix), _SG_DEF_NOM, "derived"),
             GeneratedWordForm(_attach_suffix(lemma, plural_suffix), _PL_INDEF_NOM, "derived"),
+        ),
+        pattern_group=pattern,
+    )
+
+
+def _explicit_used_plural(lemma: str, notation: str) -> str | None:
+    match = _EXPLICIT_USED_PLURAL_RE.fullmatch(notation.strip())
+    if match is None:
+        return None
+
+    supplied = match.group(1)
+    if not supplied.startswith("-"):
+        return supplied
+
+    plural_head = supplied[1:]
+    # SAOL uses a leading hyphen when only the compound head is shown, e.g.
+    # ``fredssträvan — ... används: -strävanden``. For this family the
+    # supplied plural head in -anden corresponds to a singular head in -an.
+    if plural_head.endswith("anden"):
+        singular_head = plural_head[:-3]
+        if lemma.endswith(singular_head):
+            return lemma[: -len(singular_head)] + plural_head
+    return None
+
+
+def _entry_from_explicit_used_plural(
+    record: dict[str, Any], notation: str
+) -> GeneratedEntry | None:
+    lemma = str(record.get("normaliserat_ord", "")).strip()
+    if not lemma:
+        return None
+    plural = _explicit_used_plural(lemma, notation)
+    if not plural:
+        return None
+
+    pattern = "best. +; i pl. används"
+    return GeneratedEntry(
+        lemma=lemma,
+        pattern=pattern,
+        word_forms=(
+            GeneratedWordForm(lemma, _CI, "lemma"),
+            GeneratedWordForm(lemma, _SG_DEF_NOM, "derived"),
+            GeneratedWordForm(plural, _PL_INDEF_NOM, "explicit_plural"),
         ),
         pattern_group=pattern,
     )
@@ -167,7 +216,12 @@ def complete_noun_entry(
     if str(record.get("upos", "")).upper() != "NOUN":
         return entry
 
-    pattern = normalise_pattern(record.get("text"))
+    raw_pattern = str(record.get("text", "")).strip()
+    explicit_plural_entry = _entry_from_explicit_used_plural(record, raw_pattern)
+    if explicit_plural_entry is not None:
+        return _complete_full_paradigm(explicit_plural_entry)
+
+    pattern = normalise_pattern(raw_pattern)
     if pattern is None:
         return entry
 
