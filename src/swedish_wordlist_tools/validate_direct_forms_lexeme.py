@@ -6,6 +6,8 @@ from typing import Any
 from . import validate_direct_forms as base
 from .compare_sources import _key
 
+_BASE_VALIDATION_ROW = base.validation_row
+
 
 def validation_row(
     record: dict[str, Any],
@@ -18,7 +20,7 @@ def validation_row(
     is not evidence that the matched SALDO lexeme is the same lexeme as the
     SAOL headword. Keep these rows out of ordinary paradigm mismatches.
     """
-    row = base.validation_row(record, match_method, analyses)
+    row = _BASE_VALIDATION_ROW(record, match_method, analyses)
     saldo_lemma_keys = {
         _key(str(lemma))
         for analysis in analyses
