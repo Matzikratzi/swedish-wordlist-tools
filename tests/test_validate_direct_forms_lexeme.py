@@ -132,6 +132,75 @@ class ValidateDirectFormsLexemeTests(unittest.TestCase):
 
         self.assertEqual("form_set_mismatch", row["status"])
 
+    def test_classifies_regular_n_r_plural_missing_from_saldo(self) -> None:
+        record = {
+            "id": "forstaelse-1",
+            "normaliserat_ord": "förståelse",
+            "upos": "NOUN",
+            "ordkl": "subst.",
+            "text": "+n +r",
+        }
+        analysis = {
+            "id": "förståelse..nn.1",
+            "upos": "NOUN",
+            "lemmas": {"förståelse"},
+            "forms": {
+                "förståelse", "förståelses", "förståelsen", "förståelsens",
+            },
+        }
+
+        row = validation_row(record, "lemma_same_upos", [analysis])
+
+        self.assertEqual("saol_paradigm_differs_from_saldo", row["status"])
+        self.assertEqual([], row["missing_from_saol"])
+        self.assertEqual(
+            {"förståelser", "förståelsers", "förståelserna", "förståelsernas"},
+            set(row["extra_from_saol"]),
+        )
+
+    def test_classifies_regular_n_er_plural_missing_from_saldo(self) -> None:
+        record = {
+            "id": "niva-1",
+            "normaliserat_ord": "nivå",
+            "upos": "NOUN",
+            "ordkl": "subst.",
+            "text": "+n +er",
+        }
+        analysis = {
+            "id": "nivå..nn.1",
+            "upos": "NOUN",
+            "lemmas": {"nivå"},
+            "forms": {"nivå", "nivås", "nivån", "nivåns"},
+        }
+
+        row = validation_row(record, "lemma_same_upos", [analysis])
+
+        self.assertEqual("saol_paradigm_differs_from_saldo", row["status"])
+        self.assertEqual([], row["missing_from_saol"])
+
+    def test_keeps_regular_plural_conflict_as_mismatch(self) -> None:
+        record = {
+            "id": "hajk-1",
+            "normaliserat_ord": "hajk",
+            "upos": "NOUN",
+            "ordkl": "subst.",
+            "text": "+en +er",
+        }
+        analysis = {
+            "id": "hajk..nn.1",
+            "upos": "NOUN",
+            "lemmas": {"hajk"},
+            "forms": {
+                "hajk", "hajks", "hajken", "hajkens",
+                "hajkar", "hajkars", "hajkarna", "hajkarnas",
+            },
+        }
+
+        row = validation_row(record, "lemma_same_upos", [analysis])
+
+        self.assertEqual("form_set_mismatch", row["status"])
+        self.assertTrue(row["missing_from_saol"])
+
     def test_keeps_same_lemma_mismatch_unchanged(self) -> None:
         record = {
             "id": 2,
