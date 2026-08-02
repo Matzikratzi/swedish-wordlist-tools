@@ -19,9 +19,9 @@ _FULL_PARADIGM_PATTERNS = {
     "+en +er",
     "+en +ar",
     "+et; pl. +",
+    "+t +n",
     "+n +r",
     "+n +er",
-    "+t +n",
 }
 
 _SINGULAR_ONLY_PATTERNS = {
@@ -53,6 +53,20 @@ def _form_for_msd(entry: GeneratedEntry, wanted: str) -> str | None:
         if word_form.msd is not None and word_form.msd.casefold() == wanted_msd:
             return word_form.written_form
     return None
+
+
+def _key_forms(entry: GeneratedEntry) -> tuple[str | None, str | None, str | None]:
+    lemma = _form_for_msd(entry, "ci") or entry.lemma
+    singular_definite = _form_for_msd(entry, "sg def nom")
+    plural_indefinite = _form_for_msd(entry, "pl indef nom")
+
+    # `+t +n` was present as a common spelling pattern before its forms were
+    # assigned noun MSD tags. Preserve compatibility by reading the three
+    # ordered key forms directly: lemma, definite singular, indefinite plural.
+    if entry.pattern == "+t +n" and len(entry.forms) >= 3:
+        lemma, singular_definite, plural_indefinite = entry.forms[:3]
+
+    return lemma, singular_definite, plural_indefinite
 
 
 def _merge_forms(
@@ -92,9 +106,7 @@ def _complete_singular_only(entry: GeneratedEntry) -> GeneratedEntry:
 
 
 def _complete_full_paradigm(entry: GeneratedEntry) -> GeneratedEntry:
-    lemma = _form_for_msd(entry, "ci") or entry.lemma
-    singular_definite = _form_for_msd(entry, "sg def nom")
-    plural_indefinite = _form_for_msd(entry, "pl indef nom")
+    lemma, singular_definite, plural_indefinite = _key_forms(entry)
     if not lemma or not singular_definite or plural_indefinite is None:
         return entry
 
