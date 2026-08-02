@@ -43,6 +43,28 @@ class ValidateDirectFormsTests(unittest.TestCase):
         self.assertEqual(["flickor"], row["missing_from_saol"])
         self.assertEqual([], row["extra_from_saol"])
 
+    def test_reports_zero_plural_disagreement_separately(self) -> None:
+        record = {
+            "id": 2,
+            "normaliserat_ord": "ansvar",
+            "upos": "NOUN",
+            "ordkl": "subst.",
+            "text": "+et; pl. +",
+        }
+        analysis = {
+            "id": "ansvar..nn.1",
+            "upos": "NOUN",
+            "lemmas": {"ansvar"},
+            "forms": {"ansvar", "ansvars", "ansvaret", "ansvarets"},
+        }
+        row = validation_row(record, "lemma_same_upos", [analysis])
+        self.assertEqual("saol_zero_plural_differs_from_saldo", row["status"])
+        self.assertEqual(["ansvaren", "ansvarens"], row["extra_from_saol"])
+        self.assertEqual(
+            "saol_forms_are_subset->saol_zero_plural_differs_from_saldo",
+            row["status_transition"],
+        )
+
     def test_excludes_hyphen_terminated_saldo_forms(self) -> None:
         record = {
             "normaliserat_ord": "grund",
