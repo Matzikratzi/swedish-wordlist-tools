@@ -16,22 +16,27 @@ class NounParadigmTests(unittest.TestCase):
         }
         return complete_noun_entry(record, generate_entry(record))
 
-    def test_completes_en_er_noun(self) -> None:
-        entry = self.complete("bil", "+en +er")
+    def test_completes_n_er_noun(self) -> None:
+        entry = self.complete("idé", "+n +er")
         self.assertIsNotNone(entry)
         self.assertEqual(
             {
-                "bil", "bils", "bilen", "bilens",
-                "biler", "bilers", "bilerna", "bilernas",
+                "idé", "idés", "idén", "idéns",
+                "idéer", "idéers", "idéerna", "idéernas",
             },
             set(entry.forms if entry else ()),
         )
 
     def test_completes_en_ar_noun(self) -> None:
-        entry = self.complete("pojke", "+en +ar")
+        entry = self.complete("hund", "+en +ar")
         self.assertIsNotNone(entry)
-        self.assertIn("pojkearna", set(entry.forms if entry else ()))
-        self.assertIn("pojkearnas", set(entry.forms if entry else ()))
+        self.assertEqual(
+            {
+                "hund", "hunds", "hunden", "hundens",
+                "hundar", "hundars", "hundarna", "hundarnas",
+            },
+            set(entry.forms if entry else ()),
+        )
 
     def test_completes_zero_plural_neuter(self) -> None:
         entry = self.complete("hus", "+et; pl. +")
