@@ -29,12 +29,61 @@ def _usable_form(value: str) -> bool:
     return bool(value) and not value.rstrip().endswith("-")
 
 
+def _record_forms(record: dict[str, Any]) -> set[str]:
+    initial = generate_entry(record)
+    completed = complete_noun_entry(record, initial)
+    entry = completed or initial
+    return set(entry.forms if entry else ())
+
+
+def _analysis_forms(analysis: dict[str, Any]) -> set[str]:
+    return {
+        str(form)
+        for form in analysis["forms"]
+        if _usable_form(str(form))
+    }
+
+
+def _homonym_score(generated_forms: set[str], analysis: dict[str, Any]) -> tuple[int, int, int, int]:
+    """Rank one SALDO analysis against one SAOL record's generated paradigm."""
+    saldo_forms = _analysis_forms(analysis)
+    generated_folded = _casefolded(generated_forms)
+    saldo_folded = _casefolded(saldo_forms)
+    overlap = len(generated_folded & saldo_folded)
+    symmetric_difference = len(generated_folded ^ saldo_folded)
+    return (
+        int(generated_folded == saldo_folded),
+        int(generated_folded <= saldo_folded),
+        overlap,
+        -symmetric_difference,
+    )
+
+
+def _best_matching_analyses(
+    record: dict[str, Any],
+    analyses: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Choose the SALDO homonym(s) that best fit this SAOL record.
+
+    This is only a validation choice. The word-list builder still takes the
+    union of every matched SALDO analysis, so no homonym forms are discarded.
+    """
+    if len(analyses) <= 1:
+        return analyses
+    generated_forms = _record_forms(record)
+    if not generated_forms:
+        return analyses
+    scored = [(_homonym_score(generated_forms, analysis), analysis) for analysis in analyses]
+    best_score = max(score for score, _ in scored)
+    return [analysis for score, analysis in scored if score == best_score]
+
+
 def select_direct_match(
     record: dict[str, Any],
     saldo: dict[str, list[dict[str, Any]]],
     form_index: dict[str, list[dict[str, Any]]],
 ) -> tuple[str, list[dict[str, Any]]] | None:
-    """Reproduce the direct matching rules used by compare_sources."""
+    """Reproduce direct matching, selecting the best SALDO homonym for validation."""
     lemma = _normalise(str(record.get("normaliserat_ord", "")))
     if not lemma or _is_affix_entry(record, lemma):
         return None
@@ -45,15 +94,17 @@ def select_direct_match(
     if analyses:
         matching = [analysis for analysis in analyses if analysis["upos"] == saol_upos]
         if saol_upos and saol_upos != "X" and matching:
-            return "lemma_same_upos", matching
+            return "lemma_same_upos", _best_matching_analyses(record, matching)
 
         unknown = [analysis for analysis in analyses if not analysis["upos"]]
-        if saol_upos and saol_upos != "X" and len(unknown) == 1:
-            return "lemma_unknown_saldo_upos", unknown
+        if saol_upos and saol_upos != "X" and unknown:
+            chosen = _best_matching_analyses(record, unknown)
+            if len(chosen) == 1:
+                return "lemma_unknown_saldo_upos", chosen
 
         saldo_classes = {analysis["upos"] for analysis in analyses}
         if saol_upos in {"", "X"} and len(saldo_classes) == 1 and "" not in saldo_classes:
-            return "lemma_inferred_saol_upos", analyses
+            return "lemma_inferred_saol_upos", _best_matching_analyses(record, analyses)
         return None
 
     form_candidates = [
@@ -61,8 +112,9 @@ def select_direct_match(
         for analysis in form_index.get(lemma_key, [])
         if saol_upos and saol_upos != "X" and analysis["upos"] == saol_upos
     ]
-    if len(form_candidates) == 1:
-        return "unique_form_same_upos", form_candidates
+    chosen = _best_matching_analyses(record, form_candidates)
+    if len(chosen) == 1:
+        return "unique_form_same_upos", chosen
     return None
 
 
