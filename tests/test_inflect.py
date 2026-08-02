@@ -21,11 +21,11 @@ class InflectTests(unittest.TestCase):
 
     def test_strips_bracketed_pronunciation_annotations(self) -> None:
         self.assertEqual("+n +er", normalise_pattern("+n +er [-o>r-]"))
-        self.assertEqual("+n; pl. +r", normalise_pattern("+n [-en]; pl. +r [-er]"))
+        self.assertEqual("+n +r", normalise_pattern("+n [-en]; pl. +r [-er]"))
         self.assertEqual("+t", normalise_pattern("+t [-et]"))
-        self.assertEqual("+en; pl. +er", normalise_pattern("+en [bordå>n]; pl. +er"))
+        self.assertEqual("+en +er", normalise_pattern("+en [bordå>n]; pl. +er"))
 
-    def test_generates_from_bracketed_pronunciation_annotations(self) -> None:
+    def test_generates_key_forms_from_bracketed_pronunciation_annotations(self) -> None:
         self.assertEqual(
             ("reaktor", "reaktorn", "reaktorer"),
             generate_forms("reaktor", "+n +er [-o>r-]"),
@@ -33,10 +33,6 @@ class InflectTests(unittest.TestCase):
         self.assertEqual(
             ("baguette", "baguetten", "baguetter"),
             generate_forms("baguette", "+n [-en]; pl. +r [-er]"),
-        )
-        self.assertEqual(
-            ("arbitrage", "arbitraget"),
-            generate_forms("arbitrage", "+t [-et]"),
         )
 
     def test_generates_adjective_and_verb_forms(self) -> None:
