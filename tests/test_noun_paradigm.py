@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from swedish_wordlist_tools.inflect import generate_entry
+from swedish_wordlist_tools.inflect import generate_entry, normalise_pattern
 from swedish_wordlist_tools.noun_paradigm import complete_noun_entry
 
 
@@ -24,9 +24,11 @@ class NounParadigmTests(unittest.TestCase):
             set(entry.forms if entry else ()),
         )
 
-    def test_completes_stress_marked_n_er_noun(self) -> None:
+    def test_normalises_stress_marked_n_er_noun(self) -> None:
+        self.assertEqual("+n +er", normalise_pattern("+n +er [-o>r-]"))
         entry = self.complete("reaktor", "+n +er [-o>r-]")
         self.assertIsNotNone(entry)
+        self.assertEqual("+n +er", entry.pattern if entry else None)
         self.assertEqual(
             {
                 "reaktor",
