@@ -66,11 +66,17 @@ def select_direct_match(
     return None
 
 
+def _casefolded(forms: set[str]) -> set[str]:
+    return {form.casefold() for form in forms}
+
+
 def _form_status(generated_forms: set[str], saldo_forms: set[str], supported: bool) -> str:
     if not supported:
         return "saol_pattern_unsupported"
     if generated_forms == saldo_forms:
         return "exact_form_set"
+    if _casefolded(generated_forms) == _casefolded(saldo_forms):
+        return "exact_form_set_case_difference"
     if generated_forms <= saldo_forms:
         return "saol_forms_are_subset"
     return "form_set_mismatch"
@@ -138,6 +144,19 @@ def validation_row(
         )
     ):
         status = "saol_definite_plural_differs_from_saldo"
+
+    # `+t` is an unambiguous SAOL singular paradigm. A few directly matched
+    # SALDO entries nevertheless expose a different lexeme/paradigm, for
+    # example fylle/fylla and nominalised participles such as klagande.
+    # Preserve the SAOL generation and report the lexical-source disagreement
+    # separately instead of treating it as a parser regression.
+    if (
+        status == "form_set_mismatch"
+        and initial_status == "saol_pattern_unsupported"
+        and str(record.get("text", "")).strip() == "+t"
+        and completion_applied
+    ):
+        status = "saol_paradigm_differs_from_saldo"
 
     return {
         "record_id": str(record.get("id") or record.get("subnr") or ""),
