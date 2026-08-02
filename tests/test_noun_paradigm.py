@@ -114,23 +114,92 @@ class NounParadigmTests(unittest.TestCase):
     def test_completes_en_singular_only_noun(self) -> None:
         entry = self.complete("mjölk", "+en")
         self.assertIsNotNone(entry)
-        self.assertEqual({"mjölk", "mjölks", "mjölken", "mjölkens"}, set(entry.forms if entry else ()))
+        self.assertEqual(
+            {"mjölk", "mjölks", "mjölken", "mjölkens"},
+            set(entry.forms if entry else ()),
+        )
 
     def test_completes_n_singular_only_noun(self) -> None:
         entry = self.complete("afasi", "+n")
         self.assertIsNotNone(entry)
-        self.assertEqual({"afasi", "afasis", "afasin", "afasins"}, set(entry.forms if entry else ()))
+        self.assertEqual(
+            {"afasi", "afasis", "afasin", "afasins"},
+            set(entry.forms if entry else ()),
+        )
 
     def test_completes_et_singular_only_noun(self) -> None:
         entry = self.complete("ansvar", "+et")
         self.assertIsNotNone(entry)
-        self.assertEqual({"ansvar", "ansvars", "ansvaret", "ansvarets"}, set(entry.forms if entry else ()))
+        self.assertEqual(
+            {"ansvar", "ansvars", "ansvaret", "ansvarets"},
+            set(entry.forms if entry else ()),
+        )
 
     def test_completes_t_singular_only_noun(self) -> None:
         entry = self.complete("foto", "+t")
         self.assertIsNotNone(entry)
         self.assertEqual(
             {"foto", "fotos", "fotot", "fotots"},
+            set(entry.forms if entry else ()),
+        )
+
+    def test_completes_explicit_used_plural(self) -> None:
+        expected = {
+            "anmodan",
+            "anmodans",
+            "anmodanden",
+            "anmodandens",
+            "anmodandena",
+            "anmodandenas",
+        }
+        for lemma, plural in (
+            ("anmodan", "anmodanden"),
+            ("strävan", "strävanden"),
+            ("yrkan", "yrkanden"),
+            ("vädjan", "vädjanden"),
+        ):
+            with self.subTest(lemma=lemma):
+                entry = self.complete(
+                    lemma,
+                    f"best. +; i: pl. används: {plural}",
+                )
+                self.assertIsNotNone(entry)
+                self.assertEqual(
+                    {
+                        lemma,
+                        lemma + "s",
+                        plural,
+                        plural + "s",
+                        plural + "a",
+                        plural + "as",
+                    },
+                    set(entry.forms if entry else ()),
+                )
+        self.assertEqual(
+            expected,
+            set(
+                self.complete(
+                    "anmodan",
+                    "best. +; i: pl. används: anmodanden",
+                ).forms
+            ),
+        )
+
+    def test_completes_compound_explicit_used_plural(self) -> None:
+        entry = self.complete(
+            "fredssträvan",
+            "best. +; i: pl. används: -strävanden",
+        )
+        self.assertIsNotNone(entry)
+        self.assertEqual(
+            {
+                "fredssträvan",
+                "fredssträvans",
+                "fredssträvanden",
+                "fredssträvandens",
+                "fredssträvandena",
+                "fredssträvandenas",
+            },
             set(entry.forms if entry else ()),
         )
 
@@ -141,7 +210,12 @@ class NounParadigmTests(unittest.TestCase):
         self.assertNotIn("huss", set(entry.forms if entry else ()))
 
     def test_leaves_other_word_classes_unchanged(self) -> None:
-        record = {"normaliserat_ord": "snabb", "upos": "ADJ", "ordkl": "adj.", "text": "+t +a"}
+        record = {
+            "normaliserat_ord": "snabb",
+            "upos": "ADJ",
+            "ordkl": "adj.",
+            "text": "+t +a",
+        }
         initial = generate_entry(record)
         completed = complete_noun_entry(record, initial)
         self.assertEqual(initial, completed)
