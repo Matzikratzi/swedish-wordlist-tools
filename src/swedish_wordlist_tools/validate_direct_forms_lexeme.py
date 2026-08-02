@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,10 @@ from .jsonl import read_jsonl
 
 _BASE_VALIDATION_ROW = base.validation_row
 _REGULAR_NOUN_SUBSET_NOTATIONS = {"+en +ar", "+en +er"}
+_EXPLICIT_USED_PLURAL_RE = re.compile(
+    r"^best\.\s*\+;\s*i:\s*pl\.\s*används:\s*\S+\s*$",
+    re.IGNORECASE,
+)
 _SAOL_HOMONYMS: dict[tuple[str, str], list[dict[str, Any]]] = {}
 
 
@@ -89,9 +94,9 @@ def validation_row(
 
     A unique word-form match can point to another lexeme rather than the SAOL
     headword. A same-lemma SALDO analysis can likewise correspond exactly to a
-    different SAOL homonym. Separately, for the regular noun patterns
-    ``+en +ar`` and ``+en +er``, SALDO sometimes contains only singular forms
-    while SAOL explicitly supplies the complete regular plural.
+    different SAOL homonym. Explicit SAOL plural references and regular noun
+    paradigms can also contain forms that are absent from SALDO without
+    contradicting the forms SALDO does provide.
     """
     row = _BASE_VALIDATION_ROW(record, match_method, analyses)
     saldo_lemma_keys = {
@@ -124,6 +129,16 @@ def validation_row(
                 for candidate in other_homonyms
             ]
             return row
+
+    if (
+        row["status"] == "form_set_mismatch"
+        and row.get("upos") == "NOUN"
+        and _EXPLICIT_USED_PLURAL_RE.fullmatch(str(row.get("notation", "")).strip())
+        and row.get("extra_from_saol")
+        and not row.get("missing_from_saol")
+    ):
+        _set_status(row, "saol_explicit_plural_differs_from_saldo")
+        return row
 
     if (
         row["status"] == "form_set_mismatch"
