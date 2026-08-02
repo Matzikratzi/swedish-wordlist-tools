@@ -202,6 +202,20 @@ def validation_row(
     ):
         status = "saol_paradigm_differs_from_saldo"
 
+    # For `+t +n`, SAOL explicitly supplies both definite singular and an
+    # indefinite plural in -n. SALDO often contains only a reduced subset of
+    # that same paradigm. Classify only pure SALDO subsets as source
+    # differences; records where SALDO also has unrelated forms remain real
+    # mismatches for further inspection.
+    if (
+        status == "form_set_mismatch"
+        and pattern == "+t +n"
+        and completion_applied
+        and extra_from_saol
+        and not missing_from_saol
+    ):
+        status = "saol_paradigm_differs_from_saldo"
+
     return {
         "record_id": str(record.get("id") or record.get("subnr") or ""),
         "lemma": str(record.get("normaliserat_ord", "")),
