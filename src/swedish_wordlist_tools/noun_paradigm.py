@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from .inflect import GeneratedEntry, GeneratedWordForm
+from .inflect import GeneratedEntry, GeneratedWordForm, normalise_pattern
 from .msd import parse_msd
 
 _CI = parse_msd("ci")
@@ -167,7 +167,10 @@ def complete_noun_entry(
     if str(record.get("upos", "")).upper() != "NOUN":
         return entry
 
-    pattern = str(record.get("text", "")).strip()
+    pattern = normalise_pattern(record.get("text"))
+    if pattern is None:
+        return entry
+
     if entry is None and pattern == "+et +er":
         entry = _entry_from_full_pattern(record, pattern, "et", "er")
     elif entry is None and pattern == "+n; pl. +":
