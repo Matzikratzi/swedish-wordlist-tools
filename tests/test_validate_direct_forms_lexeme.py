@@ -84,6 +84,54 @@ class ValidateDirectFormsLexemeTests(unittest.TestCase):
             row["matching_saol_homonyms"],
         )
 
+    def test_classifies_explicit_saol_plural_missing_from_saldo(self) -> None:
+        record = {
+            "id": "anmodan-1",
+            "homonr": "1",
+            "normaliserat_ord": "anmodan",
+            "upos": "NOUN",
+            "ordkl": "subst.",
+            "text": "best. +; i: pl. används: anmodanden",
+        }
+        analysis = {
+            "id": "anmodan..nn.1",
+            "upos": "NOUN",
+            "lemmas": {"anmodan"},
+            "forms": {"anmodan", "anmodans"},
+        }
+
+        row = validation_row(record, "lemma_same_upos", [analysis])
+
+        self.assertEqual("saol_explicit_plural_differs_from_saldo", row["status"])
+        self.assertEqual(
+            "form_set_mismatch->saol_explicit_plural_differs_from_saldo",
+            row["status_transition"],
+        )
+        self.assertEqual([], row["missing_from_saol"])
+        self.assertEqual(
+            {"anmodanden", "anmodandens", "anmodandena", "anmodandenas"},
+            set(row["extra_from_saol"]),
+        )
+
+    def test_keeps_explicit_plural_conflict_as_mismatch(self) -> None:
+        record = {
+            "id": "anmodan-1",
+            "normaliserat_ord": "anmodan",
+            "upos": "NOUN",
+            "ordkl": "subst.",
+            "text": "best. +; i: pl. används: anmodanden",
+        }
+        analysis = {
+            "id": "anmodan..nn.1",
+            "upos": "NOUN",
+            "lemmas": {"anmodan"},
+            "forms": {"anmodan", "anmodans", "anmodningar"},
+        }
+
+        row = validation_row(record, "lemma_same_upos", [analysis])
+
+        self.assertEqual("form_set_mismatch", row["status"])
+
     def test_keeps_same_lemma_mismatch_unchanged(self) -> None:
         record = {
             "id": 2,
