@@ -63,7 +63,7 @@ class ValidateCrossLexemeFormsTests(unittest.TestCase):
             "normaliserat_ord": "test",
             "upos": "NOUN",
             "ordkl": "subst.",
-            "text": "+en",
+            "text": "+en +er",
         }
         analysis = {
             "id": "test..nn.1",
@@ -89,6 +89,7 @@ class ValidateCrossLexemeFormsTests(unittest.TestCase):
             lexeme._SAOL_ENTRIES = old_entries
 
         self.assertEqual("form_set_mismatch", row["status"])
+        self.assertEqual(["testar"], row["missing_from_saol"])
 
 
 if __name__ == "__main__":
