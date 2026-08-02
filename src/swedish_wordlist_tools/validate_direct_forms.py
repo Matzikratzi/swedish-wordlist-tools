@@ -98,11 +98,6 @@ def validation_row(
     extra_from_saol = generated_forms - saldo_forms
     completion_applied = generated is not None and generated_forms != initial_forms
 
-    # SAOL's `+et; pl. +` explicitly states that the indefinite plural is
-    # identical to the lemma. From that, definite plural in -en follows. SALDO
-    # sometimes omits those plural forms (typically for mass/collective nouns)
-    # or records another plural. That is a source disagreement, not evidence
-    # that the SAOL parser generated an impossible form.
     if (
         status == "form_set_mismatch"
         and initial_status == "saol_forms_are_subset"
@@ -111,12 +106,6 @@ def validation_row(
     ):
         status = "saol_zero_plural_differs_from_saldo"
 
-    # A regular genitive can also be absent from SALDO when the same analysis
-    # contains a competing citation variant. For example SAOL `busk +en`
-    # deterministically gives `busks`, while SALDO lists the variant `buske`
-    # and its genitive `buskes` but omits `busks`. If every newly extra form is
-    # one of our derived genitives, report a source difference rather than a
-    # generator regression.
     generated_kinds = {
         word_form.written_form: word_form.kind
         for word_form in (generated.word_forms if generated else ())
@@ -129,6 +118,26 @@ def validation_row(
         and all(generated_kinds.get(form) == "derived_genitive" for form in extra_from_saol)
     ):
         status = "saol_genitive_differs_from_saldo"
+
+    # For patterns such as `+t +n`, SAOL gives an indefinite plural in -n.
+    # The regular definite plural is then formed with -a (embargon -> embargona).
+    # SALDO occasionally omits only that definite plural and its genitive.
+    # Treat this as a source-coverage difference rather than a generator error.
+    if (
+        status == "form_set_mismatch"
+        and initial_status == "saol_forms_are_subset"
+        and completion_applied
+        and extra_from_saol
+        and all(
+            generated_kinds.get(form) in {"derived_definite_plural", "derived_genitive"}
+            for form in extra_from_saol
+        )
+        and any(
+            generated_kinds.get(form) == "derived_definite_plural"
+            for form in extra_from_saol
+        )
+    ):
+        status = "saol_definite_plural_differs_from_saldo"
 
     return {
         "record_id": str(record.get("id") or record.get("subnr") or ""),
