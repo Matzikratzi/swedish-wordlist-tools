@@ -46,6 +46,16 @@ def _attach_suffix(lemma: str, suffix: str) -> str:
     return head + suffix + (separator + tail if separator else "")
 
 
+def _singular_t_suffix(lemma: str) -> str:
+    """Expand SAOL `+t` without losing the linking e after final i.
+
+    In this singular-only pattern, `kli +t` denotes `kliet`, while patterns
+    such as `alibi +t +n` remain separate and still give `alibit`.
+    """
+    head = lemma.partition(" ")[0]
+    return "et" if head.casefold().endswith("i") else "t"
+
+
 def _entry_from_singular_pattern(
     record: dict[str, Any], pattern: str, suffix: str
 ) -> GeneratedEntry | None:
@@ -173,7 +183,8 @@ def complete_noun_entry(
     if entry is None and pattern == "+et +er":
         entry = _entry_from_et_er(record)
     elif entry is None and pattern == "+t":
-        entry = _entry_from_singular_pattern(record, "+t", "t")
+        lemma = str(record.get("normaliserat_ord", "")).strip()
+        entry = _entry_from_singular_pattern(record, "+t", _singular_t_suffix(lemma))
     if entry is None:
         return None
 
