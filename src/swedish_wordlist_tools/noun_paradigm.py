@@ -18,6 +18,7 @@ _PL_DEF_GEN = parse_msd("pl def gen")
 _FULL_PARADIGM_PATTERNS = {
     "+en +er",
     "+en +ar",
+    "+et +er",
     "+et; pl. +",
     "+t +n",
     "+n +r",
@@ -37,6 +38,27 @@ def _genitive(form: str) -> str:
     Words ending in s, x or z have an unmarked genitive in Swedish spelling.
     """
     return form if form.casefold().endswith(("s", "x", "z")) else form + "s"
+
+
+def _attach_suffix(lemma: str, suffix: str) -> str:
+    head, separator, tail = lemma.partition(" ")
+    return head + suffix + (separator + tail if separator else "")
+
+
+def _entry_from_et_er(record: dict[str, Any]) -> GeneratedEntry | None:
+    lemma = str(record.get("normaliserat_ord", "")).strip()
+    if not lemma:
+        return None
+    return GeneratedEntry(
+        lemma=lemma,
+        pattern="+et +er",
+        word_forms=(
+            GeneratedWordForm(lemma, _CI, "lemma"),
+            GeneratedWordForm(_attach_suffix(lemma, "et"), _SG_DEF_NOM, "derived"),
+            GeneratedWordForm(_attach_suffix(lemma, "er"), _PL_INDEF_NOM, "derived"),
+        ),
+        pattern_group="+et +er",
+    )
 
 
 def _definite_plural(lemma: str, plural: str, pattern: str) -> str:
@@ -60,9 +82,6 @@ def _key_forms(entry: GeneratedEntry) -> tuple[str | None, str | None, str | Non
     singular_definite = _form_for_msd(entry, "sg def nom")
     plural_indefinite = _form_for_msd(entry, "pl indef nom")
 
-    # `+t +n` was present as a common spelling pattern before its forms were
-    # assigned noun MSD tags. Preserve compatibility by reading the three
-    # ordered key forms directly: lemma, definite singular, indefinite plural.
     if entry.pattern == "+t +n" and len(entry.forms) >= 3:
         lemma, singular_definite, plural_indefinite = entry.forms[:3]
 
@@ -96,11 +115,7 @@ def _complete_singular_only(entry: GeneratedEntry) -> GeneratedEntry:
         GeneratedWordForm(lemma, _CI, "lemma"),
         GeneratedWordForm(_genitive(lemma), _SG_INDEF_GEN, "derived_genitive"),
         GeneratedWordForm(singular_definite, _SG_DEF_NOM, "derived"),
-        GeneratedWordForm(
-            _genitive(singular_definite),
-            _SG_DEF_GEN,
-            "derived_genitive",
-        ),
+        GeneratedWordForm(_genitive(singular_definite), _SG_DEF_GEN, "derived_genitive"),
     )
     return _merge_forms(entry, additions)
 
@@ -115,27 +130,11 @@ def _complete_full_paradigm(entry: GeneratedEntry) -> GeneratedEntry:
         GeneratedWordForm(lemma, _CI, "lemma"),
         GeneratedWordForm(_genitive(lemma), _SG_INDEF_GEN, "derived_genitive"),
         GeneratedWordForm(singular_definite, _SG_DEF_NOM, "derived"),
-        GeneratedWordForm(
-            _genitive(singular_definite),
-            _SG_DEF_GEN,
-            "derived_genitive",
-        ),
+        GeneratedWordForm(_genitive(singular_definite), _SG_DEF_GEN, "derived_genitive"),
         GeneratedWordForm(plural_indefinite, _PL_INDEF_NOM, "derived"),
-        GeneratedWordForm(
-            _genitive(plural_indefinite),
-            _PL_INDEF_GEN,
-            "derived_genitive",
-        ),
-        GeneratedWordForm(
-            plural_definite,
-            _PL_DEF_NOM,
-            "derived_definite_plural",
-        ),
-        GeneratedWordForm(
-            _genitive(plural_definite),
-            _PL_DEF_GEN,
-            "derived_genitive",
-        ),
+        GeneratedWordForm(_genitive(plural_indefinite), _PL_INDEF_GEN, "derived_genitive"),
+        GeneratedWordForm(plural_definite, _PL_DEF_NOM, "derived_definite_plural"),
+        GeneratedWordForm(_genitive(plural_definite), _PL_DEF_GEN, "derived_genitive"),
     )
     return _merge_forms(entry, additions)
 
@@ -144,14 +143,16 @@ def complete_noun_entry(
     record: dict[str, Any],
     entry: GeneratedEntry | None,
 ) -> GeneratedEntry | None:
-    """Expand conservatively interpreted SAOL noun key forms.
-
-    Full-paradigm patterns provide lemma, definite singular and indefinite
-    plural. Singular-only patterns provide lemma and definite singular and are
-    completed only with their two genitives; no plural is invented.
-    """
-    if entry is None or str(record.get("upos", "")).upper() != "NOUN":
+    """Expand conservatively interpreted SAOL noun key forms."""
+    if str(record.get("upos", "")).upper() != "NOUN":
         return entry
+
+    pattern = str(record.get("text", "")).strip()
+    if entry is None and pattern == "+et +er":
+        entry = _entry_from_et_er(record)
+    if entry is None:
+        return None
+
     if entry.pattern in _SINGULAR_ONLY_PATTERNS:
         return _complete_singular_only(entry)
     if entry.pattern in _FULL_PARADIGM_PATTERNS:
