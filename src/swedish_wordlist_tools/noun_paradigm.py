@@ -133,8 +133,13 @@ def _definite_plural(lemma: str, plural: str, pattern: str) -> str:
         return lemma + "en"
     if pattern == "+n; pl. +":
         return plural + "na"
-    if pattern in {"+t +n", "best. +; i pl. används"}:
+    if pattern == "+t +n":
         return plural + "a"
+    if pattern == "best. +; i pl. används":
+        # Explicit plurals in -anden take -a (anmodanden -> anmodandena),
+        # while ordinary plurals in -ar/-er take -na
+        # (ansökningar -> ansökningarna).
+        return plural + ("a" if plural.casefold().endswith("en") else "na")
     return plural + "na"
 
 
