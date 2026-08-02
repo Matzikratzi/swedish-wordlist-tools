@@ -48,6 +48,14 @@ class NounParadigmTests(unittest.TestCase):
             set(entry.forms if entry else ()),
         )
 
+    def test_completes_n_zero_plural_noun(self) -> None:
+        entry = self.complete("demo", "+n; pl. +")
+        self.assertIsNotNone(entry)
+        self.assertEqual(
+            {"demo", "demos", "demon", "demons", "demona", "demonas"},
+            set(entry.forms if entry else ()),
+        )
+
     def test_completes_t_n_neuter(self) -> None:
         entry = self.complete("alibi", "+t +n")
         self.assertIsNotNone(entry)
