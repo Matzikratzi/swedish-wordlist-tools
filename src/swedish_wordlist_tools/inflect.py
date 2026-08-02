@@ -30,13 +30,7 @@ COMMON_PATTERNS: dict[str, tuple[str, ...]] = {
     "+n +er": ("n", "er"),
 }
 
-# These brackets describe pronunciation/stress changes, not spelling or
-# morphology. Keep the mapping explicit so that unrelated bracketed notes are
-# never discarded accidentally.
-_PRONUNCIATION_PATTERN_ALIASES = {
-    "+n +er [-o>r-]": "+n +er",
-}
-
+_BRACKET_ANNOTATION_RE = re.compile(r"\[[^\[\]]*\]")
 _LABELS = {
     "pl.", "best.", "pres.", "pret.", "sup.", "imper.", "komp.", "superl.",
     "pl", "best", "pres", "pret", "sup", "imper", "komp", "superl",
@@ -87,7 +81,15 @@ def normalise_pattern(value: Any) -> str | None:
     pattern = str(value).strip()
     if not pattern or pattern == "(null)":
         return None
-    return _PRONUNCIATION_PATTERN_ALIASES.get(pattern, pattern)
+
+    # SAOL's square brackets contain pronunciation and stress guidance. The
+    # spelling/morphology is described outside the brackets, so remove every
+    # complete bracket block before parsing while retaining the original text
+    # in source records and validation reports.
+    pattern = _BRACKET_ANNOTATION_RE.sub(" ", pattern)
+    pattern = re.sub(r"\s+", " ", pattern).strip()
+    pattern = re.sub(r"\s+([;,])", r"\1", pattern)
+    return pattern or None
 
 
 def _is_detached_suffix_row(lemma: str, pattern: str) -> bool:
