@@ -18,7 +18,7 @@ from .inflect import generate_entry
 from .jsonl import read_jsonl
 
 DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
-DEFAULT_SALDO = Path("data/raw/saldo.xml")
+DEFAULT_SALDO = Path("data/raw/saldom.xml")
 DEFAULT_JSONL = Path("reports/saol14-direct-form-validation.jsonl")
 DEFAULT_SUMMARY = Path("reports/saol14-direct-form-validation-summary.json")
 
