@@ -31,6 +31,17 @@ COMMON_PATTERNS: dict[str, tuple[str, ...]] = {
 }
 
 _BRACKET_ANNOTATION_RE = re.compile(r"\[[^\[\]]*\]")
+
+# SAOL sometimes spells out the plural label even when the same paradigm is
+# elsewhere written in compact form. Canonicalize only established equivalent
+# notations after pronunciation brackets have been removed.
+_PATTERN_ALIASES = {
+    "+n; pl. +r": "+n +r",
+    "+n; pl. +er": "+n +er",
+    "+en; pl. +er": "+en +er",
+    "+en; pl. +ar": "+en +ar",
+}
+
 _LABELS = {
     "pl.", "best.", "pres.", "pret.", "sup.", "imper.", "komp.", "superl.",
     "pl", "best", "pres", "pret", "sup", "imper", "komp", "superl",
@@ -89,6 +100,7 @@ def normalise_pattern(value: Any) -> str | None:
     pattern = _BRACKET_ANNOTATION_RE.sub(" ", pattern)
     pattern = re.sub(r"\s+", " ", pattern).strip()
     pattern = re.sub(r"\s+([;,])", r"\1", pattern)
+    pattern = _PATTERN_ALIASES.get(pattern, pattern)
     return pattern or None
 
 
