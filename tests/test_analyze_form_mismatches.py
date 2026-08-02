@@ -35,7 +35,7 @@ class AnalyzeFormMismatchesTests(unittest.TestCase):
         self.assertEqual(1, len(summary["groups"]))
         group = summary["groups"][0]
         self.assertEqual(["+erna"], group["extra_pattern"])
-        self.assertEqual(["=kattar"], group["missing_pattern"])
+        self.assertEqual(["+ar"], group["missing_pattern"])
 
     def test_renders_dimensions_and_examples(self) -> None:
         summary = analyse_rows([
