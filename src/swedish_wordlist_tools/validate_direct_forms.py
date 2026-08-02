@@ -125,10 +125,6 @@ def validation_row(
     ):
         status = "saol_genitive_differs_from_saldo"
 
-    # For patterns such as `+t +n`, SAOL gives an indefinite plural in -n.
-    # The regular definite plural is then formed with -a (embargon -> embargona).
-    # SALDO occasionally omits only that definite plural and its genitive.
-    # Treat this as a source-coverage difference rather than a generator error.
     if (
         status == "form_set_mismatch"
         and initial_status == "saol_forms_are_subset"
@@ -145,15 +141,11 @@ def validation_row(
     ):
         status = "saol_definite_plural_differs_from_saldo"
 
-    # `+t` is an unambiguous SAOL singular paradigm. A few directly matched
-    # SALDO entries nevertheless expose a different lexeme/paradigm, for
-    # example fylle/fylla and nominalised participles such as klagande.
-    # Preserve the SAOL generation and report the lexical-source disagreement
-    # separately instead of treating it as a parser regression.
+    pattern = str(record.get("text", "")).strip()
     if (
         status == "form_set_mismatch"
         and initial_status == "saol_pattern_unsupported"
-        and str(record.get("text", "")).strip() == "+t"
+        and pattern in {"+t", "+n; pl. +"}
         and completion_applied
     ):
         status = "saol_paradigm_differs_from_saldo"

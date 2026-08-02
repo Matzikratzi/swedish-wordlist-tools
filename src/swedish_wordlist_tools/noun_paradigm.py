@@ -20,6 +20,7 @@ _FULL_PARADIGM_PATTERNS = {
     "+en +ar",
     "+et +er",
     "+et; pl. +",
+    "+n; pl. +",
     "+t +n",
     "+n +r",
     "+n +er",
@@ -34,10 +35,7 @@ _SINGULAR_ONLY_PATTERNS = {
 
 
 def _genitive(form: str) -> str:
-    """Return the ordinary Swedish genitive spelling.
-
-    Words ending in s, x or z have an unmarked genitive in Swedish spelling.
-    """
+    """Return the ordinary Swedish genitive spelling."""
     return form if form.casefold().endswith(("s", "x", "z")) else form + "s"
 
 
@@ -57,35 +55,35 @@ def _entry_from_singular_pattern(
         pattern=pattern,
         word_forms=(
             GeneratedWordForm(lemma, _CI, "lemma"),
-            GeneratedWordForm(
-                _attach_suffix(lemma, suffix),
-                _SG_DEF_NOM,
-                "derived",
-            ),
+            GeneratedWordForm(_attach_suffix(lemma, suffix), _SG_DEF_NOM, "derived"),
         ),
         pattern_group=pattern,
     )
 
 
-def _entry_from_et_er(record: dict[str, Any]) -> GeneratedEntry | None:
+def _entry_from_full_pattern(
+    record: dict[str, Any], pattern: str, singular_suffix: str, plural_suffix: str
+) -> GeneratedEntry | None:
     lemma = str(record.get("normaliserat_ord", "")).strip()
     if not lemma:
         return None
     return GeneratedEntry(
         lemma=lemma,
-        pattern="+et +er",
+        pattern=pattern,
         word_forms=(
             GeneratedWordForm(lemma, _CI, "lemma"),
-            GeneratedWordForm(_attach_suffix(lemma, "et"), _SG_DEF_NOM, "derived"),
-            GeneratedWordForm(_attach_suffix(lemma, "er"), _PL_INDEF_NOM, "derived"),
+            GeneratedWordForm(_attach_suffix(lemma, singular_suffix), _SG_DEF_NOM, "derived"),
+            GeneratedWordForm(_attach_suffix(lemma, plural_suffix), _PL_INDEF_NOM, "derived"),
         ),
-        pattern_group="+et +er",
+        pattern_group=pattern,
     )
 
 
 def _definite_plural(lemma: str, plural: str, pattern: str) -> str:
     if pattern == "+et; pl. +":
         return lemma + "en"
+    if pattern == "+n; pl. +":
+        return plural + "na"
     if pattern == "+t +n":
         return plural + "a"
     return plural + "na"
@@ -171,9 +169,11 @@ def complete_noun_entry(
 
     pattern = str(record.get("text", "")).strip()
     if entry is None and pattern == "+et +er":
-        entry = _entry_from_et_er(record)
+        entry = _entry_from_full_pattern(record, pattern, "et", "er")
+    elif entry is None and pattern == "+n; pl. +":
+        entry = _entry_from_full_pattern(record, pattern, "n", "")
     elif entry is None and pattern == "+t":
-        entry = _entry_from_singular_pattern(record, "+t", "t")
+        entry = _entry_from_singular_pattern(record, pattern, "t")
     if entry is None:
         return None
 
