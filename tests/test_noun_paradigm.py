@@ -24,6 +24,25 @@ class NounParadigmTests(unittest.TestCase):
             set(entry.forms if entry else ()),
         )
 
+    def test_completes_stress_marked_n_er_noun(self) -> None:
+        entry = self.complete("reaktor", "+n +er [-o>r-]")
+        self.assertIsNotNone(entry)
+        self.assertEqual(
+            {
+                "reaktor",
+                "reaktors",
+                "reaktorn",
+                "reaktorns",
+                "reaktorer",
+                "reaktorers",
+                "reaktorerna",
+                "reaktorernas",
+            },
+            set(entry.forms if entry else ()),
+        )
+        self.assertNotIn("reakto", set(entry.forms if entry else ()))
+        self.assertNotIn("r", set(entry.forms if entry else ()))
+
     def test_completes_en_ar_noun(self) -> None:
         entry = self.complete("hund", "+en +ar")
         self.assertIsNotNone(entry)
