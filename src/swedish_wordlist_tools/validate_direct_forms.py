@@ -22,20 +22,11 @@ DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
 DEFAULT_SALDO = Path("data/raw/saldom.xml")
 DEFAULT_JSONL = Path("reports/saol14-direct-form-validation.jsonl")
 DEFAULT_SUMMARY = Path("reports/saol14-direct-form-validation-summary.json")
+ZERO_PLURAL_PATTERN = "+et; pl. +"
 
 
 def _usable_form(value: str) -> bool:
     return bool(value) and not value.rstrip().endswith("-")
-
-
-def _form_status(generated_forms: set[str], saldo_forms: set[str], supported: bool) -> str:
-    if not supported:
-        return "saol_pattern_unsupported"
-    if generated_forms == saldo_forms:
-        return "exact_form_set"
-    if generated_forms <= saldo_forms:
-        return "saol_forms_are_subset"
-    return "form_set_mismatch"
 
 
 def select_direct_match(
@@ -75,6 +66,16 @@ def select_direct_match(
     return None
 
 
+def _form_status(generated_forms: set[str], saldo_forms: set[str], supported: bool) -> str:
+    if not supported:
+        return "saol_pattern_unsupported"
+    if generated_forms == saldo_forms:
+        return "exact_form_set"
+    if generated_forms <= saldo_forms:
+        return "saol_forms_are_subset"
+    return "form_set_mismatch"
+
+
 def validation_row(
     record: dict[str, Any],
     match_method: str,
@@ -93,7 +94,22 @@ def validation_row(
 
     initial_status = _form_status(initial_forms, saldo_forms, initial is not None)
     status = _form_status(generated_forms, saldo_forms, generated is not None)
+    missing_from_saol = saldo_forms - generated_forms
+    extra_from_saol = generated_forms - saldo_forms
     completion_applied = generated is not None and generated_forms != initial_forms
+
+    # SAOL's `+et; pl. +` explicitly states that the indefinite plural is
+    # identical to the lemma. From that, definite plural in -en follows. SALDO
+    # sometimes omits those plural forms (typically for mass/collective nouns)
+    # or records another plural. That is a source disagreement, not evidence
+    # that the SAOL parser generated an impossible form.
+    if (
+        status == "form_set_mismatch"
+        and initial_status == "saol_forms_are_subset"
+        and str(record.get("text", "")).strip() == ZERO_PLURAL_PATTERN
+        and completion_applied
+    ):
+        status = "saol_zero_plural_differs_from_saldo"
 
     return {
         "record_id": str(record.get("id") or record.get("subnr") or ""),
@@ -102,21 +118,19 @@ def validation_row(
         "upos": _saol_upos(record),
         "ordkl": str(record.get("ordkl", "")),
         "notation": str(record.get("text", "")),
-        "pattern_group": str(initial.pattern_group if initial else ""),
         "match_method": match_method,
         "completion_applied": completion_applied,
-        "initial_status": initial_status,
+        "status_before_completion": initial_status,
         "status_transition": f"{initial_status}->{status}",
         "saldo_ids": sorted({str(analysis["id"]) for analysis in analyses}),
         "saldo_lemmas": sorted(
             {str(lemma) for analysis in analyses for lemma in analysis["lemmas"]},
             key=str.casefold,
         ),
-        "initial_generated_forms": sorted(initial_forms, key=str.casefold),
         "generated_forms": sorted(generated_forms, key=str.casefold),
         "saldo_forms": sorted(saldo_forms, key=str.casefold),
-        "missing_from_saol": sorted(saldo_forms - generated_forms, key=str.casefold),
-        "extra_from_saol": sorted(generated_forms - saldo_forms, key=str.casefold),
+        "missing_from_saol": sorted(missing_from_saol, key=str.casefold),
+        "extra_from_saol": sorted(extra_from_saol, key=str.casefold),
         "status": status,
     }
 
@@ -153,16 +167,20 @@ def validate_direct_forms(
     completion_counts = Counter(
         "applied" if row["completion_applied"] else "not_applied" for row in rows
     )
-    transition_counts = Counter(
-        str(row["status_transition"]) for row in rows if row["completion_applied"]
+    completion_transition_counts = Counter(
+        str(row["status_transition"])
+        for row in rows
+        if row["completion_applied"]
     )
-    pattern_transition_counts: dict[str, Counter[str]] = {}
+    completion_pattern_transition_counts: dict[str, Counter[str]] = {}
     upos_status_counts: dict[str, Counter[str]] = {}
     for row in rows:
         upos_status_counts.setdefault(str(row["upos"]), Counter())[str(row["status"])] += 1
         if row["completion_applied"]:
-            pattern = str(row["pattern_group"] or row["notation"])
-            pattern_transition_counts.setdefault(pattern, Counter())[str(row["status_transition"])] += 1
+            pattern = str(row["notation"])
+            completion_pattern_transition_counts.setdefault(pattern, Counter())[
+                str(row["status_transition"])
+            ] += 1
 
     summary = {
         "saol": str(saol_path),
@@ -171,10 +189,10 @@ def validate_direct_forms(
         "status_counts": dict(sorted(status_counts.items())),
         "match_method_counts": dict(sorted(method_counts.items())),
         "completion_counts": dict(sorted(completion_counts.items())),
-        "completion_transition_counts": dict(sorted(transition_counts.items())),
+        "completion_transition_counts": dict(sorted(completion_transition_counts.items())),
         "completion_pattern_transition_counts": {
             pattern: dict(sorted(counts.items()))
-            for pattern, counts in sorted(pattern_transition_counts.items())
+            for pattern, counts in sorted(completion_pattern_transition_counts.items())
         },
         "upos_status_counts": {
             upos: dict(sorted(counts.items()))
