@@ -45,6 +45,32 @@ class NounParadigmTests(unittest.TestCase):
         self.assertNotIn("reakto", set(entry.forms if entry else ()))
         self.assertNotIn("r", set(entry.forms if entry else ()))
 
+    def test_completes_pronunciation_marked_n_r_noun(self) -> None:
+        entry = self.complete("baguette", "+n [-en]; pl. +r [-er]")
+        self.assertIsNotNone(entry)
+        self.assertEqual("+n +r", entry.pattern if entry else None)
+        self.assertEqual(
+            {
+                "baguette",
+                "baguettes",
+                "baguetten",
+                "baguettens",
+                "baguetter",
+                "baguetters",
+                "baguetterna",
+                "baguetternas",
+            },
+            set(entry.forms if entry else ()),
+        )
+
+    def test_completes_pronunciation_marked_t_noun(self) -> None:
+        entry = self.complete("arbitrage", "+t [-et]")
+        self.assertIsNotNone(entry)
+        self.assertEqual(
+            {"arbitrage", "arbitrages", "arbitraget", "arbitragets"},
+            set(entry.forms if entry else ()),
+        )
+
     def test_completes_en_ar_noun(self) -> None:
         entry = self.complete("hund", "+en +ar")
         self.assertIsNotNone(entry)
