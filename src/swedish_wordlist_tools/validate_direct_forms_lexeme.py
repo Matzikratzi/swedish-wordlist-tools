@@ -7,6 +7,14 @@ from . import validate_direct_forms as base
 from .compare_sources import _key
 
 _BASE_VALIDATION_ROW = base.validation_row
+_REGULAR_NOUN_SUBSET_NOTATIONS = {"+en +ar", "+en +er"}
+
+
+def _set_status(row: dict[str, Any], status: str) -> None:
+    row["status"] = status
+    row["status_transition"] = (
+        f"{row['status_before_completion']}->{status}"
+    )
 
 
 def validation_row(
@@ -14,11 +22,14 @@ def validation_row(
     match_method: str,
     analyses: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Build a validation row and separate form matches to another lexeme.
+    """Build a validation row with lexeme- and source-aware classification.
 
-    A unique word-form match can be useful for finding a SALDO analysis, but it
-    is not evidence that the matched SALDO lexeme is the same lexeme as the
-    SAOL headword. Keep these rows out of ordinary paradigm mismatches.
+    A unique word-form match can point to another lexeme rather than the SAOL
+    headword. Separately, for the regular noun patterns ``+en +ar`` and
+    ``+en +er``, SALDO sometimes contains only the singular forms while SAOL
+    explicitly supplies the complete regular plural. Classify only clean
+    SALDO subsets as source differences; conflicting SALDO forms remain real
+    mismatches.
     """
     row = _BASE_VALIDATION_ROW(record, match_method, analyses)
     saldo_lemma_keys = {
@@ -35,10 +46,18 @@ def validation_row(
         and record_lemma_key
         and record_lemma_key not in saldo_lemma_keys
     ):
-        row["status"] = "saldo_form_match_other_lexeme"
-        row["status_transition"] = (
-            f"{row['status_before_completion']}->saldo_form_match_other_lexeme"
-        )
+        _set_status(row, "saldo_form_match_other_lexeme")
+        return row
+
+    if (
+        row["status"] == "form_set_mismatch"
+        and row.get("upos") == "NOUN"
+        and row.get("notation") in _REGULAR_NOUN_SUBSET_NOTATIONS
+        and row.get("extra_from_saol")
+        and not row.get("missing_from_saol")
+    ):
+        _set_status(row, "saol_paradigm_differs_from_saldo")
+
     return row
 
 
