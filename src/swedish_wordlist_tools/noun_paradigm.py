@@ -133,7 +133,7 @@ def _definite_plural(lemma: str, plural: str, pattern: str) -> str:
         return lemma + "en"
     if pattern == "+n; pl. +":
         return plural + "na"
-    if pattern == "+t +n":
+    if pattern in {"+t +n", "best. +; i pl. används"}:
         return plural + "a"
     return plural + "na"
 
