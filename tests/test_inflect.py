@@ -19,6 +19,26 @@ class InflectTests(unittest.TestCase):
         self.assertEqual(generate_forms("abakus", "+en +er"), ("abakus", "abakusen", "abakuser"))
         self.assertEqual(generate_forms("abbé", "+n +er"), ("abbé", "abbén", "abbéer"))
 
+    def test_strips_bracketed_pronunciation_annotations(self) -> None:
+        self.assertEqual("+n +er", normalise_pattern("+n +er [-o>r-]"))
+        self.assertEqual("+n; pl. +r", normalise_pattern("+n [-en]; pl. +r [-er]"))
+        self.assertEqual("+t", normalise_pattern("+t [-et]"))
+        self.assertEqual("+en; pl. +er", normalise_pattern("+en [bordå>n]; pl. +er"))
+
+    def test_generates_from_bracketed_pronunciation_annotations(self) -> None:
+        self.assertEqual(
+            ("reaktor", "reaktorn", "reaktorer"),
+            generate_forms("reaktor", "+n +er [-o>r-]"),
+        )
+        self.assertEqual(
+            ("baguette", "baguetten", "baguetter"),
+            generate_forms("baguette", "+n [-en]; pl. +r [-er]"),
+        )
+        self.assertEqual(
+            ("arbitrage", "arbitraget"),
+            generate_forms("arbitrage", "+t [-et]"),
+        )
+
     def test_generates_adjective_and_verb_forms(self) -> None:
         self.assertEqual(generate_forms("abchazisk", "+t +a"), ("abchazisk", "abchaziskt", "abchaziska"))
         self.assertEqual(generate_forms("abonnera", "+de +t"), ("abonnera", "abonnerade", "abonnerat"))
