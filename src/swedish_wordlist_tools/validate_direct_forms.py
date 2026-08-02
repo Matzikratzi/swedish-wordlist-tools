@@ -16,6 +16,7 @@ from .compare_sources import (
 )
 from .inflect import generate_entry
 from .jsonl import read_jsonl
+from .noun_paradigm import complete_noun_entry
 
 DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
 DEFAULT_SALDO = Path("data/raw/saldom.xml")
@@ -69,7 +70,8 @@ def validation_row(
     match_method: str,
     analyses: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    generated = generate_entry(record)
+    initial = generate_entry(record)
+    generated = complete_noun_entry(record, initial)
     generated_forms = set(generated.forms if generated else ())
     saldo_forms = {
         str(form)
@@ -89,6 +91,9 @@ def validation_row(
     else:
         status = "form_set_mismatch"
 
+    initial_forms = set(initial.forms if initial else ())
+    completion_applied = generated is not None and generated_forms != initial_forms
+
     return {
         "record_id": str(record.get("id") or record.get("subnr") or ""),
         "lemma": str(record.get("normaliserat_ord", "")),
@@ -97,6 +102,7 @@ def validation_row(
         "ordkl": str(record.get("ordkl", "")),
         "notation": str(record.get("text", "")),
         "match_method": match_method,
+        "completion_applied": completion_applied,
         "saldo_ids": sorted({str(analysis["id"]) for analysis in analyses}),
         "saldo_lemmas": sorted(
             {str(lemma) for analysis in analyses for lemma in analysis["lemmas"]},
@@ -139,6 +145,9 @@ def validate_direct_forms(
 
     status_counts = Counter(str(row["status"]) for row in rows)
     method_counts = Counter(str(row["match_method"]) for row in rows)
+    completion_counts = Counter(
+        "applied" if row["completion_applied"] else "not_applied" for row in rows
+    )
     upos_status_counts: dict[str, Counter[str]] = {}
     for row in rows:
         upos_status_counts.setdefault(str(row["upos"]), Counter())[str(row["status"])] += 1
@@ -149,6 +158,7 @@ def validate_direct_forms(
         "matched_records": len(rows),
         "status_counts": dict(sorted(status_counts.items())),
         "match_method_counts": dict(sorted(method_counts.items())),
+        "completion_counts": dict(sorted(completion_counts.items())),
         "upos_status_counts": {
             upos: dict(sorted(counts.items()))
             for upos, counts in sorted(upos_status_counts.items())
@@ -180,6 +190,7 @@ def main() -> None:
     print(f"Direktmatchade poster: {summary['matched_records']}")
     for status, count in summary["status_counts"].items():
         print(f"{status}: {count}")
+    print(f"Substantivkomplettering använd: {summary['completion_counts'].get('applied', 0)}")
     print(f"Detaljer: {summary['jsonl']}")
     print(f"Summering: {args.summary}")
 
