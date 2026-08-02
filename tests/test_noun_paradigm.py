@@ -75,7 +75,7 @@ class NounParadigmTests(unittest.TestCase):
         entry = self.complete("kli", "+t")
         self.assertIsNotNone(entry)
         self.assertEqual(
-            {"kli", "klis", "klit", "klits"},
+            {"kli", "klis", "kliet", "kliets"},
             set(entry.forms if entry else ()),
         )
 
