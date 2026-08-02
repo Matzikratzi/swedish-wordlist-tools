@@ -89,17 +89,24 @@ def _matching_other_saol_homonyms(
     return matches
 
 
+def _regular_noun_plural_family(plural: str) -> set[str]:
+    """Return regular noun forms built from an indefinite plural in -ar/-er."""
+    if not plural.endswith(("ar", "er")):
+        return set()
+    return {plural, plural + "s", plural + "na", plural + "nas"}
+
+
 def _matching_other_saol_lexemes(
     record: dict[str, Any],
     row: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """Find other SAOL lexemes that jointly explain SALDO's extra forms.
+    """Find other SAOL lexemes that explain SALDO's extra forms.
 
-    At least two forms must be missing from the current SAOL article, and every
-    one of them must occur in a single other SAOL article. The explaining
-    article must have a different lemma or a different UPOS. This catches, for
-    example, noun ``hajk`` receiving verb forms from ``hajka`` in SALDO without
-    treating a coincidental single shared form as an explanation.
+    At least two forms must be missing from the current SAOL article. They must
+    either all occur in one other SAOL article, or form one regular noun plural
+    family whose indefinite plural occurs there. The latter catches SALDO noun
+    ``hajkar/hajkars/hajkarna/hajkarnas`` when SAOL places the base form
+    ``hajkar`` under the verb ``hajka``.
     """
     missing = _casefolded(row.get("missing_from_saol", []))
     if len(missing) < 2:
@@ -117,7 +124,15 @@ def _matching_other_saol_lexemes(
             and candidate["upos"] == current_upos
         ):
             continue
-        if missing <= _casefolded(candidate["forms"]):
+
+        candidate_forms = _casefolded(candidate["forms"])
+        directly_explained = missing <= candidate_forms
+        paradigm_explained = any(
+            plural in candidate_forms
+            and _regular_noun_plural_family(plural) == missing
+            for plural in missing
+        )
+        if directly_explained or paradigm_explained:
             matches.append(candidate)
     return matches
 
