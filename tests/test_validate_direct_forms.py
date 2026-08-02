@@ -20,7 +20,7 @@ class ValidateDirectFormsTests(unittest.TestCase):
         self.assertEqual("lemma_same_upos", method)
         self.assertEqual([analysis], analyses)
 
-    def test_reports_generated_forms_as_subset(self) -> None:
+    def test_reports_completed_noun_forms_as_subset(self) -> None:
         record = {
             "id": 1,
             "normaliserat_ord": "flicka",
@@ -32,11 +32,15 @@ class ValidateDirectFormsTests(unittest.TestCase):
             "id": "flicka..nn.1",
             "upos": "NOUN",
             "lemmas": {"flicka"},
-            "forms": {"flicka", "flickan", "flickar", "flickarna"},
+            "forms": {
+                "flicka", "flickas", "flickan", "flickans",
+                "flickar", "flickars", "flickarna", "flickarnas",
+                "flickor",
+            },
         }
         row = validation_row(record, "lemma_same_upos", [analysis])
         self.assertEqual("saol_forms_are_subset", row["status"])
-        self.assertEqual(["flickarna"], row["missing_from_saol"])
+        self.assertEqual(["flickor"], row["missing_from_saol"])
         self.assertEqual([], row["extra_from_saol"])
 
     def test_excludes_hyphen_terminated_saldo_forms(self) -> None:
