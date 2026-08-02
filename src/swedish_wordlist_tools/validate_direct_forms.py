@@ -145,7 +145,7 @@ def validation_row(
     if (
         status == "form_set_mismatch"
         and initial_status == "saol_pattern_unsupported"
-        and pattern in {"+t", "+n; pl. +"}
+        and pattern in {"+t", "+n; pl. +", "+et +er"}
         and completion_applied
     ):
         status = "saol_paradigm_differs_from_saldo"
