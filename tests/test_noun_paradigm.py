@@ -72,10 +72,10 @@ class NounParadigmTests(unittest.TestCase):
         self.assertEqual({"ansvar", "ansvars", "ansvaret", "ansvarets"}, set(entry.forms if entry else ()))
 
     def test_completes_t_singular_only_noun(self) -> None:
-        entry = self.complete("kli", "+t")
+        entry = self.complete("foto", "+t")
         self.assertIsNotNone(entry)
         self.assertEqual(
-            {"kli", "klis", "kliet", "kliets"},
+            {"foto", "fotos", "fotot", "fotots"},
             set(entry.forms if entry else ()),
         )
 
