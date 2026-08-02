@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any
 
@@ -9,11 +8,12 @@ from .compare_sources import _key, _saol_upos
 from .jsonl import read_jsonl
 
 _BASE_VALIDATION_ROW = base.validation_row
-_REGULAR_NOUN_SUBSET_NOTATIONS = {"+en +ar", "+en +er"}
-_EXPLICIT_USED_PLURAL_RE = re.compile(
-    r"^best\.\s*\+;\s*i:\s*pl\.\s*används:\s*\S+\s*$",
-    re.IGNORECASE,
-)
+_REGULAR_NOUN_SUBSET_NOTATIONS = {
+    "+en +ar",
+    "+en +er",
+    "+n +r",
+    "+n +er",
+}
 _SAOL_HOMONYMS: dict[tuple[str, str], list[dict[str, Any]]] = {}
 
 
@@ -29,12 +29,7 @@ def _casefolded(values: list[str] | set[str]) -> set[str]:
 
 
 def _build_saol_homonym_index(saol_path: Path) -> dict[tuple[str, str], list[dict[str, Any]]]:
-    """Index complete generated paradigms for SAOL homonyms.
-
-    Only records with a supported generated paradigm participate. The original
-    homonym number and record id are retained so a validation row can explain
-    which other SAOL homonym matched SALDO exactly.
-    """
+    """Index complete generated paradigms for SAOL homonyms."""
     index: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for record in read_jsonl(saol_path):
         lemma = str(record.get("normaliserat_ord", "")).strip()
@@ -90,14 +85,7 @@ def validation_row(
     match_method: str,
     analyses: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Build a validation row with lexeme- and source-aware classification.
-
-    A unique word-form match can point to another lexeme rather than the SAOL
-    headword. A same-lemma SALDO analysis can likewise correspond exactly to a
-    different SAOL homonym. Explicit SAOL plural references and regular noun
-    paradigms can also contain forms that are absent from SALDO without
-    contradicting the forms SALDO does provide.
-    """
+    """Build a validation row with lexeme- and source-aware classification."""
     row = _BASE_VALIDATION_ROW(record, match_method, analyses)
     saldo_lemma_keys = {
         _key(str(lemma))
@@ -130,10 +118,11 @@ def validation_row(
             ]
             return row
 
+    notation = str(row.get("notation", ""))
     if (
         row["status"] == "form_set_mismatch"
         and row.get("upos") == "NOUN"
-        and _EXPLICIT_USED_PLURAL_RE.fullmatch(str(row.get("notation", "")).strip())
+        and notation.startswith("best. +; i: pl. används:")
         and row.get("extra_from_saol")
         and not row.get("missing_from_saol")
     ):
