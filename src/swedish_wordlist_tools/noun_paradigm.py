@@ -21,6 +21,7 @@ _FULL_PARADIGM_PATTERNS = {
     "+et; pl. +",
     "+n +r",
     "+n +er",
+    "+t +n",
 }
 
 _SINGULAR_ONLY_PATTERNS = {
@@ -41,6 +42,8 @@ def _genitive(form: str) -> str:
 def _definite_plural(lemma: str, plural: str, pattern: str) -> str:
     if pattern == "+et; pl. +":
         return lemma + "en"
+    if pattern == "+t +n":
+        return plural + "a"
     return plural + "na"
 
 
