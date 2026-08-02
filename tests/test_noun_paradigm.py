@@ -46,6 +46,17 @@ class NounParadigmTests(unittest.TestCase):
             set(entry.forms if entry else ()),
         )
 
+    def test_completes_t_n_neuter(self) -> None:
+        entry = self.complete("alibi", "+t +n")
+        self.assertIsNotNone(entry)
+        self.assertEqual(
+            {
+                "alibi", "alibis", "alibit", "alibits",
+                "alibin", "alibins", "alibina", "alibinas",
+            },
+            set(entry.forms if entry else ()),
+        )
+
     def test_completes_en_singular_only_noun(self) -> None:
         entry = self.complete("mjölk", "+en")
         self.assertIsNotNone(entry)
