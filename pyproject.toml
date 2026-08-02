@@ -27,6 +27,7 @@ saol14-validate-direct-forms = "swedish_wordlist_tools.validate_direct_forms_lex
 saol14-analyze-noun-validation = "swedish_wordlist_tools.analyze_noun_validation:main"
 saol14-analyze-paradigm-differences = "swedish_wordlist_tools.analyze_paradigm_differences:main"
 saol14-analyze-form-mismatches = "swedish_wordlist_tools.analyze_form_mismatches:main"
+saol14-analyze-brackets = "swedish_wordlist_tools.analyze_bracket_annotations:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
