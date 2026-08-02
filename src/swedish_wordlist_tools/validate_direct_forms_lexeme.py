@@ -80,6 +80,30 @@ def _matching_other_saol_homonyms(
     return matches
 
 
+def _is_i_noun_definite_and_plural_difference(row: dict[str, Any]) -> bool:
+    """Recognise SAOL ``-in/-ier`` versus SALDO ``-ien`` paradigms.
+
+    Examples include ``autonomi`` where SAOL has ``autonomin`` and the full
+    plural ``autonomier``, while SALDO additionally contains the older definite
+    singular ``autonomien/autonomiens`` and lacks the plural.
+    """
+    lemma = str(row.get("lemma", "")).casefold()
+    if row.get("notation") != "+n +er" or not lemma.endswith("i"):
+        return False
+
+    expected_extra = {
+        lemma + "er",
+        lemma + "ers",
+        lemma + "erna",
+        lemma + "ernas",
+    }
+    expected_missing = {lemma + "en", lemma + "ens"}
+    return (
+        _casefolded(row.get("extra_from_saol", [])) == expected_extra
+        and _casefolded(row.get("missing_from_saol", [])) == expected_missing
+    )
+
+
 def validation_row(
     record: dict[str, Any],
     match_method: str,
@@ -127,6 +151,14 @@ def validation_row(
         and not row.get("missing_from_saol")
     ):
         _set_status(row, "saol_explicit_plural_differs_from_saldo")
+        return row
+
+    if (
+        row["status"] == "form_set_mismatch"
+        and row.get("upos") == "NOUN"
+        and _is_i_noun_definite_and_plural_difference(row)
+    ):
+        _set_status(row, "saol_modern_definite_and_plural_differs_from_saldo")
         return row
 
     if (
