@@ -111,9 +111,30 @@ class ValidateDirectFormsTests(unittest.TestCase):
         self.assertEqual("saol_paradigm_differs_from_saldo", row["status"])
         self.assertEqual(["klagandet", "klagandets"], row["extra_from_saol"])
 
-    def test_reports_case_only_difference_separately(self) -> None:
+    def test_reports_n_zero_plural_disagreement_separately(self) -> None:
         record = {
             "id": 5,
+            "normaliserat_ord": "eyeliner",
+            "upos": "NOUN",
+            "ordkl": "subst.",
+            "text": "+n; pl. +",
+        }
+        analysis = {
+            "id": "eyeliner..nn.1",
+            "upos": "NOUN",
+            "lemmas": {"eyeliner"},
+            "forms": {
+                "eyeliner", "eyeliners", "eyelinern", "eyelinerns",
+                "eyelinersarna", "eyelinersarnas", "eyelinersen", "eyelinersens",
+            },
+        }
+        row = validation_row(record, "lemma_same_upos", [analysis])
+        self.assertEqual("saol_paradigm_differs_from_saldo", row["status"])
+        self.assertEqual(["eyelinerna", "eyelinernas"], row["extra_from_saol"])
+
+    def test_reports_case_only_difference_separately(self) -> None:
+        record = {
+            "id": 6,
             "normaliserat_ord": "Östersjöfiske",
             "upos": "NOUN",
             "ordkl": "subst.",
