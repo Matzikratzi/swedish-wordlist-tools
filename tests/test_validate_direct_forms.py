@@ -76,11 +76,15 @@ class ValidateDirectFormsTests(unittest.TestCase):
             "id": "grund..nn.1",
             "upos": "NOUN",
             "lemmas": {"grund"},
-            "forms": {"grund", "grunden", "grund-"},
+            "forms": {"grund", "grunds", "grunden", "grundens", "grund-"},
         }
         row = validation_row(record, "lemma_same_upos", [analysis])
         self.assertEqual("exact_form_set", row["status"])
         self.assertNotIn("grund-", row["saldo_forms"])
+        self.assertEqual(
+            {"grund", "grunds", "grunden", "grundens"},
+            set(row["generated_forms"]),
+        )
 
 
 if __name__ == "__main__":
