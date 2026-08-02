@@ -15,6 +15,7 @@ _REGULAR_NOUN_SUBSET_NOTATIONS = {
     "+n +er",
 }
 _SAOL_HOMONYMS: dict[tuple[str, str], list[dict[str, Any]]] = {}
+_SAOL_ENTRIES: list[dict[str, Any]] = []
 
 
 def _set_status(row: dict[str, Any], status: str) -> None:
@@ -28,9 +29,15 @@ def _casefolded(values: list[str] | set[str]) -> set[str]:
     return {str(value).casefold() for value in values}
 
 
-def _build_saol_homonym_index(saol_path: Path) -> dict[tuple[str, str], list[dict[str, Any]]]:
-    """Index complete generated paradigms for SAOL homonyms."""
-    index: dict[tuple[str, str], list[dict[str, Any]]] = {}
+def _build_saol_indexes(
+    saol_path: Path,
+) -> tuple[
+    dict[tuple[str, str], list[dict[str, Any]]],
+    list[dict[str, Any]],
+]:
+    """Index generated paradigms by homonym group and across all SAOL lexemes."""
+    homonyms: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    entries: list[dict[str, Any]] = []
     for record in read_jsonl(saol_path):
         lemma = str(record.get("normaliserat_ord", "")).strip()
         upos = _saol_upos(record)
@@ -39,16 +46,18 @@ def _build_saol_homonym_index(saol_path: Path) -> dict[tuple[str, str], list[dic
         forms = base._record_forms(record)
         if not forms:
             continue
-        key = (_key(lemma), upos)
-        index.setdefault(key, []).append(
-            {
-                "record_id": str(record.get("id") or record.get("subnr") or ""),
-                "homonym_number": str(record.get("homonr", "")),
-                "notation": str(record.get("text", "")),
-                "forms": forms,
-            }
-        )
-    return index
+        entry = {
+            "record_id": str(record.get("id") or record.get("subnr") or ""),
+            "homonym_number": str(record.get("homonr", "")),
+            "lemma": lemma,
+            "lemma_key": _key(lemma),
+            "upos": upos,
+            "notation": str(record.get("text", "")),
+            "forms": forms,
+        }
+        entries.append(entry)
+        homonyms.setdefault((entry["lemma_key"], upos), []).append(entry)
+    return homonyms, entries
 
 
 def _matching_other_saol_homonyms(
@@ -80,13 +89,41 @@ def _matching_other_saol_homonyms(
     return matches
 
 
-def _is_i_noun_definite_and_plural_difference(row: dict[str, Any]) -> bool:
-    """Recognise SAOL ``-in/-ier`` versus SALDO ``-ien`` paradigms.
+def _matching_other_saol_lexemes(
+    record: dict[str, Any],
+    row: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Find other SAOL lexemes that jointly explain SALDO's extra forms.
 
-    Examples include ``autonomi`` where SAOL has ``autonomin`` and the full
-    plural ``autonomier``, while SALDO additionally contains the older definite
-    singular ``autonomien/autonomiens`` and lacks the plural.
+    At least two forms must be missing from the current SAOL article, and every
+    one of them must occur in a single other SAOL article. The explaining
+    article must have a different lemma or a different UPOS. This catches, for
+    example, noun ``hajk`` receiving verb forms from ``hajka`` in SALDO without
+    treating a coincidental single shared form as an explanation.
     """
+    missing = _casefolded(row.get("missing_from_saol", []))
+    if len(missing) < 2:
+        return []
+
+    current_record_id = str(record.get("id") or record.get("subnr") or "")
+    current_lemma_key = _key(str(record.get("normaliserat_ord", "")))
+    current_upos = str(row.get("upos", ""))
+    matches: list[dict[str, Any]] = []
+    for candidate in _SAOL_ENTRIES:
+        if candidate["record_id"] == current_record_id:
+            continue
+        if (
+            candidate["lemma_key"] == current_lemma_key
+            and candidate["upos"] == current_upos
+        ):
+            continue
+        if missing <= _casefolded(candidate["forms"]):
+            matches.append(candidate)
+    return matches
+
+
+def _is_i_noun_definite_and_plural_difference(row: dict[str, Any]) -> bool:
+    """Recognise SAOL ``-in/-ier`` versus SALDO ``-ien`` paradigms."""
     lemma = str(row.get("lemma", "")).casefold()
     if row.get("notation") != "+n +er" or not lemma.endswith("i"):
         return False
@@ -142,6 +179,22 @@ def validation_row(
             ]
             return row
 
+    if row["status"] == "form_set_mismatch":
+        other_lexemes = _matching_other_saol_lexemes(record, row)
+        if other_lexemes:
+            _set_status(row, "saldo_forms_explained_by_other_saol_lexeme")
+            row["explaining_saol_lexemes"] = [
+                {
+                    "record_id": candidate["record_id"],
+                    "homonym_number": candidate["homonym_number"],
+                    "lemma": candidate["lemma"],
+                    "upos": candidate["upos"],
+                    "notation": candidate["notation"],
+                }
+                for candidate in other_lexemes
+            ]
+            return row
+
     notation = str(row.get("notation", ""))
     if (
         row["status"] == "form_set_mismatch"
@@ -180,9 +233,10 @@ def validate_direct_forms(
     summary_path: Path = base.DEFAULT_SUMMARY,
 ) -> dict[str, Any]:
     """Run the existing validator with lexeme- and homonym-aware classification."""
-    global _SAOL_HOMONYMS
+    global _SAOL_HOMONYMS, _SAOL_ENTRIES
     previous_homonyms = _SAOL_HOMONYMS
-    _SAOL_HOMONYMS = _build_saol_homonym_index(saol_path)
+    previous_entries = _SAOL_ENTRIES
+    _SAOL_HOMONYMS, _SAOL_ENTRIES = _build_saol_indexes(saol_path)
     original = base.validation_row
     base.validation_row = validation_row
     try:
@@ -195,6 +249,7 @@ def validate_direct_forms(
     finally:
         base.validation_row = original
         _SAOL_HOMONYMS = previous_homonyms
+        _SAOL_ENTRIES = previous_entries
 
 
 def build_parser():
