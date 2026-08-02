@@ -29,6 +29,7 @@ _SINGULAR_ONLY_PATTERNS = {
     "+en",
     "+n",
     "+et",
+    "+t",
 }
 
 
@@ -43,6 +44,27 @@ def _genitive(form: str) -> str:
 def _attach_suffix(lemma: str, suffix: str) -> str:
     head, separator, tail = lemma.partition(" ")
     return head + suffix + (separator + tail if separator else "")
+
+
+def _entry_from_singular_pattern(
+    record: dict[str, Any], pattern: str, suffix: str
+) -> GeneratedEntry | None:
+    lemma = str(record.get("normaliserat_ord", "")).strip()
+    if not lemma:
+        return None
+    return GeneratedEntry(
+        lemma=lemma,
+        pattern=pattern,
+        word_forms=(
+            GeneratedWordForm(lemma, _CI, "lemma"),
+            GeneratedWordForm(
+                _attach_suffix(lemma, suffix),
+                _SG_DEF_NOM,
+                "derived",
+            ),
+        ),
+        pattern_group=pattern,
+    )
 
 
 def _entry_from_et_er(record: dict[str, Any]) -> GeneratedEntry | None:
@@ -150,6 +172,8 @@ def complete_noun_entry(
     pattern = str(record.get("text", "")).strip()
     if entry is None and pattern == "+et +er":
         entry = _entry_from_et_er(record)
+    elif entry is None and pattern == "+t":
+        entry = _entry_from_singular_pattern(record, "+t", "t")
     if entry is None:
         return None
 
