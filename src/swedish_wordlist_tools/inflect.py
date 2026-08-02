@@ -30,6 +30,13 @@ COMMON_PATTERNS: dict[str, tuple[str, ...]] = {
     "+n +er": ("n", "er"),
 }
 
+# These brackets describe pronunciation/stress changes, not spelling or
+# morphology. Keep the mapping explicit so that unrelated bracketed notes are
+# never discarded accidentally.
+_PRONUNCIATION_PATTERN_ALIASES = {
+    "+n +er [-o>r-]": "+n +er",
+}
+
 _LABELS = {
     "pl.", "best.", "pres.", "pret.", "sup.", "imper.", "komp.", "superl.",
     "pl", "best", "pres", "pret", "sup", "imper", "komp", "superl",
@@ -80,7 +87,7 @@ def normalise_pattern(value: Any) -> str | None:
     pattern = str(value).strip()
     if not pattern or pattern == "(null)":
         return None
-    return pattern
+    return _PRONUNCIATION_PATTERN_ALIASES.get(pattern, pattern)
 
 
 def _is_detached_suffix_row(lemma: str, pattern: str) -> bool:
@@ -234,6 +241,7 @@ def _common_word_forms(lemma: str, pattern: str, upos: str) -> tuple[GeneratedWo
 
 def generate_forms(lemma: str, pattern: str | None) -> tuple[str, ...] | None:
     lemma = lemma.strip()
+    pattern = normalise_pattern(pattern)
     if not lemma or pattern is None or _is_detached_suffix_row(lemma, pattern):
         return None
     if pattern in COMMON_PATTERNS:
