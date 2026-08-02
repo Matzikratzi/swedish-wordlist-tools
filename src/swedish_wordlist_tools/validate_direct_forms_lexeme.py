@@ -4,10 +4,12 @@ from pathlib import Path
 from typing import Any
 
 from . import validate_direct_forms as base
-from .compare_sources import _key
+from .compare_sources import _key, _saol_upos
+from .jsonl import read_jsonl
 
 _BASE_VALIDATION_ROW = base.validation_row
 _REGULAR_NOUN_SUBSET_NOTATIONS = {"+en +ar", "+en +er"}
+_SAOL_HOMONYMS: dict[tuple[str, str], list[dict[str, Any]]] = {}
 
 
 def _set_status(row: dict[str, Any], status: str) -> None:
@@ -15,6 +17,67 @@ def _set_status(row: dict[str, Any], status: str) -> None:
     row["status_transition"] = (
         f"{row['status_before_completion']}->{status}"
     )
+
+
+def _casefolded(values: list[str] | set[str]) -> set[str]:
+    return {str(value).casefold() for value in values}
+
+
+def _build_saol_homonym_index(saol_path: Path) -> dict[tuple[str, str], list[dict[str, Any]]]:
+    """Index complete generated paradigms for SAOL homonyms.
+
+    Only records with a supported generated paradigm participate. The original
+    homonym number and record id are retained so a validation row can explain
+    which other SAOL homonym matched SALDO exactly.
+    """
+    index: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for record in read_jsonl(saol_path):
+        lemma = str(record.get("normaliserat_ord", "")).strip()
+        upos = _saol_upos(record)
+        if not lemma or not upos:
+            continue
+        forms = base._record_forms(record)
+        if not forms:
+            continue
+        key = (_key(lemma), upos)
+        index.setdefault(key, []).append(
+            {
+                "record_id": str(record.get("id") or record.get("subnr") or ""),
+                "homonym_number": str(record.get("homonr", "")),
+                "notation": str(record.get("text", "")),
+                "forms": forms,
+            }
+        )
+    return index
+
+
+def _matching_other_saol_homonyms(
+    record: dict[str, Any],
+    row: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Return other SAOL homonyms whose full paradigm equals SALDO's forms."""
+    key = (
+        _key(str(record.get("normaliserat_ord", ""))),
+        str(row.get("upos", "")),
+    )
+    candidates = _SAOL_HOMONYMS.get(key, [])
+    if len(candidates) < 2:
+        return []
+
+    current_record_id = str(record.get("id") or record.get("subnr") or "")
+    current_homonym = str(record.get("homonr", ""))
+    saldo_forms = _casefolded(row.get("saldo_forms", []))
+    matches: list[dict[str, Any]] = []
+    for candidate in candidates:
+        same_record = (
+            candidate["record_id"] == current_record_id
+            and candidate["homonym_number"] == current_homonym
+        )
+        if same_record:
+            continue
+        if _casefolded(candidate["forms"]) == saldo_forms:
+            matches.append(candidate)
+    return matches
 
 
 def validation_row(
@@ -25,11 +88,10 @@ def validation_row(
     """Build a validation row with lexeme- and source-aware classification.
 
     A unique word-form match can point to another lexeme rather than the SAOL
-    headword. Separately, for the regular noun patterns ``+en +ar`` and
-    ``+en +er``, SALDO sometimes contains only the singular forms while SAOL
-    explicitly supplies the complete regular plural. Classify only clean
-    SALDO subsets as source differences; conflicting SALDO forms remain real
-    mismatches.
+    headword. A same-lemma SALDO analysis can likewise correspond exactly to a
+    different SAOL homonym. Separately, for the regular noun patterns
+    ``+en +ar`` and ``+en +er``, SALDO sometimes contains only singular forms
+    while SAOL explicitly supplies the complete regular plural.
     """
     row = _BASE_VALIDATION_ROW(record, match_method, analyses)
     saldo_lemma_keys = {
@@ -49,6 +111,20 @@ def validation_row(
         _set_status(row, "saldo_form_match_other_lexeme")
         return row
 
+    if row["status"] == "form_set_mismatch":
+        other_homonyms = _matching_other_saol_homonyms(record, row)
+        if other_homonyms:
+            _set_status(row, "saldo_matches_other_saol_homonym")
+            row["matching_saol_homonyms"] = [
+                {
+                    "record_id": candidate["record_id"],
+                    "homonym_number": candidate["homonym_number"],
+                    "notation": candidate["notation"],
+                }
+                for candidate in other_homonyms
+            ]
+            return row
+
     if (
         row["status"] == "form_set_mismatch"
         and row.get("upos") == "NOUN"
@@ -67,7 +143,10 @@ def validate_direct_forms(
     jsonl_path: Path = base.DEFAULT_JSONL,
     summary_path: Path = base.DEFAULT_SUMMARY,
 ) -> dict[str, Any]:
-    """Run the existing validator with lexeme-aware row classification."""
+    """Run the existing validator with lexeme- and homonym-aware classification."""
+    global _SAOL_HOMONYMS
+    previous_homonyms = _SAOL_HOMONYMS
+    _SAOL_HOMONYMS = _build_saol_homonym_index(saol_path)
     original = base.validation_row
     base.validation_row = validation_row
     try:
@@ -79,6 +158,7 @@ def validate_direct_forms(
         )
     finally:
         base.validation_row = original
+        _SAOL_HOMONYMS = previous_homonyms
 
 
 def build_parser():
