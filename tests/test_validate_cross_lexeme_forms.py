@@ -34,10 +34,7 @@ class ValidateCrossLexemeFormsTests(unittest.TestCase):
                 "lemma_key": "hajka",
                 "upos": "VERB",
                 "notation": "-r -de -t",
-                "forms": {
-                    "hajka", "hajkar", "hajkade", "hajkat",
-                    "hajkars", "hajkarna", "hajkarnas",
-                },
+                "forms": {"hajka", "hajkar", "hajkade", "hajkat"},
             }
         ]
         try:
