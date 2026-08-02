@@ -26,17 +26,17 @@ class ValidateDirectFormsTests(unittest.TestCase):
             "normaliserat_ord": "flicka",
             "upos": "NOUN",
             "ordkl": "subst.",
-            "text": "+n +or",
+            "text": "+n +r",
         }
         analysis = {
             "id": "flicka..nn.1",
             "upos": "NOUN",
             "lemmas": {"flicka"},
-            "forms": {"flicka", "flickan", "flickor", "flickorna"},
+            "forms": {"flicka", "flickan", "flickar", "flickarna"},
         }
         row = validation_row(record, "lemma_same_upos", [analysis])
         self.assertEqual("saol_forms_are_subset", row["status"])
-        self.assertEqual(["flickorna"], row["missing_from_saol"])
+        self.assertEqual(["flickarna"], row["missing_from_saol"])
         self.assertEqual([], row["extra_from_saol"])
 
     def test_excludes_hyphen_terminated_saldo_forms(self) -> None:
