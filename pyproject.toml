@@ -26,6 +26,7 @@ saol14-analyze-saol-bars = "swedish_wordlist_tools.analyze_saol_bars:main"
 saol14-validate-direct-forms = "swedish_wordlist_tools.validate_direct_forms_lexeme:main"
 saol14-analyze-noun-validation = "swedish_wordlist_tools.analyze_noun_validation:main"
 saol14-analyze-paradigm-differences = "swedish_wordlist_tools.analyze_paradigm_differences:main"
+saol14-analyze-form-mismatches = "swedish_wordlist_tools.analyze_form_mismatches:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
