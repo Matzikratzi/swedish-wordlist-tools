@@ -11,6 +11,7 @@ class RegularNounSubsetClassificationTests(unittest.TestCase):
             "normaliserat_ord": "modell",
             "homonr": "1",
             "ordkl": "s. +en +er",
+            "text": "+en +er",
             "upos": "NOUN",
         }
         analyses = [{
@@ -30,6 +31,7 @@ class RegularNounSubsetClassificationTests(unittest.TestCase):
             "normaliserat_ord": "hund",
             "homonr": "1",
             "ordkl": "s. +en +ar",
+            "text": "+en +ar",
             "upos": "NOUN",
         }
         analyses = [{
@@ -49,6 +51,7 @@ class RegularNounSubsetClassificationTests(unittest.TestCase):
             "normaliserat_ord": "hund",
             "homonr": "1",
             "ordkl": "s. +en +ar",
+            "text": "+en +ar",
             "upos": "NOUN",
         }
         analyses = [{
