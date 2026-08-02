@@ -31,14 +31,8 @@ class NounParadigmTests(unittest.TestCase):
         self.assertEqual("+n +er", entry.pattern if entry else None)
         self.assertEqual(
             {
-                "reaktor",
-                "reaktors",
-                "reaktorn",
-                "reaktorns",
-                "reaktorer",
-                "reaktorers",
-                "reaktorerna",
-                "reaktorernas",
+                "reaktor", "reaktors", "reaktorn", "reaktorns",
+                "reaktorer", "reaktorers", "reaktorerna", "reaktorernas",
             },
             set(entry.forms if entry else ()),
         )
@@ -51,14 +45,8 @@ class NounParadigmTests(unittest.TestCase):
         self.assertEqual("+n +r", entry.pattern if entry else None)
         self.assertEqual(
             {
-                "baguette",
-                "baguettes",
-                "baguetten",
-                "baguettens",
-                "baguetter",
-                "baguetters",
-                "baguetterna",
-                "baguetternas",
+                "baguette", "baguettes", "baguetten", "baguettens",
+                "baguetter", "baguetters", "baguetterna", "baguetternas",
             },
             set(entry.forms if entry else ()),
         )
@@ -143,15 +131,7 @@ class NounParadigmTests(unittest.TestCase):
             set(entry.forms if entry else ()),
         )
 
-    def test_completes_explicit_used_plural(self) -> None:
-        expected = {
-            "anmodan",
-            "anmodans",
-            "anmodanden",
-            "anmodandens",
-            "anmodandena",
-            "anmodandenas",
-        }
+    def test_completes_explicit_used_plural_in_anden(self) -> None:
         for lemma, plural in (
             ("anmodan", "anmodanden"),
             ("strävan", "strävanden"),
@@ -166,24 +146,26 @@ class NounParadigmTests(unittest.TestCase):
                 self.assertIsNotNone(entry)
                 self.assertEqual(
                     {
-                        lemma,
-                        lemma + "s",
-                        plural,
-                        plural + "s",
-                        plural + "a",
-                        plural + "as",
+                        lemma, lemma + "s", plural, plural + "s",
+                        plural + "a", plural + "as",
                     },
                     set(entry.forms if entry else ()),
                 )
-        self.assertEqual(
-            expected,
-            set(
-                self.complete(
-                    "anmodan",
-                    "best. +; i: pl. används: anmodanden",
-                ).forms
-            ),
+
+    def test_completes_explicit_used_plural_in_ar(self) -> None:
+        entry = self.complete(
+            "ansökan",
+            "best. +; i: pl. används: ansökningar",
         )
+        self.assertIsNotNone(entry)
+        self.assertEqual(
+            {
+                "ansökan", "ansökans", "ansökningar", "ansökningars",
+                "ansökningarna", "ansökningarnas",
+            },
+            set(entry.forms if entry else ()),
+        )
+        self.assertNotIn("ansökningara", set(entry.forms if entry else ()))
 
     def test_completes_compound_explicit_used_plural(self) -> None:
         entry = self.complete(
@@ -193,12 +175,8 @@ class NounParadigmTests(unittest.TestCase):
         self.assertIsNotNone(entry)
         self.assertEqual(
             {
-                "fredssträvan",
-                "fredssträvans",
-                "fredssträvanden",
-                "fredssträvandens",
-                "fredssträvandena",
-                "fredssträvandenas",
+                "fredssträvan", "fredssträvans", "fredssträvanden",
+                "fredssträvandens", "fredssträvandena", "fredssträvandenas",
             },
             set(entry.forms if entry else ()),
         )
