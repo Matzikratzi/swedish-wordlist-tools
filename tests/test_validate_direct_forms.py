@@ -132,9 +132,51 @@ class ValidateDirectFormsTests(unittest.TestCase):
         self.assertEqual("saol_paradigm_differs_from_saldo", row["status"])
         self.assertEqual(["eyelinerna", "eyelinernas"], row["extra_from_saol"])
 
-    def test_reports_case_only_difference_separately(self) -> None:
+    def test_reports_et_er_genus_disagreement_separately(self) -> None:
         record = {
             "id": 6,
+            "normaliserat_ord": "feromon",
+            "upos": "NOUN",
+            "ordkl": "subst.",
+            "text": "+et +er",
+        }
+        analysis = {
+            "id": "feromon..nn.1",
+            "upos": "NOUN",
+            "lemmas": {"feromon"},
+            "forms": {
+                "feromon", "feromons", "feromonen", "feromonens",
+                "feromoner", "feromoners", "feromonerna", "feromonernas",
+            },
+        }
+        row = validation_row(record, "lemma_same_upos", [analysis])
+        self.assertEqual("saol_paradigm_differs_from_saldo", row["status"])
+        self.assertEqual(["feromonet", "feromonets"], row["extra_from_saol"])
+
+    def test_reports_et_er_extra_saldo_forms_separately(self) -> None:
+        record = {
+            "id": 7,
+            "normaliserat_ord": "pajaseri",
+            "upos": "NOUN",
+            "ordkl": "subst.",
+            "text": "+et +er",
+        }
+        analysis = {
+            "id": "pajaseri..nn.1",
+            "upos": "NOUN",
+            "lemmas": {"pajaseri"},
+            "forms": {
+                "pajaseri", "pajaseris", "pajaserit", "pajaserits",
+                "pajaserier", "pajaseriers", "pajaserierna", "pajaseriernas",
+            },
+        }
+        row = validation_row(record, "lemma_same_upos", [analysis])
+        self.assertEqual("saol_paradigm_differs_from_saldo", row["status"])
+        self.assertEqual(["pajaseriet", "pajaseriets"], row["extra_from_saol"])
+
+    def test_reports_case_only_difference_separately(self) -> None:
+        record = {
+            "id": 8,
             "normaliserat_ord": "Östersjöfiske",
             "upos": "NOUN",
             "ordkl": "subst.",
