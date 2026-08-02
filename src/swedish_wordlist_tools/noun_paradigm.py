@@ -15,8 +15,6 @@ _PL_INDEF_GEN = parse_msd("pl indef gen")
 _PL_DEF_NOM = parse_msd("pl def nom")
 _PL_DEF_GEN = parse_msd("pl def gen")
 
-_STRESS_MARKED_N_ER_PATTERN = "+n +er [-o>r-]"
-
 _FULL_PARADIGM_PATTERNS = {
     "+en +er",
     "+en +ar",
@@ -26,7 +24,6 @@ _FULL_PARADIGM_PATTERNS = {
     "+t +n",
     "+n +r",
     "+n +er",
-    _STRESS_MARKED_N_ER_PATTERN,
 }
 
 _SINGULAR_ONLY_PATTERNS = {
@@ -171,11 +168,7 @@ def complete_noun_entry(
         return entry
 
     pattern = str(record.get("text", "")).strip()
-    if pattern == _STRESS_MARKED_N_ER_PATTERN:
-        # The bracket is pronunciation/stress information, not morphology.
-        # Treat e.g. reaktor, reaktorn, reaktorer as ordinary +n +er forms.
-        entry = _entry_from_full_pattern(record, pattern, "n", "er")
-    elif entry is None and pattern == "+et +er":
+    if entry is None and pattern == "+et +er":
         entry = _entry_from_full_pattern(record, pattern, "et", "er")
     elif entry is None and pattern == "+n; pl. +":
         entry = _entry_from_full_pattern(record, pattern, "n", "")
