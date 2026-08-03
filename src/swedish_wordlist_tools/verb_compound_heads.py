@@ -1,24 +1,35 @@
 from __future__ import annotations
 
 import html
-import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
 from .lexeme_slots import LexemeSlots, SlotForm, build_lexeme_slots
 
-_SUP_RE = re.compile(r"<sup>.*?</sup>", re.IGNORECASE)
-_TAG_RE = re.compile(r"<[^>]+>")
-_SEPARATORS_RE = re.compile(r"[·\u00b7]")
 _TEXT_HARD_CAP = 50
 _VERB_FORM_SLOTS = ("present", "preterite", "supine")
 
 
 def clean_stycke(value: object) -> str:
     text = html.unescape(str(value or ""))
-    text = _SUP_RE.sub("", text)
-    text = _TAG_RE.sub("", text)
-    return _SEPARATORS_RE.sub("", text).strip()
+    while "<sup>" in text.lower():
+        start = text.lower().find("<sup>")
+        end = text.lower().find("</sup>", start)
+        if end < 0:
+            break
+        text = text[:start] + text[end + len("</sup>") :]
+    result: list[str] = []
+    in_tag = False
+    for char in text:
+        if char == "<":
+            in_tag = True
+            continue
+        if char == ">":
+            in_tag = False
+            continue
+        if not in_tag and char not in {"·", "\u00b7"}:
+            result.append(char)
+    return "".join(result).strip()
 
 
 def compound_verb_parts(record: Mapping[str, Any]) -> tuple[str, str, str] | None:
@@ -35,7 +46,7 @@ def compound_verb_parts(record: Mapping[str, Any]) -> tuple[str, str, str] | Non
 
 
 def _source_is_truncated(record: Mapping[str, Any]) -> bool:
-    """The machine-readable text export has an observed hard cap at 50."""
+    """The machine-readable ``text`` export has an observed hard cap at 50."""
     return len(str(record.get("text") or "")) == _TEXT_HARD_CAP
 
 
@@ -62,72 +73,49 @@ def _head_forms_from_compound(
     return frozenset(result)
 
 
-def _preferred_evidence_sets(
-    complete_sets: list[frozenset[str]],
-    truncated_sets: list[frozenset[str]],
-) -> list[frozenset[str]]:
-    complete = [forms for forms in complete_sets if forms]
-    return complete or [forms for forms in truncated_sets if forms]
-
-
 def build_simple_verb_paradigm_index(
     records: Iterable[Mapping[str, Any]],
     interpreted: Mapping[int, LexemeSlots | None],
 ) -> dict[str, LexemeSlots]:
-    """Build exact head paradigms from independent and compound evidence.
+    """Build exact head paradigms using only complete source evidence.
 
-    A head verb's own ``text`` may itself be cut at 50 characters. Therefore
-    complete bar-marked compounds can also provide evidence: ``ren|skriva``
-    with ``renskriver`` proves the head form ``skriver``. Family evidence is
-    accepted only when the head also exists as an independent verb. Any
-    contradiction excludes the entire head verb from the index.
+    An independent verb row proves that the head verb exists even when its
+    ``text`` is ``(null)``. It contributes forms only when it has interpreted,
+    non-truncated data. Complete bar-marked compounds may also prove head forms
+    by removing their exact prefix. Rows at the observed 50-character cap never
+    provide head-form evidence. Conflicting complete evidence excludes the
+    entire head verb instead of guessing.
     """
     record_list = list(records)
     independent_heads: set[str] = set()
-    evidence: dict[
-        str,
-        dict[str, dict[str, list[frozenset[str]]]],
-    ] = {}
+    evidence: dict[str, dict[str, list[frozenset[str]]]] = {}
 
-    def add_evidence(
-        head: str,
-        slot: str,
-        forms: frozenset[str],
-        *,
-        truncated: bool,
-    ) -> None:
-        if not forms:
-            return
-        bucket = evidence.setdefault(head, {}).setdefault(
-            slot, {"complete": [], "truncated": []}
-        )
-        bucket["truncated" if truncated else "complete"].append(forms)
+    def add_evidence(head: str, slot: str, forms: frozenset[str]) -> None:
+        if forms:
+            evidence.setdefault(head, {}).setdefault(slot, []).append(forms)
 
     for record in record_list:
         if str(record.get("upos", "")).upper() != "VERB":
             continue
-        slots = interpreted.get(id(record))
-        if slots is None:
-            continue
-        truncated = _source_is_truncated(record)
+
         parts = compound_verb_parts(record)
+        if parts is None:
+            lemma = str(record.get("normaliserat_ord") or "").strip()
+            if lemma and " " not in lemma:
+                independent_heads.add(lemma)
+
+        slots = interpreted.get(id(record))
+        if slots is None or _source_is_truncated(record):
+            continue
 
         if parts is None:
             lemma = str(record.get("normaliserat_ord") or "").strip()
             if not lemma or " " in lemma:
                 continue
-            independent_heads.add(lemma)
             for slot in _VERB_FORM_SLOTS:
-                add_evidence(
-                    lemma,
-                    slot,
-                    frozenset(slots.forms_for(slot)),
-                    truncated=truncated,
-                )
+                add_evidence(lemma, slot, frozenset(slots.forms_for(slot)))
             continue
 
-        if truncated:
-            continue
         prefix, head, trailing_words = parts
         for slot in _VERB_FORM_SLOTS:
             add_evidence(
@@ -139,22 +127,17 @@ def build_simple_verb_paradigm_index(
                     trailing_words=trailing_words,
                     slot=slot,
                 ),
-                truncated=False,
             )
 
     result: dict[str, LexemeSlots] = {}
     for head, slot_evidence in evidence.items():
         if head not in independent_heads:
             continue
+
         chosen_by_slot: dict[str, frozenset[str]] = {}
         ambiguous = False
         for slot in _VERB_FORM_SLOTS:
-            bucket = slot_evidence.get(slot)
-            if bucket is None:
-                continue
-            candidates = _preferred_evidence_sets(
-                bucket["complete"], bucket["truncated"]
-            )
+            candidates = [forms for forms in slot_evidence.get(slot, []) if forms]
             if not candidates:
                 continue
             distinct = set(candidates)
@@ -162,19 +145,20 @@ def build_simple_verb_paradigm_index(
                 ambiguous = True
                 break
             chosen_by_slot[slot] = candidates[0]
+
         if ambiguous or not chosen_by_slot:
             continue
 
         forms: list[SlotForm] = [SlotForm("infinitive", head, "lemma")]
         for slot in _VERB_FORM_SLOTS:
             for written in sorted(chosen_by_slot.get(slot, ())):
-                forms.append(SlotForm(slot, written, "verb-head-evidence"))
+                forms.append(SlotForm(slot, written, "complete-verb-family-evidence"))
         result[head] = build_lexeme_slots(
             lemma=head,
             upos="VERB",
-            notation="head-family-evidence",
+            notation="complete-head-family-evidence",
             forms=forms,
-            metadata={"head_evidence": "independent-or-bar-family"},
+            metadata={"head_evidence": "complete-independent-or-bar-family"},
         )
     return result
 
@@ -222,9 +206,7 @@ def borrow_compound_verb_slots(
 
         same_slot = [form for form in forms if form.slot == source_form.slot]
         if not same_slot:
-            forms.append(
-                SlotForm(source_form.slot, borrowed, f"compound-head:{head}")
-            )
+            forms.append(SlotForm(source_form.slot, borrowed, f"compound-head:{head}"))
             changed = True
             continue
 
@@ -249,16 +231,22 @@ def borrow_compound_verb_slots(
     if not changed:
         return current
     metadata = dict(current.metadata if current is not None else {})
-    metadata.update({
-        "compound_head": head,
-        "compound_head_source": source.lemma,
-        "stycke": str(record.get("stycke") or ""),
-        "ordkl": str(record.get("ordkl") or ""),
-    })
+    metadata.update(
+        {
+            "compound_head": head,
+            "compound_head_source": source.lemma,
+            "stycke": str(record.get("stycke") or ""),
+            "ordkl": str(record.get("ordkl") or ""),
+        }
+    )
     return build_lexeme_slots(
         lemma=lemma,
         upos="VERB",
-        notation=current.notation if current is not None else str(record.get("text") or ""),
+        notation=(
+            current.notation
+            if current is not None
+            else str(record.get("text") or "")
+        ),
         forms=forms,
         metadata=metadata,
     )
