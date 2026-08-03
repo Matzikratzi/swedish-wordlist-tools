@@ -19,8 +19,11 @@ _INCOMPLETE_LABEL_RE = re.compile(
     r"(?:\bpre(?:s)?\.?|\bpret\.?|\bimper\.?|\bperf\.?|\bsup\.?)$",
     re.IGNORECASE,
 )
-_SHORT_TRAILING_FRAGMENT_RE = re.compile(
-    r"(?:^|[\s,;:])[-+]?[A-Za-zÅÄÖåäöÉéÜü]{1,3}$"
+_UNSIGNED_SHORT_FRAGMENT_RE = re.compile(
+    r"(?:^|[\s,;:])[A-Za-zÅÄÖåäöÉéÜü]{1,3}$"
+)
+_SIGNED_SHORT_FRAGMENT_RE = re.compile(
+    r"(?:^|[\s,;:])[-+][A-Za-zÅÄÖåäöÉéÜü]{1,2}$"
 )
 _DANGLING_END_RE = re.compile(r"[-+,:;]$")
 
@@ -37,8 +40,11 @@ def _external_lookup_candidate(record: dict[str, Any]) -> bool:
     An ellipsis in ``ordkl`` proves that the displayed source field was cut,
     but that alone does not mean the machine-readable ``text`` is unusable.
     External lookup is proposed only when the text itself also ends like an
-    incomplete grammatical label, a dangling notation character, or a short
-    fragment in a longer comma-separated paradigm.
+    incomplete grammatical label, a dangling notation character, or a very
+    short fragment in a longer comma-separated paradigm. Signed forms of three
+    letters such as ``-gör`` and ``-för`` are treated as complete; signed
+    fragments must be at most two letters, while unsigned fragments may be at
+    most three letters (for example ``sju`` in a truncated ``sjunger``).
     """
     if not _has_source_ellipsis(record):
         return False
@@ -47,7 +53,12 @@ def _external_lookup_candidate(record: dict[str, Any]) -> bool:
         return True
     if _INCOMPLETE_LABEL_RE.search(text) or _DANGLING_END_RE.search(text):
         return True
-    return "," in text and bool(_SHORT_TRAILING_FRAGMENT_RE.search(text))
+    if "," not in text:
+        return False
+    return bool(
+        _SIGNED_SHORT_FRAGMENT_RE.search(text)
+        or _UNSIGNED_SHORT_FRAGMENT_RE.search(text)
+    )
 
 
 def _truncation_kind(record: dict[str, Any]) -> str | None:
