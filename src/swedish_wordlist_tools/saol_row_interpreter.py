@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any
 
@@ -33,8 +34,18 @@ _TOKEN_RE = re.compile(
 )
 
 
+def _comparison_key(value: Any) -> str:
+    """Normalize harmless typography before comparing ``stycke`` with lemma."""
+    text = unicodedata.normalize("NFKC", str(value or ""))
+    text = text.replace("\u00ad", "").replace("·", "")
+    text = text.replace("‐", "-").replace("‑", "-").replace("–", "-")
+    text = re.sub(r"\s+", " ", text).strip()
+    return text.casefold()
+
+
 def _clean_stycke(value: Any) -> str:
-    return str(value or "").replace("·", "").strip()
+    text = unicodedata.normalize("NFKC", str(value or ""))
+    return text.replace("\u00ad", "").replace("·", "").strip()
 
 
 def _compound_parts(record: dict[str, Any], lemma: str) -> tuple[str, str] | None:
@@ -43,7 +54,7 @@ def _compound_parts(record: dict[str, Any], lemma: str) -> tuple[str, str] | Non
         return None
     prefix, head = stycke.rsplit("|", 1)
     prefix = prefix.replace("|", "")
-    if prefix + head != lemma:
+    if _comparison_key(prefix + head) != _comparison_key(lemma):
         return None
     return prefix, head
 
