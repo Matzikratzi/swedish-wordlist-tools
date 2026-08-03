@@ -26,6 +26,7 @@ _SIGNED_SHORT_FRAGMENT_RE = re.compile(
     r"(?:^|[\s,;:])[-+][A-Za-zÅÄÖåäöÉéÜü]{1,2}$"
 )
 _DANGLING_END_RE = re.compile(r"[-+,:;]$")
+_COMMON_CAPS = (32, 40, 48, 50, 60, 64, 70, 80, 100, 120, 128, 255)
 
 
 def _has_source_ellipsis(record: dict[str, Any]) -> bool:
@@ -35,17 +36,7 @@ def _has_source_ellipsis(record: dict[str, Any]) -> bool:
 
 
 def _external_lookup_candidate(record: dict[str, Any]) -> bool:
-    """Return true only for source rows that plausibly need external repair.
-
-    An ellipsis in ``ordkl`` proves that the displayed source field was cut,
-    but that alone does not mean the machine-readable ``text`` is unusable.
-    External lookup is proposed only when the text itself also ends like an
-    incomplete grammatical label, a dangling notation character, or a very
-    short fragment in a longer comma-separated paradigm. Signed forms of three
-    letters such as ``-gör`` and ``-för`` are treated as complete; signed
-    fragments must be at most two letters, while unsigned fragments may be at
-    most three letters (for example ``sju`` in a truncated ``sjunger``).
-    """
+    """Return true only for source rows that plausibly need external repair."""
     if not _has_source_ellipsis(record):
         return False
     text = str(record.get("text") or "").strip()
@@ -69,6 +60,29 @@ def _truncation_kind(record: dict[str, Any]) -> str | None:
     return None
 
 
+def _length_summary(counter: Counter[int]) -> dict[str, Any]:
+    total = sum(counter.values())
+    if not counter:
+        return {
+            "records": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "most_common_lengths": {},
+            "common_cap_counts": {},
+        }
+    return {
+        "records": total,
+        "minimum": min(counter),
+        "maximum": max(counter),
+        "most_common_lengths": dict(counter.most_common(20)),
+        "common_cap_counts": {
+            str(cap): counter.get(cap, 0)
+            for cap in _COMMON_CAPS
+            if counter.get(cap, 0)
+        },
+    }
+
+
 def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
     total = 0
     interpreted = 0
@@ -76,6 +90,9 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
     reason_counts = Counter()
     truncation_counts = Counter()
     slot_counts = Counter()
+    all_text_lengths: Counter[int] = Counter()
+    ellipsis_text_lengths: Counter[int] = Counter()
+    candidate_text_lengths: Counter[int] = Counter()
     examples: dict[str, list[dict[str, str]]] = {}
     reason_examples: dict[str, list[dict[str, str]]] = {}
     truncation_examples: dict[str, list[dict[str, str]]] = {}
@@ -84,15 +101,22 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
         if str(record.get("upos", "")).upper() != "VERB":
             continue
         total += 1
+        raw_text = str(record.get("text") or "")
+        all_text_lengths[len(raw_text)] += 1
+        if _has_source_ellipsis(record):
+            ellipsis_text_lengths[len(raw_text)] += 1
 
         truncation_kind = _truncation_kind(record)
         if truncation_kind is not None:
             truncation_counts[truncation_kind] += 1
+            if truncation_kind == "external_lookup_candidate":
+                candidate_text_lengths[len(raw_text)] += 1
             truncation_examples.setdefault(truncation_kind, [])
             if len(truncation_examples[truncation_kind]) < 30:
                 truncation_examples[truncation_kind].append({
                     "lemma": str(record.get("normaliserat_ord", "")),
-                    "notation": str(record.get("text", "")),
+                    "notation": raw_text,
+                    "text_length": str(len(raw_text)),
                     "ordkl": str(record.get("ordkl", "")),
                     "source": str(record.get("source", "")),
                 })
@@ -109,7 +133,7 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
         unsupported[pattern] += 1
         example = {
             "lemma": str(record.get("normaliserat_ord", "")),
-            "notation": str(record.get("text", "")),
+            "notation": raw_text,
             "normalised": pattern,
             "stycke": str(record.get("stycke", "")),
             "ordkl": str(record.get("ordkl", "")),
@@ -126,6 +150,11 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
         "interpreted": interpreted,
         "coverage_percent": round(100 * interpreted / total, 2) if total else 0.0,
         "slot_counts": dict(slot_counts.most_common()),
+        "text_length_distribution": {
+            "all_verbs": _length_summary(all_text_lengths),
+            "source_ellipsis": _length_summary(ellipsis_text_lengths),
+            "external_lookup_candidates": _length_summary(candidate_text_lengths),
+        },
         "source_truncation_counts": dict(truncation_counts.most_common()),
         "source_truncation_examples": truncation_examples,
         "failure_reason_counts": dict(reason_counts.most_common()),
@@ -149,6 +178,28 @@ def render_text(report: dict[str, Any]) -> str:
     for slot, count in report["slot_counts"].items():
         lines.append(f"  {count:6d}  {slot}")
 
+    lines.extend(["", "Längd på text-fältet:"])
+    length_labels = {
+        "all_verbs": "alla verb",
+        "source_ellipsis": "ellips i källan",
+        "external_lookup_candidates": "svenska.se-kandidater",
+    }
+    for key, summary in report["text_length_distribution"].items():
+        lines.append(
+            f"  {length_labels[key]}: poster={summary['records']}, "
+            f"min={summary['minimum']}, max={summary['maximum']}"
+        )
+        common = ", ".join(
+            f"{length}:{count}"
+            for length, count in summary["most_common_lengths"].items()
+        )
+        lines.append(f"    vanligaste längder: {common or '–'}")
+        caps = ", ".join(
+            f"{length}:{count}"
+            for length, count in summary["common_cap_counts"].items()
+        )
+        lines.append(f"    vanliga maxgränser: {caps or '–'}")
+
     lines.extend(["", "Avklippta källfält:"])
     labels = {
         "external_lookup_candidate": "kandidater för komplettering från svenska.se",
@@ -160,7 +211,8 @@ def render_text(report: dict[str, Any]) -> str:
         lines.extend(["", f"Exempel: {labels.get(kind, kind)}"])
         for example in examples[:15]:
             lines.append(
-                f"  {example['lemma']} | text={example['notation']!r} | ordkl={example['ordkl']!r}"
+                f"  {example['lemma']} | len={example['text_length']} | "
+                f"text={example['notation']!r} | ordkl={example['ordkl']!r}"
             )
 
     lines.extend(["", "Orsaker till otolkade verb:"])
