@@ -31,6 +31,7 @@ saol14-analyze-brackets = "swedish_wordlist_tools.analyze_bracket_annotations:ma
 saol14-analyze-notation-mismatches = "swedish_wordlist_tools.analyze_notation_mismatches:main"
 saol14-analyze-noun-mismatch-patterns = "swedish_wordlist_tools.analyze_noun_mismatch_patterns:main"
 saol14-analyze-top-noun-mismatch-groups = "swedish_wordlist_tools.analyze_top_noun_mismatch_groups:main"
+saol14-analyze-noun-mismatch-causes = "swedish_wordlist_tools.analyze_noun_mismatch_causes:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
