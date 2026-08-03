@@ -38,6 +38,15 @@ _TOKEN_RE = re.compile(
 )
 _SUP_ELEMENT_RE = re.compile(r"<sup\b[^>]*>.*?</sup>", re.IGNORECASE | re.DOTALL)
 _HTML_TAG_RE = re.compile(r"<[^>]*>")
+_IGNORED_MARKERS = {
+    "i:",
+    "anv:",
+    "används:",
+    "användas:",
+    "kan:",
+    "ofta:",
+    "vanl:",
+}
 
 
 def _comparison_key(value: Any) -> str:
@@ -131,18 +140,12 @@ def _clean_notation_comments(pattern: str) -> str:
     pattern = _SUP_ELEMENT_RE.sub("", pattern)
     pattern = _HTML_TAG_RE.sub("", pattern)
     pattern = re.sub(
-        r"\bsom:\s*pl\.\s*anv\.\s*",
-        "pl. ",
+        r"(?:^|(?<=[;,]))\s*(?:som|i):\s*pl\.\s*(?:anv\.|används:)\s*(?:ofta:\s*|vanl\.\s*)?",
+        " pl. ",
         pattern,
         flags=re.IGNORECASE,
     )
-    pattern = re.sub(
-        r"\bi:\s*pl\.\s*anv\.\s*(?:ofta:\s*)?",
-        "pl. ",
-        pattern,
-        flags=re.IGNORECASE,
-    )
-    pattern = re.sub(r"\b(?:ibl|vard|högt)\.\s*", "", pattern, flags=re.IGNORECASE)
+    pattern = re.sub(r"\b(?:ibl|vard|högt|vanl)\.\s*", "", pattern, flags=re.IGNORECASE)
     return re.sub(r"\s+", " ", pattern).strip()
 
 
@@ -163,11 +166,8 @@ def _tokenize(pattern: str) -> tuple[str, ...] | None:
 def _slot_sequence(pattern: str) -> tuple[tuple[str, str], ...] | None:
     """Map cleaned noun notation to grammatical key-form slots.
 
-    The state machine understands the ordinary compact syntax rather than a
-    table of complete paradigms. Before ``pl.`` the first form is definite
-    singular. After ``pl.`` the next form is indefinite plural. ``best. pl.``
-    explicitly selects definite plural. Two adjacent form tokens without a
-    label are interpreted as definite singular followed by indefinite plural.
+    ``el.`` and the source marker ``H`` introduce an alternative in the same
+    grammatical slot. Labels such as ``pl.`` and ``best. pl.`` change slots.
     """
     tokens = _tokenize(_clean_notation_comments(pattern))
     if tokens is None:
@@ -177,20 +177,32 @@ def _slot_sequence(pattern: str) -> tuple[tuple[str, str], ...] | None:
     context = "singular"
     pending_best = False
     seen_singular_form = False
+    last_slot: str | None = None
+    alternative_next = False
 
     for token in tokens:
         lower = token.casefold()
-        if token in {";", ","} or lower == "el.":
+        if token in {";", ","}:
+            continue
+        if lower in _IGNORED_MARKERS:
+            continue
+        if lower in {"el.", "h"}:
+            alternative_next = last_slot is not None
             continue
         if lower == "best.":
             pending_best = True
+            alternative_next = False
             continue
         if lower == "pl.":
             context = "plural_definite" if pending_best else "plural"
             pending_best = False
+            alternative_next = False
             continue
 
-        if context == "plural_definite":
+        if alternative_next and last_slot is not None:
+            slot = last_slot
+            alternative_next = False
+        elif context == "plural_definite":
             slot = "pl_def"
         elif context == "plural":
             slot = "pl_indef"
@@ -202,6 +214,7 @@ def _slot_sequence(pattern: str) -> tuple[tuple[str, str], ...] | None:
             slot = "pl_indef"
             context = "after_plural"
         result.append((slot, token))
+        last_slot = slot
 
     return tuple(result) if result else None
 
