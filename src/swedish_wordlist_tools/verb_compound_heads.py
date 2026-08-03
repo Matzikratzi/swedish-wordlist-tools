@@ -10,6 +10,7 @@ from .lexeme_slots import LexemeSlots, SlotForm, build_lexeme_slots
 _SUP_RE = re.compile(r"<sup>.*?</sup>", re.IGNORECASE)
 _TAG_RE = re.compile(r"<[^>]+>")
 _SEPARATORS_RE = re.compile(r"[·\u00b7]")
+_TRUNCATION_MARK_RE = re.compile(r"(?:\.\.\.|…)")
 
 
 def clean_stycke(value: object) -> str:
@@ -21,12 +22,7 @@ def clean_stycke(value: object) -> str:
 
 
 def compound_verb_parts(record: Mapping[str, Any]) -> tuple[str, str, str] | None:
-    """Return ``(prefix, head, trailing_words)`` for an exact bar-marked verb.
-
-    Only the last bar is significant. The cleaned first word must equal the
-    target lemma's first word, so malformed or merely typographical bars are
-    never used as evidence.
-    """
+    """Return ``(prefix, head, trailing_words)`` for an exact bar-marked verb."""
     stycke = clean_stycke(record.get("stycke"))
     if "|" not in stycke:
         return None
@@ -43,12 +39,7 @@ def build_simple_verb_paradigm_index(
     records: Iterable[Mapping[str, Any]],
     interpreted: Mapping[int, LexemeSlots | None],
 ) -> dict[str, LexemeSlots]:
-    """Index unbarred, independently interpreted verbs by exact lemma.
-
-    Ambiguous lemmas with differing paradigms are omitted instead of guessed.
-    ``interpreted`` is keyed by ``id(record)`` so duplicate source rows remain
-    distinct while the index is built.
-    """
+    """Index unbarred, independently interpreted verbs by exact lemma."""
     candidates: dict[str, list[LexemeSlots]] = {}
     for record in records:
         if str(record.get("upos", "")).upper() != "VERB":
@@ -73,15 +64,42 @@ def build_simple_verb_paradigm_index(
     return result
 
 
+def _source_is_truncated(record: Mapping[str, Any]) -> bool:
+    return bool(
+        _TRUNCATION_MARK_RE.search(str(record.get("ordkl") or ""))
+        or _TRUNCATION_MARK_RE.search(str(record.get("text") or ""))
+    )
+
+
+def _can_replace_truncated_form(
+    existing: str,
+    borrowed: str,
+    *,
+    source_is_truncated: bool,
+) -> bool:
+    """Return true only when ``existing`` is a strict prefix of ``borrowed``.
+
+    This repairs source rows such as ``pres. -skr`` -> ``avskriver`` while
+    preserving complete target-specific alternatives. The source must carry an
+    explicit ellipsis marker, so ordinary short forms are never replaced.
+    """
+    return (
+        source_is_truncated
+        and existing != borrowed
+        and borrowed.startswith(existing)
+    )
+
+
 def borrow_compound_verb_slots(
     record: Mapping[str, Any],
     base_by_lemma: Mapping[str, LexemeSlots],
     current: LexemeSlots | None = None,
 ) -> LexemeSlots | None:
-    """Fill a bar-marked compound from an exact independent head verb.
+    """Fill or repair a bar-marked compound from an exact head verb.
 
-    Existing target slots win. Borrowing only fills missing slots and never
-    invents a paradigm when the exact right-hand verb is absent or ambiguous.
+    Complete existing target forms win. A source-truncated form may be replaced
+    only when it is a strict prefix of the form borrowed from the independent
+    head verb.
     """
     parts = compound_verb_parts(record)
     if parts is None:
@@ -93,25 +111,46 @@ def borrow_compound_verb_slots(
 
     lemma = str(record.get("normaliserat_ord") or "").strip()
     forms = list(current.forms if current is not None else ())
-    existing_slots = {form.slot for form in forms}
     if not forms:
         forms.append(SlotForm("infinitive", lemma, "lemma"))
-        existing_slots.add("infinitive")
 
-    borrowed = False
-    for form in source.forms:
-        if form.slot in {"lemma", "infinitive"} or form.slot in existing_slots:
+    source_is_truncated = _source_is_truncated(record)
+    changed = False
+    for source_form in source.forms:
+        if source_form.slot in {"lemma", "infinitive"}:
             continue
-        # The independent head supplies its complete inflected first word:
-        # skriva -> skriver, so av|skriva becomes av + skriver.
-        source_first, separator, source_trailing = form.written_form.partition(" ")
+        source_first, separator, source_trailing = source_form.written_form.partition(" ")
         if separator or source_trailing:
             continue
-        written = prefix + source_first + trailing_words
-        forms.append(SlotForm(form.slot, written, f"compound-head:{head}"))
-        borrowed = True
+        borrowed = prefix + source_first + trailing_words
 
-    if not borrowed:
+        same_slot = [form for form in forms if form.slot == source_form.slot]
+        if not same_slot:
+            forms.append(
+                SlotForm(source_form.slot, borrowed, f"compound-head:{head}")
+            )
+            changed = True
+            continue
+
+        replaceable = [
+            form
+            for form in same_slot
+            if _can_replace_truncated_form(
+                form.written_form,
+                borrowed,
+                source_is_truncated=source_is_truncated,
+            )
+        ]
+        if not replaceable:
+            continue
+        replaceable_ids = {id(form) for form in replaceable}
+        forms = [form for form in forms if id(form) not in replaceable_ids]
+        forms.append(
+            SlotForm(source_form.slot, borrowed, f"compound-head-repair:{head}")
+        )
+        changed = True
+
+    if not changed:
         return current
     metadata = dict(current.metadata if current is not None else {})
     metadata.update({
