@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import html
+import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
 from .lexeme_slots import LexemeSlots, SlotForm, build_lexeme_slots
 
-_SUP_RE = __import__("re").compile(r"<sup>.*?</sup>", __import__("re").IGNORECASE)
-_TAG_RE = __import__("re").compile(r"<[^>]+>")
-_SEPARATORS_RE = __import__("re").compile(r"[·\u00b7]")
+_SUP_RE = re.compile(r"<sup>.*?</sup>", re.IGNORECASE)
+_TAG_RE = re.compile(r"<[^>]+>")
+_SEPARATORS_RE = re.compile(r"[·\u00b7]")
 _TEXT_HARD_CAP = 50
 _VERB_FORM_SLOTS = ("present", "preterite", "supine")
 
@@ -61,20 +62,12 @@ def _head_forms_from_compound(
     return frozenset(result)
 
 
-def _choose_unambiguous_form_set(
+def _preferred_evidence_sets(
     complete_sets: list[frozenset[str]],
     truncated_sets: list[frozenset[str]],
-) -> frozenset[str] | None:
-    """Choose one agreed form set, preferring sources below the 50-char cap."""
-    preferred = [forms for forms in complete_sets if forms]
-    fallback = [forms for forms in truncated_sets if forms]
-    candidates = preferred or fallback
-    if not candidates:
-        return None
-    distinct = set(candidates)
-    if len(distinct) != 1:
-        return None
-    return candidates[0]
+) -> list[frozenset[str]]:
+    complete = [forms for forms in complete_sets if forms]
+    return complete or [forms for forms in truncated_sets if forms]
 
 
 def build_simple_verb_paradigm_index(
@@ -86,8 +79,8 @@ def build_simple_verb_paradigm_index(
     A head verb's own ``text`` may itself be cut at 50 characters. Therefore
     complete bar-marked compounds can also provide evidence: ``ren|skriva``
     with ``renskriver`` proves the head form ``skriver``. Evidence is resolved
-    independently per grammatical slot. Complete sources are preferred, and a
-    slot is omitted whenever complete sources disagree.
+    independently per grammatical slot, but any contradiction excludes the
+    entire head verb from the index.
     """
     record_list = list(records)
     evidence: dict[
@@ -151,23 +144,29 @@ def build_simple_verb_paradigm_index(
 
     result: dict[str, LexemeSlots] = {}
     for head, slot_evidence in evidence.items():
-        forms: list[SlotForm] = [SlotForm("infinitive", head, "lemma")]
+        chosen_by_slot: dict[str, frozenset[str]] = {}
+        ambiguous = False
         for slot in _VERB_FORM_SLOTS:
             bucket = slot_evidence.get(slot)
             if bucket is None:
                 continue
-            chosen = _choose_unambiguous_form_set(
+            candidates = _preferred_evidence_sets(
                 bucket["complete"], bucket["truncated"]
             )
-            if chosen is None:
+            if not candidates:
                 continue
-            forms.extend(
-                SlotForm(slot, written, "verb-head-evidence")
-                for written in sorted(chosen)
-            )
-        # An infinitive-only entry cannot enrich any compound.
-        if len(forms) == 1:
+            distinct = set(candidates)
+            if len(distinct) != 1:
+                ambiguous = True
+                break
+            chosen_by_slot[slot] = candidates[0]
+        if ambiguous or not chosen_by_slot:
             continue
+
+        forms: list[SlotForm] = [SlotForm("infinitive", head, "lemma")]
+        for slot in _VERB_FORM_SLOTS:
+            for written in sorted(chosen_by_slot.get(slot, ())):
+                forms.append(SlotForm(slot, written, "verb-head-evidence"))
         result[head] = build_lexeme_slots(
             lemma=head,
             upos="VERB",
