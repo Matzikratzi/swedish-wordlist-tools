@@ -35,12 +35,11 @@ class VerbCompoundHeadTests(unittest.TestCase):
             "skrev, skrivit, skriven skrivet skrivna, pres. skriver",
             "skriva",
         )
-        compound = self.record(
-            "avskriva",
-            "-skrev, -skrivit, -skriven -skrivet -skrivna, pres. -skr",
-            "av|skriva",
+        truncated_text = (
+            "-skrev, -skrivit, -skriven -skrivet -s, pres. -skr"
         )
-        compound["ordkl"] = "v. <i>-skrev, -skrivit, -...</i>"
+        self.assertEqual(50, len(truncated_text))
+        compound = self.record("avskriva", truncated_text, "av|skriva")
         base_slots = interpret_verb_slots(base_record)
         current = interpret_verb_slots(compound)
         self.assertIsNotNone(base_slots)
