@@ -76,6 +76,31 @@ class VerbSlotsTests(unittest.TestCase):
         self.assertEqual(("tillsatte",), slots.forms_for("preterite"))
         self.assertEqual(("tillsatt",), slots.forms_for("supine"))
 
+    def test_interprets_bar_marked_participle_family(self) -> None:
+        slots = interpret_verb_slots(
+            self.record(
+                "avskriva",
+                "-skrev, -skrivit, -skriven -skrivet -skrivna; pres. -skriver",
+                "av|skriva",
+            )
+        )
+        self.assertIsNotNone(slots)
+        assert slots is not None
+        self.assertEqual(("avskriver",), slots.forms_for("present"))
+        self.assertEqual(("avskrev",), slots.forms_for("preterite"))
+        self.assertEqual(("avskrivit",), slots.forms_for("supine"))
+
+    def test_finds_present_label_after_comment_punctuation(self) -> None:
+        slots = interpret_verb_slots(
+            self.record(
+                "skriva",
+                "skrev, skrivit, skriven skrivet skrivna: pres. skriver",
+            )
+        )
+        self.assertIsNotNone(slots)
+        assert slots is not None
+        self.assertEqual(("skriver",), slots.forms_for("present"))
+
     def test_keeps_colloquial_preterite_alternative(self) -> None:
         slots = interpret_verb_slots(
             self.record("lägga", "lade el. vard. la, lagt, lagd n. lagt, pres. lägger")
