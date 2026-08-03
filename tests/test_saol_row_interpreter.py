@@ -43,7 +43,7 @@ class SaolRowInterpreterTests(unittest.TestCase):
             ("specialregel", "+n -regler", "special|regel", "specialregler"),
             ("semesterresa", "+n -resor", "semester|resa", "semesterresor"),
             ("namnlista", "+n -listor", "namn|lista", "namnlistor"),
-            ("utlandssvenska", "+n -ländskor", "utlands|svenska", "utlandsländskor"),
+            ("småländska", "+n -ländskor", "små|ländska", "småländskor"),
         )
         for lemma, pattern, stycke, expected_plural in examples:
             with self.subTest(pattern=pattern):
@@ -53,10 +53,10 @@ class SaolRowInterpreterTests(unittest.TestCase):
 
     def test_accepts_harmless_typographic_differences(self) -> None:
         row = interpret_noun_row(
-            self.record("A‑lista", "+n -listor", "A|lista")
+            self.record("A-lista", "+n -listor", "A‑|lista")
         )
         self.assertIsNotNone(row)
-        self.assertEqual("Alistor", row.form("pl_indef") if row else None)
+        self.assertEqual("A‑listor", row.form("pl_indef") if row else None)
 
     def test_uses_last_bar(self) -> None:
         row = interpret_noun_row(
