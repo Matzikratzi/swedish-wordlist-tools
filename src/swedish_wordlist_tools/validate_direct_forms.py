@@ -37,15 +37,12 @@ def _record_forms(record: dict[str, Any]) -> set[str]:
 
 
 def _analysis_forms(analysis: dict[str, Any]) -> set[str]:
-    return {
-        str(form)
-        for form in analysis["forms"]
-        if _usable_form(str(form))
-    }
+    return {str(form) for form in analysis["forms"] if _usable_form(str(form))}
 
 
-def _homonym_score(generated_forms: set[str], analysis: dict[str, Any]) -> tuple[int, int, int, int]:
-    """Rank one SALDO analysis against one SAOL record's generated paradigm."""
+def _homonym_score(
+    generated_forms: set[str], analysis: dict[str, Any]
+) -> tuple[int, int, int, int]:
     saldo_forms = _analysis_forms(analysis)
     generated_folded = _casefolded(generated_forms)
     saldo_folded = _casefolded(saldo_forms)
@@ -60,14 +57,8 @@ def _homonym_score(generated_forms: set[str], analysis: dict[str, Any]) -> tuple
 
 
 def _best_matching_analyses(
-    record: dict[str, Any],
-    analyses: list[dict[str, Any]],
+    record: dict[str, Any], analyses: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """Choose the SALDO homonym(s) that best fit this SAOL record.
-
-    This is only a validation choice. The word-list builder still takes the
-    union of every matched SALDO analysis, so no homonym forms are discarded.
-    """
     if len(analyses) <= 1:
         return analyses
     generated_forms = _record_forms(record)
@@ -83,7 +74,6 @@ def select_direct_match(
     saldo: dict[str, list[dict[str, Any]]],
     form_index: dict[str, list[dict[str, Any]]],
 ) -> tuple[str, list[dict[str, Any]]] | None:
-    """Reproduce direct matching, selecting the best SALDO homonym for validation."""
     lemma = _normalise(str(record.get("normaliserat_ord", "")))
     if not lemma or _is_affix_entry(record, lemma):
         return None
@@ -194,19 +184,22 @@ def validation_row(
         status = "saol_definite_plural_differs_from_saldo"
 
     pattern = str(record.get("text", "")).strip()
+    # These three paradigms used to enter through noun completion only. They
+    # are now registered in the base generator, but that implementation detail
+    # must not change the established source-difference classification.
     if (
-        status == "form_set_mismatch"
-        and initial_status == "saol_pattern_unsupported"
-        and pattern in {"+t", "+n; pl. +", "+et +er"}
+        pattern in {"+t", "+n; pl. +", "+et +er"}
         and completion_applied
+        and status
+        in {
+            "form_set_mismatch",
+            "saol_zero_plural_differs_from_saldo",
+            "saol_genitive_differs_from_saldo",
+            "saol_definite_plural_differs_from_saldo",
+        }
     ):
         status = "saol_paradigm_differs_from_saldo"
 
-    # For `+t +n`, SAOL explicitly supplies both definite singular and an
-    # indefinite plural in -n. SALDO often contains only a reduced subset of
-    # that same paradigm. Classify only pure SALDO subsets as source
-    # differences; records where SALDO also has unrelated forms remain real
-    # mismatches for further inspection.
     if (
         status == "form_set_mismatch"
         and pattern == "+t +n"
