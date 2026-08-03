@@ -35,9 +35,7 @@ class VerbCompoundHeadTests(unittest.TestCase):
             "skrev, skrivit, skriven skrivet skrivna, pres. skriver",
             "skriva",
         )
-        truncated_text = (
-            "-skrev, -skrivit, -skriven -skrivet -s, pres. -skr"
-        )
+        truncated_text = "-skrev, -skrivit, -skriven -skrivet -s, pres. -skr"
         self.assertEqual(50, len(truncated_text))
         compound = self.record("avskriva", truncated_text, "av|skriva")
         base_slots = interpret_verb_slots(base_record)
@@ -56,6 +54,43 @@ class VerbCompoundHeadTests(unittest.TestCase):
         self.assertEqual(("avskrivit",), enriched.forms_for("supine"))
         self.assertEqual(("avskriver",), enriched.forms_for("present"))
         self.assertEqual("skriva", enriched.metadata["compound_head_source"])
+
+    def test_null_independent_head_can_use_complete_family_evidence(self) -> None:
+        base = self.record("skriva", "(null)", "skriva")
+        family = self.record(
+            "renskriva",
+            "-skrev, -skrivit, pres. -skriver",
+            "ren|skriva",
+        )
+        target_text = "-skrev, -skrivit, -skriven -skrivet -s, pres. -skr"
+        self.assertEqual(50, len(target_text))
+        target = self.record("avskriva", target_text, "av|skriva")
+        records = [base, family, target]
+        interpreted = {id(row): interpret_verb_slots(row) for row in records}
+
+        index = build_simple_verb_paradigm_index(records, interpreted)
+        self.assertIn("skriva", index)
+        self.assertEqual(("skriver",), index["skriva"].forms_for("present"))
+
+        enriched = borrow_compound_verb_slots(
+            target,
+            index,
+            interpreted[id(target)],
+        )
+        self.assertIsNotNone(enriched)
+        assert enriched is not None
+        self.assertEqual(("avskriver",), enriched.forms_for("present"))
+
+    def test_null_head_without_complete_family_evidence_is_not_indexed(self) -> None:
+        base = self.record("skriva", "(null)", "skriva")
+        target_text = "-skrev, -skrivit, -skriven -skrivet -s, pres. -skr"
+        self.assertEqual(50, len(target_text))
+        target = self.record("avskriva", target_text, "av|skriva")
+        records = [base, target]
+        interpreted = {id(row): interpret_verb_slots(row) for row in records}
+
+        index = build_simple_verb_paradigm_index(records, interpreted)
+        self.assertNotIn("skriva", index)
 
     def test_complete_compound_family_repairs_truncated_independent_head(self) -> None:
         base_text = "skrev, skrivit, pres. skr".ljust(50)
