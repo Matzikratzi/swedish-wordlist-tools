@@ -6,10 +6,11 @@ from swedish_wordlist_tools.verb_slots import interpret_verb_slots
 
 
 class VerbSlotsTests(unittest.TestCase):
-    def record(self, lemma: str, pattern: str):
+    def record(self, lemma: str, pattern: str, stycke: str = ""):
         return {
             "normaliserat_ord": lemma,
             "text": pattern,
+            "stycke": stycke,
             "upos": "VERB",
             "ordkl": "v.",
         }
@@ -36,6 +37,43 @@ class VerbSlotsTests(unittest.TestCase):
         self.assertEqual(("går",), slots.forms_for("present"))
         self.assertEqual(("gick",), slots.forms_for("preterite"))
         self.assertEqual(("gått",), slots.forms_for("supine"))
+
+    def test_interprets_labelled_expanded_notation(self) -> None:
+        slots = interpret_verb_slots(
+            self.record(
+                "sätta",
+                "satte, satt, satt n. satt, pres. sätter",
+            )
+        )
+        self.assertIsNotNone(slots)
+        assert slots is not None
+        self.assertEqual(("sätter",), slots.forms_for("present"))
+        self.assertEqual(("satte",), slots.forms_for("preterite"))
+        self.assertEqual(("satt",), slots.forms_for("supine"))
+
+    def test_interprets_bar_marked_compound_forms(self) -> None:
+        slots = interpret_verb_slots(
+            self.record(
+                "tillsätta",
+                "-satte, -satt, -satt n. -satt, pres. -sätter",
+                "till|sätta",
+            )
+        )
+        self.assertIsNotNone(slots)
+        assert slots is not None
+        self.assertEqual(("tillsätter",), slots.forms_for("present"))
+        self.assertEqual(("tillsatte",), slots.forms_for("preterite"))
+        self.assertEqual(("tillsatt",), slots.forms_for("supine"))
+
+    def test_keeps_colloquial_preterite_alternative(self) -> None:
+        slots = interpret_verb_slots(
+            self.record("lägga", "lade el. vard. la, lagt, lagd n. lagt, pres. lägger")
+        )
+        self.assertIsNotNone(slots)
+        assert slots is not None
+        self.assertEqual(("lade", "la"), slots.forms_for("preterite"))
+        self.assertEqual(("lagt",), slots.forms_for("supine"))
+        self.assertEqual(("lägger",), slots.forms_for("present"))
 
     def test_rejects_other_word_classes_and_unknown_syntax(self) -> None:
         record = self.record("abonnera", "+de +t")
