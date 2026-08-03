@@ -26,7 +26,7 @@ class AnalyzeRuleUsageTests(unittest.TestCase):
 
     def test_classifies_bar_marked_short_plural(self) -> None:
         self.assertEqual(
-            "noun_completion_from_unsupported",
+            "noun_completion_after_base_generation",
             classify_rule_path(
                 self.record("alarmklocka", "+n -klockor", stycke="a·larm|klocka")
             ),
