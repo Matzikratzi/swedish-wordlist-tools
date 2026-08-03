@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from typing import Any, Mapping
+
 from .lexeme_slots import LexemeSlots, SlotForm, build_lexeme_slots
+from .verb_participles import add_explicit_perfect_participles
 
 # Legacy slots remain the public compatibility layer while the precise slots
 # describe grammatical function explicitly. Only forms already present in the
@@ -54,4 +57,15 @@ def add_precise_active_verb_slots(slots: LexemeSlots) -> LexemeSlots:
         notation=slots.notation,
         forms=forms,
         metadata=metadata,
+    )
+
+
+def add_explicit_verb_row_slots(
+    record: Mapping[str, Any],
+    slots: LexemeSlots,
+) -> LexemeSlots:
+    """Add precise aliases and other forms explicitly written on the same row."""
+    return add_explicit_perfect_participles(
+        record,
+        add_precise_active_verb_slots(slots),
     )
