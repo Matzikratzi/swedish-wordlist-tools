@@ -36,12 +36,14 @@ _TOKEN_RE = re.compile(
     r"[A-Za-zÅÄÖåäöÉéÜü0-9][\wÅÄÖåäöÉéÜü:‐‑–-]*",
     re.IGNORECASE,
 )
+_SUP_ELEMENT_RE = re.compile(r"<sup\b[^>]*>.*?</sup>", re.IGNORECASE | re.DOTALL)
 _HTML_TAG_RE = re.compile(r"<[^>]*>")
 
 
 def _comparison_key(value: Any) -> str:
     """Normalize harmless typography before comparing ``stycke`` with lemma."""
     text = unicodedata.normalize("NFKC", str(value or ""))
+    text = _SUP_ELEMENT_RE.sub("", text)
     text = _HTML_TAG_RE.sub("", text)
     text = text.replace("\u00ad", "").replace("·", "")
     text = text.replace("‐", "-").replace("‑", "-").replace("–", "-")
@@ -51,6 +53,7 @@ def _comparison_key(value: Any) -> str:
 
 def _clean_stycke(value: Any) -> str:
     text = unicodedata.normalize("NFKC", str(value or ""))
+    text = _SUP_ELEMENT_RE.sub("", text)
     text = _HTML_TAG_RE.sub("", text)
     return text.replace("\u00ad", "").replace("·", "").strip()
 
@@ -64,6 +67,36 @@ def _compound_parts(record: dict[str, Any], lemma: str) -> tuple[str, str] | Non
     if _comparison_key(prefix + head) != _comparison_key(lemma):
         return None
     return prefix, head
+
+
+def _common_prefix_length(left: str, right: str) -> int:
+    length = 0
+    for left_char, right_char in zip(left.casefold(), right.casefold()):
+        if left_char != right_char:
+            break
+        length += 1
+    return length
+
+
+def _replace_unmarked_final_component(lemma: str, replacement: str) -> str | None:
+    """Replace an unmarked final component using spelling evidence only.
+
+    This is a generic fallback for source rows whose ``stycke`` lacks ``|``.
+    The chosen suffix of the lemma must share at least three initial letters
+    with the supplied replacement, e.g. ``gigawattimme`` + ``timmar``.
+    """
+    first, separator, rest = lemma.partition(" ")
+    best_start: int | None = None
+    best_length = 0
+    for start in range(len(first)):
+        shared = _common_prefix_length(first[start:], replacement)
+        if shared > best_length:
+            best_start = start
+            best_length = shared
+    if best_start is None or best_length < 3:
+        return None
+    result = first[:best_start] + replacement
+    return result + (separator + rest if separator else "")
 
 
 def apply_form_token(
@@ -86,10 +119,10 @@ def apply_form_token(
         if not replacement:
             return None
         parts = _compound_parts(record, lemma)
-        if parts is None:
-            return None
-        prefix, _head = parts
-        return prefix + replacement
+        if parts is not None:
+            prefix, _head = parts
+            return prefix + replacement
+        return _replace_unmarked_final_component(lemma, replacement)
     return token
 
 
