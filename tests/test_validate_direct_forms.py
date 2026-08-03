@@ -20,6 +20,40 @@ class ValidateDirectFormsTests(unittest.TestCase):
         self.assertEqual("lemma_same_upos", method)
         self.assertEqual([analysis], analyses)
 
+    def test_selects_best_saldo_homonym_for_validation(self) -> None:
+        record = {
+            "normaliserat_ord": "medley",
+            "homonr": "1",
+            "upos": "NOUN",
+            "ordkl": "subst.",
+            "text": "+t +n",
+        }
+        matching = {
+            "id": "medley..nn.1",
+            "upos": "NOUN",
+            "lemmas": {"medley"},
+            "forms": {
+                "medley", "medleys", "medleyt", "medleyts",
+                "medleyn", "medleyns", "medleyna", "medleynas",
+            },
+        }
+        other_homonym = {
+            "id": "medley..nn.2",
+            "upos": "NOUN",
+            "lemmas": {"medley"},
+            "forms": {"medley", "medleys", "medleyn", "medleyns"},
+        }
+        selected = select_direct_match(
+            record,
+            {"medley": [matching, other_homonym]},
+            {},
+        )
+        self.assertIsNotNone(selected)
+        method, analyses = selected or ("", [])
+        self.assertEqual("lemma_same_upos", method)
+        self.assertEqual([matching], analyses)
+        self.assertIn("medleyn", other_homonym["forms"])
+
     def test_reports_completed_noun_forms_as_subset(self) -> None:
         record = {
             "id": 1,
@@ -174,9 +208,54 @@ class ValidateDirectFormsTests(unittest.TestCase):
         self.assertEqual("saol_paradigm_differs_from_saldo", row["status"])
         self.assertEqual(["pajaseriet", "pajaseriets"], row["extra_from_saol"])
 
-    def test_reports_case_only_difference_separately(self) -> None:
+    def test_reports_t_n_pure_saldo_subset_as_source_difference(self) -> None:
         record = {
             "id": 8,
+            "normaliserat_ord": "medley",
+            "homonr": "2",
+            "upos": "NOUN",
+            "ordkl": "subst.",
+            "text": "+t +n",
+        }
+        analysis = {
+            "id": "medley..nn.1",
+            "upos": "NOUN",
+            "lemmas": {"medley"},
+            "forms": {"medley", "medleys", "medleyn", "medleyns"},
+        }
+        row = validation_row(record, "lemma_same_upos", [analysis])
+        self.assertEqual("saol_paradigm_differs_from_saldo", row["status"])
+        self.assertEqual(
+            ["medleyna", "medleynas", "medleyt", "medleyts"],
+            row["extra_from_saol"],
+        )
+        self.assertEqual([], row["missing_from_saol"])
+
+    def test_keeps_t_n_other_lexeme_forms_as_real_mismatch(self) -> None:
+        record = {
+            "id": 9,
+            "normaliserat_ord": "fälle",
+            "upos": "NOUN",
+            "ordkl": "subst.",
+            "text": "+t +n",
+        }
+        analysis = {
+            "id": "fälla..nn.1",
+            "upos": "NOUN",
+            "lemmas": {"fälle", "fälla"},
+            "forms": {
+                "fälle", "fäll", "fälla", "fällan", "fällans", "fällas",
+                "fällor", "fällorna", "fällornas", "fällors", "fälls",
+            },
+        }
+        row = validation_row(record, "lemma_same_upos", [analysis])
+        self.assertEqual("form_set_mismatch", row["status"])
+        self.assertIn("fälla", row["missing_from_saol"])
+        self.assertIn("fället", row["extra_from_saol"])
+
+    def test_reports_case_only_difference_separately(self) -> None:
+        record = {
+            "id": 10,
             "normaliserat_ord": "Östersjöfiske",
             "upos": "NOUN",
             "ordkl": "subst.",
