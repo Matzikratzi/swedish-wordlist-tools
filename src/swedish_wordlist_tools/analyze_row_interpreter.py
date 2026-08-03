@@ -87,6 +87,8 @@ def build_report(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
                     {
                         "lemma": record.get("normaliserat_ord"),
                         "stycke": record.get("stycke"),
+                        "ordkl": record.get("ordkl"),
+                        "raw_text": record.get("text"),
                         "pattern": pattern,
                     }
                 )
@@ -143,6 +145,16 @@ def render_text(report: dict[str, Any]) -> str:
     lines.extend(["", "Orsaker till otolkade rader:"])
     for reason, count in report["unsupported_reasons"].items():
         lines.append(f"  {count:6d}  {reason}")
+
+    missing_rows = report["unsupported_examples"].get("missing_pattern", [])
+    if missing_rows:
+        lines.extend(["", "Exempel på poster utan böjningsmönster:"])
+        for row in missing_rows[:30]:
+            lines.append(
+                "    "
+                f"{row.get('lemma')!s} | stycke={row.get('stycke')!r} "
+                f"| ordkl={row.get('ordkl')!r} | raw_text={row.get('raw_text')!r}"
+            )
 
     lines.extend(["", "Exempel på otolkade minusformer:"])
     for reason in (
