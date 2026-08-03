@@ -9,6 +9,7 @@ class ValidateRowInterpreterSaldoTests(unittest.TestCase):
     def record(self, lemma: str, pattern: str, stycke: str = ""):
         return {
             "id": "1",
+            "homonr": "2",
             "normaliserat_ord": lemma,
             "text": pattern,
             "stycke": stycke,
@@ -32,6 +33,9 @@ class ValidateRowInterpreterSaldoTests(unittest.TestCase):
         )
         self.assertEqual("all_key_forms_in_saldo", row["status"])
         self.assertEqual([], row["missing_key_forms_from_saldo"])
+        self.assertEqual("1", row["record_id"])
+        self.assertEqual("2", row["homonym_number"])
+        self.assertEqual("s.", row["ordkl"])
 
     def test_reports_missing_interpreted_key_form(self) -> None:
         row = validation_row(
@@ -49,6 +53,18 @@ class ValidateRowInterpreterSaldoTests(unittest.TestCase):
             [self.analysis("alarmklocka", "alarmklockan", "alarmklockor")],
         )
         self.assertEqual("all_key_forms_in_saldo", row["status"])
+
+    def test_validates_multiple_forms_in_same_slot(self) -> None:
+        row = validation_row(
+            self.record("fredag", "+en el. vard. -dan; pl. +ar", "fre|dag"),
+            "lemma_same_upos",
+            [self.analysis("fredag", "fredagen", "fredan", "fredagar")],
+        )
+        self.assertEqual("all_key_forms_in_saldo", row["status"])
+        self.assertEqual(
+            ["fredag", "fredagen", "fredan", "fredagar"],
+            row["key_forms"],
+        )
 
 
 if __name__ == "__main__":
