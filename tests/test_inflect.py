@@ -131,7 +131,7 @@ class InflectTests(unittest.TestCase):
         self.assertIsNone(normalise_pattern("(null)"))
 
     def test_all_initial_patterns_are_registered(self) -> None:
-        self.assertEqual(len(COMMON_PATTERNS), 11)
+        self.assertEqual(len(COMMON_PATTERNS), 14)
 
     def test_generates_typed_noun_word_forms(self) -> None:
         entry = generate_entry({"normaliserat_ord": "aktie", "text": "+n +r", "upos": "NOUN"})
