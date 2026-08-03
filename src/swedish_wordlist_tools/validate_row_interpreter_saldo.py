@@ -8,7 +8,7 @@ from typing import Any, Iterable
 
 from .compare_sources import _build_form_index, read_saldo
 from .jsonl import read_jsonl
-from .saol_row_interpreter import interpret_noun_row
+from .noun_slots import interpret_noun_slots
 from .validate_direct_forms import select_direct_match
 
 DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
@@ -27,8 +27,8 @@ def validation_row(
     match_method: str,
     analyses: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    interpreted = interpret_noun_row(record)
-    if interpreted is None:
+    slots = interpret_noun_slots(record)
+    if slots is None:
         return {
             "record_id": str(record.get("id") or record.get("subnr") or ""),
             "lemma": str(record.get("normaliserat_ord", "")),
@@ -39,7 +39,7 @@ def validation_row(
             "missing_key_forms_from_saldo": [],
         }
 
-    key_forms = [form.written_form for form in interpreted.key_forms]
+    key_forms = list(slots.written_forms())
     saldo_forms = {
         str(form)
         for analysis in analyses
@@ -56,17 +56,17 @@ def validation_row(
 
     if not missing:
         status = "all_key_forms_in_saldo"
-    elif interpreted.lemma.casefold() not in saldo_folded:
+    elif slots.lemma.casefold() not in saldo_folded:
         status = "lemma_missing_from_saldo_analysis"
     else:
         status = "some_key_forms_missing_from_saldo"
 
     return {
-        "record_id": str(record.get("id") or record.get("subnr") or ""),
-        "lemma": interpreted.lemma,
-        "homonym_number": str(record.get("homonr", "")),
-        "notation": interpreted.pattern,
-        "ordkl": str(record.get("ordkl", "")),
+        "record_id": str(slots.metadata.get("record_id", "")),
+        "lemma": slots.lemma,
+        "homonym_number": str(slots.metadata.get("homonym_number", "")),
+        "notation": slots.notation,
+        "ordkl": str(slots.metadata.get("ordkl", "")),
         "match_method": match_method,
         "status": status,
         "key_forms": key_forms,
