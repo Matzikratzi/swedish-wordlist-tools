@@ -23,7 +23,7 @@ def clean_stycke(value: object) -> str:
 def compound_verb_parts(record: Mapping[str, Any]) -> tuple[str, str, str] | None:
     """Return ``(prefix, head, trailing_words)`` for an exact bar-marked verb.
 
-    Only the last bar is significant.  The cleaned first word must equal the
+    Only the last bar is significant. The cleaned first word must equal the
     target lemma's first word, so malformed or merely typographical bars are
     never used as evidence.
     """
@@ -80,7 +80,7 @@ def borrow_compound_verb_slots(
 ) -> LexemeSlots | None:
     """Fill a bar-marked compound from an exact independent head verb.
 
-    Existing target slots win.  Borrowing only fills missing slots and never
+    Existing target slots win. Borrowing only fills missing slots and never
     invents a paradigm when the exact right-hand verb is absent or ambiguous.
     """
     parts = compound_verb_parts(record)
@@ -102,10 +102,12 @@ def borrow_compound_verb_slots(
     for form in source.forms:
         if form.slot in {"lemma", "infinitive"} or form.slot in existing_slots:
             continue
-        if not form.written_form.startswith(head):
+        # The independent head supplies its complete inflected first word:
+        # skriva -> skriver, so av|skriva becomes av + skriver.
+        source_first, separator, source_trailing = form.written_form.partition(" ")
+        if separator or source_trailing:
             continue
-        suffix = form.written_form[len(head) :]
-        written = prefix + head + suffix + trailing_words
+        written = prefix + source_first + trailing_words
         forms.append(SlotForm(form.slot, written, f"compound-head:{head}"))
         borrowed = True
 
