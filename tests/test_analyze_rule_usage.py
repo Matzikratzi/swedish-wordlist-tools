@@ -20,7 +20,7 @@ class AnalyzeRuleUsageTests(unittest.TestCase):
             classify_rule_path(self.record("hund", "+en +ar")),
         )
         self.assertEqual(
-            "noun_completion_from_unsupported",
+            "noun_completion_after_base_generation",
             classify_rule_path(self.record("parti", "+et +er")),
         )
 
