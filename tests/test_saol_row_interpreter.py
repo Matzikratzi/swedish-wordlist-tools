@@ -9,11 +9,18 @@ from swedish_wordlist_tools.saol_row_interpreter import (
 
 
 class SaolRowInterpreterTests(unittest.TestCase):
-    def record(self, lemma: str, pattern: str, stycke: str = ""):
+    def record(
+        self,
+        lemma: str,
+        pattern: str | None,
+        stycke: str = "",
+        ordkl: str = "s.",
+    ):
         return {
             "normaliserat_ord": lemma,
             "text": pattern,
             "stycke": stycke,
+            "ordkl": ordkl,
             "upos": "NOUN",
         }
 
@@ -75,7 +82,6 @@ class SaolRowInterpreterTests(unittest.TestCase):
             self.record("A-lista", "+n -listor", "A‑|lista")
         )
         self.assertIsNotNone(row)
-        # Output preserves the source typography from stycke.
         self.assertEqual("A‐listor", row.form("pl_indef") if row else None)
 
     def test_uses_last_bar(self) -> None:
@@ -127,9 +133,69 @@ class SaolRowInterpreterTests(unittest.TestCase):
             },
         )
 
+    def test_interprets_colon_suffixes(self) -> None:
+        row = interpret_noun_row(self.record("tv", "+:n +:ar"))
+        self.assertIsNotNone(row)
+        self.assertEqual("tv:n", row.form("sg_def") if row else None)
+        self.assertEqual("tv:ar", row.form("pl_indef") if row else None)
+
+    def test_interprets_plural_use_comment(self) -> None:
+        row = interpret_noun_row(
+            self.record("dagofficer", "+en; som: pl. anv. +are, best. pl. +arna")
+        )
+        self.assertIsNotNone(row)
+        self.assertEqual("dagofficeren", row.form("sg_def") if row else None)
+        self.assertEqual("dagofficerare", row.form("pl_indef") if row else None)
+        self.assertEqual("dagofficerarna", row.form("pl_def") if row else None)
+
+    def test_interprets_optional_and_colloquial_markers(self) -> None:
+        optional = interpret_noun_row(
+            self.record("halvmeter", "+n; pl. + ibl. -metrar", "halv|meter")
+        )
+        self.assertIsNotNone(optional)
+        self.assertEqual(
+            {"halvmeter", "halvmetrar"},
+            {
+                form.written_form
+                for form in (optional.key_forms if optional else ())
+                if form.slot == "pl_indef"
+            },
+        )
+        colloquial = interpret_noun_row(
+            self.record("fredag", "+en el. vard. -dan; pl. +ar", "fre|dag")
+        )
+        self.assertIsNotNone(colloquial)
+        self.assertEqual(
+            {"fredagen", "fredan"},
+            {
+                form.written_form
+                for form in (colloquial.key_forms if colloquial else ())
+                if form.slot == "sg_def"
+            },
+        )
+
+    def test_interprets_missing_pattern_from_ordkl(self) -> None:
+        indeclinable = interpret_noun_row(
+            self.record("acidofilus", None, ordkl="s. oböjl.")
+        )
+        self.assertIsNotNone(indeclinable)
+        self.assertEqual(("acidofilus",), tuple(form.written_form for form in indeclinable.key_forms))
+
+        plural = interpret_noun_row(
+            self.record("addenda", None, ordkl="s. pl.")
+        )
+        self.assertIsNotNone(plural)
+        self.assertEqual("addenda", plural.form("pl_indef") if plural else None)
+
+        definite = interpret_noun_row(
+            self.record("allsvenskan", None, ordkl="s. best.")
+        )
+        self.assertIsNotNone(definite)
+        self.assertEqual("allsvenskan", definite.form("sg_def") if definite else None)
+
     def test_rejects_unparsed_prose(self) -> None:
         self.assertIsNone(
-            interpret_noun_row(self.record("dagofficer", "+en; som: pl. anv. +are"))
+            interpret_noun_row(self.record("herr", "+n; i: vissa: uttryck: gen. herrans"))
         )
 
     def test_bracketed_pronunciation_is_removed_before_interpretation(self) -> None:
