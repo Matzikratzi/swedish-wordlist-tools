@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+from swedish_wordlist_tools.lexeme_slots import SlotForm, build_lexeme_slots
 from swedish_wordlist_tools.verb_slot_schema import add_precise_active_verb_slots
 from swedish_wordlist_tools.verb_slots import interpret_verb_slots
 
@@ -55,11 +56,13 @@ class VerbSlotSchemaTests(unittest.TestCase):
         self.assertEqual(once.forms, twice.forms)
 
     def test_does_not_change_other_word_classes(self) -> None:
-        legacy = interpret_verb_slots(self.record("gå", "går gick gått"))
-        self.assertIsNotNone(legacy)
-        assert legacy is not None
-        object.__setattr__(legacy, "upos", "NOUN")
-        self.assertIs(legacy, add_precise_active_verb_slots(legacy))
+        noun = build_lexeme_slots(
+            lemma="bok",
+            upos="NOUN",
+            notation="+en +er",
+            forms=(SlotForm("sg_indef", "bok", "lemma"),),
+        )
+        self.assertIs(noun, add_precise_active_verb_slots(noun))
 
 
 if __name__ == "__main__":
