@@ -1,54 +1,9 @@
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
 from .lexeme_slots import LexemeSlots, SlotForm, build_lexeme_slots
-
-_PASSIVE_MARKERS = {"pass", "passiv", "s-form", "sform"}
-
-
-def _normalise_msd(value: object) -> str:
-    return re.sub(r"[^a-zåäö0-9]+", " ", str(value or "").casefold()).strip()
-
-
-def saldo_verb_slot(msd: object) -> str | None:
-    """Map an unambiguous SALDO verb MSD label to a supported slot.
-
-    The mapping is intentionally conservative. Passive forms are not imported
-    yet, and unknown labels return ``None`` rather than guessing.
-    """
-    text = _normalise_msd(msd)
-    if not text:
-        return None
-    words = set(text.split())
-    if words & _PASSIVE_MARKERS or "passiv" in text:
-        return None
-
-    if "pres" in words or "presens" in words:
-        return "present"
-    if words & {"pret", "preteritum", "imperf", "imperfekt"}:
-        return "preterite"
-    if "sup" in words or "supinum" in words:
-        return "supine"
-    if "inf" in words or "infinitiv" in words:
-        return "infinitive"
-    if "imper" in words or "imperativ" in words:
-        return "imperative_active"
-
-    is_perfect_participle = (
-        ("perf" in words or "perfekt" in words)
-        and ("part" in words or "particip" in words)
-    )
-    if is_perfect_participle:
-        if words & {"pl", "plural"}:
-            return "perfect_participle_plural"
-        if words & {"neut", "neutrum", "ett"}:
-            return "perfect_participle_neuter"
-        if words & {"utr", "utrum", "common", "en"}:
-            return "perfect_participle_common"
-    return None
 
 
 def _analysis_id(analysis: Mapping[str, Any]) -> str:
@@ -67,77 +22,84 @@ def _analysis_lemmas(analysis: Mapping[str, Any]) -> set[str]:
     }
 
 
-def _tagged_forms(analysis: Mapping[str, Any]) -> Iterable[tuple[str, str]]:
-    for item in analysis.get("form_entries", ()):
-        if not isinstance(item, Mapping):
-            continue
-        written = str(item.get("written_form") or item.get("writtenForm") or "").strip()
-        msd = str(item.get("msd") or "").strip()
-        if written and msd:
-            yield written, msd
-
-
-def select_unique_saldo_verb_analysis(
+def exact_saldo_verb_analyses(
     lemma: str,
     analyses: Iterable[Mapping[str, Any]],
-) -> Mapping[str, Any] | None:
-    """Select one exact VERB analysis, rejecting homonym ambiguity."""
+) -> tuple[Mapping[str, Any], ...]:
+    """Return every exact VERB analysis for ``lemma``.
+
+    Homonymous analyses are intentionally retained. For a game word list their
+    union still consists of forms attested by SALDO; grammatical disambiguation
+    is not required merely to admit a written word form.
+    """
     key = lemma.strip().casefold()
-    candidates = [
+    return tuple(
         analysis
         for analysis in analyses
         if _analysis_upos(analysis) == "VERB" and key in _analysis_lemmas(analysis)
-    ]
-    return candidates[0] if len(candidates) == 1 else None
+    )
 
 
-def add_saldo_verb_fallback(
+def _safe_written_forms(analysis: Mapping[str, Any]) -> Iterable[str]:
+    for value in analysis.get("forms", ()):
+        written = str(value).strip()
+        if not written or written.endswith("-"):
+            continue
+        yield written
+
+
+def add_saldo_attested_forms(
     current: LexemeSlots,
     analyses: Iterable[Mapping[str, Any]],
 ) -> LexemeSlots:
-    """Fill only missing verb slots from one exact, tagged SALDO analysis.
+    """Add exact-lemma SALDO forms without guessing their grammatical slot.
 
-    Existing row-derived or compound-head-derived slots are never overwritten.
-    A SALDO slot is imported only when the selected analysis has tagged forms
-    for that slot and no form already exists in the slot.
+    Existing row-derived forms remain untouched. New SALDO words are stored in
+    the generic ``saldo_attested`` slot and carry form-level provenance. This is
+    sufficient for game-word-list generation while preserving the more precise
+    slots already interpreted from SAOL.
     """
     if current.upos != "VERB":
         return current
-    analysis = select_unique_saldo_verb_analysis(current.lemma, analyses)
-    if analysis is None:
+    selected = exact_saldo_verb_analyses(current.lemma, analyses)
+    if not selected:
         return current
 
-    by_slot: dict[str, list[str]] = {}
-    for written, msd in _tagged_forms(analysis):
-        slot = saldo_verb_slot(msd)
-        if slot is None:
-            continue
-        values = by_slot.setdefault(slot, [])
-        if written not in values:
-            values.append(written)
+    existing_words = set(current.written_forms())
+    supporting_ids: dict[str, list[str]] = {}
+    for analysis in selected:
+        source_id = _analysis_id(analysis)
+        for written in _safe_written_forms(analysis):
+            ids = supporting_ids.setdefault(written, [])
+            if source_id and source_id not in ids:
+                ids.append(source_id)
 
     forms = list(current.forms)
     changed = False
-    source_id = _analysis_id(analysis)
-    for slot, written_forms in by_slot.items():
-        if current.forms_for(slot):
+    for written in sorted(supporting_ids, key=str.casefold):
+        if written in existing_words:
             continue
-        for written in written_forms:
-            forms.append(
-                SlotForm(
-                    slot,
-                    written,
-                    f"saldo:{source_id}",
-                    "saldo",
-                    source_id,
-                )
+        source_ids = ",".join(supporting_ids[written])
+        forms.append(
+            SlotForm(
+                "saldo_attested",
+                written,
+                f"saldo:{source_ids}",
+                "saldo",
+                source_ids,
             )
-            changed = True
+        )
+        existing_words.add(written)
+        changed = True
 
     if not changed:
         return current
     metadata = dict(current.metadata)
-    metadata["saldo_fallback_lexeme"] = source_id
+    metadata["saldo_fallback_lexemes"] = ",".join(
+        source_id
+        for source_id in (_analysis_id(analysis) for analysis in selected)
+        if source_id
+    )
     return build_lexeme_slots(
         lemma=current.lemma,
         upos=current.upos,
@@ -145,3 +107,7 @@ def add_saldo_verb_fallback(
         forms=forms,
         metadata=metadata,
     )
+
+
+# Backwards-compatible name while callers migrate to the game-oriented API.
+add_saldo_verb_fallback = add_saldo_attested_forms
