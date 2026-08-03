@@ -38,6 +38,7 @@ saol14-validate-row-interpreter-saldo = "swedish_wordlist_tools.validate_row_int
 saol14-analyze-verb-slots = "swedish_wordlist_tools.analyze_verb_slots:main"
 saol14-analyze-verb-compound-heads = "swedish_wordlist_tools.analyze_verb_compound_heads:main"
 saol14-analyze-verb-participles = "swedish_wordlist_tools.analyze_verb_participles:main"
+saol14-validate-verb-participles-saldo = "swedish_wordlist_tools.validate_verb_participles_saldo:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
