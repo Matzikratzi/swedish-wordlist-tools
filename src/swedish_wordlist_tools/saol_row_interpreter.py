@@ -1,0 +1,150 @@
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from typing import Any
+
+from .inflect import normalise_pattern
+
+
+@dataclass(frozen=True)
+class KeyForm:
+    slot: str
+    written_form: str
+    source: str
+
+
+@dataclass(frozen=True)
+class InterpretedRow:
+    lemma: str
+    pattern: str
+    key_forms: tuple[KeyForm, ...]
+
+    def form(self, slot: str) -> str | None:
+        for key_form in self.key_forms:
+            if key_form.slot == slot:
+                return key_form.written_form
+        return None
+
+
+_TOKEN_RE = re.compile(
+    r"[+\-][A-Za-zÅÄÖåäöÉéÜü]*|pl\.|best\.|el\.|[;,]",
+    re.IGNORECASE,
+)
+
+
+def _clean_stycke(value: Any) -> str:
+    return str(value or "").replace("·", "").strip()
+
+
+def _compound_parts(record: dict[str, Any], lemma: str) -> tuple[str, str] | None:
+    stycke = _clean_stycke(record.get("stycke"))
+    if "|" not in stycke:
+        return None
+    prefix, head = stycke.rsplit("|", 1)
+    prefix = prefix.replace("|", "")
+    if prefix + head != lemma:
+        return None
+    return prefix, head
+
+
+def apply_form_token(
+    record: dict[str, Any], lemma: str, token: str
+) -> str | None:
+    """Apply one cleaned SAOL form token to a lemma.
+
+    ``+suffix`` appends to the inflected word. A bare ``+`` means unchanged
+    spelling. ``-headform`` replaces the component after the final bar in
+    ``stycke``. No suffix guessing is performed for a minus token.
+    """
+    if token == "+":
+        return lemma
+    if token.startswith("+"):
+        suffix = token[1:]
+        first, separator, rest = lemma.partition(" ")
+        return first + suffix + (separator + rest if separator else "")
+    if token.startswith("-"):
+        replacement = token[1:]
+        if not replacement:
+            return None
+        parts = _compound_parts(record, lemma)
+        if parts is None:
+            return None
+        prefix, _head = parts
+        return prefix + replacement
+    return None
+
+
+def _slot_sequence(pattern: str) -> tuple[tuple[str, str], ...] | None:
+    """Map cleaned noun notation to grammatical key-form slots.
+
+    The state machine understands the ordinary compact syntax rather than a
+    table of complete paradigms. Before ``pl.`` the first form is definite
+    singular. After ``pl.`` the next form is indefinite plural. ``best. pl.``
+    explicitly selects definite plural. Two adjacent form tokens without a
+    label are interpreted as definite singular followed by indefinite plural.
+    """
+    tokens = _TOKEN_RE.findall(pattern)
+    if not tokens:
+        return None
+
+    result: list[tuple[str, str]] = []
+    context = "singular"
+    pending_best = False
+    seen_singular_form = False
+
+    for token in tokens:
+        lower = token.casefold()
+        if token in {";", ","} or lower == "el.":
+            continue
+        if lower == "best.":
+            pending_best = True
+            continue
+        if lower == "pl.":
+            context = "plural_definite" if pending_best else "plural"
+            pending_best = False
+            continue
+        if not token.startswith(("+", "-")):
+            return None
+
+        if context == "plural_definite":
+            slot = "pl_def"
+        elif context == "plural":
+            slot = "pl_indef"
+            context = "after_plural"
+        elif not seen_singular_form:
+            slot = "sg_def"
+            seen_singular_form = True
+        else:
+            slot = "pl_indef"
+            context = "after_plural"
+        result.append((slot, token))
+
+    return tuple(result) if result else None
+
+
+def interpret_noun_row(record: dict[str, Any]) -> InterpretedRow | None:
+    """Interpret a cleaned SAOL noun row into grammatical key forms."""
+    if str(record.get("upos", "")).upper() != "NOUN":
+        return None
+    lemma = str(record.get("normaliserat_ord", "")).strip()
+    pattern = normalise_pattern(record.get("text"))
+    if not lemma or pattern is None:
+        return None
+
+    slots = _slot_sequence(pattern)
+    if slots is None:
+        return None
+
+    key_forms: list[KeyForm] = [KeyForm("lemma", lemma, "lemma")]
+    seen: set[tuple[str, str]] = {("lemma", lemma)}
+    for slot, token in slots:
+        written_form = apply_form_token(record, lemma, token)
+        if written_form is None:
+            return None
+        marker = (slot, written_form)
+        if marker not in seen:
+            seen.add(marker)
+            key_forms.append(KeyForm(slot, written_form, token))
+
+    return InterpretedRow(lemma, pattern, tuple(key_forms))
