@@ -78,11 +78,12 @@ def build_simple_verb_paradigm_index(
 
     A head verb's own ``text`` may itself be cut at 50 characters. Therefore
     complete bar-marked compounds can also provide evidence: ``ren|skriva``
-    with ``renskriver`` proves the head form ``skriver``. Evidence is resolved
-    independently per grammatical slot, but any contradiction excludes the
-    entire head verb from the index.
+    with ``renskriver`` proves the head form ``skriver``. Family evidence is
+    accepted only when the head also exists as an independent verb. Any
+    contradiction excludes the entire head verb from the index.
     """
     record_list = list(records)
+    independent_heads: set[str] = set()
     evidence: dict[
         str,
         dict[str, dict[str, list[frozenset[str]]]],
@@ -115,6 +116,7 @@ def build_simple_verb_paradigm_index(
             lemma = str(record.get("normaliserat_ord") or "").strip()
             if not lemma or " " in lemma:
                 continue
+            independent_heads.add(lemma)
             for slot in _VERB_FORM_SLOTS:
                 add_evidence(
                     lemma,
@@ -124,8 +126,6 @@ def build_simple_verb_paradigm_index(
                 )
             continue
 
-        # A cut compound cannot repair another cut row. Only complete compound
-        # rows are projected back to their right-hand head.
         if truncated:
             continue
         prefix, head, trailing_words = parts
@@ -144,6 +144,8 @@ def build_simple_verb_paradigm_index(
 
     result: dict[str, LexemeSlots] = {}
     for head, slot_evidence in evidence.items():
+        if head not in independent_heads:
+            continue
         chosen_by_slot: dict[str, frozenset[str]] = {}
         ambiguous = False
         for slot in _VERB_FORM_SLOTS:
