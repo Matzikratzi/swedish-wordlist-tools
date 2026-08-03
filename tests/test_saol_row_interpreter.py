@@ -107,6 +107,26 @@ class SaolRowInterpreterTests(unittest.TestCase):
             )
         )
 
+    def test_interprets_underscore_separated_alternatives(self) -> None:
+        row = interpret_noun_row(self.record("chip", "+et; pl. + _ +t +n"))
+        self.assertIsNotNone(row)
+        self.assertEqual(
+            {"chipet", "chipt"},
+            {
+                form.written_form
+                for form in (row.key_forms if row else ())
+                if form.slot == "sg_def"
+            },
+        )
+        self.assertEqual(
+            {"chip", "chipn"},
+            {
+                form.written_form
+                for form in (row.key_forms if row else ())
+                if form.slot == "pl_indef"
+            },
+        )
+
     def test_rejects_unparsed_prose(self) -> None:
         self.assertIsNone(
             interpret_noun_row(self.record("dagofficer", "+en; som: pl. anv. +are"))
