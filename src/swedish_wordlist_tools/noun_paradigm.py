@@ -51,6 +51,11 @@ _OFFICER_PLURAL_RE = re.compile(
     re.IGNORECASE,
 )
 
+_SHORT_HEAD_PLURAL_RE = re.compile(
+    r"^\+n\s+-(\S+)\s*$",
+    re.IGNORECASE,
+)
+
 
 def _genitive(form: str) -> str:
     """Return the ordinary Swedish genitive spelling."""
@@ -130,15 +135,38 @@ def _common_prefix_length(left: str, right: str) -> int:
     return length
 
 
-def _replace_compound_head(lemma: str, plural_head: str) -> str | None:
-    """Replace the lemma's final head with an explicitly supplied plural head.
+def _bar_marked_compound_parts(record: dict[str, Any]) -> tuple[str, str] | None:
+    """Return normalized compound prefix and head from SAOL ``stycke``.
 
-    SAOL writes only the changed compound head after a leading hyphen, for
-    example ``avskedsansökan — -ansökningar`` and
-    ``fredssträvan — -strävanden``. Choose the suffix of the lemma with the
-    longest shared prefix with the supplied head, requiring at least three
-    shared characters to avoid accidental matches.
+    ``a·larm|knapp`` becomes ``("alarm", "knapp")``. The last bar is used,
+    since a longer compound may contain more than one marked boundary.
     """
+    stycke = str(record.get("stycke", "")).strip()
+    if "|" not in stycke:
+        return None
+    prefix, head = stycke.rsplit("|", 1)
+    prefix = prefix.replace("·", "").strip()
+    head = head.replace("·", "").strip()
+    if not prefix or not head:
+        return None
+    return prefix, head
+
+
+def _replace_bar_marked_head(
+    record: dict[str, Any], replacement_head: str
+) -> str | None:
+    parts = _bar_marked_compound_parts(record)
+    if parts is None:
+        return None
+    prefix, head = parts
+    lemma = str(record.get("normaliserat_ord", "")).strip()
+    if not lemma or lemma.casefold() != (prefix + head).casefold():
+        return None
+    return prefix + replacement_head
+
+
+def _replace_compound_head(lemma: str, plural_head: str) -> str | None:
+    """Fallback for records without a usable bar-marked ``stycke``."""
     best_start: int | None = None
     best_length = 0
     for start in range(len(lemma)):
@@ -151,7 +179,9 @@ def _replace_compound_head(lemma: str, plural_head: str) -> str | None:
     return lemma[:best_start] + plural_head
 
 
-def _explicit_used_plural(lemma: str, notation: str) -> str | None:
+def _explicit_used_plural(
+    record: dict[str, Any], lemma: str, notation: str
+) -> str | None:
     match = _EXPLICIT_USED_PLURAL_RE.fullmatch(notation.strip())
     if match is None:
         return None
@@ -159,7 +189,11 @@ def _explicit_used_plural(lemma: str, notation: str) -> str | None:
     supplied = match.group(1)
     if not supplied.startswith("-"):
         return supplied
-    return _replace_compound_head(lemma, supplied[1:])
+    plural_head = supplied[1:]
+    return (
+        _replace_bar_marked_head(record, plural_head)
+        or _replace_compound_head(lemma, plural_head)
+    )
 
 
 def _entry_from_explicit_used_plural(
@@ -168,7 +202,7 @@ def _entry_from_explicit_used_plural(
     lemma = str(record.get("normaliserat_ord", "")).strip()
     if not lemma:
         return None
-    plural = _explicit_used_plural(lemma, notation)
+    plural = _explicit_used_plural(record, lemma, notation)
     if not plural:
         return None
 
@@ -179,6 +213,36 @@ def _entry_from_explicit_used_plural(
         word_forms=(
             GeneratedWordForm(lemma, _CI, "lemma"),
             GeneratedWordForm(lemma, _SG_DEF_NOM, "derived"),
+            GeneratedWordForm(plural, _PL_INDEF_NOM, "explicit_plural"),
+        ),
+        pattern_group=pattern,
+    )
+
+
+def _entry_from_short_head_plural(
+    record: dict[str, Any], notation: str
+) -> GeneratedEntry | None:
+    """Parse short SAOL notation such as ``+n -knappar``.
+
+    The compound head is taken from ``stycke`` rather than guessed from the
+    lemma. For ``a·larm|knapp`` this yields ``alarmknappar``.
+    """
+    match = _SHORT_HEAD_PLURAL_RE.fullmatch(notation.strip())
+    if match is None:
+        return None
+    lemma = str(record.get("normaliserat_ord", "")).strip()
+    if not lemma:
+        return None
+    plural = _replace_bar_marked_head(record, match.group(1))
+    if not plural:
+        return None
+    pattern = "+n explicit compound-head plural"
+    return GeneratedEntry(
+        lemma=lemma,
+        pattern=pattern,
+        word_forms=(
+            GeneratedWordForm(lemma, _CI, "lemma"),
+            GeneratedWordForm(lemma + "n", _SG_DEF_NOM, "derived"),
             GeneratedWordForm(plural, _PL_INDEF_NOM, "explicit_plural"),
         ),
         pattern_group=pattern,
@@ -308,6 +372,10 @@ def complete_noun_entry(
     explicit_plural_entry = _entry_from_explicit_used_plural(record, raw_pattern)
     if explicit_plural_entry is not None:
         return _complete_full_paradigm(explicit_plural_entry)
+
+    short_head_plural_entry = _entry_from_short_head_plural(record, raw_pattern)
+    if short_head_plural_entry is not None:
+        return _complete_full_paradigm(short_head_plural_entry)
 
     officer_entry = _entry_from_officer_plural_comment(record, raw_pattern)
     if officer_entry is not None:
