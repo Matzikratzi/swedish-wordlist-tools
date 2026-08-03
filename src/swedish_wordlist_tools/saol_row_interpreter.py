@@ -28,15 +28,21 @@ class InterpretedRow:
         return None
 
 
+# A cleaned row consists of grammatical labels, punctuation and form tokens.
+# A form token can be a suffix (+ar), a bar-head replacement (-resor), or a
+# complete written form (a-kassor, abc-böcker, ankaret).
 _TOKEN_RE = re.compile(
-    r"[+\-][A-Za-zÅÄÖåäöÉéÜü]*|pl\.|best\.|el\.|[;,]",
+    r"pl\.|best\.|el\.|[;,]|[+\-][A-Za-zÅÄÖåäöÉéÜü]*|"
+    r"[A-Za-zÅÄÖåäöÉéÜü0-9][\wÅÄÖåäöÉéÜü:‐‑–-]*",
     re.IGNORECASE,
 )
+_HTML_TAG_RE = re.compile(r"<[^>]*>")
 
 
 def _comparison_key(value: Any) -> str:
     """Normalize harmless typography before comparing ``stycke`` with lemma."""
     text = unicodedata.normalize("NFKC", str(value or ""))
+    text = _HTML_TAG_RE.sub("", text)
     text = text.replace("\u00ad", "").replace("·", "")
     text = text.replace("‐", "-").replace("‑", "-").replace("–", "-")
     text = re.sub(r"\s+", " ", text).strip()
@@ -45,6 +51,7 @@ def _comparison_key(value: Any) -> str:
 
 def _clean_stycke(value: Any) -> str:
     text = unicodedata.normalize("NFKC", str(value or ""))
+    text = _HTML_TAG_RE.sub("", text)
     return text.replace("\u00ad", "").replace("·", "").strip()
 
 
@@ -66,7 +73,7 @@ def apply_form_token(
 
     ``+suffix`` appends to the inflected word. A bare ``+`` means unchanged
     spelling. ``-headform`` replaces the component after the final bar in
-    ``stycke``. No suffix guessing is performed for a minus token.
+    ``stycke``. Any other token is already a complete written form.
     """
     if token == "+":
         return lemma
@@ -83,7 +90,21 @@ def apply_form_token(
             return None
         prefix, _head = parts
         return prefix + replacement
-    return None
+    return token
+
+
+def _tokenize(pattern: str) -> tuple[str, ...] | None:
+    """Tokenize only when every non-space character belongs to the syntax."""
+    tokens: list[str] = []
+    position = 0
+    for match in _TOKEN_RE.finditer(pattern):
+        if pattern[position : match.start()].strip():
+            return None
+        tokens.append(match.group(0))
+        position = match.end()
+    if pattern[position:].strip():
+        return None
+    return tuple(tokens) if tokens else None
 
 
 def _slot_sequence(pattern: str) -> tuple[tuple[str, str], ...] | None:
@@ -95,8 +116,8 @@ def _slot_sequence(pattern: str) -> tuple[tuple[str, str], ...] | None:
     explicitly selects definite plural. Two adjacent form tokens without a
     label are interpreted as definite singular followed by indefinite plural.
     """
-    tokens = _TOKEN_RE.findall(pattern)
-    if not tokens:
+    tokens = _tokenize(pattern)
+    if tokens is None:
         return None
 
     result: list[tuple[str, str]] = []
@@ -115,8 +136,6 @@ def _slot_sequence(pattern: str) -> tuple[tuple[str, str], ...] | None:
             context = "plural_definite" if pending_best else "plural"
             pending_best = False
             continue
-        if not token.startswith(("+", "-")):
-            return None
 
         if context == "plural_definite":
             slot = "pl_def"
