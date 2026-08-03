@@ -32,7 +32,7 @@ class InterpretedRow:
 # A form token can be a suffix (+ar), a bar-head replacement (-resor), or a
 # complete written form (a-kassor, abc-böcker, ankaret).
 _TOKEN_RE = re.compile(
-    r"pl\.|best\.|el\.|[;,]|[+\-][A-Za-zÅÄÖåäöÉéÜü]*|"
+    r"pl\.|best\.|el\.|[;,]|[+\-][A-Za-zÅÄÖåäöÉéÜü:]*|"
     r"[A-Za-zÅÄÖåäöÉéÜü0-9][\wÅÄÖåäöÉéÜü:‐‑–-]*",
     re.IGNORECASE,
 )
@@ -126,6 +126,26 @@ def apply_form_token(
     return token
 
 
+def _clean_notation_comments(pattern: str) -> str:
+    """Reduce grammatical prose to the compact syntax it describes."""
+    pattern = _SUP_ELEMENT_RE.sub("", pattern)
+    pattern = _HTML_TAG_RE.sub("", pattern)
+    pattern = re.sub(
+        r"\bsom:\s*pl\.\s*anv\.\s*",
+        "pl. ",
+        pattern,
+        flags=re.IGNORECASE,
+    )
+    pattern = re.sub(
+        r"\bi:\s*pl\.\s*anv\.\s*(?:ofta:\s*)?",
+        "pl. ",
+        pattern,
+        flags=re.IGNORECASE,
+    )
+    pattern = re.sub(r"\b(?:ibl|vard|högt)\.\s*", "", pattern, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", pattern).strip()
+
+
 def _tokenize(pattern: str) -> tuple[str, ...] | None:
     """Tokenize only when every non-space character belongs to the syntax."""
     tokens: list[str] = []
@@ -149,7 +169,7 @@ def _slot_sequence(pattern: str) -> tuple[tuple[str, str], ...] | None:
     explicitly selects definite plural. Two adjacent form tokens without a
     label are interpreted as definite singular followed by indefinite plural.
     """
-    tokens = _tokenize(pattern)
+    tokens = _tokenize(_clean_notation_comments(pattern))
     if tokens is None:
         return None
 
@@ -186,14 +206,31 @@ def _slot_sequence(pattern: str) -> tuple[tuple[str, str], ...] | None:
     return tuple(result) if result else None
 
 
+def _interpret_missing_pattern(record: dict[str, Any], lemma: str) -> InterpretedRow | None:
+    """Use explicit noun status in ``ordkl`` when the form field is absent."""
+    ordkl = re.sub(r"\s+", " ", str(record.get("ordkl", "")).strip()).casefold()
+    key_forms: list[KeyForm] = [KeyForm("lemma", lemma, "lemma")]
+    if "oböjl." in ordkl:
+        return InterpretedRow(lemma, "(ordkl: oböjl.)", tuple(key_forms))
+    if re.search(r"\bs\.\s*pl\.", ordkl):
+        key_forms.append(KeyForm("pl_indef", lemma, "ordkl:s. pl."))
+        return InterpretedRow(lemma, "(ordkl: pl.)", tuple(key_forms))
+    if re.search(r"\bs\.\s*best\.", ordkl):
+        key_forms.append(KeyForm("sg_def", lemma, "ordkl:s. best."))
+        return InterpretedRow(lemma, "(ordkl: best.)", tuple(key_forms))
+    return None
+
+
 def interpret_noun_row(record: dict[str, Any]) -> InterpretedRow | None:
     """Interpret a cleaned SAOL noun row into grammatical key forms."""
     if str(record.get("upos", "")).upper() != "NOUN":
         return None
     lemma = str(record.get("normaliserat_ord", "")).strip()
     pattern = normalise_pattern(record.get("text"))
-    if not lemma or pattern is None:
+    if not lemma:
         return None
+    if pattern is None:
+        return _interpret_missing_pattern(record, lemma)
 
     variants = tuple(
         part.strip() for part in re.split(r"\s+_\s+", pattern) if part.strip()
