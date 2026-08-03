@@ -8,8 +8,11 @@ from .lexeme_slots import LexemeSlots, SlotForm, build_lexeme_slots
 from .saol_row_interpreter import apply_form_token
 
 _FORM_TOKEN_RE = re.compile(r"[+\-]?[A-Za-zÅÄÖåäöÉéÜü]+(?:-[A-Za-zÅÄÖåäöÉéÜü]+)*")
-_MARKER_RE = re.compile(r"(?:\bel\.|\bvard\.|\båld\.|\bprov\.|\bn\.|\bH\b)", re.IGNORECASE)
-_PRESENT_RE = re.compile(r"(?:^|[,;])\s*pres\.\s*", re.IGNORECASE)
+_MARKER_RE = re.compile(
+    r"(?:\bel\.|\bvard\.|\båld\.|\bprov\.|\bibl\.|\bn\.|\bH\b)",
+    re.IGNORECASE,
+)
+_PRESENT_RE = re.compile(r"\bpres\.\s*", re.IGNORECASE)
 _NO_INFLECTION_RE = re.compile(r"^\s*(?:ingen\s*:?[ ]*böjning\s*:?)\s*$", re.IGNORECASE)
 
 
@@ -23,13 +26,7 @@ def _common_prefix_length(left: str, right: str) -> int:
 
 
 def _replace_verb_final_component(lemma: str, replacement: str) -> str | None:
-    """Fallback for strong verb compounds whose source lacks a usable bar.
-
-    Prefer the longest final lemma component that shares spelling with the
-    supplied form.  One shared initial letter is accepted only for a component
-    of at least three letters, covering strong pairs such as ``giva``/``gav``
-    while avoiding arbitrary whole-word replacement.
-    """
+    """Fallback for strong verb compounds whose source lacks a usable bar."""
     first, separator, rest = lemma.partition(" ")
     best_start: int | None = None
     best_shared = 0
@@ -65,21 +62,28 @@ def _alternative_tokens(text: str) -> tuple[str, ...]:
     """Extract form alternatives while discarding lexicographic markers."""
     cleaned = _MARKER_RE.sub(" ", text)
     tokens = tuple(match.group(0) for match in _FORM_TOKEN_RE.finditer(cleaned))
-    ignored = {"el", "vard", "åld", "prov", "n", "h"}
+    ignored = {"el", "vard", "åld", "prov", "ibl", "n", "h"}
     return tuple(token for token in tokens if token.casefold() not in ignored)
 
 
-def _labelled_assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
-    """Interpret expanded comma groups followed by ``pres.``.
+def _first_group(text: str) -> str:
+    """Return text up to the next grammatical/comma group."""
+    return re.split(r"[,;]", text, maxsplit=1)[0].strip()
 
-    The first group is preterite, the second supine, intervening groups are
-    participles, and the ``pres.`` group supplies present-tense alternatives.
+
+def _labelled_assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
+    """Interpret expanded verb rows containing a ``pres.`` label.
+
+    Text before ``pres.`` consists of comma groups: preterite, supine and zero
+    or more participle groups. Only the first two are needed here. Text after
+    the label supplies present-tense alternatives. The label need not be
+    preceded by one exact punctuation character.
     """
     match = _PRESENT_RE.search(pattern)
     if match is None:
         return None
 
-    before = pattern[: match.start()].strip(" ,;")
+    before = pattern[: match.start()].strip(" ,;:")
     after = pattern[match.end() :].strip()
     groups = [part.strip() for part in before.split(",") if part.strip()]
     if len(groups) < 2:
@@ -92,8 +96,7 @@ def _labelled_assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
             return None
         assignments.extend((slot, token) for token in alternatives)
 
-    present_group = re.split(r"[,;]", after, maxsplit=1)[0]
-    present = _alternative_tokens(present_group)
+    present = _alternative_tokens(_first_group(after))
     if not present:
         return None
     assignments.extend(("present", token) for token in present)
