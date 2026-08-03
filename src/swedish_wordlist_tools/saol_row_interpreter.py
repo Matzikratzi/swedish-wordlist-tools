@@ -195,19 +195,25 @@ def interpret_noun_row(record: dict[str, Any]) -> InterpretedRow | None:
     if not lemma or pattern is None:
         return None
 
-    slots = _slot_sequence(pattern)
-    if slots is None:
+    variants = tuple(
+        part.strip() for part in re.split(r"\s+_\s+", pattern) if part.strip()
+    )
+    if not variants:
         return None
 
     key_forms: list[KeyForm] = [KeyForm("lemma", lemma, "lemma")]
     seen: set[tuple[str, str]] = {("lemma", lemma)}
-    for slot, token in slots:
-        written_form = apply_form_token(record, lemma, token)
-        if written_form is None:
+    for variant in variants:
+        slots = _slot_sequence(variant)
+        if slots is None:
             return None
-        marker = (slot, written_form)
-        if marker not in seen:
-            seen.add(marker)
-            key_forms.append(KeyForm(slot, written_form, token))
+        for slot, token in slots:
+            written_form = apply_form_token(record, lemma, token)
+            if written_form is None:
+                return None
+            marker = (slot, written_form)
+            if marker not in seen:
+                seen.add(marker)
+                key_forms.append(KeyForm(slot, written_form, token))
 
     return InterpretedRow(lemma, pattern, tuple(key_forms))
