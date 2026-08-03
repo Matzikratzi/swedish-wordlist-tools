@@ -85,12 +85,25 @@ class SaolRowInterpreterTests(unittest.TestCase):
         self.assertIsNotNone(row)
         self.assertEqual("storväggklockor", row.form("pl_indef") if row else None)
 
-    def test_minus_form_requires_bar(self) -> None:
+    def test_falls_back_to_spelling_evidence_without_bar(self) -> None:
+        examples = (
+            ("gigawattimme", "-timmar", "gigawattimmar"),
+            ("bluffaktura", "-fakturor", "bluffakturor"),
+            ("halländska", "-ländskor", "halländskor"),
+        )
+        for lemma, token, expected in examples:
+            with self.subTest(lemma=lemma):
+                self.assertEqual(
+                    expected,
+                    apply_form_token(self.record(lemma, "+n " + token), lemma, token),
+                )
+
+    def test_rejects_unsafe_unmarked_replacement(self) -> None:
         self.assertIsNone(
             apply_form_token(
-                self.record("alarmklocka", "+n -klockor"),
+                self.record("alarmklocka", "+n -resor"),
                 "alarmklocka",
-                "-klockor",
+                "-resor",
             )
         )
 
