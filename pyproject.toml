@@ -34,6 +34,7 @@ saol14-analyze-top-noun-mismatch-groups = "swedish_wordlist_tools.analyze_top_no
 saol14-analyze-noun-mismatch-causes = "swedish_wordlist_tools.analyze_noun_mismatch_causes:main"
 saol14-analyze-rule-usage = "swedish_wordlist_tools.analyze_rule_usage:main"
 saol14-analyze-row-interpreter = "swedish_wordlist_tools.analyze_row_interpreter:main"
+saol14-validate-row-interpreter-saldo = "swedish_wordlist_tools.validate_row_interpreter_saldo:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
