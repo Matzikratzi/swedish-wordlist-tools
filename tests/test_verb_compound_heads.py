@@ -57,6 +57,35 @@ class VerbCompoundHeadTests(unittest.TestCase):
         self.assertEqual(("avskriver",), enriched.forms_for("present"))
         self.assertEqual("skriva", enriched.metadata["compound_head_source"])
 
+    def test_complete_compound_family_repairs_truncated_independent_head(self) -> None:
+        base_text = "skrev, skrivit, pres. skr".ljust(50)
+        target_text = "-skrev, -skrivit, pres. -skr".ljust(50)
+        self.assertEqual(50, len(base_text))
+        self.assertEqual(50, len(target_text))
+
+        base = self.record("skriva", base_text, "skriva")
+        family = self.record(
+            "renskriva",
+            "-skrev, -skrivit, pres. -skriver",
+            "ren|skriva",
+        )
+        target = self.record("avskriva", target_text, "av|skriva")
+        records = [base, family, target]
+        interpreted = {id(row): interpret_verb_slots(row) for row in records}
+        self.assertTrue(all(value is not None for value in interpreted.values()))
+
+        index = build_simple_verb_paradigm_index(records, interpreted)
+        self.assertEqual(("skriver",), index["skriva"].forms_for("present"))
+
+        enriched = borrow_compound_verb_slots(
+            target,
+            index,
+            interpreted[id(target)],
+        )
+        self.assertIsNotNone(enriched)
+        assert enriched is not None
+        self.assertEqual(("avskriver",), enriched.forms_for("present"))
+
     def test_keeps_existing_target_slot_instead_of_overwriting(self) -> None:
         base_record = self.record("skriva", "skriver skrev skrivit", "skriva")
         compound = self.record("avskriva", "avskriver avskrev avskrivit", "av|skriva")
