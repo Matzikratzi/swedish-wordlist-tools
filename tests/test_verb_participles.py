@@ -64,13 +64,53 @@ class VerbParticipleTests(unittest.TestCase):
         assert base is not None
         self.assertIs(base, add_explicit_perfect_participles(record, base))
 
-    def test_does_not_extract_from_truncated_third_group(self) -> None:
-        record = self.record(
-            "avskriva",
-            "-skrev, -skrivit, -skriven -skrivet -s, pres. -skr",
-            "av|skriva",
-        )
+    def test_rejects_plausible_final_token_at_source_limit(self) -> None:
+        # The final token is deliberately long and plausible. It is still
+        # untrusted because the group reaches the 50-character source limit
+        # without a following delimiter.
+        text = "-skrev, -skrivit, -skriven -skrivet -skrivn"
+        text = text.ljust(50, "x")[:50]
+        record = self.record("avskriva", text, "av|skriva")
+        self.assertEqual(50, len(text))
         self.assertIsNone(explicit_perfect_participle_tokens(record))
+
+    def test_accepts_group_delimited_before_end_of_capped_row(self) -> None:
+        # A later comma and present label prove that the complete third group
+        # ended before the cap; the row may be truncated only after that point.
+        text = "skrev, skrivit, skriven skrivet skrivna, pres. sju"
+        self.assertEqual(50, len(text))
+        record = self.record("skriva", text)
+        self.assertEqual(
+            ("skriven", "skrivet", "skrivna"),
+            explicit_perfect_participle_tokens(record),
+        )
+
+    def test_participles_do_not_keep_reflexive_pronoun(self) -> None:
+        record = self.record(
+            "företa sig",
+            "-tog, -tagit, -tagen -taget -tagna, pres. -tar",
+            "före|ta",
+        )
+        base = interpret_verb_slots(record)
+        self.assertIsNotNone(base)
+        assert base is not None
+        slots = add_explicit_perfect_participles(record, base)
+        self.assertEqual(("företagen",), slots.forms_for("perfect_participle_common"))
+        self.assertEqual(("företaget",), slots.forms_for("perfect_participle_neuter"))
+        self.assertEqual(("företagna",), slots.forms_for("perfect_participle_plural"))
+
+    def test_participles_do_not_keep_following_particles(self) -> None:
+        record = self.record(
+            "dra ihop sig",
+            "drog, dragit, dragen draget dragna, pres. drar",
+        )
+        base = interpret_verb_slots(record)
+        self.assertIsNotNone(base)
+        assert base is not None
+        slots = add_explicit_perfect_participles(record, base)
+        self.assertEqual(("dragen",), slots.forms_for("perfect_participle_common"))
+        self.assertEqual(("draget",), slots.forms_for("perfect_participle_neuter"))
+        self.assertEqual(("dragna",), slots.forms_for("perfect_participle_plural"))
 
 
 if __name__ == "__main__":
