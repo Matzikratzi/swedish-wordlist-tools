@@ -19,13 +19,16 @@ EXPLICIT_PATTERN_GROUP = "explicit böjningsform"
 COMMON_PATTERNS: dict[str, tuple[str, ...]] = {
     "+en +er": ("en", "er"),
     "+en +ar": ("en", "ar"),
+    "+et +er": ("et", "er"),
     "+et; pl. +": ("et", ""),
     "+en": ("en",),
     "+t +a": ("t", "a"),
     "+de +t": ("de", "t"),
     "+t +n": ("t", "n"),
     "+n": ("n",),
+    "+n; pl. +": ("n", ""),
     "+et": ("et",),
+    "+t": ("t",),
     "+n +r": ("n", "r"),
     "+n +er": ("n", "er"),
 }
@@ -226,10 +229,13 @@ def _known_common_msds(upos: str, pattern: str) -> tuple[Msd | None, ...]:
         return {
             "+en +er": (_CI, _SG_DEF_NOM, _PL_INDEF_NOM),
             "+en +ar": (_CI, _SG_DEF_NOM, _PL_INDEF_NOM),
+            "+et +er": (_CI, _SG_DEF_NOM, _PL_INDEF_NOM),
             "+et; pl. +": (_CI, _SG_DEF_NOM, _PL_INDEF_NOM),
             "+en": (_CI, _SG_DEF_NOM),
             "+n": (_CI, _SG_DEF_NOM),
+            "+n; pl. +": (_CI, _SG_DEF_NOM, _PL_INDEF_NOM),
             "+et": (_CI, _SG_DEF_NOM),
+            "+t": (_CI, _SG_DEF_NOM),
             "+n +r": (_CI, _SG_DEF_NOM, _PL_INDEF_NOM),
             "+n +er": (_CI, _SG_DEF_NOM, _PL_INDEF_NOM),
         }.get(pattern, ())
