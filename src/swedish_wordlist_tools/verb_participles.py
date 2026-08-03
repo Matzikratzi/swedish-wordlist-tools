@@ -7,6 +7,7 @@ from .inflect import normalise_pattern
 from .lexeme_slots import LexemeSlots, SlotForm, build_lexeme_slots
 from .verb_slots import _apply_token
 
+_TEXT_HARD_CAP = 50
 _PRESENT_RE = re.compile(r"\bpres\.\s*", re.IGNORECASE)
 _FORM_TOKEN_RE = re.compile(
     r"[+\-]?[A-Za-zÅÄÖåäöÉéÜü]+(?:-[A-Za-zÅÄÖåäöÉéÜü]+)*"
@@ -18,6 +19,17 @@ _PARTICIPLE_SLOTS = (
 )
 
 
+def _looks_like_hard_cap_fragment(token: str) -> bool:
+    """Return true for a very short final fragment such as ``-s``.
+
+    This check is used only when the complete machine-readable ``text`` field
+    is exactly at its observed 50-character hard cap. It is deliberately not a
+    general minimum-length rule for Swedish forms.
+    """
+    unsigned = token[1:] if token.startswith(("+", "-")) else token
+    return len(unsigned) <= 2
+
+
 def explicit_perfect_participle_tokens(
     record: Mapping[str, Any],
 ) -> tuple[str, str, str] | None:
@@ -27,8 +39,13 @@ def explicit_perfect_participle_tokens(
     place the common, neuter and plural participles in the third comma group.
     We accept only exactly three plain form tokens. Shorter comments such as
     ``lagd n. lagt`` and longer explanatory groups are left untouched.
+
+    The exported ``text`` field has an observed hard cap at 50 characters. At
+    that exact length, a very short token such as ``-s`` is treated as a
+    truncated fragment rather than as an explicit participle form.
     """
-    pattern = normalise_pattern(record.get("text"))
+    raw_text = str(record.get("text") or "")
+    pattern = normalise_pattern(raw_text)
     if pattern is None:
         return None
     present = _PRESENT_RE.search(pattern)
@@ -44,6 +61,10 @@ def explicit_perfect_participle_tokens(
     tokens = tuple(match.group(0) for match in _FORM_TOKEN_RE.finditer(groups[2]))
     remainder = _FORM_TOKEN_RE.sub(" ", groups[2]).strip()
     if remainder or len(tokens) != 3:
+        return None
+    if len(raw_text) == _TEXT_HARD_CAP and any(
+        _looks_like_hard_cap_fragment(token) for token in tokens
+    ):
         return None
     return tokens  # type: ignore[return-value]
 
