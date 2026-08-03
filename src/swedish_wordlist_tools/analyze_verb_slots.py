@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -14,85 +13,58 @@ from .verb_slots import diagnose_verb_record, interpret_verb_slots
 DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
 DEFAULT_TEXT = Path("reports/saol14-verb-slots.txt")
 DEFAULT_JSON = Path("reports/saol14-verb-slots.json")
-_TRUNCATION_MARK_RE = re.compile(r"(?:\.\.\.|…)")
-_INCOMPLETE_LABEL_RE = re.compile(
-    r"(?:\bpre(?:s)?\.?|\bpret\.?|\bimper\.?|\bperf\.?|\bsup\.?)$",
-    re.IGNORECASE,
-)
-_UNSIGNED_SHORT_FRAGMENT_RE = re.compile(
-    r"(?:^|[\s,;:])[A-Za-zÅÄÖåäöÉéÜü]{1,3}$"
-)
-_SIGNED_SHORT_FRAGMENT_RE = re.compile(
-    r"(?:^|[\s,;:])[-+][A-Za-zÅÄÖåäöÉéÜü]{1,2}$"
-)
-_DANGLING_END_RE = re.compile(r"[-+,:;]$")
-_COMMON_CAPS = (32, 40, 48, 50, 60, 64, 70, 80, 100, 120, 128, 255)
+TEXT_HARD_CAP = 50
 
 
 def _has_source_ellipsis(record: dict[str, Any]) -> bool:
+    """Return whether the human-readable ``ordkl`` display contains ellipsis.
+
+    Ellipsis is presentation metadata. It is deliberately not used as proof
+    that the machine-readable ``text`` value is truncated.
+    """
     ordkl = str(record.get("ordkl") or "")
-    text = str(record.get("text") or "")
-    return bool(_TRUNCATION_MARK_RE.search(ordkl) or _TRUNCATION_MARK_RE.search(text))
+    return "..." in ordkl or "…" in ordkl
 
 
 def _external_lookup_candidate(record: dict[str, Any]) -> bool:
-    """Return true only for source rows that plausibly need external repair."""
-    if not _has_source_ellipsis(record):
-        return False
-    text = str(record.get("text") or "").strip()
-    if not text:
-        return True
-    if _INCOMPLETE_LABEL_RE.search(text) or _DANGLING_END_RE.search(text):
-        return True
-    if "," not in text:
-        return False
-    return bool(
-        _SIGNED_SHORT_FRAGMENT_RE.search(text)
-        or _UNSIGNED_SHORT_FRAGMENT_RE.search(text)
-    )
+    """Return true for rows that hit the observed 50-character text cap."""
+    return len(str(record.get("text") or "")) == TEXT_HARD_CAP
 
 
 def _truncation_kind(record: dict[str, Any]) -> str | None:
     if _external_lookup_candidate(record):
-        return "external_lookup_candidate"
+        return "text_at_hard_cap"
     if _has_source_ellipsis(record):
-        return "ellipsis_but_text_usable"
+        return "ordkl_ellipsis_but_text_below_cap"
     return None
 
 
 def _length_summary(counter: Counter[int]) -> dict[str, Any]:
-    total = sum(counter.values())
     if not counter:
         return {
             "records": 0,
             "minimum": 0,
             "maximum": 0,
             "most_common_lengths": {},
-            "common_cap_counts": {},
         }
     return {
-        "records": total,
+        "records": sum(counter.values()),
         "minimum": min(counter),
         "maximum": max(counter),
         "most_common_lengths": dict(counter.most_common(20)),
-        "common_cap_counts": {
-            str(cap): counter.get(cap, 0)
-            for cap in _COMMON_CAPS
-            if counter.get(cap, 0)
-        },
     }
 
 
 def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
     total = 0
     interpreted = 0
-    unsupported = Counter()
-    reason_counts = Counter()
-    truncation_counts = Counter()
-    slot_counts = Counter()
+    unsupported: Counter[str] = Counter()
+    reason_counts: Counter[str] = Counter()
+    truncation_counts: Counter[str] = Counter()
+    slot_counts: Counter[str] = Counter()
     all_text_lengths: Counter[int] = Counter()
-    ellipsis_text_lengths: Counter[int] = Counter()
-    candidate_text_lengths: Counter[int] = Counter()
+    capped_text_lengths: Counter[int] = Counter()
+    ordkl_ellipsis_lengths: Counter[int] = Counter()
     examples: dict[str, list[dict[str, str]]] = {}
     reason_examples: dict[str, list[dict[str, str]]] = {}
     truncation_examples: dict[str, list[dict[str, str]]] = {}
@@ -102,21 +74,22 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
             continue
         total += 1
         raw_text = str(record.get("text") or "")
-        all_text_lengths[len(raw_text)] += 1
+        text_length = len(raw_text)
+        all_text_lengths[text_length] += 1
+        if text_length == TEXT_HARD_CAP:
+            capped_text_lengths[text_length] += 1
         if _has_source_ellipsis(record):
-            ellipsis_text_lengths[len(raw_text)] += 1
+            ordkl_ellipsis_lengths[text_length] += 1
 
         truncation_kind = _truncation_kind(record)
         if truncation_kind is not None:
             truncation_counts[truncation_kind] += 1
-            if truncation_kind == "external_lookup_candidate":
-                candidate_text_lengths[len(raw_text)] += 1
             truncation_examples.setdefault(truncation_kind, [])
             if len(truncation_examples[truncation_kind]) < 30:
                 truncation_examples[truncation_kind].append({
                     "lemma": str(record.get("normaliserat_ord", "")),
                     "notation": raw_text,
-                    "text_length": str(len(raw_text)),
+                    "text_length": str(text_length),
                     "ordkl": str(record.get("ordkl", "")),
                     "source": str(record.get("source", "")),
                 })
@@ -150,10 +123,11 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
         "interpreted": interpreted,
         "coverage_percent": round(100 * interpreted / total, 2) if total else 0.0,
         "slot_counts": dict(slot_counts.most_common()),
+        "text_hard_cap": TEXT_HARD_CAP,
         "text_length_distribution": {
             "all_verbs": _length_summary(all_text_lengths),
-            "source_ellipsis": _length_summary(ellipsis_text_lengths),
-            "external_lookup_candidates": _length_summary(candidate_text_lengths),
+            "at_hard_cap": _length_summary(capped_text_lengths),
+            "ordkl_ellipsis": _length_summary(ordkl_ellipsis_lengths),
         },
         "source_truncation_counts": dict(truncation_counts.most_common()),
         "source_truncation_examples": truncation_examples,
@@ -172,6 +146,7 @@ def render_text(report: dict[str, Any]) -> str:
         f"Verbposter: {report['verb_records']}",
         f"Tolkade: {report['interpreted']}",
         f"Täckning: {report['coverage_percent']:.2f} %",
+        f"Observerad hård maxlängd för text: {report['text_hard_cap']}",
         "",
         "Slots:",
     ]
@@ -179,14 +154,14 @@ def render_text(report: dict[str, Any]) -> str:
         lines.append(f"  {count:6d}  {slot}")
 
     lines.extend(["", "Längd på text-fältet:"])
-    length_labels = {
+    labels = {
         "all_verbs": "alla verb",
-        "source_ellipsis": "ellips i källan",
-        "external_lookup_candidates": "svenska.se-kandidater",
+        "at_hard_cap": "exakt vid 50-teckensgränsen",
+        "ordkl_ellipsis": "ordkl innehåller ellips",
     }
     for key, summary in report["text_length_distribution"].items():
         lines.append(
-            f"  {length_labels[key]}: poster={summary['records']}, "
+            f"  {labels[key]}: poster={summary['records']}, "
             f"min={summary['minimum']}, max={summary['maximum']}"
         )
         common = ", ".join(
@@ -194,36 +169,33 @@ def render_text(report: dict[str, Any]) -> str:
             for length, count in summary["most_common_lengths"].items()
         )
         lines.append(f"    vanligaste längder: {common or '–'}")
-        caps = ", ".join(
-            f"{length}:{count}"
-            for length, count in summary["common_cap_counts"].items()
-        )
-        lines.append(f"    vanliga maxgränser: {caps or '–'}")
 
-    lines.extend(["", "Avklippta källfält:"])
-    labels = {
-        "external_lookup_candidate": "kandidater för komplettering från svenska.se",
-        "ellipsis_but_text_usable": "ellips i källfältet men användbar text",
+    lines.extend(["", "Källfält:"])
+    kind_labels = {
+        "text_at_hard_cap": "text är exakt 50 tecken; kontrollkandidat",
+        "ordkl_ellipsis_but_text_below_cap": (
+            "ordkl har ellips men text är kortare än 50"
+        ),
     }
     for kind, count in report["source_truncation_counts"].items():
-        lines.append(f"  {count:6d}  {labels.get(kind, kind)}")
-    for kind, examples in report["source_truncation_examples"].items():
-        lines.extend(["", f"Exempel: {labels.get(kind, kind)}"])
-        for example in examples[:15]:
+        lines.append(f"  {count:6d}  {kind_labels.get(kind, kind)}")
+    for kind, rows in report["source_truncation_examples"].items():
+        lines.extend(["", f"Exempel: {kind_labels.get(kind, kind)}"])
+        for row in rows[:15]:
             lines.append(
-                f"  {example['lemma']} | len={example['text_length']} | "
-                f"text={example['notation']!r} | ordkl={example['ordkl']!r}"
+                f"  {row['lemma']} | len={row['text_length']} | "
+                f"text={row['notation']!r} | ordkl={row['ordkl']!r}"
             )
 
     lines.extend(["", "Orsaker till otolkade verb:"])
     for reason, count in report["failure_reason_counts"].items():
         lines.append(f"  {count:6d}  {reason}")
-
-    for reason, examples in report["failure_reason_examples"].items():
+    for reason, rows in report["failure_reason_examples"].items():
         lines.extend(["", f"Exempel: {reason}"])
-        for example in examples[:10]:
+        for row in rows[:10]:
             lines.append(
-                f"  {example['lemma']} | stycke={example['stycke']!r} | {example['normalised']}"
+                f"  {row['lemma']} | stycke={row['stycke']!r} | "
+                f"{row['normalised']}"
             )
 
     lines.extend(["", "Största ännu otolkade verbmönster:"])
@@ -246,13 +218,10 @@ def main() -> None:
     print(f"Verbposter: {report['verb_records']}")
     print(f"Tolkade: {report['interpreted']}")
     print(f"Täckning: {report['coverage_percent']:.2f} %")
+    print(f"Text exakt 50 tecken: {report['source_truncation_counts'].get('text_at_hard_cap', 0)}")
     print(
-        "Kandidater för svenska.se: "
-        f"{report['source_truncation_counts'].get('external_lookup_candidate', 0)}"
-    )
-    print(
-        "Ellips men användbar text: "
-        f"{report['source_truncation_counts'].get('ellipsis_but_text_usable', 0)}"
+        "Ordkl-ellips men text under 50: "
+        f"{report['source_truncation_counts'].get('ordkl_ellipsis_but_text_below_cap', 0)}"
     )
     print(f"Text: {args.text}")
     print(f"JSON: {args.json}")
