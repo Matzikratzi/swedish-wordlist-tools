@@ -8,15 +8,18 @@ from typing import Iterable, Iterator, Mapping
 class SlotForm:
     """One written form assigned to a grammatical slot.
 
-    ``source`` records the SAOL token or metadata that produced the form.  The
-    representation is deliberately independent of word class: noun, verb and
-    adjective interpreters can all emit the same objects with different slot
-    names.
+    ``source`` keeps the concrete token or rule that produced the form for
+    backwards compatibility. ``provenance`` records the source layer so row
+    interpretation, compound-head repair and external fallback remain
+    distinguishable. ``provenance_detail`` stores a stable source identifier,
+    such as a SALDO lexeme id or the borrowed head lemma.
     """
 
     slot: str
     written_form: str
     source: str
+    provenance: str = "row"
+    provenance_detail: str = ""
 
 
 @dataclass(frozen=True)
@@ -70,6 +73,18 @@ class LexemeSlots:
     def iter_slot(self, slot: str) -> Iterator[SlotForm]:
         return (form for form in self.forms if form.slot == slot)
 
+    def provenance_counts(self) -> dict[str, int]:
+        """Count distinct slot/form pairs by provenance layer."""
+        counts: dict[str, int] = {}
+        seen: set[tuple[str, str]] = set()
+        for form in self.forms:
+            marker = (form.slot, form.written_form)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            counts[form.provenance] = counts.get(form.provenance, 0) + 1
+        return counts
+
 
 def build_lexeme_slots(
     *,
@@ -79,7 +94,11 @@ def build_lexeme_slots(
     forms: Iterable[SlotForm],
     metadata: Mapping[str, str] | None = None,
 ) -> LexemeSlots:
-    """Build a deduplicated immutable slot representation."""
+    """Build a deduplicated immutable slot representation.
+
+    Earlier forms win when the same slot/form pair occurs from several layers.
+    Callers should therefore append fallbacks after row-derived evidence.
+    """
     seen: set[tuple[str, str]] = set()
     unique: list[SlotForm] = []
     for form in forms:
@@ -89,7 +108,7 @@ def build_lexeme_slots(
         seen.add(marker)
         unique.append(form)
     if ("lemma", lemma) not in seen:
-        unique.insert(0, SlotForm("lemma", lemma, "lemma"))
+        unique.insert(0, SlotForm("lemma", lemma, "lemma", "row", "lemma"))
     return LexemeSlots(
         lemma=lemma,
         upos=upos.upper(),
