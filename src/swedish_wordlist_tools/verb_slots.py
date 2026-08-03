@@ -13,7 +13,9 @@ _MARKER_RE = re.compile(
     re.IGNORECASE,
 )
 _PRESENT_RE = re.compile(r"\bpres\.\s*", re.IGNORECASE)
+_TRUNCATED_PRESENT_RE = re.compile(r"(?:[,;]\s*)?\bpre(?:s\.?)?\s*$", re.IGNORECASE)
 _NO_INFLECTION_RE = re.compile(r"^\s*(?:ingen\s*:?[ ]*böjning\s*:?)\s*$", re.IGNORECASE)
+_PAREN_COMMENT_RE = re.compile(r"\([^)]*\)")
 
 
 def _common_prefix_length(left: str, right: str) -> int:
@@ -42,6 +44,21 @@ def _replace_verb_final_component(lemma: str, replacement: str) -> str | None:
 
 
 def _apply_token(record: dict[str, Any], lemma: str, token: str) -> str | None:
+    # Compound bars describe the lexical verb, not a following reflexive
+    # pronoun. Apply a replacement to the first word and append the rest.
+    first, separator, rest = lemma.partition(" ")
+    if separator and token.startswith("-"):
+        written_first = apply_form_token(record, first, token)
+        if written_first is None:
+            replacement = token[1:]
+            written_first = (
+                _replace_verb_final_component(first, replacement)
+                if replacement
+                else None
+            )
+        if written_first is not None:
+            return written_first + separator + rest
+
     written = apply_form_token(record, lemma, token)
     if written is not None or not token.startswith("-"):
         return written
@@ -59,6 +76,7 @@ def _tokens(pattern: str) -> tuple[str, ...] | None:
 
 def _alternative_tokens(text: str) -> tuple[str, ...]:
     cleaned = _MARKER_RE.sub(" ", text)
+    cleaned = _PAREN_COMMENT_RE.sub(" ", cleaned)
     tokens = tuple(match.group(0) for match in _FORM_TOKEN_RE.finditer(cleaned))
     ignored = {"el", "vard", "åld", "prov", "ibl", "n", "h"}
     return tuple(token for token in tokens if token.casefold() not in ignored)
@@ -68,6 +86,19 @@ def _first_group(text: str) -> str:
     return re.split(r"[,;]", text, maxsplit=1)[0].strip()
 
 
+def _first_two_group_assignments(text: str) -> tuple[tuple[str, str], ...] | None:
+    groups = [part.strip() for part in text.split(",") if part.strip()]
+    if len(groups) < 2:
+        return None
+    assignments: list[tuple[str, str]] = []
+    for slot, group in (("preterite", groups[0]), ("supine", groups[1])):
+        alternatives = _alternative_tokens(group)
+        if not alternatives:
+            return None
+        assignments.extend((slot, token) for token in alternatives)
+    return tuple(assignments)
+
+
 def _labelled_assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
     match = _PRESENT_RE.search(pattern)
     if match is None:
@@ -75,30 +106,69 @@ def _labelled_assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
     before = pattern[: match.start()].strip(" ,;:")
     after = pattern[match.end() :].strip()
     groups = [part.strip() for part in before.split(",") if part.strip()]
-    if len(groups) < 2:
-        return None
 
     assignments: list[tuple[str, str]] = []
-    for slot, group in (("preterite", groups[0]), ("supine", groups[1])):
-        alternatives = _alternative_tokens(group)
-        if not alternatives:
+    if len(groups) >= 2:
+        first_two = _first_two_group_assignments(before)
+        if first_two is None:
             return None
-        assignments.extend((slot, token) for token in alternatives)
-
-    present = _alternative_tokens(_first_group(after))
-    if not present:
+        assignments.extend(first_two)
+    elif len(groups) == 1:
+        # Compact expanded rows occasionally put preterite and supine in one
+        # group before the presens label: "-drömde -drömt, pres. -drömmer".
+        compact = _alternative_tokens(groups[0])
+        if len(compact) != 2:
+            return None
+        assignments.extend((
+            ("preterite", compact[0]),
+            ("supine", compact[1]),
+        ))
+    else:
         return None
+
+    # Some source fields end directly after "pres." or after a bare "-".
+    # The preceding key forms are still usable; omit only the missing slot.
+    present = _alternative_tokens(_first_group(after))
     assignments.extend(("present", token) for token in present)
     return tuple(assignments)
 
 
+def _truncated_label_assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
+    match = _TRUNCATED_PRESENT_RE.search(pattern)
+    if match is None:
+        return None
+    before = pattern[: match.start()].strip(" ,;:")
+    return _first_two_group_assignments(before)
+
+
+def _comma_assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
+    # With exactly two comma groups SAOL supplies preterite and supine. For
+    # longer rows, accept only bar-replacement notation: then the first two
+    # groups unambiguously describe the compound head and later groups are
+    # participles or truncated comments.
+    groups = [part.strip() for part in pattern.split(",") if part.strip()]
+    if len(groups) == 2 or (len(groups) > 2 and groups[0].startswith("-")):
+        return _first_two_group_assignments(pattern)
+    return None
+
+
 def _simple_assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
-    tokens = _tokens(pattern)
+    cleaned = _PAREN_COMMENT_RE.sub(" ", pattern)
+    tokens = _tokens(cleaned)
     if tokens is None or len(tokens) not in {2, 3}:
         return None
     if len(tokens) == 2:
         return (("preterite", tokens[0]), ("supine", tokens[1]))
     return (("present", tokens[0]), ("preterite", tokens[1]), ("supine", tokens[2]))
+
+
+def _assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
+    return (
+        _labelled_assignments(pattern)
+        or _truncated_label_assignments(pattern)
+        or _comma_assignments(pattern)
+        or _simple_assignments(pattern)
+    )
 
 
 def diagnose_verb_record(record: dict[str, Any]) -> str:
@@ -116,9 +186,7 @@ def diagnose_verb_record(record: dict[str, Any]) -> str:
     if not variants:
         return "no_variants"
     for variant in variants:
-        assignments = _labelled_assignments(variant)
-        if assignments is None:
-            assignments = _simple_assignments(variant)
+        assignments = _assignments(variant)
         if assignments is None:
             if _PRESENT_RE.search(variant):
                 return "labelled_syntax_unparsed"
@@ -153,7 +221,7 @@ def interpret_verb_slots(record: dict[str, Any]) -> LexemeSlots | None:
 
     forms = [SlotForm("infinitive", lemma, "lemma")]
     for variant in (part.strip() for part in re.split(r"\s+_\s+", pattern) if part.strip()):
-        assignments = _labelled_assignments(variant) or _simple_assignments(variant)
+        assignments = _assignments(variant)
         assert assignments is not None
         for slot, token in assignments:
             written_form = _apply_token(record, lemma, token)
