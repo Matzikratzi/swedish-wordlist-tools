@@ -18,6 +18,15 @@ DEFAULT_TEXT = Path("reports/saol14-verb-compound-heads.txt")
 DEFAULT_JSON = Path("reports/saol14-verb-compound-heads.json")
 
 
+def _slot_map(slots: object | None) -> dict[str, tuple[str, ...]]:
+    if slots is None:
+        return {}
+    return {
+        slot: slots.forms_for(slot)
+        for slot in slots.slots()
+    }
+
+
 def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
     records = [
         record
@@ -32,6 +41,7 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
     recovered_rows = 0
     enriched_rows = 0
     borrowed_slot_counts: dict[str, int] = {}
+    repaired_slot_counts: dict[str, int] = {}
     examples: list[dict[str, Any]] = []
 
     for record in records:
@@ -48,10 +58,20 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
         if enriched is None or enriched is current:
             continue
 
-        before_slots = set(current.slots()) if current is not None else set()
-        added_slots = [slot for slot in enriched.slots() if slot not in before_slots]
+        before = _slot_map(current)
+        after = _slot_map(enriched)
+        added_slots = [slot for slot in after if slot not in before]
+        repaired_slots = [
+            slot for slot in after
+            if slot in before and after[slot] != before[slot]
+        ]
+        changed_slots = added_slots + repaired_slots
+
         for slot in added_slots:
             borrowed_slot_counts[slot] = borrowed_slot_counts.get(slot, 0) + 1
+        for slot in repaired_slots:
+            repaired_slot_counts[slot] = repaired_slot_counts.get(slot, 0) + 1
+
         if current is None:
             recovered_rows += 1
         else:
@@ -62,9 +82,14 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
                 "head": head,
                 "stycke": str(record.get("stycke") or ""),
                 "added_slots": added_slots,
-                "forms": {
-                    slot: list(enriched.forms_for(slot))
-                    for slot in added_slots
+                "repaired_slots": repaired_slots,
+                "forms_before": {
+                    slot: list(before.get(slot, ()))
+                    for slot in changed_slots
+                },
+                "forms_after": {
+                    slot: list(after.get(slot, ()))
+                    for slot in changed_slots
                 },
             })
 
@@ -75,6 +100,7 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
         "fully_recovered_rows": recovered_rows,
         "partly_enriched_rows": enriched_rows,
         "borrowed_slot_counts": dict(sorted(borrowed_slot_counts.items())),
+        "repaired_slot_counts": dict(sorted(repaired_slot_counts.items())),
         "independent_head_index_size": len(index),
         "examples": examples,
     }
@@ -86,18 +112,35 @@ def render_text(report: dict[str, Any]) -> str:
         f"Lodstrecksmarkerade sammansatta verb: {report['bar_marked_compound_verbs']}",
         f"Exakt självständigt huvudverb hittat: {report['exact_independent_head_found']}",
         f"Helt räddade rader: {report['fully_recovered_rows']}",
-        f"Redan tolkade rader med nya slots: {report['partly_enriched_rows']}",
+        f"Redan tolkade rader med nya eller reparerade slots: {report['partly_enriched_rows']}",
         f"Självständiga huvudverb i index: {report['independent_head_index_size']}",
         "",
-        "Lånade slots:",
+        "Nya slots:",
     ]
-    for slot, count in report["borrowed_slot_counts"].items():
-        lines.append(f"  {count:6d}  {slot}")
+    if report["borrowed_slot_counts"]:
+        for slot, count in report["borrowed_slot_counts"].items():
+            lines.append(f"  {count:6d}  {slot}")
+    else:
+        lines.append("  –")
+
+    lines.extend(["", "Reparerade avklippta slots:"])
+    if report["repaired_slot_counts"]:
+        for slot, count in report["repaired_slot_counts"].items():
+            lines.append(f"  {count:6d}  {slot}")
+    else:
+        lines.append("  –")
+
     lines.extend(["", "Exempel:"])
     for example in report["examples"]:
+        labels: list[str] = []
+        if example["added_slots"]:
+            labels.append("nya=" + ",".join(example["added_slots"]))
+        if example["repaired_slots"]:
+            labels.append("reparerade=" + ",".join(example["repaired_slots"]))
         lines.append(
             f"  {example['lemma']} <- {example['head']} | "
-            f"slots={','.join(example['added_slots'])} | {example['forms']}"
+            f"{' '.join(labels)} | "
+            f"före={example['forms_before']} efter={example['forms_after']}"
         )
     return "\n".join(lines) + "\n"
 
