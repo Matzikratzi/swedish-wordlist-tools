@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import html
-import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
 from .lexeme_slots import LexemeSlots, SlotForm, build_lexeme_slots
 
-_SUP_RE = re.compile(r"<sup>.*?</sup>", re.IGNORECASE)
-_TAG_RE = re.compile(r"<[^>]+>")
-_SEPARATORS_RE = re.compile(r"[·\u00b7]")
+_SUP_RE = __import__("re").compile(r"<sup>.*?</sup>", __import__("re").IGNORECASE)
+_TAG_RE = __import__("re").compile(r"<[^>]+>")
+_SEPARATORS_RE = __import__("re").compile(r"[·\u00b7]")
 _TEXT_HARD_CAP = 50
+_VERB_FORM_SLOTS = ("present", "preterite", "supine")
 
 
 def clean_stycke(value: object) -> str:
@@ -33,37 +33,149 @@ def compound_verb_parts(record: Mapping[str, Any]) -> tuple[str, str, str] | Non
     return prefix, head, separator + trailing if separator else ""
 
 
+def _source_is_truncated(record: Mapping[str, Any]) -> bool:
+    """The machine-readable text export has an observed hard cap at 50."""
+    return len(str(record.get("text") or "")) == _TEXT_HARD_CAP
+
+
+def _head_forms_from_compound(
+    slots: LexemeSlots,
+    *,
+    prefix: str,
+    trailing_words: str,
+    slot: str,
+) -> frozenset[str]:
+    """Project compound forms back to the exact bar-marked head verb."""
+    result: set[str] = set()
+    for written in slots.forms_for(slot):
+        without_trailing = written
+        if trailing_words:
+            if not written.endswith(trailing_words):
+                continue
+            without_trailing = written[: -len(trailing_words)]
+        if not without_trailing.startswith(prefix):
+            continue
+        head_form = without_trailing[len(prefix) :]
+        if head_form and " " not in head_form:
+            result.add(head_form)
+    return frozenset(result)
+
+
+def _choose_unambiguous_form_set(
+    complete_sets: list[frozenset[str]],
+    truncated_sets: list[frozenset[str]],
+) -> frozenset[str] | None:
+    """Choose one agreed form set, preferring sources below the 50-char cap."""
+    preferred = [forms for forms in complete_sets if forms]
+    fallback = [forms for forms in truncated_sets if forms]
+    candidates = preferred or fallback
+    if not candidates:
+        return None
+    distinct = set(candidates)
+    if len(distinct) != 1:
+        return None
+    return candidates[0]
+
+
 def build_simple_verb_paradigm_index(
     records: Iterable[Mapping[str, Any]],
     interpreted: Mapping[int, LexemeSlots | None],
 ) -> dict[str, LexemeSlots]:
-    candidates: dict[str, list[LexemeSlots]] = {}
-    for record in records:
+    """Build exact head paradigms from independent and compound evidence.
+
+    A head verb's own ``text`` may itself be cut at 50 characters. Therefore
+    complete bar-marked compounds can also provide evidence: ``ren|skriva``
+    with ``renskriver`` proves the head form ``skriver``. Evidence is resolved
+    independently per grammatical slot. Complete sources are preferred, and a
+    slot is omitted whenever complete sources disagree.
+    """
+    record_list = list(records)
+    evidence: dict[
+        str,
+        dict[str, dict[str, list[frozenset[str]]]],
+    ] = {}
+
+    def add_evidence(
+        head: str,
+        slot: str,
+        forms: frozenset[str],
+        *,
+        truncated: bool,
+    ) -> None:
+        if not forms:
+            return
+        bucket = evidence.setdefault(head, {}).setdefault(
+            slot, {"complete": [], "truncated": []}
+        )
+        bucket["truncated" if truncated else "complete"].append(forms)
+
+    for record in record_list:
         if str(record.get("upos", "")).upper() != "VERB":
-            continue
-        if "|" in clean_stycke(record.get("stycke")):
             continue
         slots = interpreted.get(id(record))
         if slots is None:
             continue
-        lemma = str(record.get("normaliserat_ord") or "").strip()
-        if lemma:
-            candidates.setdefault(lemma, []).append(slots)
+        truncated = _source_is_truncated(record)
+        parts = compound_verb_parts(record)
+
+        if parts is None:
+            lemma = str(record.get("normaliserat_ord") or "").strip()
+            if not lemma or " " in lemma:
+                continue
+            for slot in _VERB_FORM_SLOTS:
+                add_evidence(
+                    lemma,
+                    slot,
+                    frozenset(slots.forms_for(slot)),
+                    truncated=truncated,
+                )
+            continue
+
+        # A cut compound cannot repair another cut row. Only complete compound
+        # rows are projected back to their right-hand head.
+        if truncated:
+            continue
+        prefix, head, trailing_words = parts
+        for slot in _VERB_FORM_SLOTS:
+            add_evidence(
+                head,
+                slot,
+                _head_forms_from_compound(
+                    slots,
+                    prefix=prefix,
+                    trailing_words=trailing_words,
+                    slot=slot,
+                ),
+                truncated=False,
+            )
 
     result: dict[str, LexemeSlots] = {}
-    for lemma, rows in candidates.items():
-        signatures = {
-            tuple((form.slot, form.written_form) for form in row.forms)
-            for row in rows
-        }
-        if len(signatures) == 1:
-            result[lemma] = rows[0]
+    for head, slot_evidence in evidence.items():
+        forms: list[SlotForm] = [SlotForm("infinitive", head, "lemma")]
+        for slot in _VERB_FORM_SLOTS:
+            bucket = slot_evidence.get(slot)
+            if bucket is None:
+                continue
+            chosen = _choose_unambiguous_form_set(
+                bucket["complete"], bucket["truncated"]
+            )
+            if chosen is None:
+                continue
+            forms.extend(
+                SlotForm(slot, written, "verb-head-evidence")
+                for written in sorted(chosen)
+            )
+        # An infinitive-only entry cannot enrich any compound.
+        if len(forms) == 1:
+            continue
+        result[head] = build_lexeme_slots(
+            lemma=head,
+            upos="VERB",
+            notation="head-family-evidence",
+            forms=forms,
+            metadata={"head_evidence": "independent-or-bar-family"},
+        )
     return result
-
-
-def _source_is_truncated(record: Mapping[str, Any]) -> bool:
-    """The machine-readable text export has an observed hard cap at 50."""
-    return len(str(record.get("text") or "")) == _TEXT_HARD_CAP
 
 
 def _can_replace_truncated_form(
