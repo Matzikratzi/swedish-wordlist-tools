@@ -145,7 +145,7 @@ def _bar_marked_compound_parts(record: dict[str, Any]) -> tuple[str, str] | None
     if "|" not in stycke:
         return None
     prefix, head = stycke.rsplit("|", 1)
-    prefix = prefix.replace("·", "").strip()
+    prefix = prefix.replace("·", "").replace("|", "").strip()
     head = head.replace("·", "").strip()
     if not prefix or not head:
         return None
@@ -225,7 +225,7 @@ def _entry_from_short_head_plural(
     """Parse short SAOL notation such as ``+n -knappar``.
 
     The compound head is taken from ``stycke`` rather than guessed from the
-    lemma. For ``a·larm|knapp`` this yields ``alarmknappar``.
+    lemma. For ``a·larm|klocka`` this yields ``alarmklockor``.
     """
     match = _SHORT_HEAD_PLURAL_RE.fullmatch(notation.strip())
     if match is None:
@@ -373,8 +373,10 @@ def complete_noun_entry(
     if explicit_plural_entry is not None:
         return _complete_full_paradigm(explicit_plural_entry)
 
-    short_head_plural_entry = _entry_from_short_head_plural(record, raw_pattern)
-    if short_head_plural_entry is not None:
+    if _SHORT_HEAD_PLURAL_RE.fullmatch(raw_pattern) is not None:
+        short_head_plural_entry = _entry_from_short_head_plural(record, raw_pattern)
+        if short_head_plural_entry is None:
+            return None
         return _complete_full_paradigm(short_head_plural_entry)
 
     officer_entry = _entry_from_officer_plural_comment(record, raw_pattern)
