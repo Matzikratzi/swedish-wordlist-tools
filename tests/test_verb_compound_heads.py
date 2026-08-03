@@ -40,6 +40,7 @@ class VerbCompoundHeadTests(unittest.TestCase):
             "-skrev, -skrivit, -skriven -skrivet -skrivna, pres. -skr",
             "av|skriva",
         )
+        compound["ordkl"] = "v. <i>-skrev, -skrivit, -...</i>"
         base_slots = interpret_verb_slots(base_record)
         current = interpret_verb_slots(compound)
         self.assertIsNotNone(base_slots)
