@@ -28,9 +28,6 @@ class InterpretedRow:
         return None
 
 
-# A cleaned row consists of grammatical labels, punctuation and form tokens.
-# A form token can be a suffix (+ar), a bar-head replacement (-resor), or a
-# complete written form (a-kassor, abc-böcker, ankaret).
 _TOKEN_RE = re.compile(
     r"pl\.|best\.|el\.|[;,]|[+\-][A-Za-zÅÄÖåäöÉéÜü:]*|"
     r"[A-Za-zÅÄÖåäöÉéÜü0-9][\wÅÄÖåäöÉéÜü:‐‑–-]*",
@@ -50,7 +47,6 @@ _IGNORED_MARKERS = {
 
 
 def _comparison_key(value: Any) -> str:
-    """Normalize harmless typography before comparing ``stycke`` with lemma."""
     text = unicodedata.normalize("NFKC", str(value or ""))
     text = _SUP_ELEMENT_RE.sub("", text)
     text = _HTML_TAG_RE.sub("", text)
@@ -88,12 +84,6 @@ def _common_prefix_length(left: str, right: str) -> int:
 
 
 def _replace_unmarked_final_component(lemma: str, replacement: str) -> str | None:
-    """Replace an unmarked final component using spelling evidence only.
-
-    This is a generic fallback for source rows whose ``stycke`` lacks ``|``.
-    The chosen suffix of the lemma must share at least three initial letters
-    with the supplied replacement, e.g. ``gigawattimme`` + ``timmar``.
-    """
     first, separator, rest = lemma.partition(" ")
     best_start: int | None = None
     best_length = 0
@@ -111,12 +101,6 @@ def _replace_unmarked_final_component(lemma: str, replacement: str) -> str | Non
 def apply_form_token(
     record: dict[str, Any], lemma: str, token: str
 ) -> str | None:
-    """Apply one cleaned SAOL form token to a lemma.
-
-    ``+suffix`` appends to the inflected word. A bare ``+`` means unchanged
-    spelling. ``-headform`` replaces the component after the final bar in
-    ``stycke``. Any other token is already a complete written form.
-    """
     if token == "+":
         return lemma
     if token.startswith("+"):
@@ -136,7 +120,6 @@ def apply_form_token(
 
 
 def _clean_notation_comments(pattern: str) -> str:
-    """Reduce grammatical prose to the compact syntax it describes."""
     pattern = _SUP_ELEMENT_RE.sub("", pattern)
     pattern = _HTML_TAG_RE.sub("", pattern)
     pattern = re.sub(
@@ -150,7 +133,6 @@ def _clean_notation_comments(pattern: str) -> str:
 
 
 def _tokenize(pattern: str) -> tuple[str, ...] | None:
-    """Tokenize only when every non-space character belongs to the syntax."""
     tokens: list[str] = []
     position = 0
     for match in _TOKEN_RE.finditer(pattern):
@@ -164,11 +146,6 @@ def _tokenize(pattern: str) -> tuple[str, ...] | None:
 
 
 def _slot_sequence(pattern: str) -> tuple[tuple[str, str], ...] | None:
-    """Map cleaned noun notation to grammatical key-form slots.
-
-    ``el.`` and the source marker ``H`` introduce an alternative in the same
-    grammatical slot. Labels such as ``pl.`` and ``best. pl.`` change slots.
-    """
     tokens = _tokenize(_clean_notation_comments(pattern))
     if tokens is None:
         return None
@@ -215,12 +192,15 @@ def _slot_sequence(pattern: str) -> tuple[tuple[str, str], ...] | None:
             context = "after_plural"
         result.append((slot, token))
         last_slot = slot
+        # `best.` modifies the next form only. Without clearing it here,
+        # `best. +; i: pl. används: anmodanden` incorrectly makes the
+        # later plural form definite plural.
+        pending_best = False
 
     return tuple(result) if result else None
 
 
 def _interpret_missing_pattern(record: dict[str, Any], lemma: str) -> InterpretedRow | None:
-    """Use explicit noun status in ``ordkl`` when the form field is absent."""
     ordkl = re.sub(r"\s+", " ", str(record.get("ordkl", "")).strip()).casefold()
     key_forms: list[KeyForm] = [KeyForm("lemma", lemma, "lemma")]
     if "oböjl." in ordkl:
@@ -235,7 +215,6 @@ def _interpret_missing_pattern(record: dict[str, Any], lemma: str) -> Interprete
 
 
 def interpret_noun_row(record: dict[str, Any]) -> InterpretedRow | None:
-    """Interpret a cleaned SAOL noun row into grammatical key forms."""
     if str(record.get("upos", "")).upper() != "NOUN":
         return None
     lemma = str(record.get("normaliserat_ord", "")).strip()
