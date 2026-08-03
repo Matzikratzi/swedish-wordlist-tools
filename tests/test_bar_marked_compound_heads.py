@@ -18,24 +18,24 @@ class BarMarkedCompoundHeadTests(unittest.TestCase):
         return complete_noun_entry(record, generate_entry(record))
 
     def test_replaces_head_after_bar(self) -> None:
-        entry = self.complete("alarmknapp", "a·larm|knapp", "+n -knappar")
+        entry = self.complete("alarmklocka", "a·larm|klocka", "+n -klockor")
         self.assertIsNotNone(entry)
         self.assertEqual(
             {
-                "alarmknapp",
-                "alarmknapps",
-                "alarmknappn",
-                "alarmknappns",
-                "alarmknappar",
-                "alarmknappars",
-                "alarmknapparna",
-                "alarmknapparnas",
+                "alarmklocka",
+                "alarmklockas",
+                "alarmklockan",
+                "alarmklockans",
+                "alarmklockor",
+                "alarmklockors",
+                "alarmklockorna",
+                "alarmklockornas",
             },
             set(entry.forms if entry else ()),
         )
 
     def test_does_not_guess_without_bar(self) -> None:
-        entry = self.complete("alarmknapp", "a·larmknapp", "+n -knappar")
+        entry = self.complete("alarmklocka", "a·larmklocka", "+n -klockor")
         self.assertIsNone(entry)
 
     def test_uses_last_bar(self) -> None:
