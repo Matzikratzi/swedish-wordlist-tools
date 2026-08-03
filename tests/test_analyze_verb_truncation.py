@@ -12,34 +12,36 @@ class AnalyzeVerbTruncationTests(unittest.TestCase):
     def record(self, text: str, ordkl: str) -> dict[str, str]:
         return {"text": text, "ordkl": ordkl, "upos": "VERB"}
 
-    def test_marks_mid_word_present_form_for_external_lookup(self) -> None:
-        record = self.record(
-            "sjöng, sjungit, sjungen sjunget sjungna, pres. sju",
-            "v. <i>sjöng, sjungit, s...</i>",
-        )
+    def test_marks_text_at_observed_hard_cap(self) -> None:
+        text = "sjöng, sjungit, sjungen sjunget sjungna, pres. sju"
+        self.assertEqual(50, len(text))
+        record = self.record(text, "v. <i>sjöng, sjungit, s...</i>")
         self.assertTrue(_external_lookup_candidate(record))
-        self.assertEqual("external_lookup_candidate", _truncation_kind(record))
+        self.assertEqual("text_at_hard_cap", _truncation_kind(record))
 
     def test_does_not_mark_normal_compact_notation(self) -> None:
         record = self.record("+de +t", "v. <i>+de +t</i>")
         self.assertFalse(_external_lookup_candidate(record))
         self.assertIsNone(_truncation_kind(record))
 
-    def test_separates_ellipsis_when_text_is_still_usable(self) -> None:
+    def test_ordkl_ellipsis_is_not_text_truncation_evidence(self) -> None:
         record = self.record(
             "-gjorde, -gjort, -gjord n. -gjort, pres. -gör",
             "v. <i>-gjorde, -gjort, ...</i>",
         )
+        self.assertLess(len(record["text"]), 50)
         self.assertFalse(_external_lookup_candidate(record))
-        self.assertEqual("ellipsis_but_text_usable", _truncation_kind(record))
-
-    def test_requires_source_ellipsis(self) -> None:
-        record = self.record(
-            "sjöng, sjungit, sjungen sjunget sjungna, pres. sju",
-            "v.",
+        self.assertEqual(
+            "ordkl_ellipsis_but_text_below_cap",
+            _truncation_kind(record),
         )
-        self.assertFalse(_external_lookup_candidate(record))
-        self.assertIsNone(_truncation_kind(record))
+
+    def test_marks_length_50_even_without_ordkl_ellipsis(self) -> None:
+        text = "försjönk, försjunkit, försjunken försjunket försju"
+        self.assertEqual(50, len(text))
+        record = self.record(text, "v.")
+        self.assertTrue(_external_lookup_candidate(record))
+        self.assertEqual("text_at_hard_cap", _truncation_kind(record))
 
 
 if __name__ == "__main__":
