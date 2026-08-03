@@ -34,6 +34,13 @@ _SINGULAR_ONLY_PATTERNS = {
     "+t",
 }
 
+_ALTERNATIVE_GENDER_PATTERNS = {
+    "+et el. +en",
+    "+en el. +et",
+    "+et el. +en; pl. +",
+    "+en el. +et; pl. +",
+}
+
 _EXPLICIT_USED_PLURAL_RE = re.compile(
     r"^best\.\s*\+;\s*i:\s*pl\.\s*används:\s*(\S+)\s*$",
     re.IGNORECASE,
@@ -85,6 +92,35 @@ def _entry_from_full_pattern(
     )
 
 
+def _entry_from_alternative_gender_pattern(
+    record: dict[str, Any], pattern: str
+) -> GeneratedEntry | None:
+    """Generate both singular genders from ``+et el. +en`` notation.
+
+    SAOL lists both alternatives as accepted forms, for example
+    ``kamratskapet (kamratskapen)``. A possible zero plural adds no new
+    spellings beyond the common lemma/genitive and the ``-en`` forms.
+    """
+    lemma = str(record.get("normaliserat_ord", "")).strip()
+    if not lemma:
+        return None
+    definite_et = _attach_suffix(lemma, "et")
+    definite_en = _attach_suffix(lemma, "en")
+    return GeneratedEntry(
+        lemma=lemma,
+        pattern=pattern,
+        word_forms=(
+            GeneratedWordForm(lemma, _CI, "lemma"),
+            GeneratedWordForm(_genitive(lemma), _SG_INDEF_GEN, "derived_genitive"),
+            GeneratedWordForm(definite_et, _SG_DEF_NOM, "derived_alternative_gender"),
+            GeneratedWordForm(_genitive(definite_et), _SG_DEF_GEN, "derived_genitive"),
+            GeneratedWordForm(definite_en, _SG_DEF_NOM, "derived_alternative_gender"),
+            GeneratedWordForm(_genitive(definite_en), _SG_DEF_GEN, "derived_genitive"),
+        ),
+        pattern_group=pattern,
+    )
+
+
 def _explicit_used_plural(lemma: str, notation: str) -> str | None:
     match = _EXPLICIT_USED_PLURAL_RE.fullmatch(notation.strip())
     if match is None:
@@ -95,9 +131,6 @@ def _explicit_used_plural(lemma: str, notation: str) -> str | None:
         return supplied
 
     plural_head = supplied[1:]
-    # SAOL uses a leading hyphen when only the compound head is shown, e.g.
-    # ``fredssträvan — ... används: -strävanden``. For this family the
-    # supplied plural head in -anden corresponds to a singular head in -an.
     if plural_head.endswith("anden"):
         singular_head = plural_head[:-3]
         if lemma.endswith(singular_head):
@@ -136,9 +169,6 @@ def _definite_plural(lemma: str, plural: str, pattern: str) -> str:
     if pattern == "+t +n":
         return plural + "a"
     if pattern == "best. +; i pl. används":
-        # Explicit plurals in -anden take -a (anmodanden -> anmodandena),
-        # while ordinary plurals in -ar/-er take -na
-        # (ansökningar -> ansökningarna).
         return plural + ("a" if plural.casefold().endswith("en") else "na")
     return plural + "na"
 
@@ -228,7 +258,10 @@ def complete_noun_entry(
 
     pattern = normalise_pattern(raw_pattern)
     if pattern is None:
-        return entry
+        pattern = raw_pattern
+
+    if pattern in _ALTERNATIVE_GENDER_PATTERNS:
+        return _entry_from_alternative_gender_pattern(record, pattern)
 
     if entry is None and pattern == "+et +er":
         entry = _entry_from_full_pattern(record, pattern, "et", "er")
