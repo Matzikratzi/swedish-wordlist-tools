@@ -46,6 +46,11 @@ _EXPLICIT_USED_PLURAL_RE = re.compile(
     re.IGNORECASE,
 )
 
+_OFFICER_PLURAL_RE = re.compile(
+    r"^\+en;\s*som:\s*pl\.\s*anv\.\s*\+are,\s*best\.\s*pl\.\s*\+arna\s*$",
+    re.IGNORECASE,
+)
+
 
 def _genitive(form: str) -> str:
     """Return the ordinary Swedish genitive spelling."""
@@ -95,12 +100,7 @@ def _entry_from_full_pattern(
 def _entry_from_alternative_gender_pattern(
     record: dict[str, Any], pattern: str
 ) -> GeneratedEntry | None:
-    """Generate both singular genders from ``+et el. +en`` notation.
-
-    SAOL lists both alternatives as accepted forms, for example
-    ``kamratskapet (kamratskapen)``. A possible zero plural adds no new
-    spellings beyond the common lemma/genitive and the ``-en`` forms.
-    """
+    """Generate both singular genders from ``+et el. +en`` notation."""
     lemma = str(record.get("normaliserat_ord", "")).strip()
     if not lemma:
         return None
@@ -121,6 +121,36 @@ def _entry_from_alternative_gender_pattern(
     )
 
 
+def _common_prefix_length(left: str, right: str) -> int:
+    length = 0
+    for left_char, right_char in zip(left.casefold(), right.casefold()):
+        if left_char != right_char:
+            break
+        length += 1
+    return length
+
+
+def _replace_compound_head(lemma: str, plural_head: str) -> str | None:
+    """Replace the lemma's final head with an explicitly supplied plural head.
+
+    SAOL writes only the changed compound head after a leading hyphen, for
+    example ``avskedsansökan — -ansökningar`` and
+    ``fredssträvan — -strävanden``. Choose the suffix of the lemma with the
+    longest shared prefix with the supplied head, requiring at least three
+    shared characters to avoid accidental matches.
+    """
+    best_start: int | None = None
+    best_length = 0
+    for start in range(len(lemma)):
+        shared = _common_prefix_length(lemma[start:], plural_head)
+        if shared > best_length:
+            best_start = start
+            best_length = shared
+    if best_start is None or best_length < 3:
+        return None
+    return lemma[:best_start] + plural_head
+
+
 def _explicit_used_plural(lemma: str, notation: str) -> str | None:
     match = _EXPLICIT_USED_PLURAL_RE.fullmatch(notation.strip())
     if match is None:
@@ -129,13 +159,7 @@ def _explicit_used_plural(lemma: str, notation: str) -> str | None:
     supplied = match.group(1)
     if not supplied.startswith("-"):
         return supplied
-
-    plural_head = supplied[1:]
-    if plural_head.endswith("anden"):
-        singular_head = plural_head[:-3]
-        if lemma.endswith(singular_head):
-            return lemma[: -len(singular_head)] + plural_head
-    return None
+    return _replace_compound_head(lemma, supplied[1:])
 
 
 def _entry_from_explicit_used_plural(
@@ -156,6 +180,35 @@ def _entry_from_explicit_used_plural(
             GeneratedWordForm(lemma, _CI, "lemma"),
             GeneratedWordForm(lemma, _SG_DEF_NOM, "derived"),
             GeneratedWordForm(plural, _PL_INDEF_NOM, "explicit_plural"),
+        ),
+        pattern_group=pattern,
+    )
+
+
+def _entry_from_officer_plural_comment(
+    record: dict[str, Any], notation: str
+) -> GeneratedEntry | None:
+    if _OFFICER_PLURAL_RE.fullmatch(notation.strip()) is None:
+        return None
+    lemma = str(record.get("normaliserat_ord", "")).strip()
+    if not lemma:
+        return None
+    singular_definite = lemma + "en"
+    plural_indefinite = lemma + "are"
+    plural_definite = lemma + "arna"
+    pattern = "+en; som pl. används +are"
+    return GeneratedEntry(
+        lemma=lemma,
+        pattern=pattern,
+        word_forms=(
+            GeneratedWordForm(lemma, _CI, "lemma"),
+            GeneratedWordForm(_genitive(lemma), _SG_INDEF_GEN, "derived_genitive"),
+            GeneratedWordForm(singular_definite, _SG_DEF_NOM, "derived"),
+            GeneratedWordForm(_genitive(singular_definite), _SG_DEF_GEN, "derived_genitive"),
+            GeneratedWordForm(plural_indefinite, _PL_INDEF_NOM, "explicit_plural"),
+            GeneratedWordForm(_genitive(plural_indefinite), _PL_INDEF_GEN, "derived_genitive"),
+            GeneratedWordForm(plural_definite, _PL_DEF_NOM, "explicit_definite_plural"),
+            GeneratedWordForm(_genitive(plural_definite), _PL_DEF_GEN, "derived_genitive"),
         ),
         pattern_group=pattern,
     )
@@ -255,6 +308,10 @@ def complete_noun_entry(
     explicit_plural_entry = _entry_from_explicit_used_plural(record, raw_pattern)
     if explicit_plural_entry is not None:
         return _complete_full_paradigm(explicit_plural_entry)
+
+    officer_entry = _entry_from_officer_plural_comment(record, raw_pattern)
+    if officer_entry is not None:
+        return officer_entry
 
     pattern = normalise_pattern(raw_pattern)
     if pattern is None:
