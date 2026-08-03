@@ -26,7 +26,6 @@ def _common_prefix_length(left: str, right: str) -> int:
 
 
 def _replace_verb_final_component(lemma: str, replacement: str) -> str | None:
-    """Fallback for strong verb compounds whose source lacks a usable bar."""
     first, separator, rest = lemma.partition(" ")
     best_start: int | None = None
     best_shared = 0
@@ -59,7 +58,6 @@ def _tokens(pattern: str) -> tuple[str, ...] | None:
 
 
 def _alternative_tokens(text: str) -> tuple[str, ...]:
-    """Extract form alternatives while discarding lexicographic markers."""
     cleaned = _MARKER_RE.sub(" ", text)
     tokens = tuple(match.group(0) for match in _FORM_TOKEN_RE.finditer(cleaned))
     ignored = {"el", "vard", "åld", "prov", "ibl", "n", "h"}
@@ -67,22 +65,13 @@ def _alternative_tokens(text: str) -> tuple[str, ...]:
 
 
 def _first_group(text: str) -> str:
-    """Return text up to the next grammatical/comma group."""
     return re.split(r"[,;]", text, maxsplit=1)[0].strip()
 
 
 def _labelled_assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
-    """Interpret expanded verb rows containing a ``pres.`` label.
-
-    Text before ``pres.`` consists of comma groups: preterite, supine and zero
-    or more participle groups. Only the first two are needed here. Text after
-    the label supplies present-tense alternatives. The label need not be
-    preceded by one exact punctuation character.
-    """
     match = _PRESENT_RE.search(pattern)
     if match is None:
         return None
-
     before = pattern[: match.start()].strip(" ,;:")
     after = pattern[match.end() :].strip()
     groups = [part.strip() for part in before.split(",") if part.strip()]
@@ -109,21 +98,43 @@ def _simple_assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
         return None
     if len(tokens) == 2:
         return (("preterite", tokens[0]), ("supine", tokens[1]))
-    return (
-        ("present", tokens[0]),
-        ("preterite", tokens[1]),
-        ("supine", tokens[2]),
-    )
+    return (("present", tokens[0]), ("preterite", tokens[1]), ("supine", tokens[2]))
+
+
+def diagnose_verb_record(record: dict[str, Any]) -> str:
+    if str(record.get("upos", "")).upper() != "VERB":
+        return "not_verb"
+    lemma = str(record.get("normaliserat_ord", "")).strip()
+    if not lemma:
+        return "missing_lemma"
+    pattern = normalise_pattern(record.get("text"))
+    if pattern is None:
+        return "missing_pattern"
+    if _NO_INFLECTION_RE.fullmatch(pattern):
+        return "ok_no_inflection"
+    variants = tuple(part.strip() for part in re.split(r"\s+_\s+", pattern) if part.strip())
+    if not variants:
+        return "no_variants"
+    for variant in variants:
+        assignments = _labelled_assignments(variant)
+        if assignments is None:
+            assignments = _simple_assignments(variant)
+        if assignments is None:
+            if _PRESENT_RE.search(variant):
+                return "labelled_syntax_unparsed"
+            return "simple_syntax_unparsed"
+        for _slot, token in assignments:
+            if _apply_token(record, lemma, token) is None:
+                return "form_token_not_applied"
+    return "ok"
 
 
 def interpret_verb_slots(record: dict[str, Any]) -> LexemeSlots | None:
-    """Interpret SAOL verb notation into generic grammatical slots."""
-    if str(record.get("upos", "")).upper() != "VERB":
+    if diagnose_verb_record(record) not in {"ok", "ok_no_inflection"}:
         return None
     lemma = str(record.get("normaliserat_ord", "")).strip()
     pattern = normalise_pattern(record.get("text"))
-    if not lemma or pattern is None:
-        return None
+    assert pattern is not None
 
     metadata = {
         "record_id": str(record.get("id") or record.get("subnr") or ""),
@@ -140,19 +151,13 @@ def interpret_verb_slots(record: dict[str, Any]) -> LexemeSlots | None:
             metadata=metadata,
         )
 
-    variants = tuple(part.strip() for part in re.split(r"\s+_\s+", pattern) if part.strip())
-    if not variants:
-        return None
-
     forms = [SlotForm("infinitive", lemma, "lemma")]
-    for variant in variants:
+    for variant in (part.strip() for part in re.split(r"\s+_\s+", pattern) if part.strip()):
         assignments = _labelled_assignments(variant) or _simple_assignments(variant)
-        if assignments is None:
-            return None
+        assert assignments is not None
         for slot, token in assignments:
             written_form = _apply_token(record, lemma, token)
-            if written_form is None:
-                return None
+            assert written_form is not None
             forms.append(SlotForm(slot, written_form, token))
 
     return build_lexeme_slots(
