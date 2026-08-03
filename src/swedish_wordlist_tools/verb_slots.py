@@ -8,12 +8,49 @@ from .lexeme_slots import LexemeSlots, SlotForm, build_lexeme_slots
 from .saol_row_interpreter import apply_form_token
 
 _FORM_TOKEN_RE = re.compile(r"[+\-]?[A-Za-zÅÄÖåäöÉéÜü]+(?:-[A-Za-zÅÄÖåäöÉéÜü]+)*")
-_MARKER_RE = re.compile(r"\b(?:el\.|vard\.|åld\.|n\.)\b", re.IGNORECASE)
+_MARKER_RE = re.compile(r"(?:\bel\.|\bvard\.|\båld\.|\bprov\.|\bn\.|\bH\b)", re.IGNORECASE)
 _PRESENT_RE = re.compile(r"(?:^|[,;])\s*pres\.\s*", re.IGNORECASE)
+_NO_INFLECTION_RE = re.compile(r"^\s*(?:ingen\s*:?[ ]*böjning\s*:?)\s*$", re.IGNORECASE)
+
+
+def _common_prefix_length(left: str, right: str) -> int:
+    length = 0
+    for left_char, right_char in zip(left.casefold(), right.casefold()):
+        if left_char != right_char:
+            break
+        length += 1
+    return length
+
+
+def _replace_verb_final_component(lemma: str, replacement: str) -> str | None:
+    """Fallback for strong verb compounds whose source lacks a usable bar.
+
+    Prefer the longest final lemma component that shares spelling with the
+    supplied form.  One shared initial letter is accepted only for a component
+    of at least three letters, covering strong pairs such as ``giva``/``gav``
+    while avoiding arbitrary whole-word replacement.
+    """
+    first, separator, rest = lemma.partition(" ")
+    best_start: int | None = None
+    best_shared = 0
+    for start in range(len(first)):
+        candidate = first[start:]
+        shared = _common_prefix_length(candidate, replacement)
+        if shared > best_shared and len(candidate) >= 3:
+            best_start = start
+            best_shared = shared
+    if best_start is None or best_shared < 1:
+        return None
+    result = first[:best_start] + replacement
+    return result + (separator + rest if separator else "")
 
 
 def _apply_token(record: dict[str, Any], lemma: str, token: str) -> str | None:
-    return apply_form_token(record, lemma, token)
+    written = apply_form_token(record, lemma, token)
+    if written is not None or not token.startswith("-"):
+        return written
+    replacement = token[1:]
+    return _replace_verb_final_component(lemma, replacement) if replacement else None
 
 
 def _tokens(pattern: str) -> tuple[str, ...] | None:
@@ -28,15 +65,15 @@ def _alternative_tokens(text: str) -> tuple[str, ...]:
     """Extract form alternatives while discarding lexicographic markers."""
     cleaned = _MARKER_RE.sub(" ", text)
     tokens = tuple(match.group(0) for match in _FORM_TOKEN_RE.finditer(cleaned))
-    return tuple(token for token in tokens if token.casefold() not in {"el", "vard", "åld", "n"})
+    ignored = {"el", "vard", "åld", "prov", "n", "h"}
+    return tuple(token for token in tokens if token.casefold() not in ignored)
 
 
 def _labelled_assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
-    """Interpret comma groups followed by ``pres.``.
+    """Interpret expanded comma groups followed by ``pres.``.
 
-    In SAOL's expanded verb notation the first comma group is preterite, the
-    second is supine, following groups describe participles, and the group
-    introduced by ``pres.`` contains one or more present-tense alternatives.
+    The first group is preterite, the second supine, intervening groups are
+    participles, and the ``pres.`` group supplies present-tense alternatives.
     """
     match = _PRESENT_RE.search(pattern)
     if match is None:
@@ -63,6 +100,19 @@ def _labelled_assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
     return tuple(assignments)
 
 
+def _simple_assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
+    tokens = _tokens(pattern)
+    if tokens is None or len(tokens) not in {2, 3}:
+        return None
+    if len(tokens) == 2:
+        return (("preterite", tokens[0]), ("supine", tokens[1]))
+    return (
+        ("present", tokens[0]),
+        ("preterite", tokens[1]),
+        ("supine", tokens[2]),
+    )
+
+
 def interpret_verb_slots(record: dict[str, Any]) -> LexemeSlots | None:
     """Interpret SAOL verb notation into generic grammatical slots."""
     if str(record.get("upos", "")).upper() != "VERB":
@@ -72,36 +122,40 @@ def interpret_verb_slots(record: dict[str, Any]) -> LexemeSlots | None:
     if not lemma or pattern is None:
         return None
 
-    assignments = _labelled_assignments(pattern)
-    if assignments is None:
-        tokens = _tokens(pattern)
-        if tokens is None or len(tokens) not in {2, 3}:
-            return None
-        if len(tokens) == 2:
-            assignments = (("preterite", tokens[0]), ("supine", tokens[1]))
-        else:
-            assignments = (
-                ("present", tokens[0]),
-                ("preterite", tokens[1]),
-                ("supine", tokens[2]),
-            )
+    metadata = {
+        "record_id": str(record.get("id") or record.get("subnr") or ""),
+        "homonym_number": str(record.get("homonr") or ""),
+        "stycke": str(record.get("stycke") or ""),
+        "ordkl": str(record.get("ordkl") or ""),
+    }
+    if _NO_INFLECTION_RE.fullmatch(pattern):
+        return build_lexeme_slots(
+            lemma=lemma,
+            upos="VERB",
+            notation=pattern,
+            forms=(SlotForm("infinitive", lemma, "lemma"),),
+            metadata=metadata,
+        )
+
+    variants = tuple(part.strip() for part in re.split(r"\s+_\s+", pattern) if part.strip())
+    if not variants:
+        return None
 
     forms = [SlotForm("infinitive", lemma, "lemma")]
-    for slot, token in assignments:
-        written_form = _apply_token(record, lemma, token)
-        if written_form is None:
+    for variant in variants:
+        assignments = _labelled_assignments(variant) or _simple_assignments(variant)
+        if assignments is None:
             return None
-        forms.append(SlotForm(slot, written_form, token))
+        for slot, token in assignments:
+            written_form = _apply_token(record, lemma, token)
+            if written_form is None:
+                return None
+            forms.append(SlotForm(slot, written_form, token))
 
     return build_lexeme_slots(
         lemma=lemma,
         upos="VERB",
         notation=pattern,
         forms=forms,
-        metadata={
-            "record_id": str(record.get("id") or record.get("subnr") or ""),
-            "homonym_number": str(record.get("homonr") or ""),
-            "stycke": str(record.get("stycke") or ""),
-            "ordkl": str(record.get("ordkl") or ""),
-        },
+        metadata=metadata,
     )
