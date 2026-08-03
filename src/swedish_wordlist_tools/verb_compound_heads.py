@@ -77,15 +77,7 @@ def build_simple_verb_paradigm_index(
     records: Iterable[Mapping[str, Any]],
     interpreted: Mapping[int, LexemeSlots | None],
 ) -> dict[str, LexemeSlots]:
-    """Build exact head paradigms using only complete source evidence.
-
-    An independent verb row proves that the head verb exists even when its
-    ``text`` is ``(null)``. It contributes forms only when it has interpreted,
-    non-truncated data. Complete bar-marked compounds may also prove head forms
-    by removing their exact prefix. Rows at the observed 50-character cap never
-    provide head-form evidence. Conflicting complete evidence excludes the
-    entire head verb instead of guessing.
-    """
+    """Build exact head paradigms using only complete source evidence."""
     record_list = list(records)
     independent_heads: set[str] = set()
     evidence: dict[str, dict[str, list[frozenset[str]]]] = {}
@@ -97,7 +89,6 @@ def build_simple_verb_paradigm_index(
     for record in record_list:
         if str(record.get("upos", "")).upper() != "VERB":
             continue
-
         parts = compound_verb_parts(record)
         if parts is None:
             lemma = str(record.get("normaliserat_ord") or "").strip()
@@ -133,7 +124,6 @@ def build_simple_verb_paradigm_index(
     for head, slot_evidence in evidence.items():
         if head not in independent_heads:
             continue
-
         chosen_by_slot: dict[str, frozenset[str]] = {}
         ambiguous = False
         for slot in _VERB_FORM_SLOTS:
@@ -145,14 +135,21 @@ def build_simple_verb_paradigm_index(
                 ambiguous = True
                 break
             chosen_by_slot[slot] = candidates[0]
-
         if ambiguous or not chosen_by_slot:
             continue
 
         forms: list[SlotForm] = [SlotForm("infinitive", head, "lemma")]
         for slot in _VERB_FORM_SLOTS:
             for written in sorted(chosen_by_slot.get(slot, ())):
-                forms.append(SlotForm(slot, written, "complete-verb-family-evidence"))
+                forms.append(
+                    SlotForm(
+                        slot,
+                        written,
+                        "complete-verb-family-evidence",
+                        "row_family_evidence",
+                        head,
+                    )
+                )
         result[head] = build_lexeme_slots(
             lemma=head,
             upos="VERB",
@@ -169,11 +166,7 @@ def _can_replace_truncated_form(
     *,
     source_is_truncated: bool,
 ) -> bool:
-    return (
-        source_is_truncated
-        and existing != borrowed
-        and borrowed.startswith(existing)
-    )
+    return source_is_truncated and existing != borrowed and borrowed.startswith(existing)
 
 
 def borrow_compound_verb_slots(
@@ -206,7 +199,15 @@ def borrow_compound_verb_slots(
 
         same_slot = [form for form in forms if form.slot == source_form.slot]
         if not same_slot:
-            forms.append(SlotForm(source_form.slot, borrowed, f"compound-head:{head}"))
+            forms.append(
+                SlotForm(
+                    source_form.slot,
+                    borrowed,
+                    f"compound-head:{head}",
+                    "compound_head_repair",
+                    head,
+                )
+            )
             changed = True
             continue
 
@@ -224,7 +225,13 @@ def borrow_compound_verb_slots(
         replaceable_ids = {id(form) for form in replaceable}
         forms = [form for form in forms if id(form) not in replaceable_ids]
         forms.append(
-            SlotForm(source_form.slot, borrowed, f"compound-head-repair:{head}")
+            SlotForm(
+                source_form.slot,
+                borrowed,
+                f"compound-head-repair:{head}",
+                "compound_head_repair",
+                head,
+            )
         )
         changed = True
 
@@ -242,11 +249,7 @@ def borrow_compound_verb_slots(
     return build_lexeme_slots(
         lemma=lemma,
         upos="VERB",
-        notation=(
-            current.notation
-            if current is not None
-            else str(record.get("text") or "")
-        ),
+        notation=current.notation if current is not None else str(record.get("text") or ""),
         forms=forms,
         metadata=metadata,
     )
