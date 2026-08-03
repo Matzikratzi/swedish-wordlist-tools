@@ -28,11 +28,11 @@ class AnalyzeTopNounMismatchGroupsTests(unittest.TestCase):
                 "text": "+en +er",
             },
             {
-                "id": "hajka-verb",
-                "normaliserat_ord": "hajka",
-                "upos": "VERB",
-                "ordkl": "verb",
-                "text": "-r -de -t",
+                "id": "hajkar-noun",
+                "normaliserat_ord": "hajkar",
+                "upos": "NOUN",
+                "ordkl": "subst.",
+                "text": "+en",
             },
         ]
         saldo = {
@@ -49,8 +49,46 @@ class AnalyzeTopNounMismatchGroupsTests(unittest.TestCase):
         self.assertEqual(1, summary["remaining_noun_mismatches"])
         entry = summary["groups"][0]["entries"][0]
         self.assertEqual("hajk", entry["lemma"])
-        self.assertEqual("hajka", entry["other_saol_entries"][0]["lemma"])
-        self.assertIn("hajkar", entry["other_saol_entries"][0]["overlapping_missing_forms"])
+        self.assertEqual("hajkar", entry["other_saol_entries"][0]["lemma"])
+        self.assertEqual(
+            {"hajkar", "hajkars"},
+            set(entry["other_saol_entries"][0]["overlapping_missing_forms"]),
+        )
+
+    def test_does_not_treat_related_verb_as_full_noun_overlap(self) -> None:
+        validation = [{
+            "record_id": "hajk-noun",
+            "lemma": "hajk",
+            "homonym_number": "1",
+            "upos": "NOUN",
+            "status": "form_set_mismatch",
+            "notation": "+en +er",
+            "generated_forms": ["hajk", "hajken", "hajker"],
+            "saldo_forms": ["hajk", "hajken", "hajkar", "hajkars"],
+            "extra_from_saol": ["hajker"],
+            "missing_from_saol": ["hajkar", "hajkars"],
+        }]
+        saol = [
+            {
+                "id": "hajk-noun",
+                "normaliserat_ord": "hajk",
+                "upos": "NOUN",
+                "ordkl": "subst.",
+                "text": "+en +er",
+            },
+            {
+                "id": "hajka-verb",
+                "normaliserat_ord": "hajka",
+                "upos": "VERB",
+                "ordkl": "verb",
+                "text": "-r -de -t",
+            },
+        ]
+
+        summary = analyse(validation, saol, {}, top_groups=1)
+
+        entry = summary["groups"][0]["entries"][0]
+        self.assertEqual([], entry["other_saol_entries"])
 
     def test_limits_number_of_groups(self) -> None:
         rows = [
