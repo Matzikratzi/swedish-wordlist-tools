@@ -10,11 +10,10 @@ from .lexeme_slots import LexemeSlots, SlotForm, build_lexeme_slots
 _SUP_RE = re.compile(r"<sup>.*?</sup>", re.IGNORECASE)
 _TAG_RE = re.compile(r"<[^>]+>")
 _SEPARATORS_RE = re.compile(r"[·\u00b7]")
-_TRUNCATION_MARK_RE = re.compile(r"(?:\.\.\.|…)")
+_TEXT_HARD_CAP = 50
 
 
 def clean_stycke(value: object) -> str:
-    """Return lexical spelling from SAOL ``stycke`` markup."""
     text = html.unescape(str(value or ""))
     text = _SUP_RE.sub("", text)
     text = _TAG_RE.sub("", text)
@@ -22,7 +21,6 @@ def clean_stycke(value: object) -> str:
 
 
 def compound_verb_parts(record: Mapping[str, Any]) -> tuple[str, str, str] | None:
-    """Return ``(prefix, head, trailing_words)`` for an exact bar-marked verb."""
     stycke = clean_stycke(record.get("stycke"))
     if "|" not in stycke:
         return None
@@ -39,7 +37,6 @@ def build_simple_verb_paradigm_index(
     records: Iterable[Mapping[str, Any]],
     interpreted: Mapping[int, LexemeSlots | None],
 ) -> dict[str, LexemeSlots]:
-    """Index unbarred, independently interpreted verbs by exact lemma."""
     candidates: dict[str, list[LexemeSlots]] = {}
     for record in records:
         if str(record.get("upos", "")).upper() != "VERB":
@@ -65,10 +62,8 @@ def build_simple_verb_paradigm_index(
 
 
 def _source_is_truncated(record: Mapping[str, Any]) -> bool:
-    return bool(
-        _TRUNCATION_MARK_RE.search(str(record.get("ordkl") or ""))
-        or _TRUNCATION_MARK_RE.search(str(record.get("text") or ""))
-    )
+    """The machine-readable text export has an observed hard cap at 50."""
+    return len(str(record.get("text") or "")) == _TEXT_HARD_CAP
 
 
 def _can_replace_truncated_form(
@@ -77,12 +72,6 @@ def _can_replace_truncated_form(
     *,
     source_is_truncated: bool,
 ) -> bool:
-    """Return true only when ``existing`` is a strict prefix of ``borrowed``.
-
-    This repairs source rows such as ``pres. -skr`` -> ``avskriver`` while
-    preserving complete target-specific alternatives. The source must carry an
-    explicit ellipsis marker, so ordinary short forms are never replaced.
-    """
     return (
         source_is_truncated
         and existing != borrowed
@@ -95,12 +84,6 @@ def borrow_compound_verb_slots(
     base_by_lemma: Mapping[str, LexemeSlots],
     current: LexemeSlots | None = None,
 ) -> LexemeSlots | None:
-    """Fill or repair a bar-marked compound from an exact head verb.
-
-    Complete existing target forms win. A source-truncated form may be replaced
-    only when it is a strict prefix of the form borrowed from the independent
-    head verb.
-    """
     parts = compound_verb_parts(record)
     if parts is None:
         return current
