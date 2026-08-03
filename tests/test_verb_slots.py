@@ -139,6 +139,65 @@ class VerbSlotsTests(unittest.TestCase):
         self.assertEqual(("månde",), slots.forms_for("infinitive"))
         self.assertEqual(("månde",), slots.written_forms())
 
+    def test_interprets_source_truncated_at_present_label(self) -> None:
+        slots = interpret_verb_slots(
+            self.record(
+                "avskriva",
+                "-skrev, -skrivit, -skriven -skrivet -skrivna, pres",
+                "av|skriva",
+            )
+        )
+        self.assertIsNotNone(slots)
+        assert slots is not None
+        self.assertEqual(("avskrev",), slots.forms_for("preterite"))
+        self.assertEqual(("avskrivit",), slots.forms_for("supine"))
+        self.assertEqual((), slots.forms_for("present"))
+
+    def test_keeps_key_forms_when_present_form_is_truncated(self) -> None:
+        slots = interpret_verb_slots(
+            self.record(
+                "artbestämma",
+                "-bestämde, -bestämt, -bestämd n. -bestämt, pres. -",
+                "art|bestämma",
+            )
+        )
+        self.assertIsNotNone(slots)
+        assert slots is not None
+        self.assertEqual(("artbestämde",), slots.forms_for("preterite"))
+        self.assertEqual(("artbestämt",), slots.forms_for("supine"))
+
+    def test_interprets_two_comma_groups_without_present(self) -> None:
+        slots = interpret_verb_slots(
+            self.record("byta", "bytte el. prov. böt, bytt")
+        )
+        self.assertIsNotNone(slots)
+        assert slots is not None
+        self.assertEqual(("bytte", "böt"), slots.forms_for("preterite"))
+        self.assertEqual(("bytt",), slots.forms_for("supine"))
+
+    def test_applies_bar_replacement_before_reflexive_pronoun(self) -> None:
+        slots = interpret_verb_slots(
+            self.record(
+                "företa sig",
+                "-tog, -tagit, -tagen -taget -tagna, pres. -tar",
+                "före|ta",
+            )
+        )
+        self.assertIsNotNone(slots)
+        assert slots is not None
+        self.assertEqual(("företar sig",), slots.forms_for("present"))
+        self.assertEqual(("företog sig",), slots.forms_for("preterite"))
+        self.assertEqual(("företagit sig",), slots.forms_for("supine"))
+
+    def test_strips_parenthetical_comment_in_compact_notation(self) -> None:
+        slots = interpret_verb_slots(
+            self.record("ana", "+de el. (i: ett: uttryck:) ante, +t")
+        )
+        self.assertIsNotNone(slots)
+        assert slots is not None
+        self.assertEqual(("anade", "ante"), slots.forms_for("preterite"))
+        self.assertEqual(("anat",), slots.forms_for("supine"))
+
     def test_rejects_other_word_classes_and_unknown_syntax(self) -> None:
         record = self.record("abonnera", "+de +t")
         record["upos"] = "NOUN"
