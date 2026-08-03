@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import unicodedata
 from collections import Counter
 from pathlib import Path
 from typing import Any, Iterable
@@ -14,6 +15,9 @@ from .saol_row_interpreter import interpret_noun_row
 DEFAULT_INPUT = Path("data/raw/saol14-faksimil.jsonl")
 DEFAULT_TEXT = Path("reports/saol14-row-interpreter.txt")
 DEFAULT_JSON = Path("reports/saol14-row-interpreter.json")
+
+_HYPHENS = "‐‑‒–—−﹘﹣－"
+_HYPHEN_TRANSLATION = str.maketrans({char: "-" for char in _HYPHENS})
 
 
 def _old_key_forms(record: dict[str, Any]) -> dict[str, str]:
@@ -36,12 +40,35 @@ def _old_key_forms(record: dict[str, Any]) -> dict[str, str]:
     return result
 
 
+def _comparison_spelling(value: Any) -> str:
+    text = unicodedata.normalize("NFC", str(value or ""))
+    text = text.translate(_HYPHEN_TRANSLATION)
+    text = text.replace("\u00ad", "").replace("·", "").replace("|", "")
+    return text.casefold().strip()
+
+
+def _unsupported_reason(record: dict[str, Any], pattern: str) -> str:
+    if pattern == "(none)":
+        return "missing_pattern"
+    if "-" not in pattern:
+        return "unsupported_syntax"
+
+    stycke = str(record.get("stycke", "") or "").strip()
+    if "|" not in stycke:
+        return "minus_form_without_bar"
+    if _comparison_spelling(stycke) != _comparison_spelling(record.get("normaliserat_ord")):
+        return "bar_marked_stycke_does_not_match_lemma"
+    return "minus_form_not_applied"
+
+
 def build_report(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
     noun_records = 0
     interpreted = 0
     same_shared_slots = 0
     differences: Counter[str] = Counter()
     unsupported_patterns: Counter[str] = Counter()
+    unsupported_reasons: Counter[str] = Counter()
+    unsupported_examples: dict[str, list[dict[str, Any]]] = {}
     examples: list[dict[str, Any]] = []
 
     for record in records:
@@ -52,6 +79,17 @@ def build_report(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
         pattern = normalise_pattern(record.get("text")) or "(none)"
         if new is None:
             unsupported_patterns[pattern] += 1
+            reason = _unsupported_reason(record, pattern)
+            unsupported_reasons[reason] += 1
+            reason_examples = unsupported_examples.setdefault(reason, [])
+            if len(reason_examples) < 30:
+                reason_examples.append(
+                    {
+                        "lemma": record.get("normaliserat_ord"),
+                        "stycke": record.get("stycke"),
+                        "pattern": pattern,
+                    }
+                )
             continue
         interpreted += 1
         new_forms = {form.slot: form.written_form for form in new.key_forms}
@@ -82,6 +120,8 @@ def build_report(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
         "same_shared_slots": same_shared_slots,
         "different_shared_slots": interpreted - same_shared_slots,
         "difference_slots": dict(differences.most_common()),
+        "unsupported_reasons": dict(unsupported_reasons.most_common()),
+        "unsupported_examples": unsupported_examples,
         "largest_unsupported_patterns": dict(unsupported_patterns.most_common(50)),
         "difference_examples": examples,
     }
@@ -99,6 +139,26 @@ def render_text(report: dict[str, Any]) -> str:
     ]
     for slot, count in report["difference_slots"].items():
         lines.append(f"  {count:6d}  {slot}")
+
+    lines.extend(["", "Orsaker till otolkade rader:"])
+    for reason, count in report["unsupported_reasons"].items():
+        lines.append(f"  {count:6d}  {reason}")
+
+    lines.extend(["", "Exempel på otolkade minusformer:"])
+    for reason in (
+        "minus_form_without_bar",
+        "bar_marked_stycke_does_not_match_lemma",
+        "minus_form_not_applied",
+    ):
+        rows = report["unsupported_examples"].get(reason, [])
+        if not rows:
+            continue
+        lines.append(f"  {reason}:")
+        for row in rows[:20]:
+            lines.append(
+                f"    {row.get('lemma')!s} | stycke={row.get('stycke')!r} | {row.get('pattern')!s}"
+            )
+
     lines.extend(["", "Största ännu otolkade mönster:"])
     for pattern, count in report["largest_unsupported_patterns"].items():
         lines.append(f"  {count:6d}  {pattern}")
