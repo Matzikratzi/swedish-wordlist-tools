@@ -15,26 +15,46 @@ DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
 DEFAULT_TEXT = Path("reports/saol14-verb-slots.txt")
 DEFAULT_JSON = Path("reports/saol14-verb-slots.json")
 _TRUNCATION_MARK_RE = re.compile(r"(?:\.\.\.|…)")
-_SUSPICIOUS_END_RE = re.compile(
-    r"(?:\bpre(?:s)?\.?|\bimper\.?|\bperf\.?|[-+][A-Za-zÅÄÖåäöÉéÜü]{0,2}|\b[A-Za-zÅÄÖåäöÉéÜü]{1,3})$",
+_INCOMPLETE_LABEL_RE = re.compile(
+    r"(?:\bpre(?:s)?\.?|\bpret\.?|\bimper\.?|\bperf\.?|\bsup\.?)$",
     re.IGNORECASE,
 )
+_SHORT_TRAILING_FRAGMENT_RE = re.compile(
+    r"(?:^|[\s,;:])[-+]?[A-Za-zÅÄÖåäöÉéÜü]{1,3}$"
+)
+_DANGLING_END_RE = re.compile(r"[-+,:;]$")
+
+
+def _has_source_ellipsis(record: dict[str, Any]) -> bool:
+    ordkl = str(record.get("ordkl") or "")
+    text = str(record.get("text") or "")
+    return bool(_TRUNCATION_MARK_RE.search(ordkl) or _TRUNCATION_MARK_RE.search(text))
+
+
+def _external_lookup_candidate(record: dict[str, Any]) -> bool:
+    """Return true only for source rows that plausibly need external repair.
+
+    An ellipsis in ``ordkl`` proves that the displayed source field was cut,
+    but that alone does not mean the machine-readable ``text`` is unusable.
+    External lookup is proposed only when the text itself also ends like an
+    incomplete grammatical label, a dangling notation character, or a short
+    fragment in a longer comma-separated paradigm.
+    """
+    if not _has_source_ellipsis(record):
+        return False
+    text = str(record.get("text") or "").strip()
+    if not text:
+        return True
+    if _INCOMPLETE_LABEL_RE.search(text) or _DANGLING_END_RE.search(text):
+        return True
+    return "," in text and bool(_SHORT_TRAILING_FRAGMENT_RE.search(text))
 
 
 def _truncation_kind(record: dict[str, Any]) -> str | None:
-    """Classify source-field truncation without guessing grammatical forms.
-
-    ``certain`` means that the source metadata itself contains an ellipsis.
-    ``suspected`` is reserved for a text field ending in an incomplete label or
-    very short fragment, and is reported separately because short verb forms
-    such as ``går`` and ``ser`` can be legitimate.
-    """
-    ordkl = str(record.get("ordkl") or "")
-    text = str(record.get("text") or "").strip()
-    if _TRUNCATION_MARK_RE.search(ordkl) or _TRUNCATION_MARK_RE.search(text):
-        return "certain"
-    if text and _SUSPICIOUS_END_RE.search(text):
-        return "suspected"
+    if _external_lookup_candidate(record):
+        return "external_lookup_candidate"
+    if _has_source_ellipsis(record):
+        return "ellipsis_but_text_usable"
     return None
 
 
@@ -119,12 +139,14 @@ def render_text(report: dict[str, Any]) -> str:
         lines.append(f"  {count:6d}  {slot}")
 
     lines.extend(["", "Avklippta källfält:"])
+    labels = {
+        "external_lookup_candidate": "kandidater för komplettering från svenska.se",
+        "ellipsis_but_text_usable": "ellips i källfältet men användbar text",
+    }
     for kind, count in report["source_truncation_counts"].items():
-        label = "säkert avklippta" if kind == "certain" else "misstänkt avklippta"
-        lines.append(f"  {count:6d}  {label}")
+        lines.append(f"  {count:6d}  {labels.get(kind, kind)}")
     for kind, examples in report["source_truncation_examples"].items():
-        label = "säkert" if kind == "certain" else "misstänkt"
-        lines.extend(["", f"Exempel: {label} avklippta"])
+        lines.extend(["", f"Exempel: {labels.get(kind, kind)}"])
         for example in examples[:15]:
             lines.append(
                 f"  {example['lemma']} | text={example['notation']!r} | ordkl={example['ordkl']!r}"
@@ -161,8 +183,14 @@ def main() -> None:
     print(f"Verbposter: {report['verb_records']}")
     print(f"Tolkade: {report['interpreted']}")
     print(f"Täckning: {report['coverage_percent']:.2f} %")
-    print(f"Säkert avklippta: {report['source_truncation_counts'].get('certain', 0)}")
-    print(f"Misstänkt avklippta: {report['source_truncation_counts'].get('suspected', 0)}")
+    print(
+        "Kandidater för svenska.se: "
+        f"{report['source_truncation_counts'].get('external_lookup_candidate', 0)}"
+    )
+    print(
+        "Ellips men användbar text: "
+        f"{report['source_truncation_counts'].get('ellipsis_but_text_usable', 0)}"
+    )
     print(f"Text: {args.text}")
     print(f"JSON: {args.json}")
 
