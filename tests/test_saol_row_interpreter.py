@@ -51,6 +51,25 @@ class SaolRowInterpreterTests(unittest.TestCase):
                 self.assertIsNotNone(row)
                 self.assertEqual(expected_plural, row.form("pl_indef") if row else None)
 
+    def test_removes_html_homonym_markers_before_using_bar(self) -> None:
+        row = interpret_noun_row(
+            self.record("avresa", "+n -resor", "<sup>1</sup>av|resa")
+        )
+        self.assertIsNotNone(row)
+        self.assertEqual("avresor", row.form("pl_indef") if row else None)
+
+    def test_accepts_complete_written_forms_without_bar(self) -> None:
+        examples = (
+            ("a-kassa", "+n a-kassor", "a-kassor"),
+            ("abc-bok", "+en abc-böcker", "abc-böcker"),
+            ("cd-skiva", "+n cd-skivor", "cd-skivor"),
+        )
+        for lemma, pattern, expected_plural in examples:
+            with self.subTest(pattern=pattern):
+                row = interpret_noun_row(self.record(lemma, pattern, lemma))
+                self.assertIsNotNone(row)
+                self.assertEqual(expected_plural, row.form("pl_indef") if row else None)
+
     def test_accepts_harmless_typographic_differences(self) -> None:
         row = interpret_noun_row(
             self.record("A-lista", "+n -listor", "A‑|lista")
@@ -73,6 +92,11 @@ class SaolRowInterpreterTests(unittest.TestCase):
                 "alarmklocka",
                 "-klockor",
             )
+        )
+
+    def test_rejects_unparsed_prose(self) -> None:
+        self.assertIsNone(
+            interpret_noun_row(self.record("dagofficer", "+en; som: pl. anv. +are"))
         )
 
     def test_bracketed_pronunciation_is_removed_before_interpretation(self) -> None:
