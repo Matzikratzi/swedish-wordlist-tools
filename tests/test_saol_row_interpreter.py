@@ -56,7 +56,8 @@ class SaolRowInterpreterTests(unittest.TestCase):
             self.record("A-lista", "+n -listor", "A‑|lista")
         )
         self.assertIsNotNone(row)
-        self.assertEqual("A‑listor", row.form("pl_indef") if row else None)
+        # Output preserves the source typography from stycke.
+        self.assertEqual("A‐listor", row.form("pl_indef") if row else None)
 
     def test_uses_last_bar(self) -> None:
         row = interpret_noun_row(
