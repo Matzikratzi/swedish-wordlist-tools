@@ -14,7 +14,9 @@ class ExportVerbFormsTests(unittest.TestCase):
         with handle:
             for record in records:
                 handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-        return Path(handle.name)
+        path = Path(handle.name)
+        self.addCleanup(path.unlink, missing_ok=True)
+        return path
 
     def test_default_export_is_saol_only(self) -> None:
         path = self.write_jsonl([
@@ -26,12 +28,12 @@ class ExportVerbFormsTests(unittest.TestCase):
                 "ordkl": "v.",
             }
         ])
-        self.addCleanup(path.unlink)
 
         words, report = build_verb_forms(path)
 
         self.assertEqual("SAOL14", report["source"])
         self.assertFalse(report["include_saldo"])
+        self.assertFalse(report["include_validated_imperatives"])
         self.assertIn("skriva", words)
         self.assertIn("skrev", words)
         self.assertIn("skrivit", words)
@@ -40,6 +42,48 @@ class ExportVerbFormsTests(unittest.TestCase):
         self.assertIn("skrivna", words)
         self.assertIn("skriver", words)
         self.assertNotIn("saldo", report["unique_forms_by_provenance"])
+
+    def test_includes_explicit_saol_imperative_without_saldo(self) -> None:
+        path = self.write_jsonl([
+            {
+                "normaliserat_ord": "glädjas",
+                "text": "gladdes, glatts, pres. gläds, imper. gläds",
+                "stycke": "glädjas",
+                "upos": "VERB",
+                "ordkl": "v.",
+            }
+        ])
+
+        words, report = build_verb_forms(path)
+
+        self.assertIn("gläds", words)
+        self.assertIn("explicit_saol_imperative", report["unique_forms_by_provenance"])
+
+    def test_includes_reviewed_saol_hv_inflection(self) -> None:
+        path = self.write_jsonl([
+            {
+                "normaliserat_ord": "spörja",
+                "text": "sporde, sport, pres. spörjer",
+                "stycke": "spörja",
+                "ord": "spörja",
+                "upos": "VERB",
+                "ordkl": "v.",
+            },
+            {
+                "normaliserat_ord": "spörja",
+                "homonr": "0",
+                "ordkl": "(hv)",
+                "upos": "X",
+                "text": "(null)",
+                "stycke": "spörs",
+                "ord": "spörs",
+            },
+        ])
+
+        words, report = build_verb_forms(path)
+
+        self.assertIn("spörs", words)
+        self.assertEqual(1, report["unique_forms_by_provenance"]["reviewed_hv_inflection"])
 
     def test_rejects_multiword_and_nonalphabetic_forms_for_game_export(self) -> None:
         path = self.write_jsonl([
@@ -51,7 +95,6 @@ class ExportVerbFormsTests(unittest.TestCase):
                 "ordkl": "v.",
             }
         ])
-        self.addCleanup(path.unlink)
 
         words, report = build_verb_forms(path)
 
