@@ -20,32 +20,16 @@ DEFAULT_JSON = Path("reports/saol14-verb-hv.json")
 _SUP_RE = re.compile(r"<sup\b[^>]*>.*?</sup>", re.IGNORECASE | re.DOTALL)
 _TAG_RE = re.compile(r"<[^>]+>")
 
-_SUBJUNCTIVE_FORMS = {
-    "bekomme", "finge", "ginge", "leve", "måtte", "torde",
-    "vare", "varde", "vore",
-}
-_NONVERBAL_REFERENCE_FORMS = {"närmare", "närmre", "närmast", "närmst", "summarum"}
-_OTHER_HISTORIC_FORMS = {
-    "andre", "bevare", "bre", "ene", "färst", "göre", "rå", "ände",
-    "talte", "talt", "förtalde", "förtalt",
-}
-_EXPLICIT_ALTERNATIVE_SPELLINGS = {"lire", "tighta"}
-_HISTORIC_INFINITIVE_ENDINGS = (
-    "giva", "givas", "taga", "tagas", "draga", "dragas", "bliva",
-    "bedja", "kläda", "späda",
-)
-_INFLECTION_ENDINGS = (
-    "ade", "at", "ats", "de", "des", "dde", "ddes", "er", "es",
-    "it", "its", "s", "te", "tes", "t",
-)
+_SUBJUNCTIVE_FORMS = {"bekomme", "finge", "ginge", "leve", "måtte", "torde", "vare", "varde", "vore"}
+_NONVERBAL_REFERENCE_FORMS = {"lire", "närmare", "närmre", "närmast", "närmst", "summarum"}
+_OTHER_HISTORIC_FORMS = {"andre", "bevare", "bre", "ene", "färst", "göre", "rå", "ände", "talte", "talt", "förtalde", "förtalt"}
+_EXPLICIT_ALTERNATIVE_SPELLINGS = {"tighta"}
+_HISTORIC_INFINITIVE_ENDINGS = ("giva", "givas", "taga", "tagas", "draga", "dragas", "bliva", "bedja", "kläda", "späda")
+_INFLECTION_ENDINGS = ("ade", "at", "ats", "de", "des", "dde", "ddes", "er", "es", "it", "its", "s", "te", "tes", "t")
 _CLASSIFICATION_ORDER = (
-    "subjunctive",
-    "historic_infinitive",
-    "alternative_spelling",
-    "nonverbal_reference",
-    "other_historic_reference",
-    "possible_inflection",
-    "unclassified",
+    "subjunctive", "historic_infinitive", "alternative_spelling",
+    "nonverbal_reference", "other_historic_reference",
+    "possible_inflection", "unclassified",
 )
 
 
@@ -59,11 +43,8 @@ def _plain(value: object) -> str:
 def _verb_form_index(records: list[dict[str, Any]]) -> dict[str, set[str]]:
     verbs = [record for record in records if str(record.get("upos", "")).upper() == "VERB"]
     interpreted = {
-        id(record): (
-            add_explicit_verb_row_slots(record, slots)
-            if (slots := interpret_playable_verb_slots(record)) is not None
-            else None
-        )
+        id(record): add_explicit_verb_row_slots(record, slots)
+        if (slots := interpret_playable_verb_slots(record)) is not None else None
         for record in verbs
     }
     head_index = build_simple_verb_paradigm_index(verbs, interpreted)
@@ -108,7 +89,6 @@ def _is_alternative_spelling(form: str, target: str) -> bool:
 
 
 def classify_missing_reference(form: str, target: str) -> tuple[str, str]:
-    """Return a conservative review label for a missing SAOL (hv) form."""
     if form in _SUBJUNCTIVE_FORMS:
         return "subjunctive", "known_subjunctive_form"
     if form in _NONVERBAL_REFERENCE_FORMS:
@@ -119,7 +99,6 @@ def classify_missing_reference(form: str, target: str) -> tuple[str, str]:
         return "alternative_spelling", "infinitive_like_reference_close_to_target"
     if form in _OTHER_HISTORIC_FORMS:
         return "other_historic_reference", "known_historic_or_formulaic_reference"
-
     shared = _common_prefix_length(form, target)
     if shared >= 3 and form.endswith(_INFLECTION_ENDINGS):
         return "possible_inflection", "shares_target_stem_and_inflectional_ending"
@@ -140,7 +119,6 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
         referred_form = _plain(record.get("ord")) or _plain(record.get("stycke"))
         if target not in verb_forms:
             continue
-
         classification = "not_applicable"
         reason = ""
         if not referred_form or " " in referred_form or not referred_form.isalpha():
@@ -165,88 +143,77 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
             "source": str(record.get("source") or ""),
         })
 
-    rows.sort(key=lambda row: (
-        row["status"], row["classification"], row["target_lemma"], row["form"]
-    ))
+    rows.sort(key=lambda row: (row["status"], row["classification"], row["target_lemma"], row["form"]))
     matched = counts["matched_generated_verb_form"]
     comparable = matched + counts["missing_from_generated_verb_forms"]
-    possible_parser_misses = class_counts["possible_inflection"] + class_counts["unclassified"]
+    review_remaining = class_counts["possible_inflection"] + class_counts["unclassified"]
     return {
         "verb_lemmas_with_forms": len(verb_forms),
         "verb_targeted_hv_records": len(rows),
         "single_form_comparable_hv_records": comparable,
         "matched_generated_verb_forms": matched,
         "coverage_percent": round(100 * matched / comparable, 2) if comparable else 0.0,
-        "possible_parser_misses": possible_parser_misses,
-        "possible_parser_miss_percent_of_comparable": (
-            round(100 * possible_parser_misses / comparable, 2) if comparable else 0.0
-        ),
+        "remaining_for_review": review_remaining,
+        "remaining_for_review_percent_of_comparable": round(100 * review_remaining / comparable, 2) if comparable else 0.0,
         "status_counts": dict(counts.most_common()),
         "missing_classification_counts": dict(class_counts.most_common()),
         "records": rows,
         "note": (
-            "Classifications are conservative review labels. Only possible_inflection and "
-            "unclassified are counted as possible parser misses; no (hv) form is exported automatically."
+            "Classifications are conservative review labels. Only possible_inflection and unclassified "
+            "remain for review; no (hv) form is exported automatically by this report."
         ),
     }
 
 
 def render_text(report: dict[str, Any]) -> str:
+    class_counts = report["missing_classification_counts"]
+    explained = sum(class_counts.get(name, 0) for name in (
+        "subjunctive", "historic_infinitive", "alternative_spelling",
+        "nonverbal_reference", "other_historic_reference",
+    ))
     lines = [
         f"Verbuppslagsord med former: {report['verb_lemmas_with_forms']}",
         f"(hv)-poster som pekar på verb: {report['verb_targeted_hv_records']}",
         f"Jämförbara enordsformer: {report['single_form_comparable_hv_records']}",
-        f"Återfunna bland genererade verbformer: {report['matched_generated_verb_forms']} "
-        f"({report['coverage_percent']:.2f} %)",
-        f"Möjliga parsermissar: {report['possible_parser_misses']} "
-        f"({report['possible_parser_miss_percent_of_comparable']:.2f} % av jämförbara)",
+        f"Återfunna bland genererade verbformer: {report['matched_generated_verb_forms']} ({report['coverage_percent']:.2f} %)",
+        f"Återstår att ta ställning till: {report['remaining_for_review']} ({report['remaining_for_review_percent_of_comparable']:.2f} % av jämförbara)",
+        "",
+        "Parserstatus:",
+        f"  Verbuppslagsord med former: {report['verb_lemmas_with_forms']}",
+        f"  Verbrelaterade (hv)-poster: {report['verb_targeted_hv_records']}",
+        f"  Återfunna former: {report['matched_generated_verb_forms']}",
+        f"  Förklarade hänvisningar: {explained}",
+        f"  Återstår att ta ställning till: {report['remaining_for_review']}",
         "",
         "Status:",
     ]
     for status, count in report["status_counts"].items():
         lines.append(f"  {count:6d}  {status}")
-
     lines.extend(["", "Klassificering av saknade hänvisningar:"])
     for classification in _CLASSIFICATION_ORDER:
-        count = report["missing_classification_counts"].get(classification, 0)
-        lines.append(f"  {count:6d}  {classification}")
-
+        lines.append(f"  {class_counts.get(classification, 0):6d}  {classification}")
     for classification in _CLASSIFICATION_ORDER:
         lines.extend(["", classification + ":"])
-        selected = [
-            row for row in report["records"]
-            if row["status"] == "missing_from_generated_verb_forms"
-            and row["classification"] == classification
-        ]
+        selected = [row for row in report["records"] if row["status"] == "missing_from_generated_verb_forms" and row["classification"] == classification]
         if not selected:
             lines.append("  (inga)")
         for row in selected[:200]:
-            lines.append(
-                f"  {row['form']} -> {row['target_lemma']} "
-                f"| reason={row['classification_reason']} "
-                f"| generated={row['generated_forms']}"
-            )
-
+            lines.append(f"  {row['form']} -> {row['target_lemma']} | reason={row['classification_reason']} | generated={row['generated_forms']}")
     lines.extend(["", "Ej jämförbara som enskilt spelord:"])
     selected = [row for row in report["records"] if row["status"] == "not_single_playable_form"]
     if not selected:
         lines.append("  (inga)")
     for row in selected[:200]:
-        lines.append(
-            f"  {row['form']} -> {row['target_lemma']} | generated={row['generated_forms']}"
-        )
+        lines.append(f"  {row['form']} -> {row['target_lemma']} | generated={row['generated_forms']}")
     return "\n".join(lines) + "\n"
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Audit and classify SAOL14 verb forms against internal (hv) references"
-    )
+    parser = argparse.ArgumentParser(description="Audit and classify SAOL14 verb forms against internal (hv) references")
     parser.add_argument("saol", nargs="?", type=Path, default=DEFAULT_SAOL)
     parser.add_argument("--text", type=Path, default=DEFAULT_TEXT)
     parser.add_argument("--json", type=Path, default=DEFAULT_JSON)
     args = parser.parse_args()
-
     report = build_report(args.saol)
     args.text.parent.mkdir(parents=True, exist_ok=True)
     args.text.write_text(render_text(report), encoding="utf-8")
@@ -254,7 +221,7 @@ def main() -> None:
     args.json.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"(hv)-poster som pekar på verb: {report['verb_targeted_hv_records']}")
     print(f"Återfunna former: {report['matched_generated_verb_forms']} ({report['coverage_percent']:.2f} %)")
-    print(f"Möjliga parsermissar: {report['possible_parser_misses']}")
+    print(f"Återstår att ta ställning till: {report['remaining_for_review']}")
     for classification in _CLASSIFICATION_ORDER:
         print(f"{classification}: {report['missing_classification_counts'].get(classification, 0)}")
     print(f"Text: {args.text}")
