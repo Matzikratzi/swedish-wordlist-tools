@@ -20,7 +20,9 @@ DEFAULT_JSON = Path("reports/saol14-imperatives.json")
 _IMPERATIVE_SEGMENT_RE = re.compile(r"\bimper\.\s*(?P<body>[^,;_]*)", re.IGNORECASE)
 _FORM_RE = re.compile(r"[+\-]?[A-Za-zÅÄÖåäöÉéÜü]+(?:-[A-Za-zÅÄÖåäöÉéÜü]+)*")
 _MARKER_WORDS = {"el", "eller", "vard", "åld", "prov", "ibl", "och", "obrukl"}
-_FORM_CONTAINER_NAMES = {"wordform", "form", "formrepresentation"}
+# FormRepresentation is nested below WordForm in the LMF-style SALDO export.
+# Treating both as containers counts every form/MSD pair twice.
+_FORM_CONTAINER_NAMES = {"wordform", "form"}
 _WRITTEN_FORM_NAMES = {"writtenform", "written-form", "orthography"}
 _MSD_NAMES = {
     "msd",
@@ -116,8 +118,6 @@ def explicit_saol_imperatives(record: dict[str, Any]) -> tuple[str, ...]:
     lemma = str(record.get("normaliserat_ord") or "").strip()
     tokens = _FORM_RE.findall(body)
     if len(text) == 50 and match.end() == len(text) and body and body[-1].isalpha():
-        # The final token may be cut by the source hard cap. Earlier complete
-        # alternatives in the same segment are still usable.
         tokens = tokens[:-1]
     result: list[str] = []
     for token in tokens:
@@ -136,13 +136,7 @@ def _is_imperative_label(label: str) -> bool:
 def read_saldo_form_labels(
     path: Path,
 ) -> tuple[dict[str, dict[str, set[str]]], Counter[str]]:
-    """Read SALDO forms and their raw MSD/slot labels, grouped by lemma.
-
-    The SALDO exports used by the project are LMF-like but may spell the label
-    feature differently. We therefore recognise several standard feature names
-    and retain the raw values in the report. An empty label set means that the
-    form exists but no supported form label was exposed by the XML structure.
-    """
+    """Read SALDO forms and their raw MSD/slot labels, grouped by lemma."""
     entries: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
     observed_labels: Counter[str] = Counter()
 
@@ -160,6 +154,7 @@ def read_saldo_form_labels(
             continue
 
         found_container = False
+        seen_labelled_forms: set[tuple[str, str]] = set()
         for node in element.iter():
             if _local_name(node.tag).casefold() not in _FORM_CONTAINER_NAMES:
                 continue
@@ -168,15 +163,16 @@ def read_saldo_form_labels(
                 continue
             found_container = True
             labels = set(_feature_values(node, _MSD_NAMES))
-            for label in labels:
-                observed_labels[label] += 1
-            for lemma_key in lemma_keys:
-                for form in forms:
-                    entries[lemma_key][_normalise(form).casefold()].update(labels)
+            for form in forms:
+                normalised_form = _normalise(form).casefold()
+                for label in labels:
+                    marker = (normalised_form, label)
+                    if marker not in seen_labelled_forms:
+                        observed_labels[label] += 1
+                        seen_labelled_forms.add(marker)
+                for lemma_key in lemma_keys:
+                    entries[lemma_key][normalised_form].update(labels)
 
-        # Some LMF files place FormRepresentation directly under WordForm; the
-        # recursive feature reader above handles that. This fallback only keeps
-        # form presence if the export has no recognised form containers.
         if not found_container:
             all_forms = _feature_values(element, _WRITTEN_FORM_NAMES)
             for lemma_key in lemma_keys:
@@ -228,32 +224,23 @@ def build_report(saol_path: Path = DEFAULT_SAOL, saldo_path: Path = DEFAULT_SALD
             )
             counts[explicit_status] += 1
 
-        rows.append(
-            {
-                "lemma": lemma,
-                "homonr": str(record.get("homonr") or ""),
-                "rule": rule,
-                "generated": candidate,
-                "status": status,
-                "explicit_saol": list(explicit),
-                "explicit_status": explicit_status,
-                "saldo_candidate_labels": sorted(candidate_labels),
-                "saldo_candidate_is_imperative": any(
-                    _is_imperative_label(label) for label in candidate_labels
-                ),
-                "saldo_forms_sample": sorted(saldo_forms)[:30],
-                "text": str(record.get("text") or ""),
-            }
-        )
+        rows.append({
+            "lemma": lemma,
+            "homonr": str(record.get("homonr") or ""),
+            "rule": rule,
+            "generated": candidate,
+            "status": status,
+            "explicit_saol": list(explicit),
+            "explicit_status": explicit_status,
+            "saldo_candidate_labels": sorted(candidate_labels),
+            "saldo_candidate_is_imperative": any(
+                _is_imperative_label(label) for label in candidate_labels
+            ),
+            "saldo_forms_sample": sorted(saldo_forms)[:30],
+            "text": str(record.get("text") or ""),
+        })
 
-    rows.sort(
-        key=lambda row: (
-            row["status"],
-            row["explicit_status"],
-            row["lemma"],
-            row["homonr"],
-        )
-    )
+    rows.sort(key=lambda row: (row["status"], row["explicit_status"], row["lemma"], row["homonr"]))
     generated = sum(1 for row in rows if row["generated"])
     imperative_confirmed = counts["generated_as_imperative_in_saldo"]
     exact_form_matches = sum(
@@ -306,8 +293,7 @@ def render_text(report: dict[str, Any]) -> str:
         f"({report['generated_as_imperative_percent_of_generated']:.2f} % av alla genererade; "
         f"{report['generated_as_imperative_percent_of_labelled_matches']:.2f} % av etiketterade formträffar)",
         f"Poster med uttryckligt SAOL-imperativ: {report['explicit_saol_records']}",
-        "",
-        "Status:",
+        "", "Status:",
     ]
     for key, count in report["status_counts"].items():
         lines.append(f"  {count:6d}  {key}")
@@ -323,8 +309,7 @@ def render_text(report: dict[str, Any]) -> str:
     def section(title: str, status: str, limit: int = 100) -> None:
         lines.extend(["", title + ":"])
         selected = [
-            row
-            for row in report["records"]
+            row for row in report["records"]
             if row.get("explicit_status") == status or row.get("status") == status
         ][:limit]
         for row in selected:
@@ -337,22 +322,10 @@ def render_text(report: dict[str, Any]) -> str:
         if not selected:
             lines.append("  (inga)")
 
-    section(
-        "Avviker från uttryckligt SAOL-imperativ",
-        "generated_differs_from_explicit_saol",
-    )
-    section(
-        "Finns i SALDO men saknar imperativetikett",
-        "generated_in_saldo_but_not_labelled_imperative",
-    )
-    section(
-        "Finns i SALDO men MSD kunde inte läsas",
-        "generated_in_saldo_without_readable_msd",
-    )
-    section(
-        "Saknas hos exakt matchat SALDO-lemma",
-        "generated_missing_from_exact_saldo_lemma",
-    )
+    section("Avviker från uttryckligt SAOL-imperativ", "generated_differs_from_explicit_saol")
+    section("Finns i SALDO men saknar imperativetikett", "generated_in_saldo_but_not_labelled_imperative")
+    section("Finns i SALDO men MSD kunde inte läsas", "generated_in_saldo_without_readable_msd")
+    section("Saknas hos exakt matchat SALDO-lemma", "generated_missing_from_exact_saldo_lemma")
     return "\n".join(lines) + "\n"
 
 
@@ -369,10 +342,7 @@ def main() -> None:
     args.text.parent.mkdir(parents=True, exist_ok=True)
     args.text.write_text(render_text(report), encoding="utf-8")
     args.json.parent.mkdir(parents=True, exist_ok=True)
-    args.json.write_text(
-        json.dumps(report, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    args.json.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"Verbposter: {report['verb_records']}")
     print(f"Genererade kandidater: {report['generated_candidates']}")
     print(
