@@ -1,0 +1,240 @@
+from __future__ import annotations
+
+import argparse
+import json
+import re
+from collections import Counter
+from pathlib import Path
+from typing import Any
+
+from .compare_sources import read_saldo
+from .jsonl import read_jsonl
+from .verb_game_fallback import interpret_playable_verb_slots
+
+DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
+DEFAULT_SALDO = Path("data/raw/saldom.xml")
+DEFAULT_TEXT = Path("reports/saol14-imperatives.txt")
+DEFAULT_JSON = Path("reports/saol14-imperatives.json")
+
+_IMPERATIVE_SEGMENT_RE = re.compile(
+    r"\bimper\.\s*(?P<body>[^,;_]*)",
+    re.IGNORECASE,
+)
+_FORM_RE = re.compile(r"[+\-]?[A-Za-zÅÄÖåäöÉéÜü]+(?:-[A-Za-zÅÄÖåäöÉéÜü]+)*")
+_MARKER_WORDS = {"el", "eller", "vard", "åld", "prov", "ibl", "och", "obrukl"}
+
+
+def _first_word(lemma: str) -> str:
+    return lemma.partition(" ")[0]
+
+
+def _preterite_forms(slots: Any) -> tuple[str, ...]:
+    if slots is None:
+        return ()
+    return tuple(
+        form.written_form.partition(" ")[0]
+        for form in slots.forms_for("preterite")
+    )
+
+
+def generate_imperative(lemma: str, slots: Any) -> tuple[str | None, str]:
+    """Generate one conservative imperative candidate and name the rule.
+
+    Class-1 verbs are identified by an SAOL preterite ending in ``-ade`` and
+    keep the infinitive. Other infinitives ending in ``-a`` lose that ``a``.
+    Infinitives without final ``-a`` are used unchanged.
+    """
+    word = _first_word(lemma).casefold()
+    if not word or not word.isalpha():
+        return None, "not_single_alpha_head"
+    if not word.endswith("a"):
+        return word, "non_a_infinitive"
+    preterites = _preterite_forms(slots)
+    if any(form.casefold().endswith("ade") for form in preterites):
+        return word, "class1_preterite_ade"
+    if len(word) <= 2:
+        return word, "short_a_infinitive"
+    return word[:-1], "drop_final_a"
+
+
+def _apply_explicit_token(lemma: str, token: str) -> str | None:
+    head = _first_word(lemma).casefold()
+    token = token.casefold()
+    if token.startswith("+"):
+        return head + token[1:]
+    if token.startswith("-"):
+        suffix = token[1:]
+        if not suffix:
+            return None
+        shared = 0
+        for left, right in zip(reversed(head), reversed(suffix)):
+            if left != right:
+                break
+            shared += 1
+        if shared:
+            return head[:-shared] + suffix
+        return None
+    return token
+
+
+def explicit_saol_imperatives(record: dict[str, Any]) -> tuple[str, ...]:
+    text = str(record.get("text") or "")
+    match = _IMPERATIVE_SEGMENT_RE.search(text)
+    if match is None:
+        return ()
+    # At the known hard cap, a segment ending at character 50 may be partial.
+    body = match.group("body").strip()
+    if len(text) == 50 and match.end() == len(text) and body and body[-1].isalpha():
+        return ()
+    lemma = str(record.get("normaliserat_ord") or "").strip()
+    result: list[str] = []
+    for token in _FORM_RE.findall(body):
+        if token.casefold().lstrip("+-") in _MARKER_WORDS:
+            continue
+        written = _apply_explicit_token(lemma, token)
+        if written and written.isalpha() and written not in result:
+            result.append(written)
+    return tuple(result)
+
+
+def _saldo_verb_forms(saldo: dict[str, list[dict[str, Any]]], lemma: str) -> set[str]:
+    forms: set[str] = set()
+    for analysis in saldo.get(lemma.casefold(), ()):
+        if analysis.get("upos") == "VERB":
+            forms.update(str(form).casefold() for form in analysis.get("forms", ()))
+    return forms
+
+
+def build_report(
+    saol_path: Path = DEFAULT_SAOL,
+    saldo_path: Path = DEFAULT_SALDO,
+) -> dict[str, Any]:
+    saldo = read_saldo(saldo_path)
+    rows: list[dict[str, Any]] = []
+    counts: Counter[str] = Counter()
+    rule_counts: Counter[str] = Counter()
+
+    for record in read_jsonl(saol_path):
+        if str(record.get("upos", "")).upper() != "VERB":
+            continue
+        lemma = str(record.get("normaliserat_ord") or "").strip()
+        playable = interpret_playable_verb_slots(record)
+        candidate, rule = generate_imperative(lemma, playable)
+        explicit = explicit_saol_imperatives(record)
+        saldo_forms = _saldo_verb_forms(saldo, lemma)
+        rule_counts[rule] += 1
+
+        if candidate is None:
+            status = "not_generated"
+        elif candidate in saldo_forms:
+            status = "generated_in_saldo"
+        elif saldo_forms:
+            status = "generated_missing_from_matched_saldo"
+        else:
+            status = "no_exact_saldo_verb_lemma"
+        counts[status] += 1
+
+        explicit_status = "none"
+        if explicit:
+            if candidate in explicit:
+                explicit_status = "generated_matches_explicit_saol"
+            else:
+                explicit_status = "generated_differs_from_explicit_saol"
+            counts[explicit_status] += 1
+
+        rows.append(
+            {
+                "lemma": lemma,
+                "homonr": str(record.get("homonr") or ""),
+                "rule": rule,
+                "generated": candidate,
+                "status": status,
+                "explicit_saol": list(explicit),
+                "explicit_status": explicit_status,
+                "generated_in_saldo": bool(candidate and candidate in saldo_forms),
+                "saldo_forms_sample": sorted(saldo_forms)[:30],
+                "text": str(record.get("text") or ""),
+            }
+        )
+
+    rows.sort(key=lambda row: (row["status"], row["explicit_status"], row["lemma"], row["homonr"]))
+    generated = sum(1 for row in rows if row["generated"])
+    in_saldo = counts["generated_in_saldo"]
+    explicit_total = sum(1 for row in rows if row["explicit_saol"])
+    return {
+        "verb_records": len(rows),
+        "generated_candidates": generated,
+        "generated_in_saldo": in_saldo,
+        "generated_in_saldo_percent": round(100 * in_saldo / generated, 2) if generated else 0.0,
+        "explicit_saol_records": explicit_total,
+        "status_counts": dict(counts.most_common()),
+        "rule_counts": dict(rule_counts.most_common()),
+        "records": rows,
+        "note": "SALDO is validation only; absence from SALDO does not reject a SAOL-derived candidate.",
+    }
+
+
+def render_text(report: dict[str, Any]) -> str:
+    lines = [
+        f"Verbposter: {report['verb_records']}",
+        f"Genererade imperativkandidater: {report['generated_candidates']}",
+        f"Kandidater belagda i SALDO: {report['generated_in_saldo']} ({report['generated_in_saldo_percent']:.2f} %)",
+        f"Poster med uttryckligt SAOL-imperativ: {report['explicit_saol_records']}",
+        "",
+        "Status:",
+    ]
+    for key, count in report["status_counts"].items():
+        lines.append(f"  {count:6d}  {key}")
+    lines.extend(["", "Regler:"])
+    for key, count in report["rule_counts"].items():
+        lines.append(f"  {count:6d}  {key}")
+
+    def section(title: str, predicate: Any, limit: int = 100) -> None:
+        lines.extend(["", title + ":"])
+        selected = [row for row in report["records"] if predicate(row)][:limit]
+        for row in selected:
+            lines.append(
+                f"  {row['lemma']} (homonr={row['homonr']}) -> {row['generated']} "
+                f"| rule={row['rule']} | status={row['status']} "
+                f"| explicit={row['explicit_saol']}"
+            )
+        if not selected:
+            lines.append("  (inga)")
+
+    section(
+        "Avviker från uttryckligt SAOL-imperativ",
+        lambda row: row["explicit_status"] == "generated_differs_from_explicit_saol",
+    )
+    section(
+        "Genererad men saknas hos exakt matchat SALDO-verb",
+        lambda row: row["status"] == "generated_missing_from_matched_saldo",
+    )
+    section(
+        "Ingen exakt SALDO-verblemmaträff",
+        lambda row: row["status"] == "no_exact_saldo_verb_lemma",
+    )
+    return "\n".join(lines) + "\n"
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Audit generated SAOL14 imperatives against SALDO")
+    parser.add_argument("saol", nargs="?", type=Path, default=DEFAULT_SAOL)
+    parser.add_argument("saldo", nargs="?", type=Path, default=DEFAULT_SALDO)
+    parser.add_argument("--text", type=Path, default=DEFAULT_TEXT)
+    parser.add_argument("--json", type=Path, default=DEFAULT_JSON)
+    args = parser.parse_args()
+
+    report = build_report(args.saol, args.saldo)
+    args.text.parent.mkdir(parents=True, exist_ok=True)
+    args.text.write_text(render_text(report), encoding="utf-8")
+    args.json.parent.mkdir(parents=True, exist_ok=True)
+    args.json.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(f"Verbposter: {report['verb_records']}")
+    print(f"Genererade kandidater: {report['generated_candidates']}")
+    print(f"Belagda i SALDO: {report['generated_in_saldo']} ({report['generated_in_saldo_percent']:.2f} %)")
+    print(f"Text: {args.text}")
+    print(f"JSON: {args.json}")
+
+
+if __name__ == "__main__":
+    main()
