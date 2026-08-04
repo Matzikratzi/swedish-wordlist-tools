@@ -24,7 +24,9 @@ class AdjectiveSlotsTests(unittest.TestCase):
         self.assertEqual(("röd", "rött", "röda"), self.parse("röd", "+t +a").written_forms())
 
     def test_unchanged_neuter(self) -> None:
-        self.assertEqual(("kortväxt", "kortväxt", "kortväxta"), self.parse("kortväxt", "n. +, +a").written_forms())
+        slots = self.parse("kortväxt", "n. +, +a")
+        self.assertEqual(("kortväxt", "kortväxta"), slots.written_forms())
+        self.assertEqual(3, len(slots.forms))
 
     def test_regular_tt_a(self) -> None:
         self.assertEqual(("blå", "blått", "blåa"), self.parse("blå", "+tt +a").written_forms())
@@ -40,7 +42,7 @@ class AdjectiveSlotsTests(unittest.TestCase):
 
     def test_labelled_plural_alternatives(self) -> None:
         slots = self.parse("akvamarinblå", "-blått, best. och: pl. + el. +a")
-        self.assertEqual(("akvamarinblå", "akvamarinblått", "akvamarinblå", "akvamarinblåa"), slots.written_forms())
+        self.assertEqual(("akvamarinblå", "akvamarinblått", "akvamarinblåa"), slots.written_forms())
 
     def test_labelled_limited_plural_suffix(self) -> None:
         slots = self.parse("fullmäktig", "pl. +e")
@@ -55,43 +57,30 @@ class AdjectiveSlotsTests(unittest.TestCase):
         self.assertEqual(("flesta",), self.parse("flesta", "best.").written_forms())
 
     def test_full_labelled_plural_alternatives(self) -> None:
-        self.assertEqual(
-            ("blå", "blått", "blå", "blåa"),
-            self.parse("blå", "blått, best. och: pl. blå el. blåa").written_forms(),
-        )
+        self.assertEqual(("blå", "blått", "blåa"), self.parse("blå", "blått, best. och: pl. blå el. blåa").written_forms())
 
     def test_single_slot_patterns(self) -> None:
         self.assertEqual(("dan", "dant"), self.parse("dan", "+t").written_forms())
-        self.assertEqual(("genomsvett",), self.parse("genomsvett", "n. +").written_forms())
+        slots = self.parse("genomsvett", "n. +")
+        self.assertEqual(("genomsvett",), slots.written_forms())
+        self.assertEqual(2, len(slots.forms))
         self.assertEqual(("hot", "hotta"), self.parse("hot", "neutr. +; pl. hotta").written_forms())
         self.assertEqual(("förstnämnde", "förstnämnda"), self.parse("förstnämnde", "förstnämnda").written_forms())
 
     def test_parallel_participial_alternatives(self) -> None:
         slots = self.parse("fasetterad", "fasetterat +e _ facetterat +e")
-        self.assertEqual(
-            ("fasetterad", "fasetterat", "fasetterade", "facetterad", "facetterat", "facetterade"),
-            slots.written_forms(),
-        )
+        self.assertEqual(("fasetterad", "fasetterat", "fasetterade", "facetterad", "facetterat", "facetterade"), slots.written_forms())
         self.assertEqual("parallel_alternative_paradigms", slots.rule)
 
     def test_parallel_replacement_alternatives_in_compound(self) -> None:
         slots = self.parse("hårdflörtad", "-flörtat +e _ -flirtat +e")
-        self.assertEqual(
-            ("hårdflörtad", "hårdflörtat", "hårdflörtade", "hårdflirtad", "hårdflirtat", "hårdflirtade"),
-            slots.written_forms(),
-        )
+        self.assertEqual(("hårdflörtad", "hårdflörtat", "hårdflörtade", "hårdflirtad", "hårdflirtat", "hårdflirtade"), slots.written_forms())
 
     def test_parallel_complete_pairs(self) -> None:
-        self.assertEqual(
-            ("ledsen", "ledset", "ledsna", "lesset", "lessna"),
-            self.parse("ledsen", "ledset ledsna _ lesset lessna").written_forms(),
-        )
+        self.assertEqual(("ledsen", "ledset", "ledsna", "lesset", "lessna"), self.parse("ledsen", "ledset ledsna _ lesset lessna").written_forms())
 
     def test_rejects_ambiguous_parallel_suffix_branch(self) -> None:
-        self.assertIsNone(interpret_simple_adjective_slots({
-            "normaliserat_ord": "sjangdobel",
-            "text": "+t sjangdobla _ +t schangdobla",
-        }))
+        self.assertIsNone(interpret_simple_adjective_slots({"normaliserat_ord": "sjangdobel", "text": "+t sjangdobla _ +t schangdobla"}))
 
     def test_comparison_only_suffixes(self) -> None:
         self.assertEqual(("ringa", "ringare", "ringast"), self.parse("ringa", "komp. +re, superl. +st").written_forms())
