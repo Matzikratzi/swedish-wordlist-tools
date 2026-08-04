@@ -42,12 +42,28 @@ class AnalyzeVerbHardCapTests(unittest.TestCase):
 
         report = build_report(path)
 
+        self.assertEqual(2, report["verb_records"])
         self.assertEqual(1, report["records_at_hard_cap"])
+        self.assertEqual(50.0, report["records_at_hard_cap_percent"])
+        self.assertEqual(1, report["possible_missing_after_cap"])
+        self.assertEqual(50.0, report["possible_missing_after_cap_percent_of_verbs"])
         row = report["records"][0]
         self.assertEqual("måste", row["lemma"])
         self.assertEqual("inf", row["last_label"])
         self.assertEqual(["måste", "måst"], row["playable_forms"])
         self.assertTrue(row["possible_missing_after_cap"])
+
+        exported = report["exported_unique_playable_verb_forms"]
+        one = report["missing_form_estimates"]["1_missing_per_candidate"]
+        two = report["missing_form_estimates"]["2_missing_per_candidate"]
+        three = report["missing_form_estimates"]["3_missing_per_candidate"]
+        self.assertEqual(4, exported)
+        self.assertEqual(1, one["estimated_missing_form_occurrences"])
+        self.assertEqual(20.0, one["estimated_missing_share_percent"])
+        self.assertEqual(2, two["estimated_missing_form_occurrences"])
+        self.assertEqual(33.33, two["estimated_missing_share_percent"])
+        self.assertEqual(3, three["estimated_missing_form_occurrences"])
+        self.assertEqual(42.86, three["estimated_missing_share_percent"])
 
     def test_delimiter_end_is_not_flagged_as_open_tail(self) -> None:
         capped = "skrev, skrivit".ljust(49, "x") + ","
@@ -65,6 +81,13 @@ class AnalyzeVerbHardCapTests(unittest.TestCase):
         report = build_report(path)
         row = report["records"][0]
         self.assertFalse(row["possible_missing_after_cap"])
+        self.assertEqual(0, report["possible_missing_after_cap"])
+        self.assertEqual(
+            0,
+            report["missing_form_estimates"]["1_missing_per_candidate"][
+                "estimated_missing_form_occurrences"
+            ],
+        )
 
 
 if __name__ == "__main__":
