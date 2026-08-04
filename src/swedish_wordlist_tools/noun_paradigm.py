@@ -15,12 +15,18 @@ _PL_INDEF_GEN = parse_msd("pl indef gen")
 _PL_DEF_NOM = parse_msd("pl def nom")
 _PL_DEF_GEN = parse_msd("pl def gen")
 
-_SUPPORTED_PATTERNS = {
+_FULL_PARADIGM_PATTERNS = {
     "+en +er",
     "+en +ar",
     "+et; pl. +",
     "+n +r",
     "+n +er",
+}
+
+_SINGULAR_ONLY_PATTERNS = {
+    "+en",
+    "+n",
+    "+et",
 }
 
 
@@ -46,19 +52,43 @@ def _form_for_msd(entry: GeneratedEntry, wanted: str) -> str | None:
     return None
 
 
-def complete_noun_entry(record: dict[str, Any], entry: GeneratedEntry | None) -> GeneratedEntry | None:
-    """Expand safe SAOL noun key forms to a complete nominal paradigm.
+def _merge_forms(
+    entry: GeneratedEntry,
+    additions: tuple[GeneratedWordForm, ...],
+) -> GeneratedEntry:
+    seen: set[tuple[str, str | None]] = set()
+    word_forms: list[GeneratedWordForm] = []
+    for word_form in (*entry.word_forms, *additions):
+        marker = (
+            word_form.written_form,
+            str(word_form.msd) if word_form.msd is not None else None,
+        )
+        if word_form.written_form and marker not in seen:
+            seen.add(marker)
+            word_forms.append(word_form)
+    return replace(entry, word_forms=tuple(word_forms))
 
-    This first implementation is deliberately conservative. It only handles
-    common patterns where the existing SAOL parser has typed the citation form,
-    definite singular and indefinite plural. Unsupported and singular-only
-    patterns are returned unchanged.
-    """
-    if entry is None or str(record.get("upos", "")).upper() != "NOUN":
-        return entry
-    if entry.pattern not in _SUPPORTED_PATTERNS:
+
+def _complete_singular_only(entry: GeneratedEntry) -> GeneratedEntry:
+    lemma = _form_for_msd(entry, "ci") or entry.lemma
+    singular_definite = _form_for_msd(entry, "sg def nom")
+    if not lemma or not singular_definite:
         return entry
 
+    additions = (
+        GeneratedWordForm(lemma, _CI, "lemma"),
+        GeneratedWordForm(_genitive(lemma), _SG_INDEF_GEN, "derived_genitive"),
+        GeneratedWordForm(singular_definite, _SG_DEF_NOM, "derived"),
+        GeneratedWordForm(
+            _genitive(singular_definite),
+            _SG_DEF_GEN,
+            "derived_genitive",
+        ),
+    )
+    return _merge_forms(entry, additions)
+
+
+def _complete_full_paradigm(entry: GeneratedEntry) -> GeneratedEntry:
     lemma = _form_for_msd(entry, "ci") or entry.lemma
     singular_definite = _form_for_msd(entry, "sg def nom")
     plural_indefinite = _form_for_msd(entry, "pl indef nom")
@@ -70,22 +100,45 @@ def complete_noun_entry(record: dict[str, Any], entry: GeneratedEntry | None) ->
         GeneratedWordForm(lemma, _CI, "lemma"),
         GeneratedWordForm(_genitive(lemma), _SG_INDEF_GEN, "derived_genitive"),
         GeneratedWordForm(singular_definite, _SG_DEF_NOM, "derived"),
-        GeneratedWordForm(_genitive(singular_definite), _SG_DEF_GEN, "derived_genitive"),
+        GeneratedWordForm(
+            _genitive(singular_definite),
+            _SG_DEF_GEN,
+            "derived_genitive",
+        ),
         GeneratedWordForm(plural_indefinite, _PL_INDEF_NOM, "derived"),
-        GeneratedWordForm(_genitive(plural_indefinite), _PL_INDEF_GEN, "derived_genitive"),
-        GeneratedWordForm(plural_definite, _PL_DEF_NOM, "derived_definite_plural"),
-        GeneratedWordForm(_genitive(plural_definite), _PL_DEF_GEN, "derived_genitive"),
+        GeneratedWordForm(
+            _genitive(plural_indefinite),
+            _PL_INDEF_GEN,
+            "derived_genitive",
+        ),
+        GeneratedWordForm(
+            plural_definite,
+            _PL_DEF_NOM,
+            "derived_definite_plural",
+        ),
+        GeneratedWordForm(
+            _genitive(plural_definite),
+            _PL_DEF_GEN,
+            "derived_genitive",
+        ),
     )
+    return _merge_forms(entry, additions)
 
-    seen: set[tuple[str, str | None]] = set()
-    word_forms: list[GeneratedWordForm] = []
-    for word_form in (*entry.word_forms, *additions):
-        marker = (
-            word_form.written_form,
-            str(word_form.msd) if word_form.msd is not None else None,
-        )
-        if word_form.written_form and marker not in seen:
-            seen.add(marker)
-            word_forms.append(word_form)
 
-    return replace(entry, word_forms=tuple(word_forms))
+def complete_noun_entry(
+    record: dict[str, Any],
+    entry: GeneratedEntry | None,
+) -> GeneratedEntry | None:
+    """Expand conservatively interpreted SAOL noun key forms.
+
+    Full-paradigm patterns provide lemma, definite singular and indefinite
+    plural. Singular-only patterns provide lemma and definite singular and are
+    completed only with their two genitives; no plural is invented.
+    """
+    if entry is None or str(record.get("upos", "")).upper() != "NOUN":
+        return entry
+    if entry.pattern in _SINGULAR_ONLY_PATTERNS:
+        return _complete_singular_only(entry)
+    if entry.pattern in _FULL_PARADIGM_PATTERNS:
+        return _complete_full_paradigm(entry)
+    return entry

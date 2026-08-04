@@ -111,6 +111,25 @@ def validation_row(
     ):
         status = "saol_zero_plural_differs_from_saldo"
 
+    # A regular genitive can also be absent from SALDO when the same analysis
+    # contains a competing citation variant. For example SAOL `busk +en`
+    # deterministically gives `busks`, while SALDO lists the variant `buske`
+    # and its genitive `buskes` but omits `busks`. If every newly extra form is
+    # one of our derived genitives, report a source difference rather than a
+    # generator regression.
+    generated_kinds = {
+        word_form.written_form: word_form.kind
+        for word_form in (generated.word_forms if generated else ())
+    }
+    if (
+        status == "form_set_mismatch"
+        and initial_status == "saol_forms_are_subset"
+        and completion_applied
+        and extra_from_saol
+        and all(generated_kinds.get(form) == "derived_genitive" for form in extra_from_saol)
+    ):
+        status = "saol_genitive_differs_from_saldo"
+
     return {
         "record_id": str(record.get("id") or record.get("subnr") or ""),
         "lemma": str(record.get("normaliserat_ord", "")),

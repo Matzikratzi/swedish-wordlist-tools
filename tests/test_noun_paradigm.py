@@ -46,22 +46,35 @@ class NounParadigmTests(unittest.TestCase):
             set(entry.forms if entry else ()),
         )
 
+    def test_completes_en_singular_only_noun(self) -> None:
+        entry = self.complete("mjölk", "+en")
+        self.assertIsNotNone(entry)
+        self.assertEqual(
+            {"mjölk", "mjölks", "mjölken", "mjölkens"},
+            set(entry.forms if entry else ()),
+        )
+
+    def test_completes_n_singular_only_noun(self) -> None:
+        entry = self.complete("afasi", "+n")
+        self.assertIsNotNone(entry)
+        self.assertEqual(
+            {"afasi", "afasis", "afasin", "afasins"},
+            set(entry.forms if entry else ()),
+        )
+
+    def test_completes_et_singular_only_noun(self) -> None:
+        entry = self.complete("ansvar", "+et")
+        self.assertIsNotNone(entry)
+        self.assertEqual(
+            {"ansvar", "ansvars", "ansvaret", "ansvarets"},
+            set(entry.forms if entry else ()),
+        )
+
     def test_unmarked_genitive_after_s_x_or_z(self) -> None:
         entry = self.complete("hus", "+et; pl. +")
         self.assertIsNotNone(entry)
         self.assertIn("hus", set(entry.forms if entry else ()))
         self.assertNotIn("huss", set(entry.forms if entry else ()))
-
-    def test_leaves_singular_only_pattern_unchanged(self) -> None:
-        record = {
-            "normaliserat_ord": "mjölk",
-            "upos": "NOUN",
-            "ordkl": "subst.",
-            "text": "+en",
-        }
-        initial = generate_entry(record)
-        completed = complete_noun_entry(record, initial)
-        self.assertEqual(initial, completed)
 
     def test_leaves_other_word_classes_unchanged(self) -> None:
         record = {

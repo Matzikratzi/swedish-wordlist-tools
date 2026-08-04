@@ -65,6 +65,31 @@ class ValidateDirectFormsTests(unittest.TestCase):
             row["status_transition"],
         )
 
+    def test_reports_variant_genitive_disagreement_separately(self) -> None:
+        record = {
+            "id": 3,
+            "normaliserat_ord": "busk",
+            "upos": "NOUN",
+            "ordkl": "subst.",
+            "text": "+en",
+        }
+        analysis = {
+            "id": "busk..nn.1",
+            "upos": "NOUN",
+            "lemmas": {"busk", "buske"},
+            "forms": {
+                "busk", "buske", "busken", "buskens", "buskes",
+                "buskar", "buskars", "buskarna", "buskarnas",
+            },
+        }
+        row = validation_row(record, "lemma_same_upos", [analysis])
+        self.assertEqual("saol_genitive_differs_from_saldo", row["status"])
+        self.assertEqual(["busks"], row["extra_from_saol"])
+        self.assertEqual(
+            "saol_forms_are_subset->saol_genitive_differs_from_saldo",
+            row["status_transition"],
+        )
+
     def test_excludes_hyphen_terminated_saldo_forms(self) -> None:
         record = {
             "normaliserat_ord": "grund",
@@ -76,11 +101,15 @@ class ValidateDirectFormsTests(unittest.TestCase):
             "id": "grund..nn.1",
             "upos": "NOUN",
             "lemmas": {"grund"},
-            "forms": {"grund", "grunden", "grund-"},
+            "forms": {"grund", "grunds", "grunden", "grundens", "grund-"},
         }
         row = validation_row(record, "lemma_same_upos", [analysis])
         self.assertEqual("exact_form_set", row["status"])
         self.assertNotIn("grund-", row["saldo_forms"])
+        self.assertEqual(
+            {"grund", "grunds", "grunden", "grundens"},
+            set(row["generated_forms"]),
+        )
 
 
 if __name__ == "__main__":
