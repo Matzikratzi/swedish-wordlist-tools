@@ -17,6 +17,35 @@ DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
 DEFAULT_TEXT = Path("reports/saol14-verb-hv.txt")
 DEFAULT_JSON = Path("reports/saol14-verb-hv.json")
 _TAG_RE = re.compile(r"<[^>]+>")
+_SUBJUNCTIVE_FORMS = {
+    "bekomme",
+    "finge",
+    "ginge",
+    "gjorde",
+    "leve",
+    "måtte",
+    "torde",
+    "vare",
+    "varde",
+    "vore",
+}
+_INFLECTION_ENDINGS = (
+    "ade",
+    "at",
+    "ats",
+    "de",
+    "des",
+    "dde",
+    "ddes",
+    "er",
+    "es",
+    "it",
+    "its",
+    "s",
+    "te",
+    "tes",
+    "t",
+)
 
 
 def _plain(value: object) -> str:
@@ -49,11 +78,45 @@ def _verb_form_index(records: list[dict[str, Any]]) -> dict[str, set[str]]:
     return dict(result)
 
 
+def _common_prefix_length(left: str, right: str) -> int:
+    length = 0
+    for a, b in zip(left, right):
+        if a != b:
+            break
+        length += 1
+    return length
+
+
+def _looks_like_infinitive_reference(form: str) -> bool:
+    return form.endswith(("a", "as", "e")) and len(form) >= 3
+
+
+def classify_missing_reference(form: str, target: str) -> tuple[str, str]:
+    """Classify a missing internal SAOL reference without treating it as fact.
+
+    The categories are deliberately conservative. They describe why a missing
+    (hv) form is probably not a parser failure, but never add the form to the
+    playable export.
+    """
+    if form in _SUBJUNCTIVE_FORMS:
+        return "subjunctive", "known_subjunctive_form"
+
+    if _looks_like_infinitive_reference(form):
+        return "lemma_variant", "reference_looks_like_alternative_infinitive"
+
+    shared = _common_prefix_length(form, target)
+    if shared >= 3 and form.endswith(_INFLECTION_ENDINGS):
+        return "possible_inflection", "shares_target_stem_and_inflectional_ending"
+
+    return "unclassified", "no_conservative_rule_matched"
+
+
 def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
     records = list(read_jsonl(saol_path))
     verb_forms = _verb_form_index(records)
     rows: list[dict[str, Any]] = []
     counts: Counter[str] = Counter()
+    class_counts: Counter[str] = Counter()
 
     for record in records:
         if str(record.get("ordkl") or "").strip().casefold() != "(hv)":
@@ -62,25 +125,40 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
         referred_form = _plain(record.get("ord")) or _plain(record.get("stycke"))
         if target not in verb_forms:
             continue
+        classification = "not_applicable"
+        classification_reason = ""
         if not referred_form or " " in referred_form or not referred_form.isalpha():
             status = "not_single_playable_form"
         elif referred_form in verb_forms[target]:
             status = "matched_generated_verb_form"
         else:
             status = "missing_from_generated_verb_forms"
+            classification, classification_reason = classify_missing_reference(
+                referred_form, target
+            )
+            class_counts[classification] += 1
         counts[status] += 1
         rows.append({
             "form": referred_form,
             "target_lemma": target,
             "target_homonr": str(record.get("homonr") or ""),
             "status": status,
+            "classification": classification,
+            "classification_reason": classification_reason,
             "generated_forms": sorted(verb_forms[target]),
             "ord": str(record.get("ord") or ""),
             "stycke": str(record.get("stycke") or ""),
             "source": str(record.get("source") or ""),
         })
 
-    rows.sort(key=lambda row: (row["status"], row["target_lemma"], row["form"]))
+    rows.sort(
+        key=lambda row: (
+            row["status"],
+            row["classification"],
+            row["target_lemma"],
+            row["form"],
+        )
+    )
     matched = counts["matched_generated_verb_form"]
     comparable = matched + counts["missing_from_generated_verb_forms"]
     return {
@@ -90,10 +168,11 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
         "matched_generated_verb_forms": matched,
         "coverage_percent": round(100 * matched / comparable, 2) if comparable else 0.0,
         "status_counts": dict(counts.most_common()),
+        "missing_classification_counts": dict(class_counts.most_common()),
         "records": rows,
         "note": (
             "Only (hv) records whose normaliserat_ord matches a SAOL14 VERB lemma are audited. "
-            "The referred spelling comes from ord, with stycke as fallback. The report is validation only."
+            "Missing-reference classifications are conservative review labels, not proof and not export rules."
         ),
     }
 
@@ -111,25 +190,51 @@ def render_text(report: dict[str, Any]) -> str:
     for status, count in report["status_counts"].items():
         lines.append(f"  {count:6d}  {status}")
 
-    for title, status in (
-        ("Saknas bland genererade verbformer", "missing_from_generated_verb_forms"),
-        ("Ej jämförbara som enskilt spelord", "not_single_playable_form"),
+    lines.extend(["", "Klassificering av saknade hänvisningar:"])
+    for classification, count in report["missing_classification_counts"].items():
+        lines.append(f"  {count:6d}  {classification}")
+    if not report["missing_classification_counts"]:
+        lines.append("  (inga)")
+
+    for classification in (
+        "subjunctive",
+        "lemma_variant",
+        "possible_inflection",
+        "unclassified",
     ):
-        lines.extend(["", title + ":"])
-        selected = [row for row in report["records"] if row["status"] == status]
+        lines.extend(["", classification + ":"])
+        selected = [
+            row
+            for row in report["records"]
+            if row["status"] == "missing_from_generated_verb_forms"
+            and row["classification"] == classification
+        ]
         if not selected:
             lines.append("  (inga)")
         for row in selected[:200]:
             lines.append(
                 f"  {row['form']} -> {row['target_lemma']} "
+                f"| reason={row['classification_reason']} "
                 f"| generated={row['generated_forms']}"
             )
+
+    lines.extend(["", "Ej jämförbara som enskilt spelord:"])
+    selected = [
+        row for row in report["records"] if row["status"] == "not_single_playable_form"
+    ]
+    if not selected:
+        lines.append("  (inga)")
+    for row in selected[:200]:
+        lines.append(
+            f"  {row['form']} -> {row['target_lemma']} "
+            f"| generated={row['generated_forms']}"
+        )
     return "\n".join(lines) + "\n"
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Audit SAOL14 verb forms against internal (hv) reference entries"
+        description="Audit and classify SAOL14 verb forms against internal (hv) references"
     )
     parser.add_argument("saol", nargs="?", type=Path, default=DEFAULT_SAOL)
     parser.add_argument("--text", type=Path, default=DEFAULT_TEXT)
@@ -146,6 +251,8 @@ def main() -> None:
         f"Återfunna former: {report['matched_generated_verb_forms']} "
         f"({report['coverage_percent']:.2f} %)"
     )
+    for classification, count in report["missing_classification_counts"].items():
+        print(f"{classification}: {count}")
     print(f"Text: {args.text}")
     print(f"JSON: {args.json}")
 
