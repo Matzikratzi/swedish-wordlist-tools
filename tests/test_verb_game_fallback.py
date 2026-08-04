@@ -1,0 +1,64 @@
+from __future__ import annotations
+
+import unittest
+
+from swedish_wordlist_tools.verb_game_fallback import interpret_playable_verb_slots
+
+
+class VerbGameFallbackTests(unittest.TestCase):
+    def record(self, lemma: str, text: object, ordkl: str = "v.") -> dict[str, object]:
+        return {
+            "normaliserat_ord": lemma,
+            "text": text,
+            "stycke": lemma,
+            "upos": "VERB",
+            "ordkl": ordkl,
+            "homonr": "1",
+        }
+
+    def test_keeps_headword_when_pattern_is_missing(self) -> None:
+        slots = interpret_playable_verb_slots(self.record("förbaske", None))
+        self.assertIsNotNone(slots)
+        assert slots is not None
+        self.assertEqual(("förbaske",), slots.written_forms())
+        self.assertEqual("lemma_only", slots.metadata["fallback_kind"])
+
+    def test_keeps_present_only_headword(self) -> None:
+        slots = interpret_playable_verb_slots(self.record("lyster", "pres."))
+        self.assertIsNotNone(slots)
+        assert slots is not None
+        self.assertEqual(("lyster",), slots.written_forms())
+
+    def test_keeps_explicit_present_alternative(self) -> None:
+        slots = interpret_playable_verb_slots(self.record("torde", "pres. ibl. tör"))
+        self.assertIsNotNone(slots)
+        assert slots is not None
+        self.assertEqual(("torde", "tör"), slots.written_forms())
+
+    def test_keeps_explicit_supine_from_defective_paradigm(self) -> None:
+        slots = interpret_playable_verb_slots(
+            self.record(
+                "måste",
+                "pres. och: pret.; sup. måst; prov. och: finl. inf.",
+            )
+        )
+        self.assertIsNotNone(slots)
+        assert slots is not None
+        self.assertEqual(("måste", "måst"), slots.written_forms())
+
+    def test_keeps_single_explicit_form(self) -> None:
+        slots = interpret_playable_verb_slots(self.record("må", "måtte"))
+        self.assertIsNotNone(slots)
+        assert slots is not None
+        self.assertEqual(("må", "måtte"), slots.written_forms())
+
+    def test_prefers_strict_parser_when_available(self) -> None:
+        slots = interpret_playable_verb_slots(self.record("abonnera", "+de +t"))
+        self.assertIsNotNone(slots)
+        assert slots is not None
+        self.assertEqual(("abonnera", "abonnerade", "abonnerat"), slots.written_forms())
+        self.assertNotIn("fallback_kind", slots.metadata)
+
+
+if __name__ == "__main__":
+    unittest.main()
