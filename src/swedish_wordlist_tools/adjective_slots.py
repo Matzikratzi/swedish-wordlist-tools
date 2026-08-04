@@ -36,7 +36,6 @@ def _append(lemma: str, suffix: str) -> str:
 
 
 def _add_neuter_t(lemma: str) -> str:
-    """Apply common Swedish spelling changes before adjective neuter ``-t``."""
     if lemma.endswith("rd") or lemma.endswith("ld"):
         return lemma[:-1] + "t"
     if lemma.endswith("d"):
@@ -45,7 +44,6 @@ def _add_neuter_t(lemma: str) -> str:
 
 
 def _replace_final_component(lemma: str, replacement: str) -> str | None:
-    """Apply SAOL's ``-form`` notation to the final matching component."""
     replacement = replacement.lstrip("-")
     if not replacement or not replacement.isalpha():
         return None
@@ -57,7 +55,6 @@ def _replace_final_component(lemma: str, replacement: str) -> str | None:
 
 
 def _resolve_form_token(lemma: str, token: str, *, neuter: bool = False) -> str | None:
-    """Resolve one exact SAOL form token without guessing omitted morphology."""
     token = token.strip()
     if token == "+" and not neuter:
         return lemma
@@ -83,32 +80,27 @@ def _deduplicate(forms: list[AdjectiveForm]) -> tuple[AdjectiveForm, ...]:
 
 
 def _explicit_two_form_slots(lemma: str, text: str) -> AdjectiveSlots | None:
-    """Parse exact neuter/plural pairs encoded as two form tokens."""
     match = re.fullmatch(
-        r"(?P<neuter>[+-]?[a-zåäöéü]+) (?P<plural>[+-]?[a-zåäöéü]+)",
-        text,
+        r"(?P<neuter>[+-]?[a-zåäöéü]+) (?P<plural>[+-]?[a-zåäöéü]+)", text
     )
     if match is None:
         return None
-
     neuter = _resolve_form_token(lemma, match.group("neuter"), neuter=True)
     plural = _resolve_form_token(lemma, match.group("plural"))
     if neuter is None or plural is None:
         return None
-
     return AdjectiveSlots(
-        lemma=lemma,
-        forms=(
+        lemma,
+        (
             AdjectiveForm(lemma, "common_singular"),
             AdjectiveForm(neuter, "neuter_singular"),
             AdjectiveForm(plural, "definite_or_plural"),
         ),
-        rule="explicit_neuter_plural_pair",
+        "explicit_neuter_plural_pair",
     )
 
 
 def _labelled_plural_alternatives(lemma: str, text: str) -> AdjectiveSlots | None:
-    """Parse e.g. ``-blått, best. och: pl. + el. +a``."""
     match = re.fullmatch(
         r"(?P<neuter>-[a-zåäöéü]+), best\. och: pl\. (?P<first>\+) el\. (?P<second>\+[a-zåäöéü]+)",
         text,
@@ -121,33 +113,56 @@ def _labelled_plural_alternatives(lemma: str, text: str) -> AdjectiveSlots | Non
     if neuter is None or first is None or second is None:
         return None
     return AdjectiveSlots(
-        lemma=lemma,
-        forms=_deduplicate([
+        lemma,
+        _deduplicate([
             AdjectiveForm(lemma, "common_singular"),
             AdjectiveForm(neuter, "neuter_singular"),
             AdjectiveForm(first, "definite_or_plural"),
             AdjectiveForm(second, "definite_or_plural"),
         ]),
-        rule="labelled_plural_alternatives",
+        "labelled_plural_alternatives",
+    )
+
+
+def _labelled_limited_slots(lemma: str, text: str) -> AdjectiveSlots | None:
+    """Parse rows that explicitly expose only plural, definite or masculine forms."""
+    if text == "best.":
+        return AdjectiveSlots(
+            lemma,
+            (AdjectiveForm(lemma, "definite_or_plural"),),
+            "labelled_limited_paradigm",
+        )
+
+    match = re.fullmatch(r"(?P<label>pl\.|mask\.|best\.) (?P<form>[+-]?[a-zåäöéü]+)", text)
+    if match is None:
+        return None
+    form = _resolve_form_token(lemma, match.group("form"))
+    if form is None:
+        return None
+    slot = {
+        "pl.": "definite_or_plural",
+        "mask.": "masculine_definite",
+        "best.": "definite_or_plural",
+    }[match.group("label")]
+    return AdjectiveSlots(
+        lemma,
+        _deduplicate([
+            AdjectiveForm(lemma, "common_singular"),
+            AdjectiveForm(form, slot),
+        ]),
+        "labelled_limited_paradigm",
     )
 
 
 def _comparison_slots(lemma: str, text: str) -> AdjectiveSlots | None:
-    """Parse explicit comparison while preserving any positive forms on the row."""
     forms: list[AdjectiveForm] = [AdjectiveForm(lemma, "common_singular")]
-
     match = re.fullmatch(
         r"komp\. (?P<comparative>[+]?[a-zåäöéü]+)(?: el\. (?P<comparative_alt>[a-zåäöéü]+))?, "
         r"superl\. (?P<superlative>[+]?[a-zåäöéü]+)(?: el\. (?P<superlative_alt>[a-zåäöéü]+))?",
         text,
     )
     if match:
-        for name, slot in (
-            ("comparative", "comparative"),
-            ("comparative_alt", "comparative"),
-            ("superlative", "superlative"),
-            ("superlative_alt", "superlative"),
-        ):
+        for name, slot in (("comparative", "comparative"), ("comparative_alt", "comparative"), ("superlative", "superlative"), ("superlative_alt", "superlative")):
             token = match.group(name)
             if token:
                 resolved = _resolve_form_token(lemma, token)
@@ -161,15 +176,8 @@ def _comparison_slots(lemma: str, text: str) -> AdjectiveSlots | None:
         text,
     )
     if match:
-        forms.extend((
-            AdjectiveForm(_add_neuter_t(lemma), "neuter_singular"),
-            AdjectiveForm(_append(lemma, "a"), "definite_or_plural"),
-        ))
-        for name, slot in (
-            ("comparative", "comparative"),
-            ("superlative", "superlative"),
-            ("superlative_alt", "superlative"),
-        ):
+        forms.extend((AdjectiveForm(_add_neuter_t(lemma), "neuter_singular"), AdjectiveForm(_append(lemma, "a"), "definite_or_plural")))
+        for name, slot in (("comparative", "comparative"), ("superlative", "superlative"), ("superlative_alt", "superlative")):
             token = match.group(name)
             if token:
                 resolved = _resolve_form_token(lemma, token)
@@ -187,64 +195,36 @@ def _comparison_slots(lemma: str, text: str) -> AdjectiveSlots | None:
         plural = _resolve_form_token(lemma, match.group("plural"))
         if neuter is None or plural is None:
             return None
-        forms.extend((
-            AdjectiveForm(neuter, "neuter_singular"),
-            AdjectiveForm(plural, "definite_or_plural"),
-            AdjectiveForm(match.group("comparative"), "comparative"),
-            AdjectiveForm(match.group("superlative"), "superlative"),
-        ))
+        forms.extend((AdjectiveForm(neuter, "neuter_singular"), AdjectiveForm(plural, "definite_or_plural"), AdjectiveForm(match.group("comparative"), "comparative"), AdjectiveForm(match.group("superlative"), "superlative")))
         return AdjectiveSlots(lemma, _deduplicate(forms), "explicit_positive_and_comparison")
-
     return None
 
 
 def interpret_simple_adjective_slots(record: dict[str, Any]) -> AdjectiveSlots | None:
-    """Interpret exact, high-confidence SAOL14 adjective patterns."""
     lemma = _value(record, "normaliserat_ord").casefold()
     raw_text = _value(record, "text")
     text = " ".join(raw_text.split()).casefold()
     if not lemma or " " in lemma or not lemma.isalpha():
         return None
-
-    # The faksimil field is hard-capped at 50 characters. A comparison row at
-    # that exact length may end in a partial word, as for ``nära`` where the
-    # final alternative is truncated to ``närm``. Reject the whole row rather
-    # than allowing any fragment to escape from the parser.
     if len(raw_text) == HARD_CAP and ("komp." in text or "superl." in text):
         return None
 
     forms: list[AdjectiveForm] = [AdjectiveForm(lemma, "common_singular")]
-    rule = ""
-
     if text == "+t +a":
-        forms.extend((
-            AdjectiveForm(_add_neuter_t(lemma), "neuter_singular"),
-            AdjectiveForm(_append(lemma, "a"), "definite_or_plural"),
-        ))
-        rule = "regular_t_a"
-    elif text == "n. +, +a":
-        forms.extend((
-            AdjectiveForm(lemma, "neuter_singular"),
-            AdjectiveForm(_append(lemma, "a"), "definite_or_plural"),
-        ))
-        rule = "unchanged_neuter_a"
-    elif text == "+tt +a":
-        forms.extend((
-            AdjectiveForm(_append(lemma, "tt"), "neuter_singular"),
-            AdjectiveForm(_append(lemma, "a"), "definite_or_plural"),
-        ))
-        rule = "regular_tt_a"
-    elif text == "+t +ma":
-        forms.extend((
-            AdjectiveForm(_add_neuter_t(lemma), "neuter_singular"),
-            AdjectiveForm(_append(lemma, "ma"), "definite_or_plural"),
-        ))
-        rule = "regular_t_ma"
-    else:
-        return (
-            _labelled_plural_alternatives(lemma, text)
-            or _comparison_slots(lemma, text)
-            or _explicit_two_form_slots(lemma, text)
-        )
-
-    return AdjectiveSlots(lemma=lemma, forms=_deduplicate(forms), rule=rule)
+        forms.extend((AdjectiveForm(_add_neuter_t(lemma), "neuter_singular"), AdjectiveForm(_append(lemma, "a"), "definite_or_plural")))
+        return AdjectiveSlots(lemma, _deduplicate(forms), "regular_t_a")
+    if text == "n. +, +a":
+        forms.extend((AdjectiveForm(lemma, "neuter_singular"), AdjectiveForm(_append(lemma, "a"), "definite_or_plural")))
+        return AdjectiveSlots(lemma, _deduplicate(forms), "unchanged_neuter_a")
+    if text == "+tt +a":
+        forms.extend((AdjectiveForm(_append(lemma, "tt"), "neuter_singular"), AdjectiveForm(_append(lemma, "a"), "definite_or_plural")))
+        return AdjectiveSlots(lemma, _deduplicate(forms), "regular_tt_a")
+    if text == "+t +ma":
+        forms.extend((AdjectiveForm(_add_neuter_t(lemma), "neuter_singular"), AdjectiveForm(_append(lemma, "ma"), "definite_or_plural")))
+        return AdjectiveSlots(lemma, _deduplicate(forms), "regular_t_ma")
+    return (
+        _labelled_plural_alternatives(lemma, text)
+        or _labelled_limited_slots(lemma, text)
+        or _comparison_slots(lemma, text)
+        or _explicit_two_form_slots(lemma, text)
+    )
