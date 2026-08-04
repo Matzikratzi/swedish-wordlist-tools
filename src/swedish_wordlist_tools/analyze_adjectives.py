@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +26,25 @@ def _pattern(text: str) -> str:
     return " ".join(text.split()) if text else "(none)"
 
 
+def _remaining_reason(lemma: str, text: str) -> str:
+    if not lemma:
+        return "missing_lemma"
+    if " " in lemma:
+        return "multiword_lemma"
+    if not lemma.isalpha():
+        return "nonalpha_lemma"
+    if not text:
+        return "missing_text"
+    lowered = text.casefold()
+    if lowered.startswith(("pl.", "best.", "mask.")):
+        return "labelled_limited_paradigm"
+    if "obrukl." in lowered or "undviks" in lowered or "oböjl." in lowered:
+        return "usage_restricted_paradigm"
+    if "komp." in lowered or "superl." in lowered:
+        return "comparison_or_mixed_pattern"
+    return "unparsed_singleword_pattern"
+
+
 def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
     records = [
         record for record in read_jsonl(saol_path)
@@ -34,22 +53,34 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
     pattern_counts: Counter[str] = Counter()
     remaining_pattern_counts: Counter[str] = Counter()
     rule_counts: Counter[str] = Counter()
+    remaining_reason_counts: Counter[str] = Counter()
+    remaining_reason_samples: dict[str, list[dict[str, str]]] = defaultdict(list)
     length_counts: Counter[str] = Counter()
     rows: list[dict[str, Any]] = []
 
     for record in records:
+        lemma = _value(record, "normaliserat_ord")
         text = _value(record, "text")
         stycke = _value(record, "stycke")
         pattern = _pattern(text)
         slots = interpret_simple_adjective_slots(record)
         pattern_counts[pattern] += 1
+        reason = None
         if slots is None:
             remaining_pattern_counts[pattern] += 1
+            reason = _remaining_reason(lemma, text)
+            remaining_reason_counts[reason] += 1
+            if len(remaining_reason_samples[reason]) < 30:
+                remaining_reason_samples[reason].append({
+                    "lemma": lemma,
+                    "homonr": _value(record, "homonr"),
+                    "text": text or "(none)",
+                })
         else:
             rule_counts[slots.rule] += 1
         length_counts["at_hard_cap" if len(text) == HARD_CAP else "below_hard_cap"] += 1
         rows.append({
-            "lemma": _value(record, "normaliserat_ord"),
+            "lemma": lemma,
             "homonr": _value(record, "homonr"),
             "text": text or None,
             "text_length": len(text),
@@ -58,6 +89,7 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
             "stycke": stycke,
             "ordkl": _value(record, "ordkl"),
             "interpreted": slots is not None,
+            "remaining_reason": reason,
             "rule": slots.rule if slots else None,
             "forms": list(slots.written_forms()) if slots else [],
             "source": _value(record, "source"),
@@ -76,12 +108,14 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
         "with_bar": sum(1 for row in rows if row["has_bar"]),
         "unique_raw_patterns": len(pattern_counts),
         "rule_counts": dict(rule_counts.most_common()),
+        "remaining_reason_counts": dict(remaining_reason_counts.most_common()),
+        "remaining_reason_samples": dict(remaining_reason_samples),
         "top_raw_patterns": pattern_counts.most_common(100),
         "top_remaining_patterns": remaining_pattern_counts.most_common(100),
         "records": rows,
         "note": (
-            "The simple parser handles only exact +t +a, n. +, +a, +tt +a and +t +ma rows. "
-            "No adjective forms are exported by this command."
+            "The parser handles conservative positive-degree adjective rows only. "
+            "Remaining rows are classified before further grammar is added; no forms are exported."
         ),
     }
 
@@ -102,6 +136,19 @@ def render_text(report: dict[str, Any]) -> str:
     ]
     for rule, count in report["rule_counts"].items():
         lines.append(f"  {count:6d}  {rule}")
+
+    lines.extend(["", "Varför återstående poster inte tolkades:"])
+    for reason, count in report["remaining_reason_counts"].items():
+        lines.append(f"  {count:6d}  {reason}")
+
+    lines.extend(["", "Exempel per återstående orsak:"])
+    for reason, samples in report["remaining_reason_samples"].items():
+        lines.append(f"  {reason}:")
+        for row in samples[:12]:
+            lines.append(
+                f"    {row['lemma']} (homonr={row['homonr'] or '-'}) | text={row['text']!r}"
+            )
+
     lines.extend(["", "Vanligaste återstående råa textmönster:"])
     for pattern, count in report["top_remaining_patterns"]:
         lines.append(f"  {count:6d}  {pattern}")
@@ -135,6 +182,8 @@ def main() -> None:
         f"({report['interpreted_simple_percent']:.2f} %)"
     )
     print(f"Återstår: {report['remaining_records']}")
+    for reason, count in report["remaining_reason_counts"].items():
+        print(f"{reason}: {count}")
     print(f"Vid 50-teckensgränsen: {report['at_hard_cap']}")
     print(f"Text: {args.text}")
     print(f"JSON: {args.json}")
