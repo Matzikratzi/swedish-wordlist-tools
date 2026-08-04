@@ -33,6 +33,9 @@ class AnalyzeImperativesTests(unittest.TestCase):
     def test_non_a_infinitive_is_unchanged(self) -> None:
         self.assertEqual(("gå", "non_a_infinitive"), generate_imperative("gå", None))
 
+    def test_multiword_lemma_is_not_generated(self) -> None:
+        self.assertEqual((None, "multiword_lemma"), generate_imperative("loma av", None))
+
     def test_extracts_complete_explicit_imperative(self) -> None:
         record = {
             "normaliserat_ord": "skriva",
@@ -40,7 +43,13 @@ class AnalyzeImperativesTests(unittest.TestCase):
         }
         self.assertEqual(("skriv",), explicit_saol_imperatives(record))
 
-    def test_drops_explicit_imperative_fragment_at_hard_cap(self) -> None:
+    def test_drops_only_final_explicit_imperative_fragment_at_hard_cap(self) -> None:
+        text = "+de +t, pres. sparar el. spar, imper. spara el. sp"
+        self.assertEqual(50, len(text))
+        record = {"normaliserat_ord": "spara", "text": text}
+        self.assertEqual(("spara",), explicit_saol_imperatives(record))
+
+    def test_drops_lone_explicit_imperative_fragment_at_hard_cap(self) -> None:
         text = "skrev, skrivit, pres. skriver, imper. sk".ljust(50, "r")
         self.assertEqual(50, len(text))
         record = {"normaliserat_ord": "skriva", "text": text}
