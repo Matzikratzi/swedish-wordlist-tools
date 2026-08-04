@@ -17,6 +17,7 @@ DEFAULT_TEXT = Path("reports/saol14-verb-hard-cap.txt")
 DEFAULT_JSON = Path("reports/saol14-verb-hard-cap.json")
 TEXT_HARD_CAP = 50
 _LABEL_RE = re.compile(r"\b(pres|pret|sup|imper|inf)\.\s*", re.IGNORECASE)
+_BARE_FINAL_LABEL_RE = re.compile(r"\b(pres|pret|sup|imper|inf)\.\s*$", re.IGNORECASE)
 _WORD_RE = re.compile(r"[A-Za-zÅÄÖåäöÉéÜü-]+$")
 
 
@@ -29,14 +30,13 @@ def _tail_kind(text: str) -> str:
     """Describe how the 50-character field ends without guessing a form."""
     if not text:
         return "empty"
+    if _BARE_FINAL_LABEL_RE.search(text):
+        return "label"
     if text[-1] in ",;:.()[]":
         return "delimiter"
     match = _WORD_RE.search(text)
     if match is None:
         return "other"
-    token = match.group(0)
-    if _LABEL_RE.fullmatch(token + "."):
-        return "label"
     return "word_fragment_or_complete_word"
 
 
@@ -46,14 +46,7 @@ def _missing_share(exported: int, estimated_missing: int) -> float:
 
 
 def _estimate_scenarios(exported: int, candidates: int) -> dict[str, dict[str, Any]]:
-    """Show transparent assumptions instead of pretending to know hidden text.
-
-    A 50-character review candidate may hide no additional playable form, but
-    inspection so far suggests that one omitted final form is common and two or
-    three are a useful sensitivity range. Counts are form occurrences before
-    global deduplication; percentages compare them with the unique export and
-    should therefore be read as approximate upper-oriented estimates.
-    """
+    """Show transparent assumptions instead of pretending to know hidden text."""
     result: dict[str, dict[str, Any]] = {}
     for per_record in (1, 2, 3):
         missing = candidates * per_record
@@ -86,7 +79,9 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
         tail = _tail_kind(text)
         label_counts[label] += 1
         tail_counts[tail] += 1
-        strict_counts["strict_interpreted" if strict is not None else "strict_uninterpreted"] += 1
+        strict_counts[
+            "strict_interpreted" if strict is not None else "strict_uninterpreted"
+        ] += 1
 
         strict_forms = list(strict.written_forms()) if strict is not None else []
         playable_forms = list(playable.written_forms()) if playable is not None else []
@@ -128,10 +123,9 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
         "missing_form_estimates": _estimate_scenarios(exported_count, candidates),
         "records": records,
         "note": (
-            "possible_missing_after_cap is a review flag only. The report never "
-            "invents text beyond character 50. Missing-form percentages are "
-            "sensitivity estimates based on 1, 2 or 3 hidden form occurrences "
-            "per review candidate, not observed counts."
+            "possible_missing_after_cap is a review flag only. A bare final "
+            "grammatical label such as 'pres.' or 'inf.' is open even though it "
+            "ends in a period. The report never invents text beyond character 50."
         ),
     }
 
