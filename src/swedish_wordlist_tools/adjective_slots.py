@@ -4,6 +4,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+HARD_CAP = 50
+
 
 @dataclass(frozen=True)
 class AdjectiveForm:
@@ -134,7 +136,6 @@ def _comparison_slots(lemma: str, text: str) -> AdjectiveSlots | None:
     """Parse explicit comparison while preserving any positive forms on the row."""
     forms: list[AdjectiveForm] = [AdjectiveForm(lemma, "common_singular")]
 
-    # Pure labelled comparison: ``komp. +re, superl. +st`` or explicit words.
     match = re.fullmatch(
         r"komp\. (?P<comparative>[+]?[a-zåäöéü]+)(?: el\. (?P<comparative_alt>[a-zåäöéü]+))?, "
         r"superl\. (?P<superlative>[+]?[a-zåäöéü]+)(?: el\. (?P<superlative_alt>[a-zåäöéü]+))?",
@@ -155,7 +156,6 @@ def _comparison_slots(lemma: str, text: str) -> AdjectiveSlots | None:
                 forms.append(AdjectiveForm(resolved, slot))
         return AdjectiveSlots(lemma, _deduplicate(forms), "comparison_only")
 
-    # Regular positive followed by labelled comparison.
     match = re.fullmatch(
         r"\+t \+a, komp\. (?P<comparative>[+]?[a-zåäöéü]+), superl\. (?P<superlative>[+]?[a-zåäöéü]+)(?: h (?P<superlative_alt>\+[a-zåäöéü]+))?",
         text,
@@ -178,7 +178,6 @@ def _comparison_slots(lemma: str, text: str) -> AdjectiveSlots | None:
                 forms.append(AdjectiveForm(resolved, slot))
         return AdjectiveSlots(lemma, _deduplicate(forms), "positive_with_comparison")
 
-    # Explicit positive pair followed by two unlabelled comparison forms.
     match = re.fullmatch(
         r"(?P<neuter>[+-]?[a-zåäöéü]+) (?P<plural>[+-]?[a-zåäöéü]+), (?P<comparative>[a-zåäöéü]+) (?P<superlative>[a-zåäöéü]+)",
         text,
@@ -202,8 +201,16 @@ def _comparison_slots(lemma: str, text: str) -> AdjectiveSlots | None:
 def interpret_simple_adjective_slots(record: dict[str, Any]) -> AdjectiveSlots | None:
     """Interpret exact, high-confidence SAOL14 adjective patterns."""
     lemma = _value(record, "normaliserat_ord").casefold()
-    text = " ".join(_value(record, "text").split()).casefold()
+    raw_text = _value(record, "text")
+    text = " ".join(raw_text.split()).casefold()
     if not lemma or " " in lemma or not lemma.isalpha():
+        return None
+
+    # The faksimil field is hard-capped at 50 characters. A comparison row at
+    # that exact length may end in a partial word, as for ``nära`` where the
+    # final alternative is truncated to ``närm``. Reject the whole row rather
+    # than allowing any fragment to escape from the parser.
+    if len(raw_text) == HARD_CAP and ("komp." in text or "superl." in text):
         return None
 
     forms: list[AdjectiveForm] = [AdjectiveForm(lemma, "common_singular")]
