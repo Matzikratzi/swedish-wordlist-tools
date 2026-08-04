@@ -56,7 +56,7 @@ def _replace_final_component(lemma: str, replacement: str) -> str | None:
 
 def _resolve_form_token(lemma: str, token: str, *, neuter: bool = False) -> str | None:
     token = token.strip()
-    if token == "+" and not neuter:
+    if token == "+":
         return lemma
     if token == "+t" and neuter:
         return _add_neuter_t(lemma)
@@ -124,8 +124,75 @@ def _labelled_plural_alternatives(lemma: str, text: str) -> AdjectiveSlots | Non
     )
 
 
+def _full_labelled_plural_alternatives(lemma: str, text: str) -> AdjectiveSlots | None:
+    """Parse rows such as ``blått, best. och: pl. blå el. blåa``."""
+    match = re.fullmatch(
+        r"(?P<neuter>[a-zåäöéü]+), best\. och: pl\. "
+        r"(?P<first>[a-zåäöéü]+) el\. (?P<second>[a-zåäöéü]+)",
+        text,
+    )
+    if match is None:
+        return None
+    return AdjectiveSlots(
+        lemma,
+        _deduplicate([
+            AdjectiveForm(lemma, "common_singular"),
+            AdjectiveForm(match.group("neuter"), "neuter_singular"),
+            AdjectiveForm(match.group("first"), "definite_or_plural"),
+            AdjectiveForm(match.group("second"), "definite_or_plural"),
+        ]),
+        "full_labelled_plural_alternatives",
+    )
+
+
+def _single_slot_rows(lemma: str, text: str) -> AdjectiveSlots | None:
+    """Parse rows that expose only one additional positive slot."""
+    if text == "+t":
+        return AdjectiveSlots(
+            lemma,
+            _deduplicate([
+                AdjectiveForm(lemma, "common_singular"),
+                AdjectiveForm(_add_neuter_t(lemma), "neuter_singular"),
+            ]),
+            "neuter_only",
+        )
+    if text == "n. +":
+        return AdjectiveSlots(
+            lemma,
+            _deduplicate([
+                AdjectiveForm(lemma, "common_singular"),
+                AdjectiveForm(lemma, "neuter_singular"),
+            ]),
+            "unchanged_neuter_only",
+        )
+
+    match = re.fullmatch(r"neutr\. \+; pl\. (?P<plural>[a-zåäöéü]+)", text)
+    if match:
+        return AdjectiveSlots(
+            lemma,
+            _deduplicate([
+                AdjectiveForm(lemma, "common_singular"),
+                AdjectiveForm(lemma, "neuter_singular"),
+                AdjectiveForm(match.group("plural"), "definite_or_plural"),
+            ]),
+            "unchanged_neuter_explicit_plural",
+        )
+
+    # A single complete word on the row is an explicitly supplied additional
+    # form. We do not infer its grammatical label beyond definite/plural.
+    if re.fullmatch(r"[a-zåäöéü]+", text):
+        return AdjectiveSlots(
+            lemma,
+            _deduplicate([
+                AdjectiveForm(lemma, "common_singular"),
+                AdjectiveForm(text, "definite_or_plural"),
+            ]),
+            "explicit_single_additional_form",
+        )
+    return None
+
+
 def _labelled_limited_slots(lemma: str, text: str) -> AdjectiveSlots | None:
-    """Parse rows that explicitly expose only plural, definite or masculine forms."""
     if text == "best.":
         return AdjectiveSlots(
             lemma,
@@ -224,7 +291,9 @@ def interpret_simple_adjective_slots(record: dict[str, Any]) -> AdjectiveSlots |
         return AdjectiveSlots(lemma, _deduplicate(forms), "regular_t_ma")
     return (
         _labelled_plural_alternatives(lemma, text)
+        or _full_labelled_plural_alternatives(lemma, text)
         or _labelled_limited_slots(lemma, text)
         or _comparison_slots(lemma, text)
+        or _single_slot_rows(lemma, text)
         or _explicit_two_form_slots(lemma, text)
     )
