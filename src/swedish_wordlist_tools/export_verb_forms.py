@@ -10,8 +10,8 @@ from .compare_sources import read_saldo
 from .jsonl import read_jsonl
 from .saldo_verb_fallback import add_saldo_attested_forms
 from .verb_compound_heads import borrow_compound_verb_slots, build_simple_verb_paradigm_index
+from .verb_game_fallback import interpret_playable_verb_slots
 from .verb_slot_schema import add_explicit_verb_row_slots
-from .verb_slots import interpret_verb_slots
 
 DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
 DEFAULT_SALDO = Path("data/raw/saldom.xml")
@@ -40,7 +40,7 @@ def build_verb_forms(
     interpreted = {
         id(record): (
             add_explicit_verb_row_slots(record, slots)
-            if (slots := interpret_verb_slots(record)) is not None
+            if (slots := interpret_playable_verb_slots(record)) is not None
             else None
         )
         for record in records
