@@ -16,10 +16,7 @@ DEFAULT_SALDO = Path("data/raw/saldom.xml")
 DEFAULT_TEXT = Path("reports/saol14-imperatives.txt")
 DEFAULT_JSON = Path("reports/saol14-imperatives.json")
 
-_IMPERATIVE_SEGMENT_RE = re.compile(
-    r"\bimper\.\s*(?P<body>[^,;_]*)",
-    re.IGNORECASE,
-)
+_IMPERATIVE_SEGMENT_RE = re.compile(r"\bimper\.\s*(?P<body>[^,;_]*)", re.IGNORECASE)
 _FORM_RE = re.compile(r"[+\-]?[A-Za-zÅÄÖåäöÉéÜü]+(?:-[A-Za-zÅÄÖåäöÉéÜü]+)*")
 _MARKER_WORDS = {"el", "eller", "vard", "åld", "prov", "ibl", "och", "obrukl"}
 
@@ -31,19 +28,11 @@ def _first_word(lemma: str) -> str:
 def _preterite_forms(slots: Any) -> tuple[str, ...]:
     if slots is None:
         return ()
-    return tuple(
-        form.written_form.partition(" ")[0]
-        for form in slots.forms_for("preterite")
-    )
+    return tuple(form.partition(" ")[0] for form in slots.forms_for("preterite"))
 
 
 def generate_imperative(lemma: str, slots: Any) -> tuple[str | None, str]:
-    """Generate one conservative imperative candidate and name the rule.
-
-    Class-1 verbs are identified by an SAOL preterite ending in ``-ade`` and
-    keep the infinitive. Other infinitives ending in ``-a`` lose that ``a``.
-    Infinitives without final ``-a`` are used unchanged.
-    """
+    """Generate one conservative imperative candidate and name the rule."""
     word = _first_word(lemma).casefold()
     if not word or not word.isalpha():
         return None, "not_single_alpha_head"
@@ -66,13 +55,9 @@ def _apply_explicit_token(lemma: str, token: str) -> str | None:
         suffix = token[1:]
         if not suffix:
             return None
-        shared = 0
-        for left, right in zip(reversed(head), reversed(suffix)):
-            if left != right:
-                break
-            shared += 1
-        if shared:
-            return head[:-shared] + suffix
+        for start in range(len(head)):
+            if head[start:].startswith(suffix[:1]):
+                return head[:start] + suffix
         return None
     return token
 
@@ -82,7 +67,6 @@ def explicit_saol_imperatives(record: dict[str, Any]) -> tuple[str, ...]:
     match = _IMPERATIVE_SEGMENT_RE.search(text)
     if match is None:
         return ()
-    # At the known hard cap, a segment ending at character 50 may be partial.
     body = match.group("body").strip()
     if len(text) == 50 and match.end() == len(text) and body and body[-1].isalpha():
         return ()
@@ -105,10 +89,7 @@ def _saldo_verb_forms(saldo: dict[str, list[dict[str, Any]]], lemma: str) -> set
     return forms
 
 
-def build_report(
-    saol_path: Path = DEFAULT_SAOL,
-    saldo_path: Path = DEFAULT_SALDO,
-) -> dict[str, Any]:
+def build_report(saol_path: Path = DEFAULT_SAOL, saldo_path: Path = DEFAULT_SALDO) -> dict[str, Any]:
     saldo = read_saldo(saldo_path)
     rows: list[dict[str, Any]] = []
     counts: Counter[str] = Counter()
@@ -136,26 +117,25 @@ def build_report(
 
         explicit_status = "none"
         if explicit:
-            if candidate in explicit:
-                explicit_status = "generated_matches_explicit_saol"
-            else:
-                explicit_status = "generated_differs_from_explicit_saol"
+            explicit_status = (
+                "generated_matches_explicit_saol"
+                if candidate in explicit
+                else "generated_differs_from_explicit_saol"
+            )
             counts[explicit_status] += 1
 
-        rows.append(
-            {
-                "lemma": lemma,
-                "homonr": str(record.get("homonr") or ""),
-                "rule": rule,
-                "generated": candidate,
-                "status": status,
-                "explicit_saol": list(explicit),
-                "explicit_status": explicit_status,
-                "generated_in_saldo": bool(candidate and candidate in saldo_forms),
-                "saldo_forms_sample": sorted(saldo_forms)[:30],
-                "text": str(record.get("text") or ""),
-            }
-        )
+        rows.append({
+            "lemma": lemma,
+            "homonr": str(record.get("homonr") or ""),
+            "rule": rule,
+            "generated": candidate,
+            "status": status,
+            "explicit_saol": list(explicit),
+            "explicit_status": explicit_status,
+            "generated_in_saldo": bool(candidate and candidate in saldo_forms),
+            "saldo_forms_sample": sorted(saldo_forms)[:30],
+            "text": str(record.get("text") or ""),
+        })
 
     rows.sort(key=lambda row: (row["status"], row["explicit_status"], row["lemma"], row["homonr"]))
     generated = sum(1 for row in rows if row["generated"])
@@ -180,8 +160,7 @@ def render_text(report: dict[str, Any]) -> str:
         f"Genererade imperativkandidater: {report['generated_candidates']}",
         f"Kandidater belagda i SALDO: {report['generated_in_saldo']} ({report['generated_in_saldo_percent']:.2f} %)",
         f"Poster med uttryckligt SAOL-imperativ: {report['explicit_saol_records']}",
-        "",
-        "Status:",
+        "", "Status:",
     ]
     for key, count in report["status_counts"].items():
         lines.append(f"  {count:6d}  {key}")
@@ -189,30 +168,20 @@ def render_text(report: dict[str, Any]) -> str:
     for key, count in report["rule_counts"].items():
         lines.append(f"  {count:6d}  {key}")
 
-    def section(title: str, predicate: Any, limit: int = 100) -> None:
+    def section(title: str, status: str, limit: int = 100) -> None:
         lines.extend(["", title + ":"])
-        selected = [row for row in report["records"] if predicate(row)][:limit]
+        selected = [row for row in report["records"] if row.get("explicit_status") == status or row.get("status") == status][:limit]
         for row in selected:
             lines.append(
                 f"  {row['lemma']} (homonr={row['homonr']}) -> {row['generated']} "
-                f"| rule={row['rule']} | status={row['status']} "
-                f"| explicit={row['explicit_saol']}"
+                f"| rule={row['rule']} | status={row['status']} | explicit={row['explicit_saol']}"
             )
         if not selected:
             lines.append("  (inga)")
 
-    section(
-        "Avviker från uttryckligt SAOL-imperativ",
-        lambda row: row["explicit_status"] == "generated_differs_from_explicit_saol",
-    )
-    section(
-        "Genererad men saknas hos exakt matchat SALDO-verb",
-        lambda row: row["status"] == "generated_missing_from_matched_saldo",
-    )
-    section(
-        "Ingen exakt SALDO-verblemmaträff",
-        lambda row: row["status"] == "no_exact_saldo_verb_lemma",
-    )
+    section("Avviker från uttryckligt SAOL-imperativ", "generated_differs_from_explicit_saol")
+    section("Genererad men saknas hos exakt matchat SALDO-verb", "generated_missing_from_matched_saldo")
+    section("Ingen exakt SALDO-verblemmaträff", "no_exact_saldo_verb_lemma")
     return "\n".join(lines) + "\n"
 
 
@@ -223,7 +192,6 @@ def main() -> None:
     parser.add_argument("--text", type=Path, default=DEFAULT_TEXT)
     parser.add_argument("--json", type=Path, default=DEFAULT_JSON)
     args = parser.parse_args()
-
     report = build_report(args.saol, args.saldo)
     args.text.parent.mkdir(parents=True, exist_ok=True)
     args.text.write_text(render_text(report), encoding="utf-8")
