@@ -18,11 +18,11 @@ class ExportVerbSlotsOnlyTests(unittest.TestCase):
                 handle.write(json.dumps(record, ensure_ascii=False) + "\n")
         return Path(handle.name)
 
-    def test_raw_text_token_cannot_bypass_slot_interpreter(self) -> None:
+    def test_unmarked_raw_text_token_cannot_bypass_slot_interpreter(self) -> None:
         path = self.write_jsonl([
             {
                 "normaliserat_ord": "testa",
-                "text": "pres. anfa",
+                "text": "unknown syntax anfa",
                 "stycke": "testa",
                 "upos": "VERB",
                 "ordkl": "v.",
