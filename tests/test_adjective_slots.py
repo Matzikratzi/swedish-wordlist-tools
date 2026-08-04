@@ -42,6 +42,11 @@ class AdjectiveSlotsTests(unittest.TestCase):
         slots = self.parse("akvamarinblå", "-blått, best. och: pl. + el. +a")
         self.assertEqual(("akvamarinblå", "akvamarinblått", "akvamarinblå", "akvamarinblåa"), slots.written_forms())
 
+    def test_full_labelled_plural_alternatives(self) -> None:
+        slots = self.parse("blå", "blått, best. och: pl. blå el. blåa")
+        self.assertEqual(("blå", "blått", "blå", "blåa"), slots.written_forms())
+        self.assertEqual("full_labelled_plural_alternatives", slots.rule)
+
     def test_labelled_limited_plural_suffix(self) -> None:
         slots = self.parse("fullmäktig", "pl. +e")
         self.assertEqual(("fullmäktig", "fullmäktige"), slots.written_forms())
@@ -53,6 +58,20 @@ class AdjectiveSlotsTests(unittest.TestCase):
     def test_labelled_masculine_and_bare_definite(self) -> None:
         self.assertEqual(("främsta", "främste"), self.parse("främsta", "mask. främste").written_forms())
         self.assertEqual(("flesta",), self.parse("flesta", "best.").written_forms())
+
+    def test_single_neuter_slots(self) -> None:
+        self.assertEqual(("dan", "dant"), self.parse("dan", "+t").written_forms())
+        self.assertEqual(("genomsvett", "genomsvett"), self.parse("genomsvett", "n. +").written_forms())
+
+    def test_unchanged_neuter_with_explicit_plural(self) -> None:
+        slots = self.parse("hot", "neutr. +; pl. hotta")
+        self.assertEqual(("hot", "hot", "hotta"), slots.written_forms())
+        self.assertEqual("unchanged_neuter_explicit_plural", slots.rule)
+
+    def test_single_explicit_additional_form(self) -> None:
+        slots = self.parse("förstnämnde", "förstnämnda")
+        self.assertEqual(("förstnämnde", "förstnämnda"), slots.written_forms())
+        self.assertEqual("explicit_single_additional_form", slots.rule)
 
     def test_comparison_only_suffixes(self) -> None:
         self.assertEqual(("ringa", "ringare", "ringast"), self.parse("ringa", "komp. +re, superl. +st").written_forms())
@@ -68,6 +87,12 @@ class AdjectiveSlotsTests(unittest.TestCase):
 
     def test_rejects_truncated_comparison(self) -> None:
         self.assertIsNone(interpret_simple_adjective_slots({"normaliserat_ord": "nära", "text": "komp. närmare el. närmre, superl. närmast el. närm"}))
+
+    def test_does_not_guess_underscore_alternative_stems(self) -> None:
+        self.assertIsNone(interpret_simple_adjective_slots({
+            "normaliserat_ord": "fasetterad",
+            "text": "fasetterat +e _ facetterat +e",
+        }))
 
 
 if __name__ == "__main__":
