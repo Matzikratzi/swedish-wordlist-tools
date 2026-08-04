@@ -55,7 +55,7 @@ class AdjectiveSlotsTests(unittest.TestCase):
             ("mångfärgad", "mångfärgat", "mångfärgade"),
             slots.written_forms(),
         )
-        self.assertEqual("explicit_neuter_plural_replacement", slots.rule)
+        self.assertEqual("explicit_neuter_plural_pair", slots.rule)
 
     def test_explicit_neuter_and_plural_replacements(self) -> None:
         slots = self.parse("obunden", "-bundet -bundna")
@@ -63,6 +63,18 @@ class AdjectiveSlotsTests(unittest.TestCase):
             ("obunden", "obundet", "obundna"),
             slots.written_forms(),
         )
+
+    def test_regular_neuter_and_explicit_plural(self) -> None:
+        slots = self.parse("osäker", "+t -säkra")
+        self.assertEqual(("osäker", "osäkert", "osäkra"), slots.written_forms())
+
+    def test_explicit_neuter_and_added_plural(self) -> None:
+        slots = self.parse("absurd", "absurt +a")
+        self.assertEqual(("absurd", "absurt", "absurda"), slots.written_forms())
+
+    def test_two_complete_explicit_forms(self) -> None:
+        slots = self.parse("bebodd", "bebott bebodda")
+        self.assertEqual(("bebodd", "bebott", "bebodda"), slots.written_forms())
 
     def test_replacement_uses_last_matching_component_in_compound(self) -> None:
         slots = self.parse("bundenbunden", "-bundet -bundna")
