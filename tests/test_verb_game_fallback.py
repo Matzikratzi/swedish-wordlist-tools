@@ -34,7 +34,7 @@ class VerbGameFallbackTests(unittest.TestCase):
         self.assertIsNotNone(slots)
         assert slots is not None
         self.assertEqual(("torde", "tör"), slots.written_forms())
-        self.assertEqual(("attested", "attested_present"), slots.slots())
+        self.assertEqual(("lemma", "attested", "attested_present"), slots.slots())
 
     def test_keeps_only_explicit_supine_from_defective_paradigm(self) -> None:
         slots = interpret_playable_verb_slots(
@@ -61,7 +61,7 @@ class VerbGameFallbackTests(unittest.TestCase):
         assert slots is not None
         self.assertEqual(("lyss", "lys"), slots.written_forms())
         self.assertEqual(
-            ("attested", "attested_present", "attested_imperative"),
+            ("lemma", "attested", "attested_present", "attested_imperative"),
             slots.slots(),
         )
 
