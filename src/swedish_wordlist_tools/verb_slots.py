@@ -7,6 +7,7 @@ from .inflect import normalise_pattern
 from .lexeme_slots import LexemeSlots, SlotForm, build_lexeme_slots
 from .saol_row_interpreter import apply_form_token
 
+_TEXT_HARD_CAP = 50
 _FORM_TOKEN_RE = re.compile(r"[+\-]?[A-Za-zÅÄÖåäöÉéÜü]+(?:-[A-Za-zÅÄÖåäöÉéÜü]+)*")
 _MARKER_RE = re.compile(
     r"(?:\bel\.|\bvard\.|\båld\.|\bprov\.|\bibl\.|\bn\.|\bH\b)",
@@ -16,6 +17,38 @@ _PRESENT_RE = re.compile(r"\bpres\.\s*", re.IGNORECASE)
 _TRUNCATED_PRESENT_RE = re.compile(r"(?:[,;]\s*)?\bpre(?:s\.?)?\s*$", re.IGNORECASE)
 _NO_INFLECTION_RE = re.compile(r"^\s*(?:ingen\s*:?[ ]*böjning\s*:?)\s*$", re.IGNORECASE)
 _PAREN_COMMENT_RE = re.compile(r"\([^)]*\)")
+
+
+def _source_is_truncated(record: dict[str, Any]) -> bool:
+    """Return true at the observed hard cap of the SAOL ``text`` export."""
+    return len(str(record.get("text") or "")) == _TEXT_HARD_CAP
+
+
+def _drop_unterminated_final_token(
+    assignments: tuple[tuple[str, str], ...],
+    variant: str,
+    *,
+    source_is_truncated: bool,
+) -> tuple[tuple[str, str], ...]:
+    """Discard the final form token when a source row ends at the hard cap.
+
+    At exactly 50 characters the export may have cut the row in the middle of
+    a form without an ellipsis.  Earlier comma/semicolon-delimited groups are
+    still trustworthy, but the token reaching the end of the field is not.
+    Remove only the last matching assignment, preserving all earlier forms.
+    """
+    if not source_is_truncated or not assignments:
+        return assignments
+    matches = tuple(_FORM_TOKEN_RE.finditer(variant))
+    if not matches or matches[-1].end() != len(variant):
+        return assignments
+    final_token = matches[-1].group(0)
+    result = list(assignments)
+    for index in range(len(result) - 1, -1, -1):
+        if result[index][1] == final_token:
+            del result[index]
+            break
+    return tuple(result)
 
 
 def _common_prefix_length(left: str, right: str) -> int:
@@ -44,8 +77,6 @@ def _replace_verb_final_component(lemma: str, replacement: str) -> str | None:
 
 
 def _apply_token(record: dict[str, Any], lemma: str, token: str) -> str | None:
-    # Compound bars describe the lexical verb, not a following reflexive
-    # pronoun. Apply a replacement to the first word and append the rest.
     first, separator, rest = lemma.partition(" ")
     if separator and token.startswith("-"):
         written_first = apply_form_token(record, first, token)
@@ -114,8 +145,6 @@ def _labelled_assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
             return None
         assignments.extend(first_two)
     elif len(groups) == 1:
-        # Compact expanded rows occasionally put preterite and supine in one
-        # group before the presens label: "-drömde -drömt, pres. -drömmer".
         compact = _alternative_tokens(groups[0])
         if len(compact) != 2:
             return None
@@ -126,8 +155,6 @@ def _labelled_assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
     else:
         return None
 
-    # Some source fields end directly after "pres." or after a bare "-".
-    # The preceding key forms are still usable; omit only the missing slot.
     present = _alternative_tokens(_first_group(after))
     assignments.extend(("present", token) for token in present)
     return tuple(assignments)
@@ -142,10 +169,6 @@ def _truncated_label_assignments(pattern: str) -> tuple[tuple[str, str], ...] | 
 
 
 def _comma_assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
-    # With exactly two comma groups SAOL supplies preterite and supine. For
-    # longer rows, accept only bar-replacement notation: then the first two
-    # groups unambiguously describe the compound head and later groups are
-    # participles or truncated comments.
     groups = [part.strip() for part in pattern.split(",") if part.strip()]
     if len(groups) == 2 or (len(groups) > 2 and groups[0].startswith("-")):
         return _first_two_group_assignments(pattern)
@@ -171,6 +194,26 @@ def _assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
     )
 
 
+def _record_variants(record: dict[str, Any], pattern: str) -> tuple[tuple[str, tuple[tuple[str, str], ...]], ...] | None:
+    variants = tuple(part.strip() for part in re.split(r"\s+_\s+", pattern) if part.strip())
+    if not variants:
+        return None
+    result: list[tuple[str, tuple[tuple[str, str], ...]]] = []
+    truncated = _source_is_truncated(record)
+    for index, variant in enumerate(variants):
+        assignments = _assignments(variant)
+        if assignments is None:
+            return None
+        if truncated and index == len(variants) - 1:
+            assignments = _drop_unterminated_final_token(
+                assignments,
+                variant,
+                source_is_truncated=True,
+            )
+        result.append((variant, assignments))
+    return tuple(result)
+
+
 def diagnose_verb_record(record: dict[str, Any]) -> str:
     if str(record.get("upos", "")).upper() != "VERB":
         return "not_verb"
@@ -182,15 +225,12 @@ def diagnose_verb_record(record: dict[str, Any]) -> str:
         return "missing_pattern"
     if _NO_INFLECTION_RE.fullmatch(pattern):
         return "ok_no_inflection"
-    variants = tuple(part.strip() for part in re.split(r"\s+_\s+", pattern) if part.strip())
-    if not variants:
-        return "no_variants"
-    for variant in variants:
-        assignments = _assignments(variant)
-        if assignments is None:
-            if _PRESENT_RE.search(variant):
-                return "labelled_syntax_unparsed"
-            return "simple_syntax_unparsed"
+    parsed = _record_variants(record, pattern)
+    if parsed is None:
+        if _PRESENT_RE.search(pattern):
+            return "labelled_syntax_unparsed"
+        return "simple_syntax_unparsed"
+    for _variant, assignments in parsed:
         for _slot, token in assignments:
             if _apply_token(record, lemma, token) is None:
                 return "form_token_not_applied"
@@ -209,6 +249,7 @@ def interpret_verb_slots(record: dict[str, Any]) -> LexemeSlots | None:
         "homonym_number": str(record.get("homonr") or ""),
         "stycke": str(record.get("stycke") or ""),
         "ordkl": str(record.get("ordkl") or ""),
+        "text_hard_cap": "true" if _source_is_truncated(record) else "false",
     }
     if _NO_INFLECTION_RE.fullmatch(pattern):
         return build_lexeme_slots(
@@ -219,10 +260,10 @@ def interpret_verb_slots(record: dict[str, Any]) -> LexemeSlots | None:
             metadata=metadata,
         )
 
+    parsed = _record_variants(record, pattern)
+    assert parsed is not None
     forms = [SlotForm("infinitive", lemma, "lemma")]
-    for variant in (part.strip() for part in re.split(r"\s+_\s+", pattern) if part.strip()):
-        assignments = _assignments(variant)
-        assert assignments is not None
+    for _variant, assignments in parsed:
         for slot, token in assignments:
             written_form = _apply_token(record, lemma, token)
             assert written_form is not None
