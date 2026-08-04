@@ -37,8 +37,8 @@ class AdjectiveSlotsTests(unittest.TestCase):
         )
 
     def test_unchanged_neuter(self) -> None:
-        slots = self.parse("gratis", "n. +, +a")
-        self.assertEqual(("gratis", "gratis", "gratisa"), slots.written_forms())
+        slots = self.parse("kortväxt", "n. +, +a")
+        self.assertEqual(("kortväxt", "kortväxt", "kortväxta"), slots.written_forms())
         self.assertEqual("unchanged_neuter_a", slots.rule)
 
     def test_regular_tt_a(self) -> None:
@@ -49,10 +49,32 @@ class AdjectiveSlotsTests(unittest.TestCase):
         slots = self.parse("öm", "+t +ma")
         self.assertEqual(("öm", "ömt", "ömma"), slots.written_forms())
 
-    def test_rejects_unhandled_pattern(self) -> None:
+    def test_explicit_replacement_and_added_plural(self) -> None:
+        slots = self.parse("mångfärgad", "-färgat +e")
+        self.assertEqual(
+            ("mångfärgad", "mångfärgat", "mångfärgade"),
+            slots.written_forms(),
+        )
+        self.assertEqual("explicit_neuter_plural_replacement", slots.rule)
+
+    def test_explicit_neuter_and_plural_replacements(self) -> None:
+        slots = self.parse("obunden", "-bundet -bundna")
+        self.assertEqual(
+            ("obunden", "obundet", "obundna"),
+            slots.written_forms(),
+        )
+
+    def test_replacement_uses_last_matching_component_in_compound(self) -> None:
+        slots = self.parse("bundenbunden", "-bundet -bundna")
+        self.assertEqual(
+            ("bundenbunden", "bundenbundet", "bundenbundna"),
+            slots.written_forms(),
+        )
+
+    def test_rejects_unhandled_labelled_pattern(self) -> None:
         self.assertIsNone(interpret_simple_adjective_slots({
-            "normaliserat_ord": "bunden",
-            "text": "-bundet -bundna",
+            "normaliserat_ord": "blå",
+            "text": "-blått, best. och: pl. + el. +a",
         }))
 
 
