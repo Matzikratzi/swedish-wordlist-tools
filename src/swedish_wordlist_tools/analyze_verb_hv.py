@@ -26,9 +26,10 @@ _SUBJUNCTIVE_FORMS = {
 }
 _NONVERBAL_REFERENCE_FORMS = {"närmare", "närmre", "närmast", "närmst", "summarum"}
 _OTHER_HISTORIC_FORMS = {
-    "andre", "bevare", "bre", "ene", "färst", "göre", "rå",
+    "andre", "bevare", "bre", "ene", "färst", "göre", "rå", "ände",
     "talte", "talt", "förtalde", "förtalt",
 }
+_EXPLICIT_ALTERNATIVE_SPELLINGS = {"lire", "tighta"}
 _HISTORIC_INFINITIVE_ENDINGS = (
     "giva", "givas", "taga", "tagas", "draga", "dragas", "bliva",
     "bedja", "kläda", "späda",
@@ -97,6 +98,8 @@ def _is_historic_infinitive(form: str) -> bool:
 
 
 def _is_alternative_spelling(form: str, target: str) -> bool:
+    if form in _EXPLICIT_ALTERNATIVE_SPELLINGS:
+        return True
     if not _looks_like_infinitive(form):
         return False
     if not (target.endswith(("a", "as", "e", "i", "ä")) or len(target) <= 3):
