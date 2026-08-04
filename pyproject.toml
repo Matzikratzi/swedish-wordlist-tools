@@ -43,6 +43,7 @@ saol14-analyze-saldo-verb-fallback = "swedish_wordlist_tools.analyze_saldo_verb_
 saol14-export-verb-forms = "swedish_wordlist_tools.export_verb_forms:main"
 saol14-audit-saldo-verb-overlap = "swedish_wordlist_tools.audit_saldo_verb_overlap:main"
 saol14-analyze-remaining-verbs = "swedish_wordlist_tools.analyze_remaining_verbs:main"
+saol14-analyze-verb-hard-cap = "swedish_wordlist_tools.analyze_verb_hard_cap:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
