@@ -44,7 +44,9 @@ class AnalyzeRemainingVerbsTests(unittest.TestCase):
         self.assertEqual({"missing_pattern": 1}, report["reason_counts"])
 
     def test_marks_hard_cap_and_exact_compound_head(self) -> None:
-        capped = "unknown syntax".ljust(50, "x")
+        # Keep this fixture deliberately outside all supported verb syntaxes.
+        # Alphabetic padding would accidentally look like a valid two-form row.
+        capped = "unknown syntax!".ljust(50, "!")
         self.assertEqual(50, len(capped))
         path = self.write_records([
             self.record("skriva", "skrev, skrivit, pres. skriver", "skriva"),
