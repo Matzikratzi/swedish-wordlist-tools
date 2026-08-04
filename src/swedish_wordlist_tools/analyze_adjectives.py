@@ -2,17 +2,27 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
-from .adjective_slots import interpret_simple_adjective_slots
+from .adjective_slots import (
+    AdjectiveForm,
+    AdjectiveSlots,
+    interpret_simple_adjective_slots,
+)
 from .jsonl import read_jsonl
 
 DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
 DEFAULT_TEXT = Path("reports/saol14-adjectives.txt")
 DEFAULT_JSON = Path("reports/saol14-adjectives.json")
 HARD_CAP = 50
+ALPHA_COMPONENT = r"[a-zåäöéü]+"
+COMPLETE_HYPHENATED_LEMMA = re.compile(
+    rf"{ALPHA_COMPONENT}(?:-{ALPHA_COMPONENT})+",
+    re.IGNORECASE,
+)
 
 
 def _value(record: dict[str, Any], key: str) -> str:
@@ -26,12 +36,74 @@ def _pattern(text: str) -> str:
     return " ".join(text.split()) if text else "(none)"
 
 
+def _is_complete_hyphenated_lemma(lemma: str) -> bool:
+    return COMPLETE_HYPHENATED_LEMMA.fullmatch(lemma) is not None
+
+
+def _restore_hyphens(form: str, original_lemma: str) -> str | None:
+    """Restore original compound boundaries after proxy parsing.
+
+    The proxy parser removes internal hyphens so the existing adjective rules
+    can be reused unchanged. Swedish adjective inflection affects the final
+    component, so boundaries before that component stay at the same offsets.
+    """
+    parts = original_lemma.split("-")
+    boundaries: list[int] = []
+    position = 0
+    for part in parts[:-1]:
+        position += len(part)
+        boundaries.append(position)
+
+    if any(boundary > len(form) for boundary in boundaries):
+        return None
+
+    restored = form
+    for boundary in reversed(boundaries):
+        restored = restored[:boundary] + "-" + restored[boundary:]
+    return restored
+
+
+def _interpret_record(record: dict[str, Any]) -> AdjectiveSlots | None:
+    slots = interpret_simple_adjective_slots(record)
+    if slots is not None:
+        return slots
+
+    lemma = _value(record, "normaliserat_ord").casefold()
+    if not _is_complete_hyphenated_lemma(lemma):
+        return None
+
+    proxy_record = dict(record)
+    proxy_record["normaliserat_ord"] = lemma.replace("-", "")
+    text = _value(record, "text")
+    proxy_record["text"] = text.replace("-", "")
+    proxy_slots = interpret_simple_adjective_slots(proxy_record)
+    if proxy_slots is None:
+        return None
+
+    restored_forms: list[AdjectiveForm] = []
+    for form in proxy_slots.forms:
+        restored = _restore_hyphens(form.written_form, lemma)
+        if restored is None:
+            return None
+        restored_forms.append(
+            AdjectiveForm(restored, form.slot, provenance=form.provenance)
+        )
+
+    return AdjectiveSlots(
+        lemma=lemma,
+        forms=tuple(restored_forms),
+        rule=f"hyphenated_{proxy_slots.rule}",
+    )
+
+
 def _remaining_reason(lemma: str, text: str) -> str:
     if not lemma:
         return "missing_lemma"
     if " " in lemma:
         return "multiword_lemma"
-    if not lemma.isalpha():
+    if lemma.startswith("-") or lemma.endswith("-"):
+        return "suffix_or_prefix_lemma"
+    if not lemma.isalpha() and not _is_complete_hyphenated_lemma(lemma):
         return "nonalpha_lemma"
     if not text:
         return "missing_text"
@@ -63,7 +135,7 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
         text = _value(record, "text")
         stycke = _value(record, "stycke")
         pattern = _pattern(text)
-        slots = interpret_simple_adjective_slots(record)
+        slots = _interpret_record(record)
         pattern_counts[pattern] += 1
         reason = None
         if slots is None:
@@ -114,8 +186,10 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
         "top_remaining_patterns": remaining_pattern_counts.most_common(100),
         "records": rows,
         "note": (
-            "The parser handles conservative positive-degree adjective rows only. "
-            "Remaining rows are classified before further grammar is added; no forms are exported."
+            "The parser handles conservative adjective rows, including complete "
+            "hyphenated lemmas through a boundary-preserving proxy. Leading-hyphen "
+            "suffix entries remain non-playable and are reported separately; no forms "
+            "are exported."
         ),
     }
 
