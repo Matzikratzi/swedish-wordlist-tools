@@ -42,6 +42,7 @@ saol14-validate-verb-participles-saldo = "swedish_wordlist_tools.validate_verb_p
 saol14-analyze-saldo-verb-fallback = "swedish_wordlist_tools.analyze_saldo_verb_fallback:main"
 saol14-export-verb-forms = "swedish_wordlist_tools.export_verb_forms:main"
 saol14-audit-saldo-verb-overlap = "swedish_wordlist_tools.audit_saldo_verb_overlap:main"
+saol14-analyze-remaining-verbs = "swedish_wordlist_tools.analyze_remaining_verbs:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
