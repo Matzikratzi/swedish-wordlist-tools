@@ -45,6 +45,7 @@ saol14-audit-saldo-verb-overlap = "swedish_wordlist_tools.audit_saldo_verb_overl
 saol14-analyze-remaining-verbs = "swedish_wordlist_tools.analyze_remaining_verbs:main"
 saol14-analyze-verb-hard-cap = "swedish_wordlist_tools.analyze_verb_hard_cap:main"
 saol14-analyze-imperatives = "swedish_wordlist_tools.analyze_imperatives:main"
+saol14-analyze-verb-hv = "swedish_wordlist_tools.analyze_verb_hv:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
