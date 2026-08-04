@@ -42,7 +42,7 @@ class VerbTextHardCapTests(unittest.TestCase):
         self.assertNotIn("anfa", slots.written_forms())
 
     def test_drops_final_supine_fragment_in_unlabelled_notation(self) -> None:
-        text = "abcdefghijklmnopqrstuvwxade, abcdefghijklmnopqrst"
+        text = "abcdefghijklmnopqrstuvwxade, abcdefghijklmnopqrstu"
         slots = interpret_verb_slots(self.record("abcdefghijklmnopqrstuvwa", text))
 
         self.assertIsNotNone(slots)
@@ -52,7 +52,7 @@ class VerbTextHardCapTests(unittest.TestCase):
             slots.forms_for("preterite"),
         )
         self.assertEqual((), slots.forms_for("supine"))
-        self.assertNotIn("abcdefghijklmnopqrst", slots.written_forms())
+        self.assertNotIn("abcdefghijklmnopqrstu", slots.written_forms())
 
 
 if __name__ == "__main__":
