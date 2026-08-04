@@ -56,6 +56,8 @@ def _replace_final_component(lemma: str, replacement: str) -> str | None:
 
 def _resolve_form_token(lemma: str, token: str, *, neuter: bool) -> str | None:
     """Resolve one exact SAOL form token without guessing omitted morphology."""
+    if token == "+":
+        return lemma
     if token == "+t" and neuter:
         return _add_neuter_t(lemma)
     if token.startswith("+"):
@@ -80,13 +82,8 @@ def _explicit_two_form_slots(lemma: str, text: str) -> AdjectiveSlots | None:
     if match is None:
         return None
 
-    neuter_token = match.group("neuter")
-    plural_token = match.group("plural")
-    # Two bare tokens may be explicit complete forms. At least one marked token
-    # or two complete forms are required; ordinary prose never reaches here
-    # because the complete row must consist of exactly two alphabetic tokens.
-    neuter = _resolve_form_token(lemma, neuter_token, neuter=True)
-    plural = _resolve_form_token(lemma, plural_token, neuter=False)
+    neuter = _resolve_form_token(lemma, match.group("neuter"), neuter=True)
+    plural = _resolve_form_token(lemma, match.group("plural"), neuter=False)
     if neuter is None or plural is None:
         return None
 
@@ -101,12 +98,44 @@ def _explicit_two_form_slots(lemma: str, text: str) -> AdjectiveSlots | None:
     )
 
 
+def _labelled_plural_alternatives(lemma: str, text: str) -> AdjectiveSlots | None:
+    """Parse rows such as ``-blått, best. och: pl. + el. +a``.
+
+    The row explicitly supplies one neuter form and two permitted definite or
+    plural spellings. A bare ``+`` means that the lemma spelling is unchanged.
+    """
+    match = re.fullmatch(
+        r"(?P<neuter>-[a-zåäöéü]+), best\. och: pl\. "
+        r"(?P<plural1>\+|\+[a-zåäöéü]+) el\. (?P<plural2>\+[a-zåäöéü]+)",
+        text,
+    )
+    if match is None:
+        return None
+
+    neuter = _resolve_form_token(lemma, match.group("neuter"), neuter=True)
+    plural1 = _resolve_form_token(lemma, match.group("plural1"), neuter=False)
+    plural2 = _resolve_form_token(lemma, match.group("plural2"), neuter=False)
+    if neuter is None or plural1 is None or plural2 is None:
+        return None
+
+    return AdjectiveSlots(
+        lemma=lemma,
+        forms=(
+            AdjectiveForm(lemma, "common_singular"),
+            AdjectiveForm(neuter, "neuter_singular"),
+            AdjectiveForm(plural1, "definite_or_plural"),
+            AdjectiveForm(plural2, "definite_or_plural_alternative"),
+        ),
+        rule="labelled_plural_alternatives",
+    )
+
+
 def interpret_simple_adjective_slots(record: dict[str, Any]) -> AdjectiveSlots | None:
     """Interpret exact, high-confidence SAOL14 adjective patterns.
 
-    Comparison, labelled alternatives and missing text remain outside this
-    stage. Exact two-form notation is accepted because both resulting slots
-    are directly encoded on the SAOL row.
+    Comparison and missing text remain outside this stage. Exact form notation
+    and narrowly defined labels are accepted when every resulting spelling is
+    explicitly encoded on the SAOL row.
     """
     lemma = _value(record, "normaliserat_ord").casefold()
     text = " ".join(_value(record, "text").split()).casefold()
@@ -141,7 +170,10 @@ def interpret_simple_adjective_slots(record: dict[str, Any]) -> AdjectiveSlots |
         ))
         rule = "regular_t_ma"
     else:
-        return _explicit_two_form_slots(lemma, text)
+        return (
+            _labelled_plural_alternatives(lemma, text)
+            or _explicit_two_form_slots(lemma, text)
+        )
 
     unique: list[AdjectiveForm] = []
     seen: set[tuple[str, str]] = set()
