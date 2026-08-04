@@ -90,6 +90,46 @@ class ValidateDirectFormsTests(unittest.TestCase):
             row["status_transition"],
         )
 
+    def test_reports_t_paradigm_disagreement_separately(self) -> None:
+        record = {
+            "id": 4,
+            "normaliserat_ord": "klagande",
+            "upos": "NOUN",
+            "ordkl": "subst.",
+            "text": "+t",
+        }
+        analysis = {
+            "id": "klagande..nn.1",
+            "upos": "NOUN",
+            "lemmas": {"klagande"},
+            "forms": {
+                "klagande", "klagandes", "klaganden", "klagandens",
+                "klagandena", "klagandenas",
+            },
+        }
+        row = validation_row(record, "lemma_same_upos", [analysis])
+        self.assertEqual("saol_paradigm_differs_from_saldo", row["status"])
+        self.assertEqual(["klagandet", "klagandets"], row["extra_from_saol"])
+
+    def test_reports_case_only_difference_separately(self) -> None:
+        record = {
+            "id": 5,
+            "normaliserat_ord": "Östersjöfiske",
+            "upos": "NOUN",
+            "ordkl": "subst.",
+            "text": "+t",
+        }
+        analysis = {
+            "id": "östersjöfiske..nn.1",
+            "upos": "NOUN",
+            "lemmas": {"östersjöfiske"},
+            "forms": {
+                "östersjöfiske", "östersjöfiskes", "östersjöfisket", "östersjöfiskets",
+            },
+        }
+        row = validation_row(record, "lemma_same_upos", [analysis])
+        self.assertEqual("exact_form_set_case_difference", row["status"])
+
     def test_excludes_hyphen_terminated_saldo_forms(self) -> None:
         record = {
             "normaliserat_ord": "grund",

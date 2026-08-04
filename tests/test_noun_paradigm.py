@@ -71,6 +71,14 @@ class NounParadigmTests(unittest.TestCase):
         self.assertIsNotNone(entry)
         self.assertEqual({"ansvar", "ansvars", "ansvaret", "ansvarets"}, set(entry.forms if entry else ()))
 
+    def test_completes_t_singular_only_noun(self) -> None:
+        entry = self.complete("foto", "+t")
+        self.assertIsNotNone(entry)
+        self.assertEqual(
+            {"foto", "fotos", "fotot", "fotots"},
+            set(entry.forms if entry else ()),
+        )
+
     def test_unmarked_genitive_after_s_x_or_z(self) -> None:
         entry = self.complete("hus", "+et; pl. +")
         self.assertIsNotNone(entry)
