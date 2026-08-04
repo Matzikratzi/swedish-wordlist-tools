@@ -133,24 +133,14 @@ def _first_two_group_assignments(text: str) -> tuple[tuple[str, str], ...] | Non
 
 
 def _looks_like_participle_group(group: str) -> bool:
-    """Recognise the expanded perfect-participle group structurally.
-
-    SAOL normally writes either three adjective forms, or a common form plus
-    the explicit neuter marker ``n.``.  The group is used only as an anchor;
-    participle extraction itself remains in the dedicated row-slot layer.
-    """
+    """Recognise the expanded perfect-participle group structurally."""
     if _PARTICIPLE_NEUTER_MARKER_RE.search(group):
         return True
     return len(_alternative_tokens(group)) >= 2
 
 
 def _expanded_comma_assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
-    """Parse core forms before an explicit perfect-participle group.
-
-    Two groups before the participle are preterite and supine. Three groups
-    before it are present, preterite and supine. This handles alternatives
-    joined by ``el.`` or ``H`` without verb-specific tables.
-    """
+    """Parse core forms before an explicit perfect-participle group."""
     groups = [part.strip() for part in pattern.split(",") if part.strip()]
     if len(groups) < 3:
         return None
@@ -216,16 +206,6 @@ def _truncated_label_assignments(pattern: str) -> tuple[tuple[str, str], ...] | 
     return _first_two_group_assignments(before)
 
 
-def _comma_assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
-    expanded = _expanded_comma_assignments(pattern)
-    if expanded is not None:
-        return expanded
-    groups = [part.strip() for part in pattern.split(",") if part.strip()]
-    if len(groups) == 2 or (len(groups) > 2 and groups[0].startswith("-")):
-        return _first_two_group_assignments(pattern)
-    return None
-
-
 def _simple_assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
     cleaned = _PAREN_COMMENT_RE.sub(" ", pattern)
     tokens = _tokens(cleaned)
@@ -236,11 +216,77 @@ def _simple_assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
     return (("present", tokens[0]), ("preterite", tokens[1]), ("supine", tokens[2]))
 
 
-def _assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
+def _semicolon_core_assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
+    """Keep a complete compact core before a following usage comment."""
+    first, separator, _rest = pattern.partition(";")
+    if not separator:
+        return None
+    return _simple_assignments(first.strip())
+
+
+def _truncated_comma_core_assignments(
+    pattern: str,
+    *,
+    source_is_truncated: bool,
+) -> tuple[tuple[str, str], ...] | None:
+    """Keep complete comma groups before a tail cut at the 50-char cap.
+
+    With three groups, the first two are preterite and supine and the third is
+    an incomplete participle/comment group. With four or more groups, the first
+    three are present, preterite and supine and the last group is incomplete.
+    The rule is used only at the observed source hard cap.
+    """
+    if not source_is_truncated:
+        return None
+    groups = [part.strip() for part in pattern.split(",") if part.strip()]
+    if len(groups) == 3:
+        slots = ("preterite", "supine")
+        core_groups = groups[:2]
+    elif len(groups) >= 4:
+        slots = ("present", "preterite", "supine")
+        core_groups = groups[:3]
+    else:
+        return None
+
+    assignments: list[tuple[str, str]] = []
+    for slot, group in zip(slots, core_groups):
+        values = _assign_group(slot, group)
+        if values is None:
+            return None
+        assignments.extend(values)
+    return tuple(assignments)
+
+
+def _comma_assignments(
+    pattern: str,
+    *,
+    source_is_truncated: bool,
+) -> tuple[tuple[str, str], ...] | None:
+    expanded = _expanded_comma_assignments(pattern)
+    if expanded is not None:
+        return expanded
+    truncated_core = _truncated_comma_core_assignments(
+        pattern,
+        source_is_truncated=source_is_truncated,
+    )
+    if truncated_core is not None:
+        return truncated_core
+    groups = [part.strip() for part in pattern.split(",") if part.strip()]
+    if len(groups) == 2 or (len(groups) > 2 and groups[0].startswith("-")):
+        return _first_two_group_assignments(pattern)
+    return None
+
+
+def _assignments(
+    pattern: str,
+    *,
+    source_is_truncated: bool,
+) -> tuple[tuple[str, str], ...] | None:
     return (
         _labelled_assignments(pattern)
         or _truncated_label_assignments(pattern)
-        or _comma_assignments(pattern)
+        or _comma_assignments(pattern, source_is_truncated=source_is_truncated)
+        or _semicolon_core_assignments(pattern)
         or _simple_assignments(pattern)
     )
 
@@ -255,7 +301,10 @@ def _record_variants(
     result: list[tuple[str, tuple[tuple[str, str], ...]]] = []
     truncated = _source_is_truncated(record)
     for index, variant in enumerate(variants):
-        assignments = _assignments(variant)
+        assignments = _assignments(
+            variant,
+            source_is_truncated=truncated and index == len(variants) - 1,
+        )
         if assignments is None:
             return None
         if truncated and index == len(variants) - 1:
