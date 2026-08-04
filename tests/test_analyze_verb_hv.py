@@ -5,7 +5,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from swedish_wordlist_tools.analyze_verb_hv import build_report
+from swedish_wordlist_tools.analyze_verb_hv import (
+    build_report,
+    classify_missing_reference,
+)
 
 
 class AnalyzeVerbHvTests(unittest.TestCase):
@@ -74,11 +77,10 @@ class AnalyzeVerbHvTests(unittest.TestCase):
         report = build_report(path)
 
         self.assertEqual(0, report["matched_generated_verb_forms"])
-        self.assertEqual(
-            "missing_from_generated_verb_forms",
-            report["records"][0]["status"],
-        )
-        self.assertNotIn("testades", report["records"][0]["generated_forms"])
+        row = report["records"][0]
+        self.assertEqual("missing_from_generated_verb_forms", row["status"])
+        self.assertEqual("possible_inflection", row["classification"])
+        self.assertNotIn("testades", row["generated_forms"])
 
     def test_ignores_hv_targeting_nonverb_lemma(self) -> None:
         path = self.write_records([
@@ -95,6 +97,24 @@ class AnalyzeVerbHvTests(unittest.TestCase):
 
         report = build_report(path)
         self.assertEqual(0, report["verb_targeted_hv_records"])
+
+    def test_classifies_known_subjunctive(self) -> None:
+        self.assertEqual(
+            ("subjunctive", "known_subjunctive_form"),
+            classify_missing_reference("ginge", "gå"),
+        )
+
+    def test_classifies_alternative_infinitive(self) -> None:
+        self.assertEqual(
+            ("lemma_variant", "reference_looks_like_alternative_infinitive"),
+            classify_missing_reference("giva", "ge"),
+        )
+
+    def test_leaves_uncertain_reference_unclassified(self) -> None:
+        self.assertEqual(
+            ("unclassified", "no_conservative_rule_matched"),
+            classify_missing_reference("färst", "få"),
+        )
 
 
 if __name__ == "__main__":
