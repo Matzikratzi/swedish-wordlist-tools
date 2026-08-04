@@ -15,10 +15,26 @@ class AdjectiveSlotsTests(unittest.TestCase):
         self.assertIsNotNone(slots)
         return slots
 
-    def test_regular_t_a(self) -> None:
+    def test_regular_t_a_applies_neuter_spelling(self) -> None:
         slots = self.parse("glad", "+t +a")
-        self.assertEqual(("glad", "gladt", "glada"), slots.written_forms())
+        self.assertEqual(("glad", "glatt", "glada"), slots.written_forms())
         self.assertEqual("regular_t_a", slots.rule)
+
+    def test_final_rd_and_ld_drop_d_before_t(self) -> None:
+        self.assertEqual(
+            ("hård", "hårt", "hårda"),
+            self.parse("hård", "+t +a").written_forms(),
+        )
+        self.assertEqual(
+            ("vild", "vilt", "vilda"),
+            self.parse("vild", "+t +a").written_forms(),
+        )
+
+    def test_other_final_d_becomes_tt(self) -> None:
+        self.assertEqual(
+            ("röd", "rött", "röda"),
+            self.parse("röd", "+t +a").written_forms(),
+        )
 
     def test_unchanged_neuter(self) -> None:
         slots = self.parse("gratis", "n. +, +a")
