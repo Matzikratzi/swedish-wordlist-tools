@@ -50,7 +50,7 @@ class AnalyzeVerbHardCapTests(unittest.TestCase):
         self.assertTrue(row["possible_missing_after_cap"])
 
     def test_delimiter_end_is_not_flagged_as_open_tail(self) -> None:
-        capped = "skrev, skrivit, skriven skrivet skrivna,".ljust(50)
+        capped = "skrev, skrivit".ljust(49, "x") + ","
         self.assertEqual(50, len(capped))
         path = self.write_records([
             {
