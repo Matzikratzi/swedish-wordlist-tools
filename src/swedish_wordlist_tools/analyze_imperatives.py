@@ -33,7 +33,9 @@ def _preterite_forms(slots: Any) -> tuple[str, ...]:
 
 def generate_imperative(lemma: str, slots: Any) -> tuple[str | None, str]:
     """Generate one conservative imperative candidate and name the rule."""
-    word = _first_word(lemma).casefold()
+    if " " in lemma.strip():
+        return None, "multiword_lemma"
+    word = lemma.casefold().strip()
     if not word or not word.isalpha():
         return None, "not_single_alpha_head"
     if not word.endswith("a"):
@@ -68,12 +70,23 @@ def explicit_saol_imperatives(record: dict[str, Any]) -> tuple[str, ...]:
     if match is None:
         return ()
     body = match.group("body").strip()
-    if len(text) == 50 and match.end() == len(text) and body and body[-1].isalpha():
-        return ()
+    token_matches = list(_FORM_RE.finditer(body))
     lemma = str(record.get("normaliserat_ord") or "").strip()
     result: list[str] = []
-    for token in _FORM_RE.findall(body):
+    for index, token_match in enumerate(token_matches):
+        token = token_match.group(0)
         if token.casefold().lstrip("+-") in _MARKER_WORDS:
+            continue
+        # Only the final alphabetic token is unsafe when the 50-char field ends
+        # inside the imperative segment. Earlier complete alternatives remain.
+        if (
+            len(text) == 50
+            and match.end() == len(text)
+            and index == len(token_matches) - 1
+            and token_match.end() == len(body)
+            and body
+            and body[-1].isalpha()
+        ):
             continue
         written = _apply_explicit_token(lemma, token)
         if written and written.isalpha() and written not in result:
@@ -140,13 +153,17 @@ def build_report(saol_path: Path = DEFAULT_SAOL, saldo_path: Path = DEFAULT_SALD
     rows.sort(key=lambda row: (row["status"], row["explicit_status"], row["lemma"], row["homonr"]))
     generated = sum(1 for row in rows if row["generated"])
     in_saldo = counts["generated_in_saldo"]
+    saldo_checkable = in_saldo + counts["generated_missing_from_matched_saldo"]
     explicit_total = sum(1 for row in rows if row["explicit_saol"])
+    explicit_matches = counts["generated_matches_explicit_saol"]
     return {
         "verb_records": len(rows),
         "generated_candidates": generated,
         "generated_in_saldo": in_saldo,
-        "generated_in_saldo_percent": round(100 * in_saldo / generated, 2) if generated else 0.0,
+        "saldo_checkable_candidates": saldo_checkable,
+        "generated_in_saldo_percent": round(100 * in_saldo / saldo_checkable, 2) if saldo_checkable else 0.0,
         "explicit_saol_records": explicit_total,
+        "explicit_match_percent": round(100 * explicit_matches / explicit_total, 2) if explicit_total else 0.0,
         "status_counts": dict(counts.most_common()),
         "rule_counts": dict(rule_counts.most_common()),
         "records": rows,
@@ -158,8 +175,10 @@ def render_text(report: dict[str, Any]) -> str:
     lines = [
         f"Verbposter: {report['verb_records']}",
         f"Genererade imperativkandidater: {report['generated_candidates']}",
-        f"Kandidater belagda i SALDO: {report['generated_in_saldo']} ({report['generated_in_saldo_percent']:.2f} %)",
+        f"Kandidater med exakt SALDO-verblemma: {report['saldo_checkable_candidates']}",
+        f"Kandidater belagda i SALDO: {report['generated_in_saldo']} ({report['generated_in_saldo_percent']:.2f} % av kontrollerbara)",
         f"Poster med uttryckligt SAOL-imperativ: {report['explicit_saol_records']}",
+        f"Överensstämmelse med uttryckligt SAOL-imperativ: {report['explicit_match_percent']:.2f} %",
         "", "Status:",
     ]
     for key, count in report["status_counts"].items():
@@ -199,7 +218,7 @@ def main() -> None:
     args.json.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"Verbposter: {report['verb_records']}")
     print(f"Genererade kandidater: {report['generated_candidates']}")
-    print(f"Belagda i SALDO: {report['generated_in_saldo']} ({report['generated_in_saldo_percent']:.2f} %)")
+    print(f"Belagda i SALDO: {report['generated_in_saldo']} ({report['generated_in_saldo_percent']:.2f} % av kontrollerbara)")
     print(f"Text: {args.text}")
     print(f"JSON: {args.json}")
 
