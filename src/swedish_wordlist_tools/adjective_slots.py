@@ -32,6 +32,21 @@ def _append(lemma: str, suffix: str) -> str:
     return lemma + suffix
 
 
+def _add_neuter_t(lemma: str) -> str:
+    """Apply the common Swedish spelling changes before adjective neuter -t.
+
+    SAOL's ``+t`` is morphological notation, not always literal string
+    concatenation. In particular, a final ``d`` is replaced according to the
+    preceding consonant: ``glad -> glatt`` and ``röd -> rött``, while the
+    clusters ``-rd`` and ``-ld`` become ``-rt`` and ``-lt``.
+    """
+    if lemma.endswith("rd") or lemma.endswith("ld"):
+        return lemma[:-1] + "t"
+    if lemma.endswith("d"):
+        return lemma[:-1] + "tt"
+    return lemma + "t"
+
+
 def interpret_simple_adjective_slots(record: dict[str, Any]) -> AdjectiveSlots | None:
     """Interpret only exact, high-confidence SAOL14 adjective patterns.
 
@@ -49,7 +64,7 @@ def interpret_simple_adjective_slots(record: dict[str, Any]) -> AdjectiveSlots |
 
     if text == "+t +a":
         forms.extend((
-            AdjectiveForm(_append(lemma, "t"), "neuter_singular"),
+            AdjectiveForm(_add_neuter_t(lemma), "neuter_singular"),
             AdjectiveForm(_append(lemma, "a"), "definite_or_plural"),
         ))
         rule = "regular_t_a"
@@ -67,7 +82,7 @@ def interpret_simple_adjective_slots(record: dict[str, Any]) -> AdjectiveSlots |
         rule = "regular_tt_a"
     elif text == "+t +ma":
         forms.extend((
-            AdjectiveForm(_append(lemma, "t"), "neuter_singular"),
+            AdjectiveForm(_add_neuter_t(lemma), "neuter_singular"),
             AdjectiveForm(_append(lemma, "ma"), "definite_or_plural"),
         ))
         rule = "regular_t_ma"
