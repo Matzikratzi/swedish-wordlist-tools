@@ -39,6 +39,54 @@ class AnalyzeAdjectivesTests(unittest.TestCase):
         self.assertEqual(1, report["with_bar"])
         self.assertTrue(report["records"][0]["at_hard_cap"])
 
+    def test_reuses_rules_for_complete_hyphenated_lemmas(self) -> None:
+        path = self.write_records([
+            {
+                "normaliserat_ord": "dansk-svensk",
+                "upos": "ADJ",
+                "text": "+t +a",
+                "stycke": "dansk-svensk",
+            },
+            {
+                "normaliserat_ord": "tv-övervakad",
+                "upos": "ADJ",
+                "text": "tv-övervakat +e",
+                "stycke": "tv-övervakad",
+            },
+        ])
+        report = build_report(path)
+        self.assertEqual(2, report["interpreted_simple_records"])
+        rows = {row["lemma"]: row for row in report["records"]}
+        self.assertEqual(
+            ["dansk-svensk", "dansk-svenskt", "dansk-svenska"],
+            rows["dansk-svensk"]["forms"],
+        )
+        self.assertEqual(
+            ["tv-övervakad", "tv-övervakat", "tv-övervakade"],
+            rows["tv-övervakad"]["forms"],
+        )
+        self.assertEqual(
+            "hyphenated_regular_t_a",
+            rows["dansk-svensk"]["rule"],
+        )
+
+    def test_keeps_suffix_entries_non_playable(self) -> None:
+        path = self.write_records([
+            {
+                "normaliserat_ord": "-aktig",
+                "upos": "ADJ",
+                "text": "+t +a",
+                "stycke": "-aktig",
+            },
+        ])
+        report = build_report(path)
+        self.assertEqual(0, report["interpreted_simple_records"])
+        self.assertEqual(
+            {"suffix_or_prefix_lemma": 1},
+            report["remaining_reason_counts"],
+        )
+        self.assertEqual([], report["records"][0]["forms"])
+
 
 if __name__ == "__main__":
     unittest.main()
