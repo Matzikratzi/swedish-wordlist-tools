@@ -57,13 +57,14 @@ class AnalyzeVerbHardCapTests(unittest.TestCase):
         one = report["missing_form_estimates"]["1_missing_per_candidate"]
         two = report["missing_form_estimates"]["2_missing_per_candidate"]
         three = report["missing_form_estimates"]["3_missing_per_candidate"]
-        self.assertEqual(4, exported)
+        # måste, måst, abonnera, abonnerade, abonnerat
+        self.assertEqual(5, exported)
         self.assertEqual(1, one["estimated_missing_form_occurrences"])
-        self.assertEqual(20.0, one["estimated_missing_share_percent"])
+        self.assertEqual(16.67, one["estimated_missing_share_percent"])
         self.assertEqual(2, two["estimated_missing_form_occurrences"])
-        self.assertEqual(33.33, two["estimated_missing_share_percent"])
+        self.assertEqual(28.57, two["estimated_missing_share_percent"])
         self.assertEqual(3, three["estimated_missing_form_occurrences"])
-        self.assertEqual(42.86, three["estimated_missing_share_percent"])
+        self.assertEqual(37.5, three["estimated_missing_share_percent"])
 
     def test_delimiter_end_is_not_flagged_as_open_tail(self) -> None:
         capped = "skrev, skrivit".ljust(49, "x") + ","
