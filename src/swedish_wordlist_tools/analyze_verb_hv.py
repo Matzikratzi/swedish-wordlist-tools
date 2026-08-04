@@ -16,6 +16,7 @@ from .verb_slot_schema import add_explicit_verb_row_slots
 DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
 DEFAULT_TEXT = Path("reports/saol14-verb-hv.txt")
 DEFAULT_JSON = Path("reports/saol14-verb-hv.json")
+_SUP_RE = re.compile(r"<sup\b[^>]*>.*?</sup>", re.IGNORECASE | re.DOTALL)
 _TAG_RE = re.compile(r"<[^>]+>")
 _SUBJUNCTIVE_FORMS = {
     "bekomme",
@@ -50,6 +51,10 @@ _INFLECTION_ENDINGS = (
 
 def _plain(value: object) -> str:
     text = html.unescape(str(value or ""))
+    # The homonym number is already available in the separate ``homonr``
+    # field. Remove both the <sup> tags and their contents before stripping
+    # the remaining presentation markup, so <sup>2</sup>giva becomes giva.
+    text = _SUP_RE.sub("", text)
     text = _TAG_RE.sub("", text)
     return text.replace("·", "").strip().casefold()
 
