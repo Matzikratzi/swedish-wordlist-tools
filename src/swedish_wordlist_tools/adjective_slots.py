@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -33,13 +34,7 @@ def _append(lemma: str, suffix: str) -> str:
 
 
 def _add_neuter_t(lemma: str) -> str:
-    """Apply the common Swedish spelling changes before adjective neuter -t.
-
-    SAOL's ``+t`` is morphological notation, not always literal string
-    concatenation. In particular, a final ``d`` is replaced according to the
-    preceding consonant: ``glad -> glatt`` and ``röd -> rött``, while the
-    clusters ``-rd`` and ``-ld`` become ``-rt`` and ``-lt``.
-    """
+    """Apply common Swedish spelling changes before adjective neuter ``-t``."""
     if lemma.endswith("rd") or lemma.endswith("ld"):
         return lemma[:-1] + "t"
     if lemma.endswith("d"):
@@ -47,15 +42,58 @@ def _add_neuter_t(lemma: str) -> str:
     return lemma + "t"
 
 
-def interpret_simple_adjective_slots(record: dict[str, Any]) -> AdjectiveSlots | None:
-    """Interpret only exact, high-confidence SAOL14 adjective patterns.
+def _replace_final_component(lemma: str, replacement: str) -> str | None:
+    """Apply SAOL's ``-form`` notation to the final matching component.
 
-    This first stage deliberately handles only the four dominant regular rows.
-    Replacement notation, comparison, participial patterns and missing text are
-    left for later analysis rather than guessed.
+    The first letter of the replacement anchors the suffix. Choosing its last
+    occurrence lets the same notation work for compounds, for example
+    ``mångfärgad, -färgat`` and ``obunden, -bundet``.
+    """
+    replacement = replacement.lstrip("-")
+    if not replacement or not replacement.isalpha():
+        return None
+    anchor = replacement[0]
+    positions = [index for index, char in enumerate(lemma) if char == anchor]
+    if not positions:
+        return None
+    return lemma[: positions[-1]] + replacement
+
+
+def _explicit_replacement_slots(lemma: str, text: str) -> AdjectiveSlots | None:
+    """Parse exact two-form rows such as ``-färgat +e`` and ``-bundet -bundna``."""
+    match = re.fullmatch(r"(?P<neuter>-[a-zåäöéü]+) (?P<plural>[+-][a-zåäöéü]+)", text)
+    if match is None:
+        return None
+
+    neuter = _replace_final_component(lemma, match.group("neuter"))
+    plural_token = match.group("plural")
+    if plural_token.startswith("+"):
+        plural = _append(lemma, plural_token[1:])
+    else:
+        plural = _replace_final_component(lemma, plural_token)
+    if neuter is None or plural is None:
+        return None
+
+    return AdjectiveSlots(
+        lemma=lemma,
+        forms=(
+            AdjectiveForm(lemma, "common_singular"),
+            AdjectiveForm(neuter, "neuter_singular"),
+            AdjectiveForm(plural, "definite_or_plural"),
+        ),
+        rule="explicit_neuter_plural_replacement",
+    )
+
+
+def interpret_simple_adjective_slots(record: dict[str, Any]) -> AdjectiveSlots | None:
+    """Interpret exact, high-confidence SAOL14 adjective patterns.
+
+    Comparison, labelled alternatives and missing text remain outside this
+    stage. Explicit two-form replacement notation is accepted because both
+    generated spellings are directly encoded on the SAOL row.
     """
     lemma = _value(record, "normaliserat_ord").casefold()
-    text = " ".join(_value(record, "text").split())
+    text = " ".join(_value(record, "text").split()).casefold()
     if not lemma or " " in lemma or not lemma.isalpha():
         return None
 
@@ -87,10 +125,8 @@ def interpret_simple_adjective_slots(record: dict[str, Any]) -> AdjectiveSlots |
         ))
         rule = "regular_t_ma"
     else:
-        return None
+        return _explicit_replacement_slots(lemma, text)
 
-    # A form may occupy two grammatical slots; the game export only needs the
-    # spelling, while the slot model keeps the interpretation explicit.
     unique: list[AdjectiveForm] = []
     seen: set[tuple[str, str]] = set()
     for form in forms:
