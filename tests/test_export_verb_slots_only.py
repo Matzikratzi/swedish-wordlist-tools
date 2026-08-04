@@ -22,7 +22,7 @@ class ExportVerbSlotsOnlyTests(unittest.TestCase):
         path = self.write_jsonl([
             {
                 "normaliserat_ord": "testa",
-                "text": "unknown syntax anfa",
+                "text": "unknown syntax: anfa",
                 "stycke": "testa",
                 "upos": "VERB",
                 "ordkl": "v.",
