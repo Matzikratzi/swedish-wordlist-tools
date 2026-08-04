@@ -17,6 +17,7 @@ _PRESENT_RE = re.compile(r"\bpres\.\s*", re.IGNORECASE)
 _TRUNCATED_PRESENT_RE = re.compile(r"(?:[,;]\s*)?\bpre(?:s\.?)?\s*$", re.IGNORECASE)
 _NO_INFLECTION_RE = re.compile(r"^\s*(?:ingen\s*:?[ ]*böjning\s*:?)\s*$", re.IGNORECASE)
 _PAREN_COMMENT_RE = re.compile(r"\([^)]*\)")
+_PARTICIPLE_NEUTER_MARKER_RE = re.compile(r"\bn\.\b", re.IGNORECASE)
 
 
 def _source_is_truncated(record: dict[str, Any]) -> bool:
@@ -30,13 +31,7 @@ def _drop_unterminated_final_token(
     *,
     source_is_truncated: bool,
 ) -> tuple[tuple[str, str], ...]:
-    """Discard the final form token when a source row ends at the hard cap.
-
-    At exactly 50 characters the export may have cut the row in the middle of
-    a form without an ellipsis.  Earlier comma/semicolon-delimited groups are
-    still trustworthy, but the token reaching the end of the field is not.
-    Remove only the last matching assignment, preserving all earlier forms.
-    """
+    """Discard the final form token when a source row ends at the hard cap."""
     if not source_is_truncated or not assignments:
         return assignments
     matches = tuple(_FORM_TOKEN_RE.finditer(variant))
@@ -117,16 +112,69 @@ def _first_group(text: str) -> str:
     return re.split(r"[,;]", text, maxsplit=1)[0].strip()
 
 
+def _assign_group(slot: str, group: str) -> tuple[tuple[str, str], ...] | None:
+    alternatives = _alternative_tokens(group)
+    if not alternatives:
+        return None
+    return tuple((slot, token) for token in alternatives)
+
+
 def _first_two_group_assignments(text: str) -> tuple[tuple[str, str], ...] | None:
     groups = [part.strip() for part in text.split(",") if part.strip()]
     if len(groups) < 2:
         return None
     assignments: list[tuple[str, str]] = []
     for slot, group in (("preterite", groups[0]), ("supine", groups[1])):
-        alternatives = _alternative_tokens(group)
-        if not alternatives:
+        values = _assign_group(slot, group)
+        if values is None:
             return None
-        assignments.extend((slot, token) for token in alternatives)
+        assignments.extend(values)
+    return tuple(assignments)
+
+
+def _looks_like_participle_group(group: str) -> bool:
+    """Recognise the expanded perfect-participle group structurally.
+
+    SAOL normally writes either three adjective forms, or a common form plus
+    the explicit neuter marker ``n.``.  The group is used only as an anchor;
+    participle extraction itself remains in the dedicated row-slot layer.
+    """
+    if _PARTICIPLE_NEUTER_MARKER_RE.search(group):
+        return True
+    return len(_alternative_tokens(group)) >= 2
+
+
+def _expanded_comma_assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
+    """Parse core forms before an explicit perfect-participle group.
+
+    Two groups before the participle are preterite and supine. Three groups
+    before it are present, preterite and supine. This handles alternatives
+    joined by ``el.`` or ``H`` without verb-specific tables.
+    """
+    groups = [part.strip() for part in pattern.split(",") if part.strip()]
+    if len(groups) < 3:
+        return None
+
+    participle_index: int | None = None
+    for index in range(2, len(groups)):
+        if _looks_like_participle_group(groups[index]):
+            participle_index = index
+            break
+    if participle_index not in {2, 3}:
+        return None
+
+    core_groups = groups[:participle_index]
+    slots = (
+        ("preterite", "supine")
+        if participle_index == 2
+        else ("present", "preterite", "supine")
+    )
+    assignments: list[tuple[str, str]] = []
+    for slot, group in zip(slots, core_groups):
+        values = _assign_group(slot, group)
+        if values is None:
+            return None
+        assignments.extend(values)
     return tuple(assignments)
 
 
@@ -169,6 +217,9 @@ def _truncated_label_assignments(pattern: str) -> tuple[tuple[str, str], ...] | 
 
 
 def _comma_assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
+    expanded = _expanded_comma_assignments(pattern)
+    if expanded is not None:
+        return expanded
     groups = [part.strip() for part in pattern.split(",") if part.strip()]
     if len(groups) == 2 or (len(groups) > 2 and groups[0].startswith("-")):
         return _first_two_group_assignments(pattern)
@@ -194,7 +245,10 @@ def _assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
     )
 
 
-def _record_variants(record: dict[str, Any], pattern: str) -> tuple[tuple[str, tuple[tuple[str, str], ...]], ...] | None:
+def _record_variants(
+    record: dict[str, Any],
+    pattern: str,
+) -> tuple[tuple[str, tuple[tuple[str, str], ...]], ...] | None:
     variants = tuple(part.strip() for part in re.split(r"\s+_\s+", pattern) if part.strip())
     if not variants:
         return None
