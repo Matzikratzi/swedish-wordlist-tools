@@ -52,6 +52,37 @@ class AnalyzeVerbHvTests(unittest.TestCase):
         self.assertEqual(100.0, report["coverage_percent"])
         self.assertEqual("matched_generated_verb_form", report["records"][0]["status"])
 
+    def test_strips_homonym_superscript_from_referred_form(self) -> None:
+        path = self.write_records([
+            {
+                "normaliserat_ord": "ge",
+                "homonr": "1",
+                "ordkl": "v.",
+                "upos": "VERB",
+                "text": "gav, gett",
+                "stycke": "ge",
+                "ord": "ge",
+            },
+            {
+                "normaliserat_ord": "ge",
+                "homonr": "1",
+                "ordkl": "(hv)",
+                "upos": "X",
+                "text": "(null)",
+                "stycke": "<sup>1</sup>giva",
+                "ord": "<sup>1</sup>giva",
+            },
+        ])
+
+        report = build_report(path)
+
+        self.assertEqual(1, report["verb_targeted_hv_records"])
+        row = report["records"][0]
+        self.assertEqual("giva", row["form"])
+        self.assertEqual("1", row["target_homonr"])
+        self.assertEqual("missing_from_generated_verb_forms", row["status"])
+        self.assertEqual("lemma_variant", row["classification"])
+
     def test_reports_missing_hv_form_without_adding_it(self) -> None:
         path = self.write_records([
             {
