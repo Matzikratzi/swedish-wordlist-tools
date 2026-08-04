@@ -44,7 +44,7 @@ class AnalyzeRemainingVerbsTests(unittest.TestCase):
         self.assertEqual({"missing_pattern": 1}, report["reason_counts"])
 
     def test_marks_hard_cap_and_exact_compound_head(self) -> None:
-        capped = "unknown syntax that reaches the source hard cap xxxx"
+        capped = "unknown syntax".ljust(50, "x")
         self.assertEqual(50, len(capped))
         path = self.write_records([
             self.record("skriva", "skrev, skrivit, pres. skriver", "skriva"),
