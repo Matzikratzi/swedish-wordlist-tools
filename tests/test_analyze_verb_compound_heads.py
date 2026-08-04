@@ -38,8 +38,9 @@ class AnalyzeVerbCompoundHeadsTests(unittest.TestCase):
             "-skrev, -skrivit, pres. -skriver",
             "ren|skriva",
         )
-        # All three parsed forms are strict prefixes of the complete family
-        # forms. Padding keeps the source at the observed hard cap of 50.
+        # Preterite and supine are parsed as strict prefixes and repaired.
+        # The final present token reaches the 50-character hard cap, so the
+        # parser drops it and compound-head recovery adds the missing slot.
         target_text = "-skr, -skriv, pres. -skr".ljust(50)
         self.assertEqual(50, len(target_text))
         target = self.record("avskriva", target_text, "av|skriva")
@@ -47,13 +48,15 @@ class AnalyzeVerbCompoundHeadsTests(unittest.TestCase):
         report = build_report(self.write_records([base, family, target]))
 
         self.assertEqual(1, report["partly_enriched_rows"])
+        self.assertEqual({"present": 1}, report["borrowed_slot_counts"])
         self.assertEqual(
-            {"present": 1, "preterite": 1, "supine": 1},
+            {"preterite": 1, "supine": 1},
             report["repaired_slot_counts"],
         )
         example = report["examples"][0]
+        self.assertEqual(["present"], example["added_slots"])
         self.assertEqual(
-            ["present", "preterite", "supine"],
+            ["preterite", "supine"],
             sorted(example["repaired_slots"]),
         )
         self.assertEqual(["avskriver"], example["forms_after"]["present"])
