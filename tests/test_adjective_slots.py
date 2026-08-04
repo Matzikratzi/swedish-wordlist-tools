@@ -83,10 +83,31 @@ class AdjectiveSlotsTests(unittest.TestCase):
             slots.written_forms(),
         )
 
-    def test_rejects_unhandled_labelled_pattern(self) -> None:
+    def test_labelled_unchanged_and_added_plural_alternatives(self) -> None:
+        slots = self.parse(
+            "akvamarinblå",
+            "-blått, best. och: pl. + el. +a",
+        )
+        self.assertEqual(
+            ("akvamarinblå", "akvamarinblått", "akvamarinblå", "akvamarinblåa"),
+            slots.written_forms(),
+        )
+        self.assertEqual("labelled_plural_alternatives", slots.rule)
+
+    def test_labelled_gray_compound_uses_final_component(self) -> None:
+        slots = self.parse(
+            "betonggrå",
+            "-grått, best. och: pl. + el. +a",
+        )
+        self.assertEqual(
+            ("betonggrå", "betonggrått", "betonggrå", "betonggråa"),
+            slots.written_forms(),
+        )
+
+    def test_rejects_unhandled_comparison_pattern(self) -> None:
         self.assertIsNone(interpret_simple_adjective_slots({
-            "normaliserat_ord": "blå",
-            "text": "-blått, best. och: pl. + el. +a",
+            "normaliserat_ord": "förnäm",
+            "text": "+t +a, komp. +are, superl. +st H +ast",
         }))
 
 
