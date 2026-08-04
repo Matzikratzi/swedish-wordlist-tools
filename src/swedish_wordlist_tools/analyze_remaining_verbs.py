@@ -17,13 +17,6 @@ DEFAULT_JSON = Path("reports/saol14-remaining-verbs.json")
 TEXT_HARD_CAP = 50
 
 
-def _clean_stycke(value: object) -> str:
-    text = str(value or "")
-    # The compound-head code owns the actual interpretation. Here we only need
-    # a readable marker for the focused report.
-    return text
-
-
 def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
     records = [
         record
@@ -44,19 +37,18 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
             continue
 
         lemma = str(record.get("normaliserat_ord") or "").strip()
+        homonr = str(record.get("homonr") or "").strip()
         raw_text = str(record.get("text") or "")
         pattern = normalise_pattern(record.get("text")) or "(none)"
         reason = diagnose_verb_record(record)
         at_hard_cap = len(raw_text) == TEXT_HARD_CAP
-        stycke = _clean_stycke(record.get("stycke"))
+        stycke = str(record.get("stycke") or "")
         has_bar = "|" in stycke
+        compound_notation = stycke if has_bar else ""
 
-        # Exact compound heads are indexed by the same production helper used
-        # by the repair stage. Do not guess a head from the written lemma here.
         head_key = ""
         if has_bar:
             right = stycke.rsplit("|", 1)[-1]
-            # Remove the visual syllable marker used in SAOL facsimile text.
             head_key = right.replace("·", "").strip().casefold()
         head_slots = head_index.get(head_key) if head_key else None
         recoverable_from_head = head_slots is not None
@@ -75,22 +67,30 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
         remaining.append(
             {
                 "lemma": lemma,
+                "homonr": homonr,
                 "reason": reason,
                 "pattern": pattern,
                 "raw_text": raw_text,
                 "text_length": len(raw_text),
                 "at_hard_cap": at_hard_cap,
-                "stycke": stycke,
+                "ordkl": str(record.get("ordkl") or ""),
+                "compound_notation": compound_notation,
                 "bar_marked": has_bar,
                 "head_key": head_key,
                 "exact_head_found": recoverable_from_head,
                 "head_slots": list(head_slots.slots()) if head_slots is not None else [],
-                "ordkl": str(record.get("ordkl") or ""),
                 "source": str(record.get("source") or ""),
             }
         )
 
-    remaining.sort(key=lambda row: (row["reason"], row["pattern"], row["lemma"]))
+    remaining.sort(
+        key=lambda row: (
+            row["reason"],
+            row["pattern"],
+            row["lemma"],
+            row["homonr"],
+        )
+    )
     return {
         "verb_records": len(records),
         "interpreted_records": len(records) - len(remaining),
@@ -132,13 +132,19 @@ def render_text(report: dict[str, Any]) -> str:
 
     lines.extend(["", "Alla återstående poster:"])
     for row in report["records"]:
-        head = ""
+        identity = row["lemma"]
+        if row["homonr"]:
+            identity += f" (homonr={row['homonr']})"
+        compound = ""
         if row["bar_marked"]:
             status = "head=found" if row["exact_head_found"] else "head=missing"
-            head = f" | {status}:{row['head_key']}"
+            compound = (
+                f" | compound={row['compound_notation']!r}"
+                f" | {status}:{row['head_key']}"
+            )
         lines.append(
-            f"  {row['lemma']} | {row['reason']} | len={row['text_length']}"
-            f" | stycke={row['stycke']!r}{head} | {row['pattern']}"
+            f"  {identity} | {row['reason']} | len={row['text_length']}"
+            f" | text={row['raw_text']!r} | ordkl={row['ordkl']!r}{compound}"
         )
     return "\n".join(lines) + "\n"
 
