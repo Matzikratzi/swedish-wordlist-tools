@@ -6,6 +6,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from .adjective_slots import interpret_simple_adjective_slots
 from .jsonl import read_jsonl
 
 DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
@@ -31,13 +32,21 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
         if str(record.get("upos", "")).upper() == "ADJ"
     ]
     pattern_counts: Counter[str] = Counter()
+    remaining_pattern_counts: Counter[str] = Counter()
+    rule_counts: Counter[str] = Counter()
     length_counts: Counter[str] = Counter()
     rows: list[dict[str, Any]] = []
 
     for record in records:
         text = _value(record, "text")
         stycke = _value(record, "stycke")
-        pattern_counts[_pattern(text)] += 1
+        pattern = _pattern(text)
+        slots = interpret_simple_adjective_slots(record)
+        pattern_counts[pattern] += 1
+        if slots is None:
+            remaining_pattern_counts[pattern] += 1
+        else:
+            rule_counts[slots.rule] += 1
         length_counts["at_hard_cap" if len(text) == HARD_CAP else "below_hard_cap"] += 1
         rows.append({
             "lemma": _value(record, "normaliserat_ord"),
@@ -48,20 +57,32 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
             "has_bar": "|" in stycke,
             "stycke": stycke,
             "ordkl": _value(record, "ordkl"),
+            "interpreted": slots is not None,
+            "rule": slots.rule if slots else None,
+            "forms": list(slots.written_forms()) if slots else [],
             "source": _value(record, "source"),
         })
 
-    rows.sort(key=lambda row: (not row["at_hard_cap"], row["lemma"], row["homonr"]))
+    interpreted = sum(1 for row in rows if row["interpreted"])
+    rows.sort(key=lambda row: (not row["at_hard_cap"], row["interpreted"], row["lemma"], row["homonr"]))
     return {
         "adjective_records": len(records),
         "with_text": sum(1 for row in rows if row["text"]),
         "without_text": sum(1 for row in rows if not row["text"]),
+        "interpreted_simple_records": interpreted,
+        "interpreted_simple_percent": round(100 * interpreted / len(records), 2) if records else 0.0,
+        "remaining_records": len(records) - interpreted,
         "at_hard_cap": length_counts["at_hard_cap"],
         "with_bar": sum(1 for row in rows if row["has_bar"]),
         "unique_raw_patterns": len(pattern_counts),
+        "rule_counts": dict(rule_counts.most_common()),
         "top_raw_patterns": pattern_counts.most_common(100),
+        "top_remaining_patterns": remaining_pattern_counts.most_common(100),
         "records": rows,
-        "note": "Inventory only: no adjective forms are parsed or exported by this command.",
+        "note": (
+            "The simple parser handles only exact +t +a, n. +, +a, +tt +a and +t +ma rows. "
+            "No adjective forms are exported by this command."
+        ),
     }
 
 
@@ -70,13 +91,19 @@ def render_text(report: dict[str, Any]) -> str:
         f"Adjektivposter: {report['adjective_records']}",
         f"Med text: {report['with_text']}",
         f"Utan text: {report['without_text']}",
+        f"Enkelt tolkade: {report['interpreted_simple_records']} "
+        f"({report['interpreted_simple_percent']:.2f} %)",
+        f"Återstår: {report['remaining_records']}",
         f"Vid 50-teckensgränsen: {report['at_hard_cap']}",
         f"Med lodstreck i stycke: {report['with_bar']}",
         f"Unika råa textmönster: {report['unique_raw_patterns']}",
         "",
-        "Vanligaste råa textmönster:",
+        "Tolkade regler:",
     ]
-    for pattern, count in report["top_raw_patterns"]:
+    for rule, count in report["rule_counts"].items():
+        lines.append(f"  {count:6d}  {rule}")
+    lines.extend(["", "Vanligaste återstående råa textmönster:"])
+    for pattern, count in report["top_remaining_patterns"]:
         lines.append(f"  {count:6d}  {pattern}")
     lines.extend(["", "Poster vid 50-teckensgränsen:"])
     capped = [row for row in report["records"] if row["at_hard_cap"]]
@@ -91,7 +118,7 @@ def render_text(report: dict[str, Any]) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Inventory SAOL14 adjective rows before parsing")
+    parser = argparse.ArgumentParser(description="Inventory and conservatively parse SAOL14 adjective rows")
     parser.add_argument("saol", nargs="?", type=Path, default=DEFAULT_SAOL)
     parser.add_argument("--text", type=Path, default=DEFAULT_TEXT)
     parser.add_argument("--json", type=Path, default=DEFAULT_JSON)
@@ -103,7 +130,11 @@ def main() -> None:
     args.json.parent.mkdir(parents=True, exist_ok=True)
     args.json.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"Adjektivposter: {report['adjective_records']}")
-    print(f"Utan text: {report['without_text']}")
+    print(
+        f"Enkelt tolkade: {report['interpreted_simple_records']} "
+        f"({report['interpreted_simple_percent']:.2f} %)"
+    )
+    print(f"Återstår: {report['remaining_records']}")
     print(f"Vid 50-teckensgränsen: {report['at_hard_cap']}")
     print(f"Text: {args.text}")
     print(f"JSON: {args.json}")
