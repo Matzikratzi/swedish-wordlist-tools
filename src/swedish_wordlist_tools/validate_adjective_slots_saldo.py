@@ -46,6 +46,7 @@ def validation_row(
             "slot": str(form.get("slot") or ""),
             "provenance": str(form.get("provenance") or ""),
             "source_token": str(form.get("source_token") or ""),
+            "operation_base": str(form.get("operation_base") or ""),
             "in_saldo": str(form.get("written_form") or "").casefold() in saldo_folded,
         }
         for form in generated.get("forms", ())
@@ -138,8 +139,8 @@ def build_report(
         "generated_artifact": str(generated_path),
         "note": (
             "SAOL remains normative. This validator consumes the canonical generated "
-            "adjective-form artifact, including stored provenance and source tokens, and "
-            "never invokes the adjective interpreter."
+            "adjective-form artifact, including stored provenance, source tokens and "
+            "operation bases, and never invokes the adjective interpreter."
         ),
     }
     return report, rows
