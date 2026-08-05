@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 DEFAULT_INPUT = Path("reports/saol14-adjective-saldo-global-coverage.jsonl")
+DEFAULT_REPLACE_TAIL_REVIEW = Path("reports/saol14-adjective-replace-tail-review.jsonl")
 DEFAULT_TEXT = Path("reports/saol14-adjective-saldo-absent-review.txt")
 DEFAULT_JSON = Path("reports/saol14-adjective-saldo-absent-review.json")
 DEFAULT_JSONL = Path("reports/saol14-adjective-saldo-absent-review.jsonl")
@@ -19,6 +20,24 @@ def read_jsonl(path: Path) -> Iterable[dict[str, Any]]:
         for line in handle:
             if line.strip():
                 yield json.loads(line)
+
+
+def _case_key(values: dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(values.get("lemma") or "").casefold(),
+        str(values.get("slot") or ""),
+        str(values.get("written_form") or "").casefold(),
+    )
+
+
+def read_confirmed_replace_tail(path: Path) -> set[tuple[str, str, str]]:
+    if not path.exists():
+        return set()
+    return {
+        _case_key(row)
+        for row in read_jsonl(path)
+        if row.get("replace_tail_assessment") == "bar_notation_confirms_form"
+    }
 
 
 def review_priority(form: dict[str, Any]) -> tuple[int, str]:
@@ -35,12 +54,18 @@ def review_priority(form: dict[str, Any]) -> tuple[int, str]:
     return 4, "other"
 
 
-def review_assessment(form: dict[str, Any]) -> str:
+def review_assessment(
+    form: dict[str, Any],
+    *,
+    replace_tail_confirmed: bool = False,
+) -> str:
     """Choose the next evidence-based action for a SALDO-absent form."""
 
     provenance = str(form.get("provenance") or "")
     token = str(form.get("source_token") or "")
     if provenance == "explicit":
+        return "strong_saldo_gap_candidate"
+    if provenance == "replace_tail" and replace_tail_confirmed:
         return "strong_saldo_gap_candidate"
     if provenance == "append" and token in REGULAR_APPEND_TOKENS:
         return "standard_notation_saldo_gap_candidate"
@@ -49,14 +74,23 @@ def review_assessment(form: dict[str, Any]) -> str:
     return "manual_notation_review"
 
 
-def build_report(rows: Iterable[dict[str, Any]]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def build_report(
+    rows: Iterable[dict[str, Any]],
+    confirmed_replace_tail: set[tuple[str, str, str]] | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    confirmed_replace_tail = confirmed_replace_tail or set()
     cases: list[dict[str, Any]] = []
     for row in rows:
         for form in row.get("classified_missing_forms", ()):
             if form.get("global_saldo_status") != "absent_from_all_saldo":
                 continue
+            case_identity = _case_key({**form, "lemma": row.get("lemma")})
+            bar_confirmed = case_identity in confirmed_replace_tail
             rank, group = review_priority(form)
-            assessment = review_assessment(form)
+            assessment = review_assessment(
+                form,
+                replace_tail_confirmed=bar_confirmed,
+            )
             cases.append({
                 "lemma": str(row.get("lemma") or ""),
                 "homonym_number": str(row.get("homonym_number") or ""),
@@ -68,6 +102,7 @@ def build_report(rows: Iterable[dict[str, Any]]) -> tuple[dict[str, Any], list[d
                 "source_occurrence_count": int(form.get("source_occurrence_count") or 1),
                 "review_group": group,
                 "review_assessment": assessment,
+                "bar_notation_confirmed": bar_confirmed,
                 "priority": rank,
                 "notation": str(row.get("effective_notation") or row.get("notation") or ""),
                 "stycke": str(row.get("stycke") or ""),
@@ -93,6 +128,9 @@ def build_report(rows: Iterable[dict[str, Any]]) -> tuple[dict[str, Any], list[d
 
     report = {
         "cases": len(cases),
+        "confirmed_replace_tail_cases": sum(
+            1 for case in cases if case["bar_notation_confirmed"]
+        ),
         "review_group_counts": dict(group_counts.most_common()),
         "review_assessment_counts": dict(assessment_counts.most_common()),
         "slot_counts": dict(slot_counts.most_common()),
@@ -101,8 +139,8 @@ def build_report(rows: Iterable[dict[str, Any]]) -> tuple[dict[str, Any], list[d
         "examples": dict(grouped_examples),
         "note": (
             "Only unique adjective forms absent from every SALDO analysis are included. "
-            "Explicit forms are strong SALDO-gap candidates. Standard append operations "
-            "are separated from tail replacements that still merit targeted notation review."
+            "Explicit forms and tail replacements independently confirmed by SAOL's "
+            "lodstreck notation are strong SALDO-gap candidates."
         ),
     }
     return report, cases
@@ -111,6 +149,7 @@ def build_report(rows: Iterable[dict[str, Any]]) -> tuple[dict[str, Any], list[d
 def render_text(report: dict[str, Any]) -> str:
     lines = [
         f"Former som saknas helt i SALDO: {report['cases']}",
+        f"Replace-tail-former bekräftade av lodstreck: {report['confirmed_replace_tail_cases']}",
         "",
         "Bedömd nästa åtgärd:",
     ]
@@ -136,11 +175,14 @@ def render_text(report: dict[str, Any]) -> str:
                 f" | förekomster={item['source_occurrence_count']}"
                 if item["source_occurrence_count"] > 1 else ""
             )
+            confirmation = (
+                " | lodstreck=bekräftad" if item["bar_notation_confirmed"] else ""
+            )
             lines.append(
                 f"  {item['lemma']} | {item['slot']}={item['written_form']} | "
                 f"{item['provenance']} | token={item['source_token']} | "
                 f"base={item['operation_base']} | assessment={item['review_assessment']}"
-                f"{occurrences}"
+                f"{confirmation}{occurrences}"
             )
     return "\n".join(lines) + "\n"
 
@@ -157,17 +199,27 @@ def main() -> None:
         description="Prioritize adjective forms absent from every SALDO analysis"
     )
     parser.add_argument("input", nargs="?", type=Path, default=DEFAULT_INPUT)
+    parser.add_argument(
+        "--replace-tail-review",
+        type=Path,
+        default=DEFAULT_REPLACE_TAIL_REVIEW,
+    )
     parser.add_argument("--text", type=Path, default=DEFAULT_TEXT)
     parser.add_argument("--json", type=Path, default=DEFAULT_JSON)
     parser.add_argument("--jsonl", type=Path, default=DEFAULT_JSONL)
     args = parser.parse_args()
 
-    report, cases = build_report(read_jsonl(args.input))
+    confirmations = read_confirmed_replace_tail(args.replace_tail_review)
+    report, cases = build_report(read_jsonl(args.input), confirmations)
     args.text.parent.mkdir(parents=True, exist_ok=True)
     args.text.write_text(render_text(report), encoding="utf-8")
     args.json.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     write_jsonl(args.jsonl, cases)
     print(f"Former som saknas helt i SALDO: {report['cases']}")
+    print(
+        "Replace-tail-former bekräftade av lodstreck: "
+        f"{report['confirmed_replace_tail_cases']}"
+    )
     print(f"Text: {args.text}")
     print(f"JSON: {args.json}")
     print(f"JSONL: {args.jsonl}")
