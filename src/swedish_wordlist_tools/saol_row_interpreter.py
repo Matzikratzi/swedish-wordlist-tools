@@ -79,6 +79,27 @@ def _compound_parts(record: dict[str, Any], lemma: str) -> tuple[str, str] | Non
     return prefix, head
 
 
+def _stycke_carrier(record: dict[str, Any], lemma: str) -> tuple[str, str] | None:
+    """Return the phrase part identified by ``stycke`` and its trailing text.
+
+    SAOL may store a phrase lemma such as ``företa sig`` while ``stycke``
+    describes only the inflecting lexeme, for example ``före|ta``. In that
+    case the carrier is ``företa`` and the untouched tail is `` sig``.
+    """
+
+    stycke = _clean_stycke(record.get("stycke"))
+    if not stycke:
+        return None
+    carrier = stycke.replace("|", "")
+    if not carrier:
+        return None
+    if _comparison_key(lemma) == _comparison_key(carrier):
+        return carrier, ""
+    if lemma.startswith(carrier + " "):
+        return carrier, lemma[len(carrier) :]
+    return None
+
+
 def _common_prefix_length(left: str, right: str) -> int:
     length = 0
     for left_char, right_char in zip(left.casefold(), right.casefold()):
@@ -116,6 +137,22 @@ def _append_to_first_word(lemma: str, suffix: str) -> str:
     return first + suffix + (separator + rest if separator else "")
 
 
+def _apply_to_carrier(
+    record: dict[str, Any], carrier: str, operation: FormOperation
+) -> str | None:
+    if operation.kind is FormOperationKind.REPLACE_TAIL:
+        parts = _compound_parts(record, carrier)
+        if parts is not None:
+            prefix, _head = parts
+            return prefix + operation.value
+    return apply_form_operation(
+        carrier,
+        operation,
+        append=lambda value, suffix: value + suffix,
+        replace_tail=_replace_unmarked_final_component,
+    )
+
+
 def apply_form_operation_to_noun(
     record: dict[str, Any], lemma: str, operation: FormOperation
 ) -> str | None:
@@ -138,23 +175,24 @@ def apply_form_operation_to_noun(
 def apply_form_token(
     record: dict[str, Any], lemma: str, token: str
 ) -> str | None:
-    """Compatibility wrapper for non-noun callers that provide a raw token.
+    """Apply a raw form token to the lexeme selected by SAOL ``stycke``.
 
-    Historical callers such as the verb-slot interpreter inflect the first
-    word of a phrase. Bar-marked tail replacement must still be honored for
-    that first word, for example ``före|ta`` in ``företa sig``.
-    Canonical noun interpretation bypasses this wrapper and uses the noun-
-    specific last-word realization above.
+    For phrase lemmas, ``stycke`` is authoritative about the inflecting carrier:
+    ``före|ta`` in ``företa sig`` yields ``företog sig``. When ``stycke`` does
+    not identify a shorter carrier, the historical first-word fallback remains.
     """
 
     operation = parse_form_operation(token)
     if operation is None:
         return None
-    if operation.kind is FormOperationKind.REPLACE_TAIL:
-        parts = _compound_parts(record, lemma)
-        if parts is not None:
-            prefix, _head = parts
-            return prefix + operation.value
+
+    carrier = _stycke_carrier(record, lemma)
+    if carrier is not None:
+        carrier_text, tail = carrier
+        written_carrier = _apply_to_carrier(record, carrier_text, operation)
+        if written_carrier is not None:
+            return written_carrier + tail
+
     return apply_form_operation(
         lemma,
         operation,
