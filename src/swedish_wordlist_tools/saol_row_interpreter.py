@@ -89,23 +89,26 @@ def _common_prefix_length(left: str, right: str) -> int:
 
 
 def _replace_unmarked_final_component(lemma: str, replacement: str) -> str | None:
-    first, separator, rest = lemma.partition(" ")
+    prefix, separator, final_word = lemma.rpartition(" ")
+    target = final_word if separator else lemma
     best_start: int | None = None
     best_length = 0
-    for start in range(len(first)):
-        shared = _common_prefix_length(first[start:], replacement)
+    for start in range(len(target)):
+        shared = _common_prefix_length(target[start:], replacement)
         if shared > best_length:
             best_start = start
             best_length = shared
     if best_start is None or best_length < 3:
         return None
-    result = first[:best_start] + replacement
-    return result + (separator + rest if separator else "")
+    result = target[:best_start] + replacement
+    return prefix + separator + result if separator else result
 
 
-def _append_to_first_word(lemma: str, suffix: str) -> str:
-    first, separator, rest = lemma.partition(" ")
-    return first + suffix + (separator + rest if separator else "")
+def _append_to_last_word(lemma: str, suffix: str) -> str:
+    prefix, separator, final_word = lemma.rpartition(" ")
+    if not separator:
+        return lemma + suffix
+    return prefix + separator + final_word + suffix
 
 
 def apply_form_operation_to_noun(
@@ -122,7 +125,7 @@ def apply_form_operation_to_noun(
     return apply_form_operation(
         lemma,
         operation,
-        append=_append_to_first_word,
+        append=_append_to_last_word,
         replace_tail=_replace_unmarked_final_component,
     )
 
