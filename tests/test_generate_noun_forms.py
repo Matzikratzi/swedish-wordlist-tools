@@ -72,6 +72,30 @@ class GenerateNounFormsTests(unittest.TestCase):
         assert comparison is not None
         self.assertEqual("replace_tail", comparison["change_reasons"].get("alarmklockor"))
 
+    def test_classifies_legacy_comment_tokens_as_noise(self) -> None:
+        row, comparison = canonical_noun_row({
+            "normaliserat_ord": "ansökan",
+            "upos": "NOUN",
+            "text": "best. +; i: pl. används: ansökningar",
+            "stycke": "an|sök·an",
+        })
+        self.assertIsNotNone(row)
+        assert comparison is not None
+        self.assertEqual(["används", "i"], comparison["legacy_noise_removed_forms"])
+        self.assertEqual([], comparison["semantic_removed_forms"])
+
+    def test_classifies_truncated_legacy_tokens_as_noise(self) -> None:
+        row, comparison = canonical_noun_row({
+            "normaliserat_ord": "a-kassa",
+            "upos": "NOUN",
+            "text": "+n a-kassor",
+            "stycke": "a-kassa",
+        })
+        self.assertIsNotNone(row)
+        assert comparison is not None
+        self.assertEqual(["a"], comparison["legacy_noise_removed_forms"])
+        self.assertEqual([], comparison["semantic_removed_forms"])
+
     def test_unsupported_noun_is_preserved_in_comparison(self) -> None:
         rows, comparisons, summary = generate_noun_artifact([
             {
