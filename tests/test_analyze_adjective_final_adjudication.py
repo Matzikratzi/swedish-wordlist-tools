@@ -11,7 +11,7 @@ from swedish_wordlist_tools.analyze_adjective_final_adjudication import (
 class AnalyzeAdjectiveFinalAdjudicationTests(unittest.TestCase):
     def test_adjudication_categories(self) -> None:
         self.assertEqual(
-            "confirmed_saldo_gap",
+            "confirmed_saldo_form_gap",
             adjudicate("absent_from_all_saldo", True),
         )
         self.assertEqual(
@@ -19,7 +19,7 @@ class AnalyzeAdjectiveFinalAdjudicationTests(unittest.TestCase):
             adjudicate("found_in_other_saldo_adjective_analysis", False),
         )
         self.assertEqual(
-            "saldo_pos_or_adjective_coverage_review",
+            "confirmed_saldo_adjective_analysis_gap",
             adjudicate("only_non_adjective_saldo_match", False),
         )
 
@@ -39,13 +39,14 @@ class AnalyzeAdjectiveFinalAdjudicationTests(unittest.TestCase):
             {("allgod", "neuter_singular", "allgott")},
         )
         self.assertEqual(1, report["cases"])
+        self.assertEqual(1, report["saldo_deficiency_total"])
         self.assertEqual(
-            {"confirmed_saldo_gap": 1},
+            {"confirmed_saldo_form_gap": 1},
             report["adjudication_counts"],
         )
-        self.assertEqual("confirmed_saldo_gap", cases[0]["final_adjudication"])
+        self.assertEqual("confirmed_saldo_form_gap", cases[0]["final_adjudication"])
 
-    def test_alignment_and_pos_cases_are_kept_separate(self) -> None:
+    def test_alignment_and_adjective_analysis_gap_are_kept_separate(self) -> None:
         rows = [{
             "lemma": "fasetterad",
             "classified_missing_forms": [
@@ -62,10 +63,11 @@ class AnalyzeAdjectiveFinalAdjudicationTests(unittest.TestCase):
             ],
         }]
         report, _cases = build_report(rows, set())
+        self.assertEqual(1, report["saldo_deficiency_total"])
         self.assertEqual(
             {
                 "saldo_adjective_alignment": 1,
-                "saldo_pos_or_adjective_coverage_review": 1,
+                "confirmed_saldo_adjective_analysis_gap": 1,
             },
             report["adjudication_counts"],
         )
