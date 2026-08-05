@@ -20,7 +20,7 @@ class AnalyzeAdjectiveAppendReviewTests(unittest.TestCase):
         self.assertEqual("literal_append_confirms_form", result["append_assessment"])
         self.assertEqual("bakåtböjda", result["literal_appended_form"])
 
-    def test_plus_t_is_kept_for_spelling_review(self) -> None:
+    def test_literal_plus_t_confirms_form(self) -> None:
         result = analyze_case({
             "lemma": "camp",
             "written_form": "campt",
@@ -28,7 +28,19 @@ class AnalyzeAdjectiveAppendReviewTests(unittest.TestCase):
             "operation_base": "camp",
             "source_token": "+t",
         })
-        self.assertEqual("needs_adjective_t_spelling_review", result["append_assessment"])
+        self.assertEqual("literal_append_confirms_form", result["append_assessment"])
+        self.assertEqual("campt", result["literal_appended_form"])
+
+    def test_explicit_glatt_is_not_treated_as_plus_t(self) -> None:
+        result = analyze_case({
+            "lemma": "glad",
+            "written_form": "glatt",
+            "slot": "neuter_singular",
+            "operation_base": "glatt",
+            "source_token": "glatt",
+        })
+        self.assertEqual("needs_manual_append_review", result["append_assessment"])
+        self.assertEqual("", result["literal_appended_form"])
 
     def test_build_report_only_uses_regular_append_group(self) -> None:
         report, cases = build_report([
