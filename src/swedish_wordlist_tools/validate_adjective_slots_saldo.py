@@ -6,9 +6,13 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable
 
-from .adjective_slots import interpret_simple_adjective_slots
 from .compare_sources import _build_form_index, read_saldo
 from .jsonl import read_jsonl
+from .saol_source_corrections import (
+    apply_saol_source_corrections,
+    interpret_corrected_adjective_slots,
+    source_correction_rows,
+)
 from .validate_direct_forms import select_direct_match
 
 DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
@@ -27,12 +31,15 @@ def validation_row(
     match_method: str,
     analyses: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    slots = interpret_simple_adjective_slots(record)
+    corrected_record = apply_saol_source_corrections(record)
+    slots = interpret_corrected_adjective_slots(record)
     if slots is None:
         return {
             "record_id": str(record.get("id") or record.get("subnr") or ""),
             "lemma": str(record.get("normaliserat_ord", "")),
             "notation": str(record.get("text", "")),
+            "effective_notation": str(corrected_record.get("text", "")),
+            "source_correction_applied": corrected_record is not record,
             "match_method": match_method,
             "status": "adjective_interpreter_unsupported",
             "forms": [],
@@ -68,6 +75,8 @@ def validation_row(
         "lemma": slots.lemma,
         "homonym_number": str(record.get("homonr") or ""),
         "notation": str(record.get("text") or ""),
+        "effective_notation": str(corrected_record.get("text") or ""),
+        "source_correction_applied": corrected_record is not record,
         "ordkl": str(record.get("ordkl") or ""),
         "rule": slots.rule,
         "match_method": match_method,
@@ -93,7 +102,7 @@ def build_report(
         if str(record.get("upos", "")).upper() != "ADJ":
             continue
         adjective_records += 1
-        if interpret_simple_adjective_slots(record) is None:
+        if interpret_corrected_adjective_slots(record) is None:
             continue
         interpreted_records += 1
         selected = select_direct_match(record, saldo, form_index)
@@ -124,6 +133,7 @@ def build_report(
         if row["status"] != "all_slot_forms_in_saldo" and len(examples[row["status"]]) < 30:
             examples[row["status"]].append(row)
 
+    corrections_applied = [row for row in rows if row.get("source_correction_applied")]
     report = {
         "adjective_records": adjective_records,
         "interpreted_records": interpreted_records,
@@ -137,9 +147,13 @@ def build_report(
         "missing_rule_counts": dict(missing_rule_counts.most_common()),
         "most_common_missing_forms": dict(missing_form_counts.most_common(100)),
         "examples": dict(examples),
+        "source_corrections": source_correction_rows(),
+        "source_corrections_applied": len(corrections_applied),
+        "source_correction_examples": corrections_applied[:30],
         "note": (
             "SAOL remains normative. SALDO is used only to validate generated forms. "
-            "A form missing from SALDO is reported but not rejected."
+            "A form missing from SALDO is reported but not rejected. Exact suspected "
+            "source errors are corrected through a separate, reportable list."
         ),
     }
     return report, rows
@@ -152,6 +166,7 @@ def render_text(report: dict[str, Any]) -> str:
         f"Direktmatchade mot SALDO: {report['direct_matches']}",
         f"Validerade rader: {report['validated_rows']}",
         f"Alla slotformer finns i SALDO: {report['all_slot_forms_in_saldo_percent']:.2f} %",
+        f"Dokumenterade SAOL-korrigeringar använda: {report['source_corrections_applied']}",
         "",
         "Status:",
     ]
@@ -166,6 +181,17 @@ def render_text(report: dict[str, Any]) -> str:
     for rule, count in report["missing_rule_counts"].items():
         lines.append(f"  {count:6d}  {rule}")
 
+    if report.get("source_corrections"):
+        lines.extend(["", "Misstänkta SAOL-källfel:"])
+        for item in report["source_corrections"]:
+            lines.append(
+                f"  {item['lemma']}#{item['homonym_number']} | "
+                f"{item['source_value']} -> {item['corrected_value']}"
+            )
+            lines.append(f"    {item['reason']}")
+            for evidence in item.get("evidence", ()): 
+                lines.append(f"    källa: {evidence}")
+
     for status, rows in report.get("examples", {}).items():
         lines.extend(["", f"Exempel: {status}"])
         for row in rows[:20]:
@@ -174,7 +200,7 @@ def render_text(report: dict[str, Any]) -> str:
                 for form in row.get("missing_forms", ())
             )
             lines.append(
-                f"  {row.get('lemma')} | {row.get('notation')} | saknas: {missing}"
+                f"  {row.get('lemma')} | {row.get('effective_notation')} | saknas: {missing}"
             )
     return "\n".join(lines) + "\n"
 
@@ -215,6 +241,10 @@ def main() -> None:
     print(
         "Alla slotformer finns i SALDO: "
         f"{report['all_slot_forms_in_saldo_percent']:.2f} %"
+    )
+    print(
+        "Dokumenterade SAOL-korrigeringar använda: "
+        f"{report['source_corrections_applied']}"
     )
     print(f"Text: {args.text}")
     print(f"JSON: {args.json}")
