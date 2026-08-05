@@ -24,6 +24,7 @@ def classify_row(row: dict[str, Any]) -> dict[str, Any] | None:
     for form in missing:
         derivation = str(form.get("provenance") or "unknown")
         source_token = str(form.get("source_token") or "")
+        operation_base = str(form.get("operation_base") or "")
         replay = replay_generated_form(
             lemma=str(row.get("lemma") or ""),
             stycke=str(row.get("stycke") or ""),
@@ -32,6 +33,7 @@ def classify_row(row: dict[str, Any]) -> dict[str, Any] | None:
             provenance=derivation,
             source_token=source_token,
             notation=notation,
+            operation_base=operation_base,
         )
         if row.get("source_correction_applied"):
             cause = "suspected_saol_error"
@@ -49,6 +51,7 @@ def classify_row(row: dict[str, Any]) -> dict[str, Any] | None:
             **form,
             "derivation": derivation,
             "source_token": source_token,
+            "operation_base": operation_base,
             "replay_status": replay.status,
             "replayed_form": replay.replayed_form or "",
             "preliminary_cause": cause,
@@ -98,6 +101,7 @@ def build_report(path: Path = DEFAULT_INPUT) -> tuple[dict[str, Any], list[dict[
                     "form": form.get("written_form"),
                     "derivation": form.get("derivation"),
                     "source_token": form.get("source_token"),
+                    "operation_base": form.get("operation_base"),
                     "replay_status": form.get("replay_status"),
                     "replayed_form": form.get("replayed_form"),
                     "saldo_forms": row.get("saldo_forms", []),
@@ -111,10 +115,9 @@ def build_report(path: Path = DEFAULT_INPUT) -> tuple[dict[str, Any], list[dict[
         "source_token_counts": dict(source_token_counts.most_common()),
         "examples": dict(examples),
         "note": (
-            "The replay check applies the stored primitive source token to lemma/stycke. "
-            "A documented lodstreck takes precedence over overlap fallback. Parallel "
-            "alternative paradigms are unsupported because their active base may not be "
-            "the entry lemma. A match confirms consistency, not whether SALDO or SAOL is right."
+            "The replay check applies each stored source token to its stored operation "
+            "base. A documented lodstreck takes precedence over overlap fallback. A "
+            "match confirms generation consistency, not whether SALDO or SAOL is right."
         ),
     }
     return report, rows
@@ -142,12 +145,13 @@ def render_text(report: dict[str, Any]) -> str:
         lines.extend(["", f"Exempel: {cause}"])
         for item in examples[:20]:
             token = f" | token={item['source_token']}" if item.get("source_token") else ""
+            base = f" | base={item['operation_base']}" if item.get("operation_base") else ""
             replay = f" | replay={item['replay_status']}"
             if item.get("replayed_form"):
                 replay += f":{item['replayed_form']}"
             lines.append(
                 f"  {item['lemma']} | {item['notation']} | "
-                f"{item['slot']}={item['form']} | {item['derivation']}{token}{replay}"
+                f"{item['slot']}={item['form']} | {item['derivation']}{token}{base}{replay}"
             )
     return "\n".join(lines) + "\n"
 
