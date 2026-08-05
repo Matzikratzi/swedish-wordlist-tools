@@ -71,6 +71,7 @@ def _unsupported_comparison(record: dict[str, Any]) -> dict[str, Any]:
         "change_reasons": {},
         "removed_form_reasons": {},
         "legacy_noise_removed_forms": [],
+        "legacy_malformed_removed_forms": [],
         "semantic_removed_forms": [],
     }
 
@@ -121,20 +122,76 @@ def _change_reasons(
     return dict(sorted(reasons.items(), key=lambda item: item[0].casefold()))
 
 
-def _removed_form_reason(form: str, lemma: str) -> str:
+def _normalised_words(value: str) -> tuple[str, ...]:
+    return tuple(part for part in re.split(r"\s+", value.casefold().strip()) if part)
+
+
+def _has_suffix_on_wrong_phrase_word(form: str, lemma: str) -> bool:
+    """Detect the legacy bug that appended a noun suffix to phrase word one."""
+
+    lemma_words = _normalised_words(lemma)
+    form_words = _normalised_words(form)
+    if len(lemma_words) < 2 or len(form_words) != len(lemma_words):
+        return False
+    return (
+        form_words[1:] == lemma_words[1:]
+        and form_words[0].startswith(lemma_words[0])
+        and len(form_words[0]) > len(lemma_words[0])
+    )
+
+
+def _is_single_duplicated_segment(form: str, canonical: str) -> bool:
+    """Return true when deleting one adjacent duplicate repairs the old form."""
+
+    old = form.casefold()
+    new = canonical.casefold()
+    if len(old) <= len(new):
+        return False
+    excess = len(old) - len(new)
+    for split in range(len(new) + 1):
+        suffix_length = len(new) - split
+        if not old.startswith(new[:split]):
+            continue
+        if suffix_length and not old.endswith(new[split:]):
+            continue
+        end = len(old) - suffix_length if suffix_length else len(old)
+        duplicated = old[split:end]
+        if len(duplicated) != excess or not duplicated:
+            continue
+        if new[:split].endswith(duplicated) or new[split:].startswith(duplicated):
+            return True
+    return False
+
+
+def _removed_form_reason(
+    form: str,
+    lemma: str,
+    added_forms: set[str],
+) -> str:
     normalized = re.sub(r"[^0-9a-zåäöéü-]+", "", form.casefold())
     if normalized in _LEGACY_COMMENT_TOKENS:
         return "legacy_comment_token"
     folded_lemma = lemma.casefold()
     if normalized and len(normalized) < len(folded_lemma) and folded_lemma.startswith(normalized):
         return "legacy_truncated_token"
+    if _has_suffix_on_wrong_phrase_word(form, lemma):
+        return "legacy_malformed_form"
+    if any(_is_single_duplicated_segment(form, candidate) for candidate in added_forms):
+        return "legacy_malformed_form"
     return "semantic_difference"
 
 
-def _removed_form_reasons(removed: set[str], lemma: str) -> dict[str, str]:
+def _removed_form_reasons(
+    removed: set[str],
+    lemma: str,
+    added_forms: set[str],
+) -> dict[str, str]:
     return dict(
         sorted(
-            ((form, _removed_form_reason(form, lemma)) for form in removed),
+            (
+                (form, _removed_form_reason(form, lemma, added_forms))
+                for form in removed
+            ),
             key=lambda item: item[0].casefold(),
         )
     )
@@ -155,9 +212,14 @@ def canonical_noun_row(record: dict[str, Any]) -> tuple[dict[str, Any] | None, d
     canonical_written = {form.written_form for form in canonical_forms}
     added = canonical_written - legacy_written
     removed = legacy_written - canonical_written
-    removed_reasons = _removed_form_reasons(removed, canonical.lemma)
+    removed_reasons = _removed_form_reasons(removed, canonical.lemma, added)
     legacy_noise = {
         form for form, reason in removed_reasons.items() if reason.startswith("legacy_")
+    }
+    legacy_malformed = {
+        form
+        for form, reason in removed_reasons.items()
+        if reason == "legacy_malformed_form"
     }
     semantic_removed = removed - legacy_noise
 
@@ -189,6 +251,7 @@ def canonical_noun_row(record: dict[str, Any]) -> tuple[dict[str, Any] | None, d
         "change_reasons": _change_reasons(record, canonical_forms, added),
         "removed_form_reasons": removed_reasons,
         "legacy_noise_removed_forms": sorted(legacy_noise, key=str.casefold),
+        "legacy_malformed_removed_forms": sorted(legacy_malformed, key=str.casefold),
         "semantic_removed_forms": sorted(semantic_removed, key=str.casefold),
     }
     return row, comparison
@@ -238,6 +301,11 @@ def generate_noun_artifact(records: Iterable[dict[str, Any]]) -> tuple[list[dict
         for row in comparisons
         for form in row.get("legacy_noise_removed_forms", [])
     }
+    legacy_malformed_written = {
+        str(form).casefold()
+        for row in comparisons
+        for form in row.get("legacy_malformed_removed_forms", [])
+    }
     semantic_removed_written = {
         str(form).casefold()
         for row in comparisons
@@ -257,6 +325,7 @@ def generate_noun_artifact(records: Iterable[dict[str, Any]]) -> tuple[list[dict
         "unique_forms_added": len(added_written),
         "unique_forms_removed": len(removed_written),
         "unique_legacy_noise_removed": len(legacy_noise_written),
+        "unique_legacy_malformed_removed": len(legacy_malformed_written),
         "unique_semantic_forms_removed": len(semantic_removed_written),
     }
     return rows, comparisons, summary
@@ -284,6 +353,7 @@ def render_comparison(summary: dict[str, Any], comparisons: list[dict[str, Any]]
         f"Unika tillagda former: {summary['unique_forms_added']}",
         f"Unika borttagna former: {summary['unique_forms_removed']}",
         f"Varav gammalt generatorskräp: {summary['unique_legacy_noise_removed']}",
+        f"Varav tydligt felformade gamla former: {summary['unique_legacy_malformed_removed']}",
         f"Semantiskt borttagna former: {summary['unique_semantic_forms_removed']}",
         "Orsaker till tillägg: " + ", ".join(
             f"{reason}={count}" for reason, count in summary["change_reason_counts"].items()
@@ -306,6 +376,7 @@ def render_comparison(summary: dict[str, Any], comparisons: list[dict[str, Any]]
             added = ", ".join(row.get("added_forms", [])) or "-"
             removed = ", ".join(row.get("removed_forms", [])) or "-"
             noise = ", ".join(row.get("legacy_noise_removed_forms", [])) or "-"
+            malformed = ", ".join(row.get("legacy_malformed_removed_forms", [])) or "-"
             semantic = ", ".join(row.get("semantic_removed_forms", [])) or "-"
             reasons = ", ".join(
                 f"{form}:{reason}" for form, reason in row.get("change_reasons", {}).items()
@@ -313,7 +384,8 @@ def render_comparison(summary: dict[str, Any], comparisons: list[dict[str, Any]]
             lines.append(
                 f"  {row['lemma']} | {row['notation']} | stycke={row.get('stycke', '')} | "
                 f"tillagt: {added} | borttaget: {removed} | generatorskräp: {noise} | "
-                f"semantiskt borttaget: {semantic} | orsaker: {reasons}"
+                f"felformade gamla former: {malformed} | semantiskt borttaget: {semantic} | "
+                f"orsaker: {reasons}"
             )
     return "\n".join(lines) + "\n"
 
