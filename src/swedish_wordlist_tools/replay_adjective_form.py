@@ -36,39 +36,55 @@ def replay_generated_form(
     slot: str,
     provenance: str,
     source_token: str,
+    notation: str = "",
 ) -> ReplayResult:
     """Replay one generated form from its stored primitive SAOL operation.
 
-    The function does not inspect the full notation and does not choose a slot.
-    It only applies the operation token already stored by the canonical
-    generator. This makes it a consistency check, not a second generator.
+    The function does not choose a slot or generate a paradigm. It applies the
+    stored operation token to the stored lemma/stycke context. Parallel
+    paradigms are reported as unsupported because their active base may be an
+    alternative stem rather than the entry lemma.
     """
 
     provenance = str(provenance or "")
     token = str(source_token or "").strip().casefold()
     expected = str(written_form or "").casefold()
     base = str(lemma or "").casefold()
+    normalized_notation = " ".join(str(notation or "").casefold().split())
 
     if provenance == "lemma":
         replayed = base
     elif provenance == "explicit":
-        # Some explicit alternative stems are represented by a whole branch,
-        # such as ``facetterat +e``. They cannot be replayed from one primitive
-        # token without interpreting the paradigm again.
         operation = parse_form_operation(token)
         if operation is None or " " in token:
             return ReplayResult("unsupported", None)
         replayed = apply_form_operation(base, operation)
     elif provenance in {"append", "replace_tail"}:
+        # In a parallel paradigm the operation may apply to an alternative
+        # stem reconstructed by the adjective parser. Replaying it from the
+        # entry lemma alone would create false mismatches.
+        if " _ " in normalized_notation:
+            return ReplayResult("unsupported", None)
+
         operation = parse_form_operation(token)
         if operation is None:
             return ReplayResult("unsupported", None)
-        replayed = apply_form_operation(
-            base,
-            operation,
-            append=lambda word, suffix: _append_adjective(word, suffix, slot=slot),
-            replace_tail=lambda word, tail: _replace_from_bar(word, stycke, tail),
-        )
+
+        if provenance == "replace_tail":
+            # A documented lodstreck is authoritative. Do not let the generic
+            # overlap fallback choose an earlier, equally long match such as
+            # the initial ``fö`` in ``förstfödd``.
+            replayed = _replace_from_bar(base, stycke, operation.value)
+            if replayed is None:
+                replayed = apply_form_operation(base, operation)
+        else:
+            replayed = apply_form_operation(
+                base,
+                operation,
+                append=lambda word, suffix: _append_adjective(
+                    word, suffix, slot=slot
+                ),
+            )
     else:
         return ReplayResult("unsupported", None)
 
