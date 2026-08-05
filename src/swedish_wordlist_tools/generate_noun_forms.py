@@ -7,10 +7,9 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .compare_sources import _saol_upos
-from .inflect import GeneratedEntry, GeneratedWordForm, generate_entry
+from .inflect import GeneratedWordForm, generate_entry
 from .jsonl import read_jsonl
 from .noun_paradigm import complete_noun_entry
-from .saol_row_interpreter import interpret_noun_row
 
 DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
 DEFAULT_JSONL = Path("reports/saol14-noun-forms.jsonl")
@@ -28,6 +27,12 @@ def _form_key(form: GeneratedWordForm) -> tuple[str, str | None]:
         form.written_form.casefold(),
         str(form.msd) if form.msd is not None else None,
     )
+
+
+def _canonical_stage(form: GeneratedWordForm) -> str:
+    if form.kind in {"lemma", "interpreted_slot"}:
+        return "noun_interpreter"
+    return "noun_completion"
 
 
 def _form_dict(form: GeneratedWordForm, stage: str) -> dict[str, Any]:
@@ -57,25 +62,21 @@ def canonical_noun_row(record: dict[str, Any]) -> tuple[dict[str, Any] | None, d
     if _saol_upos(record) != "NOUN":
         return None, None
 
-    # The generic legacy generator accepts any sequence of word-like tokens as
-    # explicit forms. For nouns, the row interpreter is the authority on
-    # whether the text is actually valid SAOL inflection notation.
-    if interpret_noun_row(record) is None:
-        return None, _unsupported_comparison(record)
-
-    initial = generate_entry(record)
-    completed = complete_noun_entry(record, initial)
-    canonical = completed or initial
+    # Canonical noun generation goes directly through the SAOL row interpreter
+    # and noun-slot completion. The legacy generator is run only afterwards to
+    # provide a comparison artifact; it cannot influence the canonical forms.
+    canonical = complete_noun_entry(record, None)
     if canonical is None:
         return None, _unsupported_comparison(record)
 
-    initial_forms = tuple(initial.word_forms if initial is not None else ())
+    legacy = generate_entry(record)
+    legacy_forms = tuple(legacy.word_forms if legacy is not None else ())
     canonical_forms = tuple(canonical.word_forms)
-    initial_keys = {_form_key(form) for form in initial_forms}
+    legacy_keys = {_form_key(form) for form in legacy_forms}
     canonical_keys = {_form_key(form) for form in canonical_forms}
 
     forms = [
-        _form_dict(form, "base_generator" if _form_key(form) in initial_keys else "noun_completion")
+        _form_dict(form, _canonical_stage(form))
         for form in canonical_forms
     ]
     row = {
@@ -89,11 +90,14 @@ def canonical_noun_row(record: dict[str, Any]) -> tuple[dict[str, Any] | None, d
         "source": str(record.get("source", "")),
         "pattern": canonical.pattern,
         "pattern_group": canonical.pattern_group,
-        "completion_applied": canonical_keys != initial_keys,
+        "completion_applied": any(
+            form.kind not in {"lemma", "interpreted_slot"}
+            for form in canonical_forms
+        ),
         "forms": forms,
     }
 
-    initial_written = {form.written_form for form in initial_forms}
+    legacy_written = {form.written_form for form in legacy_forms}
     canonical_written = {form.written_form for form in canonical_forms}
     comparison = {
         "record_id": row["record_id"],
@@ -102,13 +106,13 @@ def canonical_noun_row(record: dict[str, Any]) -> tuple[dict[str, Any] | None, d
         "notation": row["notation"],
         "status": (
             "unchanged"
-            if initial_written == canonical_written
+            if legacy_written == canonical_written
             else "completion_changed_forms"
         ),
-        "legacy_forms": sorted(initial_written, key=str.casefold),
+        "legacy_forms": sorted(legacy_written, key=str.casefold),
         "canonical_forms": sorted(canonical_written, key=str.casefold),
-        "added_by_completion": sorted(canonical_written - initial_written, key=str.casefold),
-        "removed_by_completion": sorted(initial_written - canonical_written, key=str.casefold),
+        "added_by_completion": sorted(canonical_written - legacy_written, key=str.casefold),
+        "removed_by_completion": sorted(legacy_written - canonical_written, key=str.casefold),
     }
     return row, comparison
 
@@ -208,7 +212,7 @@ def render_comparison(summary: dict[str, Any], comparisons: list[dict[str, Any]]
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Generate a canonical SAOL noun-form artifact and compare it with the legacy base generator"
+        description="Generate canonical SAOL noun forms and compare them with the legacy base generator"
     )
     parser.add_argument("saol", nargs="?", type=Path, default=DEFAULT_SAOL)
     parser.add_argument("--jsonl", type=Path, default=DEFAULT_JSONL)
