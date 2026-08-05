@@ -47,16 +47,42 @@ class AnalyzeAdjectiveSaldoGlobalCoverageTests(unittest.TestCase):
                     "slot": "common_singular",
                     "provenance": "explicit",
                     "source_token": "facetterat +e",
+                    "operation_base": "facetterad",
                 }],
             }],
             self.form_index,
         )
-        self.assertEqual(1, report["forms"])
+        self.assertEqual(1, report["unique_forms"])
         form = rows[0]["classified_missing_forms"][0]
         self.assertEqual("explicit", form["provenance"])
         self.assertEqual(
             "found_in_other_saldo_adjective_analysis",
             form["global_saldo_status"],
+        )
+        self.assertEqual("saldo_alignment_problem", form["global_review_category"])
+
+    def test_duplicate_forms_within_one_record_are_counted_once(self) -> None:
+        duplicate = {
+            "written_form": "bemälda",
+            "slot": "definite_or_plural",
+            "provenance": "explicit",
+            "source_token": "bemälda",
+            "operation_base": "bemälda",
+        }
+        report, rows = analyze_rows(
+            [{
+                "lemma": "bemälde",
+                "classified_missing_forms": [duplicate, dict(duplicate)],
+            }],
+            self.form_index,
+        )
+        self.assertEqual(2, report["raw_forms"])
+        self.assertEqual(1, report["unique_forms"])
+        self.assertEqual(1, report["duplicates_removed"])
+        self.assertEqual(1, len(rows[0]["classified_missing_forms"]))
+        self.assertEqual(
+            "saldo_coverage_or_saol_review",
+            rows[0]["classified_missing_forms"][0]["global_review_category"],
         )
 
 
