@@ -7,6 +7,7 @@ from typing import Any, Iterable
 
 from .analyze_adjectives import _interpret_record, _value
 from .jsonl import read_jsonl
+from .saol_boundaries import restore_replacement_bar_prefix
 from .saol_source_corrections import apply_saol_source_corrections
 
 DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
@@ -19,25 +20,36 @@ def generated_row(record: dict[str, Any]) -> dict[str, Any] | None:
     slots = _interpret_record(corrected)
     if slots is None:
         return None
+
+    lemma = slots.lemma
+    stycke = _value(record, "stycke")
+    notation = _value(corrected, "text")
+    forms = [
+        {
+            "written_form": restore_replacement_bar_prefix(
+                stycke=stycke,
+                lemma=lemma,
+                notation=notation,
+                written_form=form.written_form,
+            ),
+            "slot": form.slot,
+            "provenance": form.provenance,
+        }
+        for form in slots.forms
+    ]
+
     return {
         "record_id": str(record.get("id") or record.get("subnr") or ""),
-        "lemma": slots.lemma,
+        "lemma": lemma,
         "homonym_number": _value(record, "homonr"),
         "rule": slots.rule,
         "source_correction_applied": corrected is not record,
         "source_notation": _value(record, "text"),
-        "effective_notation": _value(corrected, "text"),
-        "stycke": _value(record, "stycke"),
+        "effective_notation": notation,
+        "stycke": stycke,
         "ordkl": _value(record, "ordkl"),
         "source": _value(record, "source"),
-        "forms": [
-            {
-                "written_form": form.written_form,
-                "slot": form.slot,
-                "provenance": form.provenance,
-            }
-            for form in slots.forms
-        ],
+        "forms": forms,
         "source_record": {
             "normaliserat_ord": record.get("normaliserat_ord"),
             "homonr": record.get("homonr"),
