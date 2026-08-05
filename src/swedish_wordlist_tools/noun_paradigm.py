@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from typing import Any
 
 from .inflect import GeneratedEntry, GeneratedWordForm
 from .msd import parse_msd
+from .saol_notation import FormOperationKind, parse_form_operation
 from .saol_row_interpreter import InterpretedRow, interpret_noun_row
 
 _CI = parse_msd("ci")
@@ -22,6 +24,11 @@ _SLOT_MSD = {
     "pl_indef": _PL_INDEF_NOM,
     "pl_def": _PL_DEF_NOM,
 }
+
+_EXPLICIT_PLURAL_USE_RE = re.compile(
+    r"\bpl\.\s*(?:anv\.|används:)\s*",
+    re.IGNORECASE,
+)
 
 
 def _genitive(form: str) -> str:
@@ -82,7 +89,6 @@ def _derive_definite_plural(
     singular_definites: tuple[str, ...],
     plural: str,
 ) -> str:
-    """Derive the regular definite plural from interpreted key forms."""
     folded_plural = plural.casefold()
     folded_lemma = lemma.casefold()
     folded_singulars = tuple(form.casefold() for form in singular_definites)
@@ -145,22 +151,26 @@ def _complete_from_slots(entry: GeneratedEntry) -> GeneratedEntry:
     return _merge_forms(entry, tuple(additions))
 
 
-def _requires_unmarked_head_guess(record: dict[str, Any], row: InterpretedRow) -> bool:
-    """Return true when a noun tail replacement lacks SAOL's marked boundary.
-
-    A ``-form`` instruction replaces a final component. For canonical noun
-    generation we only accept that operation when ``stycke`` identifies the
-    component with ``|``. The lower-level interpreter may still expose its
-    spelling-overlap fallback for diagnostics and isolated parsing tests.
-    """
-    has_replacement = any(
-        key_form.source.startswith("-")
-        for key_form in row.key_forms
-        if key_form.slot != "lemma"
+def _has_unmarked_replacement(row: InterpretedRow) -> bool:
+    return any(
+        operation is not None and operation.kind is FormOperationKind.REPLACE_TAIL
+        for form in row.key_forms
+        if form.slot != "lemma"
+        for operation in (parse_form_operation(form.source),)
     )
-    if not has_replacement:
+
+
+def _replacement_is_explicit_plural_use(record: dict[str, Any]) -> bool:
+    """Return whether prose explicitly licenses a supplied plural replacement."""
+    return _EXPLICIT_PLURAL_USE_RE.search(str(record.get("text", ""))) is not None
+
+
+def _has_usable_compound_bar(record: dict[str, Any], lemma: str) -> bool:
+    stycke = str(record.get("stycke", ""))
+    if "|" not in stycke:
         return False
-    return "|" not in str(record.get("stycke", ""))
+    normalized = stycke.replace("·", "").replace("|", "").strip()
+    return normalized.casefold() == lemma.casefold()
 
 
 def complete_noun_entry(
@@ -172,7 +182,14 @@ def complete_noun_entry(
         return entry
 
     row = interpret_noun_row(record)
-    if row is None or _requires_unmarked_head_guess(record, row):
+    if row is None:
+        return None
+
+    if (
+        _has_unmarked_replacement(row)
+        and not _has_usable_compound_bar(record, row.lemma)
+        and not _replacement_is_explicit_plural_use(record)
+    ):
         return None
 
     interpreted = _entry_from_interpreted_row(row)
