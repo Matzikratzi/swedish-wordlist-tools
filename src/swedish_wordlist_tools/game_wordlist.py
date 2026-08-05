@@ -34,7 +34,7 @@ def standalone_saldo_forms(path: Path) -> set[str]:
 
 
 def canonical_adjective_forms(path: Path) -> set[str]:
-    """Read playable candidates from the canonical generated adjective artifact."""
+    """Read candidates from the canonical generated adjective artifact."""
 
     result: set[str] = set()
     if not path.exists():
@@ -96,10 +96,12 @@ def filter_game_words(
 def build_game_wordlist(
     input_path: Path = DEFAULT_INPUT,
     saldo_path: Path = DEFAULT_SALDO,
-    adjective_forms_path: Path = DEFAULT_ADJECTIVE_FORMS,
     output_path: Path = DEFAULT_OUTPUT,
     report_path: Path = DEFAULT_REPORT,
+    adjective_forms_path: Path = DEFAULT_ADJECTIVE_FORMS,
 ) -> dict[str, object]:
+    """Build the game list while preserving the historic four positional arguments."""
+
     saldo_forms = standalone_saldo_forms(saldo_path)
     adjective_forms = canonical_adjective_forms(adjective_forms_path)
     allowed_forms = saldo_forms | adjective_forms
@@ -145,17 +147,14 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = build_parser().parse_args()
     report = build_game_wordlist(
-        args.input,
-        args.saldo,
-        args.adjective_forms,
-        args.output,
-        args.report,
+        input_path=args.input,
+        saldo_path=args.saldo,
+        output_path=args.output,
+        report_path=args.report,
+        adjective_forms_path=args.adjective_forms,
     )
     print(f"Källformer totalt: {report['source_forms']}")
-    print(
-        "Kanoniska adjektivformer: "
-        f"{report['canonical_adjective_form_count']}"
-    )
+    print(f"Kanoniska adjektivformer: {report['canonical_adjective_form_count']}")
     print(f"Bortfiltrerade icke spelbara former: {report['rejected_non_playable_forms']}")
     print(f"Bortfiltrerade sammansättnings-/citatvarianter: {report['rejected_non_standalone_saldo_forms']}")
     print(f"Dubletter efter gemener/normalisering: {report['duplicate_after_normalisation']}")
