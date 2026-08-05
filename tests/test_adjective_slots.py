@@ -107,6 +107,13 @@ class AdjectiveSlotsTests(unittest.TestCase):
         self.assertEqual(("beige", "beigea"), slots.written_forms())
         self.assertEqual(("mostly_uninflected", "occasional"), tuple(item.label for item in slots.restrictions))
 
+    def test_missing_text_contributes_only_the_lemma(self) -> None:
+        for lemma in ("abortframkallande", "ajour", "aktersta"):
+            slots = self.parse(lemma, "")
+            self.assertEqual((lemma,), slots.written_forms())
+            self.assertEqual("lemma_only_no_inflection_text", slots.rule)
+            self.assertEqual("lemma", slots.forms[0].slot)
+
     def test_rejects_truncated_comparison(self) -> None:
         self.assertIsNone(interpret_simple_adjective_slots({"normaliserat_ord": "nära", "text": "komp. närmare el. närmre, superl. närmast el. närm"}))
 
