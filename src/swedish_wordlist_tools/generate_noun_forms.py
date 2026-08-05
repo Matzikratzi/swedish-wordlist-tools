@@ -10,6 +10,7 @@ from .compare_sources import _saol_upos
 from .inflect import GeneratedEntry, GeneratedWordForm, generate_entry
 from .jsonl import read_jsonl
 from .noun_paradigm import complete_noun_entry
+from .saol_row_interpreter import interpret_noun_row
 
 DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
 DEFAULT_JSONL = Path("reports/saol14-noun-forms.jsonl")
@@ -38,25 +39,35 @@ def _form_dict(form: GeneratedWordForm, stage: str) -> dict[str, Any]:
     }
 
 
+def _unsupported_comparison(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "record_id": _record_id(record),
+        "lemma": str(record.get("normaliserat_ord", "")),
+        "homonym_number": str(record.get("homonr", "")),
+        "notation": str(record.get("text", "")),
+        "status": "unsupported",
+        "legacy_forms": [],
+        "canonical_forms": [],
+        "added_by_completion": [],
+        "removed_by_completion": [],
+    }
+
+
 def canonical_noun_row(record: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     if _saol_upos(record) != "NOUN":
         return None, None
+
+    # The generic legacy generator accepts any sequence of word-like tokens as
+    # explicit forms. For nouns, the row interpreter is the authority on
+    # whether the text is actually valid SAOL inflection notation.
+    if interpret_noun_row(record) is None:
+        return None, _unsupported_comparison(record)
 
     initial = generate_entry(record)
     completed = complete_noun_entry(record, initial)
     canonical = completed or initial
     if canonical is None:
-        return None, {
-            "record_id": _record_id(record),
-            "lemma": str(record.get("normaliserat_ord", "")),
-            "homonym_number": str(record.get("homonr", "")),
-            "notation": str(record.get("text", "")),
-            "status": "unsupported",
-            "legacy_forms": [],
-            "canonical_forms": [],
-            "added_by_completion": [],
-            "removed_by_completion": [],
-        }
+        return None, _unsupported_comparison(record)
 
     initial_forms = tuple(initial.word_forms if initial is not None else ())
     canonical_forms = tuple(canonical.word_forms)
