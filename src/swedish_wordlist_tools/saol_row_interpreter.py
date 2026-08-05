@@ -141,7 +141,8 @@ def apply_form_token(
     """Compatibility wrapper for non-noun callers that provide a raw token.
 
     Historical callers such as the verb-slot interpreter inflect the first
-    word of a phrase (for example ``blamera sig`` -> ``blamerade sig``).
+    word of a phrase. Bar-marked tail replacement must still be honored for
+    that first word, for example ``före|ta`` in ``företa sig``.
     Canonical noun interpretation bypasses this wrapper and uses the noun-
     specific last-word realization above.
     """
@@ -149,6 +150,11 @@ def apply_form_token(
     operation = parse_form_operation(token)
     if operation is None:
         return None
+    if operation.kind is FormOperationKind.REPLACE_TAIL:
+        parts = _compound_parts(record, lemma)
+        if parts is not None:
+            prefix, _head = parts
+            return prefix + operation.value
     return apply_form_operation(
         lemma,
         operation,
