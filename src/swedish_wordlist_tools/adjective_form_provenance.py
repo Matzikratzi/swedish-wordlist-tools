@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 _OPERATION = re.compile(r"[+-]?[a-zåäöéü]+", re.IGNORECASE)
 _LABELS = {"pl", "n", "best", "mask", "komp", "superl"}
+
+
+@dataclass(frozen=True)
+class FormProvenance:
+    kind: str
+    source_token: str = ""
 
 
 def _tokens(notation: str) -> tuple[str, ...]:
@@ -36,7 +43,7 @@ def slot_operation_token(slot: str, notation: str) -> str | None:
     ):
         return lexical[-1]
     # In notation such as ``n. +, +a`` the unchanged neuter is written as a
-    # bare plus sign, which is intentionally absent from _OPERATION.  The sole
+    # bare plus sign, which is intentionally absent from _OPERATION. The sole
     # lexical operation token therefore supplies the plural slot.
     if slot == "definite_or_plural" and normalized.startswith("n. +,") and lexical:
         return lexical[-1]
@@ -49,11 +56,13 @@ def slot_operation_token(slot: str, notation: str) -> str | None:
     return None
 
 
-def form_provenance(*, written_form: str, lemma: str, slot: str, notation: str) -> str:
-    """Describe how a canonical generated form was obtained.
+def form_provenance_details(
+    *, written_form: str, lemma: str, slot: str, notation: str
+) -> FormProvenance:
+    """Describe how one canonical adjective form was obtained.
 
-    This function is called by the generator. Validators and mismatch reports
-    consume the stored value and must not infer it by parsing notation again.
+    The generator stores both the operation kind and the exact SAOL token.
+    Validators and reports consume these fields and do not parse notation again.
     """
 
     form = str(written_form or "").casefold()
@@ -62,19 +71,32 @@ def form_provenance(*, written_form: str, lemma: str, slot: str, notation: str) 
     tokens = _tokens(normalized)
 
     if form == folded_lemma:
-        return "lemma"
-    if form in {token for token in tokens if not token.startswith(("+", "-"))}:
-        return "explicit"
+        return FormProvenance("lemma")
+    explicit_tokens = {token for token in tokens if not token.startswith(("+", "-"))}
+    if form in explicit_tokens:
+        return FormProvenance("explicit", form)
 
     token = slot_operation_token(slot, normalized)
     if token:
-        return _operation_kind(token)
+        return FormProvenance(_operation_kind(token), token)
 
     # Parallel paradigms separated by ``_`` may imply an alternative common
     # form from an explicitly written alternative neuter/plural pair, e.g.
-    # ``fasetterat +e _ facetterat +e`` -> ``facetterad``.  The alternative
-    # stem is supplied explicitly by SAOL, rather than inferred from the lemma.
+    # ``fasetterat +e _ facetterat +e`` -> ``facetterad``. The alternative
+    # stem is supplied explicitly by SAOL, but no single surface token equals
+    # the reconstructed common form.
     if slot == "common_singular" and " _ " in normalized:
-        return "explicit"
+        return FormProvenance("explicit", normalized.split(" _ ", 1)[1])
 
-    return "unknown"
+    return FormProvenance("unknown")
+
+
+def form_provenance(*, written_form: str, lemma: str, slot: str, notation: str) -> str:
+    """Backward-compatible shorthand returning only the provenance kind."""
+
+    return form_provenance_details(
+        written_form=written_form,
+        lemma=lemma,
+        slot=slot,
+        notation=notation,
+    ).kind
