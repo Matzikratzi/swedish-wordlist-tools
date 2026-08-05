@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Any, Iterable
 
+from .adjective_form_provenance import form_provenance
 from .analyze_adjectives import _interpret_record, _value
 from .jsonl import read_jsonl
 from .saol_boundaries import restore_replacement_bar_prefix
@@ -24,19 +25,24 @@ def generated_row(record: dict[str, Any]) -> dict[str, Any] | None:
     lemma = slots.lemma
     stycke = _value(record, "stycke")
     notation = _value(corrected, "text")
-    forms = [
-        {
-            "written_form": restore_replacement_bar_prefix(
-                stycke=stycke,
-                lemma=lemma,
-                notation=notation,
-                written_form=form.written_form,
-            ),
+    forms = []
+    for form in slots.forms:
+        written_form = restore_replacement_bar_prefix(
+            stycke=stycke,
+            lemma=lemma,
+            notation=notation,
+            written_form=form.written_form,
+        )
+        forms.append({
+            "written_form": written_form,
             "slot": form.slot,
-            "provenance": form.provenance,
-        }
-        for form in slots.forms
-    ]
+            "provenance": form_provenance(
+                written_form=written_form,
+                lemma=lemma,
+                slot=form.slot,
+                notation=notation,
+            ),
+        })
 
     return {
         "record_id": str(record.get("id") or record.get("subnr") or ""),
