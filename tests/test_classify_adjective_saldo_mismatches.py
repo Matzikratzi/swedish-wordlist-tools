@@ -6,7 +6,7 @@ from swedish_wordlist_tools.classify_adjective_saldo_mismatches import classify_
 
 
 class ClassifyAdjectiveSaldoMismatchesTest(unittest.TestCase):
-    def test_explicit_form_is_saldo_coverage_difference(self) -> None:
+    def test_explicit_form_is_sent_to_saldo_review(self) -> None:
         row = classify_row({
             "lemma": "bemälde",
             "missing_forms": [{
@@ -18,9 +18,9 @@ class ClassifyAdjectiveSaldoMismatchesTest(unittest.TestCase):
         assert row is not None
         form = row["classified_missing_forms"][0]
         self.assertEqual(form["derivation"], "explicit")
-        self.assertEqual(form["preliminary_cause"], "saldo_coverage_difference")
+        self.assertEqual(form["preliminary_cause"], "needs_saldo_review")
 
-    def test_replace_tail_requires_parser_or_saldo_review(self) -> None:
+    def test_replace_tail_requires_manual_review(self) -> None:
         row = classify_row({
             "lemma": "allgod",
             "missing_forms": [{
@@ -32,9 +32,9 @@ class ClassifyAdjectiveSaldoMismatchesTest(unittest.TestCase):
         assert row is not None
         form = row["classified_missing_forms"][0]
         self.assertEqual(form["derivation"], "replace_tail")
-        self.assertEqual(form["preliminary_cause"], "needs_parser_or_saldo_review")
+        self.assertEqual(form["preliminary_cause"], "needs_manual_review")
 
-    def test_append_provenance_is_used_directly(self) -> None:
+    def test_append_provenance_requires_manual_review(self) -> None:
         row = classify_row({
             "lemma": "bakåtböjd",
             "effective_notation": "deliberately ignored",
@@ -47,9 +47,9 @@ class ClassifyAdjectiveSaldoMismatchesTest(unittest.TestCase):
         assert row is not None
         form = row["classified_missing_forms"][0]
         self.assertEqual(form["derivation"], "append")
-        self.assertEqual(form["preliminary_cause"], "needs_parser_or_saldo_review")
+        self.assertEqual(form["preliminary_cause"], "needs_manual_review")
 
-    def test_missing_lemma_points_to_alignment(self) -> None:
+    def test_missing_lemma_points_to_alignment_review(self) -> None:
         row = classify_row({
             "lemma": "facetterad",
             "missing_forms": [{
@@ -61,7 +61,23 @@ class ClassifyAdjectiveSaldoMismatchesTest(unittest.TestCase):
         assert row is not None
         form = row["classified_missing_forms"][0]
         self.assertEqual(form["derivation"], "lemma")
-        self.assertEqual(form["preliminary_cause"], "saldo_alignment_problem")
+        self.assertEqual(form["preliminary_cause"], "needs_saldo_alignment_review")
+
+    def test_source_correction_is_suspected_saol_error(self) -> None:
+        row = classify_row({
+            "lemma": "anhörig",
+            "source_correction_applied": True,
+            "missing_forms": [{
+                "written_form": "anhöriga",
+                "slot": "definite_or_plural",
+                "provenance": "append",
+            }],
+        })
+        assert row is not None
+        self.assertEqual(
+            "suspected_saol_error",
+            row["classified_missing_forms"][0]["preliminary_cause"],
+        )
 
     def test_rows_without_missing_forms_are_ignored(self) -> None:
         self.assertIsNone(classify_row({"lemma": "glad", "missing_forms": []}))
