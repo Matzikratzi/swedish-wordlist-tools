@@ -21,6 +21,30 @@ class GenerateAdjectiveFormsTests(unittest.TestCase):
             ["förstfödd", "förstfött", "förstfödda"],
             [form["written_form"] for form in row["forms"]],
         )
+        self.assertEqual(
+            ["lemma", "replace_tail", "append"],
+            [form["provenance"] for form in row["forms"]],
+        )
+
+    def test_regular_forms_get_operation_provenance(self) -> None:
+        row = generated_row({
+            "normaliserat_ord": "glad",
+            "homonr": "1",
+            "ordkl": "adj. <i>+t +a</i>",
+            "stycke": "glad",
+            "text": "+t +a",
+            "upos": "ADJ",
+            "subnr": 1,
+        })
+        assert row is not None
+        self.assertEqual(
+            ["glad", "glatt", "glada"],
+            [form["written_form"] for form in row["forms"]],
+        )
+        self.assertEqual(
+            ["lemma", "append", "append"],
+            [form["provenance"] for form in row["forms"]],
+        )
 
     def test_generation_applies_documented_source_correction(self) -> None:
         row = generated_row({
@@ -38,6 +62,10 @@ class GenerateAdjectiveFormsTests(unittest.TestCase):
         self.assertEqual(
             ["anhörig", "anhöriga"],
             [form["written_form"] for form in row["forms"]],
+        )
+        self.assertEqual(
+            ["lemma", "append"],
+            [form["provenance"] for form in row["forms"]],
         )
 
 
