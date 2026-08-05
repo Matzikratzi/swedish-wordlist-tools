@@ -1,9 +1,11 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import json
 import unittest
 
 from swedish_wordlist_tools.game_wordlist import (
     build_game_wordlist,
+    canonical_adjective_forms,
     filter_game_words,
     normalise_game_word,
     standalone_saldo_forms,
@@ -68,11 +70,31 @@ class GameWordlistTests(unittest.TestCase):
         self.assertNotIn("abborrpinn", allowed)
         self.assertNotIn("abborrpinn-", allowed)
 
+    def test_reads_canonical_adjective_artifact(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "adjectives.jsonl"
+            path.write_text(
+                json.dumps({
+                    "lemma": "allgod",
+                    "forms": [
+                        {"written_form": "allgod"},
+                        {"written_form": "allgott"},
+                        {"written_form": "allgoda"},
+                    ],
+                }, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                canonical_adjective_forms(path),
+                {"allgod", "allgott", "allgoda"},
+            )
+
     def test_builds_game_file_and_report(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "saldo.txt"
             saldo_path = root / "saldo.xml"
+            adjective_path = root / "adjectives.jsonl"
             output = root / "game.txt"
             report_path = root / "report.json"
             source.write_text(
@@ -80,14 +102,59 @@ class GameWordlistTests(unittest.TestCase):
                 encoding="utf-8",
             )
             saldo_path.write_text(SALDO_XML, encoding="utf-8")
-            report = build_game_wordlist(source, saldo_path, output, report_path)
+            adjective_path.write_text(
+                json.dumps({
+                    "lemma": "allgod",
+                    "forms": [
+                        {"written_form": "allgod"},
+                        {"written_form": "allgott"},
+                    ],
+                }, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            report = build_game_wordlist(
+                source,
+                saldo_path,
+                adjective_path,
+                output,
+                report_path,
+            )
             self.assertEqual(
                 output.read_text(encoding="utf-8"),
-                "abborrpinne\nabborrpinnens\nabborrpinnes\nabbé\nabbén\n",
+                "abborrpinne\nabborrpinnens\nabborrpinnes\nabbé\nabbén\nallgod\nallgott\n",
             )
             self.assertTrue(report_path.exists())
             self.assertEqual(report["rejected_non_standalone_saldo_forms"], 1)
-            self.assertEqual(report["game_words"], 5)
+            self.assertEqual(report["canonical_adjective_form_count"], 2)
+            self.assertEqual(report["game_words"], 7)
+
+    def test_keeps_adjective_form_missing_from_saldo(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "saldo.txt"
+            saldo_path = root / "saldo.xml"
+            adjective_path = root / "adjectives.jsonl"
+            output = root / "game.txt"
+            report_path = root / "report.json"
+            source.write_text("abborrpinne\n", encoding="utf-8")
+            saldo_path.write_text(SALDO_XML, encoding="utf-8")
+            adjective_path.write_text(
+                json.dumps({
+                    "lemma": "durabel",
+                    "forms": [{"written_form": "durabla"}],
+                }, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+
+            build_game_wordlist(
+                source,
+                saldo_path,
+                adjective_path,
+                output,
+                report_path,
+            )
+
+            self.assertIn("durabla", output.read_text(encoding="utf-8").splitlines())
 
 
 if __name__ == "__main__":
