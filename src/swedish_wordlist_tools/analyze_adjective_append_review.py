@@ -11,7 +11,7 @@ DEFAULT_TEXT = Path("reports/saol14-adjective-append-review.txt")
 DEFAULT_JSON = Path("reports/saol14-adjective-append-review.json")
 DEFAULT_JSONL = Path("reports/saol14-adjective-append-review.jsonl")
 
-LITERAL_APPEND_TOKENS = {"+a", "+e", "+ma"}
+LITERAL_APPEND_TOKENS = {"+a", "+t", "+e", "+ma"}
 
 
 def read_jsonl(path: Path) -> Iterable[dict[str, Any]]:
@@ -30,8 +30,6 @@ def analyze_case(case: dict[str, Any]) -> dict[str, Any]:
 
     if token in LITERAL_APPEND_TOKENS and literal_form == form:
         assessment = "literal_append_confirms_form"
-    elif token == "+t":
-        assessment = "needs_adjective_t_spelling_review"
     else:
         assessment = "needs_manual_append_review"
 
@@ -53,8 +51,9 @@ def build_report(rows: Iterable[dict[str, Any]]) -> tuple[dict[str, Any], list[d
         "cases": len(cases),
         "assessment_counts": dict(counts.most_common()),
         "note": (
-            "Literal +a, +e and +ma operations are checked as base + suffix. "
-            "+t remains separate because adjective spelling may change the base ending."
+            "SAOL +a, +t, +e and +ma operations are checked literally as base + suffix. "
+            "Irregular adjective spellings are written out explicitly in SAOL rather than "
+            "being encoded by a + operation."
         ),
     }, cases
 
