@@ -59,6 +59,26 @@ def _clean_notation_spelling(text: str) -> str:
     return " ".join(_BRACKET_COMMENT.sub("", without_tags).split())
 
 
+def _unwrap_token(token: str) -> str:
+    """Remove punctuation that only wraps a notation token."""
+
+    return _HTML_TAG.sub("", token.strip()).strip("()")
+
+
+def _is_comment_word(token: str) -> bool:
+    """Return true for one word in SAOL's colon-marked explanatory prose."""
+
+    raw = _unwrap_token(token)
+    return bool(raw) and not raw.startswith(("+", "-")) and raw.endswith(":")
+
+
+def _is_generic_label(token: str) -> bool:
+    """Return true for an abbreviated grammatical or usage label."""
+
+    raw = _unwrap_token(token)
+    return bool(raw) and not raw.startswith(("+", "-")) and raw.endswith(".")
+
+
 def normalize_notation(text: str) -> str:
     return _clean_notation_spelling(text).casefold()
 
@@ -85,7 +105,7 @@ def tokenize_notation(text: str) -> tuple[str, ...] | None:
 
 
 def parse_form_operation(token: str) -> FormOperation | None:
-    raw = _HTML_TAG.sub("", token.strip())
+    raw = _unwrap_token(token)
     normalized = raw.casefold()
     if normalized == "+":
         return FormOperation(FormOperationKind.UNCHANGED, source=raw)
@@ -105,12 +125,13 @@ def parse_form_operation(token: str) -> FormOperation | None:
             return FormOperation(FormOperationKind.REPLACE_TAIL, value, raw)
         return None
 
-    # Token-final colon and period belong to SAOL's explanatory metalanguage,
-    # not to explicit word forms. Colons inside forms remain valid (BB:t), as
-    # do punctuation-free full forms with capitals, hyphens and diacritics.
+    # Colon-marked prose and abbreviated labels are metadata, not forms.
+    # Colons inside forms remain valid (BB:t), as do punctuation-free full
+    # forms with capitals, hyphens and diacritics.
     if (
         not raw
-        or raw.endswith((":", "."))
+        or _is_comment_word(raw)
+        or _is_generic_label(raw)
         or not raw[0].isalnum()
         or not _EXPLICIT_FORM.fullmatch(raw)
     ):
@@ -126,11 +147,13 @@ def assign_labeled_slots(
     definite_plural_slot: str,
     ignored_markers: frozenset[str] = frozenset(),
 ) -> tuple[SlotOperation, ...] | None:
-    """Assign SAOL form operations using common ``best.``, ``pl.`` and ``el.`` labels.
+    """Assign form operations while ignoring SAOL's explanatory prose.
 
-    Slot names are supplied by the ordklass layer. The shared interpreter owns
-    only the notation state: first unlabelled form, later plural form, explicit
-    plural labels, definite-plural labels and alternatives of the previous slot.
+    Slot names are supplied by the ordklass layer. Colon-marked words form
+    ordinary Swedish comments and are skipped without interpreting their
+    meaning. Unknown period-final tokens are grammatical or usage labels and
+    are skipped in the same way. The form operations and explicit forms that
+    remain are assigned to the best available slots.
     """
 
     result: list[SlotOperation] = []
@@ -142,8 +165,9 @@ def assign_labeled_slots(
     saw_notation_marker = False
 
     for token in tokens:
-        lower = token.casefold()
-        if token in {";", ","}:
+        raw = _unwrap_token(token)
+        lower = raw.casefold()
+        if raw in {";", ","}:
             saw_notation_marker = True
             continue
         if lower in ignored_markers:
@@ -164,8 +188,11 @@ def assign_labeled_slots(
             pending_best = False
             alternative_next = False
             continue
+        if _is_comment_word(raw) or _is_generic_label(raw):
+            saw_notation_marker = True
+            continue
 
-        operation = parse_form_operation(token)
+        operation = parse_form_operation(raw)
         if operation is None:
             return None
         if operation.kind is not FormOperationKind.EXPLICIT:
@@ -186,7 +213,7 @@ def assign_labeled_slots(
             slot = plural_slot
             context = "after_plural"
 
-        result.append(SlotOperation(slot, token, operation))
+        result.append(SlotOperation(slot, raw, operation))
         last_slot = slot
         pending_best = False
 
