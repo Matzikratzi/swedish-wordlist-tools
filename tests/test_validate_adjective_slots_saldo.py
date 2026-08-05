@@ -20,6 +20,7 @@ def generated(lemma: str, forms: list[tuple[str, str]]) -> dict[str, object]:
                 "slot": slot,
                 "provenance": "row",
                 "source_token": "",
+                "operation_base": "",
             }
             for written_form, slot in forms
         ],
@@ -61,6 +62,7 @@ class ValidateAdjectiveSlotsSaldoTests(unittest.TestCase):
                 "slot": "neuter_singular",
                 "provenance": "row",
                 "source_token": "",
+                "operation_base": "",
                 "in_saldo": False,
             }],
             row["missing_forms"],
