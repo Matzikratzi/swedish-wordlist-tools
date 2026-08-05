@@ -54,6 +54,7 @@ saol14-analyze-adjective-replace-tail = "swedish_wordlist_tools.analyze_adjectiv
 saol14-classify-adjective-saldo-mismatches = "swedish_wordlist_tools.classify_adjective_saldo_mismatches:main"
 saol14-analyze-adjective-saldo-global-coverage = "swedish_wordlist_tools.analyze_adjective_saldo_global_coverage:main"
 saol14-analyze-adjective-saldo-absent-review = "swedish_wordlist_tools.analyze_adjective_saldo_absent_review:main"
+saol14-analyze-adjective-replace-tail-review = "swedish_wordlist_tools.analyze_adjective_replace_tail_review:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
