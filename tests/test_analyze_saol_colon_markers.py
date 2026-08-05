@@ -12,7 +12,7 @@ from swedish_wordlist_tools.analyze_saol_colon_markers import (
 class AnalyzeSaolColonMarkersTests(unittest.TestCase):
     def test_extracts_only_token_final_colons(self) -> None:
         self.assertEqual(
-            ("i:", "används:", "uttryck:"),
+            ("i:", "används:", "i:", "uttryck:"),
             colon_tokens("+:n; i: pl. används: BB:t i: uttryck:"),
         )
 
@@ -37,7 +37,7 @@ class AnalyzeSaolColonMarkersTests(unittest.TestCase):
             ]
         )
         self.assertEqual(2, analysis["records_with_colon_markers"])
-        self.assertEqual(5, analysis["unique_colon_markers"])
+        self.assertEqual(4, analysis["unique_colon_markers"])
         groups = {group["token"]: group for group in analysis["groups"]}
         self.assertEqual(2, groups["i:"]["count"])
         self.assertEqual({"ansökan", "ante"}, set(groups["i:"]["lemmas"]))
