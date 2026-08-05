@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -56,27 +57,37 @@ def pipeline_commands(args: argparse.Namespace) -> list[list[str]]:
             python,
             "-m",
             "swedish_wordlist_tools.audit_game_adjective_integration",
-            "--input",
             str(args.input),
             "--saldo",
             str(args.saldo),
             "--adjective-forms",
             str(args.adjective_forms),
-            "--final-adjudication",
+            "--adjudication",
             str(args.final_adjudication),
             "--text",
             str(args.audit_text),
             "--json",
             str(args.audit_json),
-            "--added-words",
+            "--added",
             str(args.added_words),
         ],
     ]
 
 
-def run_pipeline(args: argparse.Namespace, runner: Runner = subprocess_runner) -> None:
+def assert_clean_audit(path: Path) -> dict[str, object]:
+    report = json.loads(path.read_text(encoding="utf-8"))
+    if report.get("integration_is_clean") is not True:
+        raise RuntimeError(
+            "Spelordlistan skapades, men adjektivintegrationen är inte ren. "
+            f"Se {path}."
+        )
+    return report
+
+
+def run_pipeline(args: argparse.Namespace, runner: Runner = subprocess_runner) -> dict[str, object]:
     for command in pipeline_commands(args):
         runner(command)
+    return assert_clean_audit(args.audit_json)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -106,8 +117,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
-    run_pipeline(args)
+    report = run_pipeline(args)
     print("Spelordlistebygge klart och integrationsrevisionen är ren.")
+    print(f"Ord i spelordlistan: {report.get('new_game_words', '?')}")
+    print(f"Tillagda adjektivformer: {report.get('added_game_words', '?')}")
     print(f"Spelordlista: {args.output}")
     print(f"Revisionsrapport: {args.audit_text}")
 
