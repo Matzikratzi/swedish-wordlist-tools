@@ -40,13 +40,13 @@ def read_confirmed_absent(path: Path) -> set[tuple[str, str, str]]:
 
 def adjudicate(status: str, confirmed_absent: bool) -> str:
     if status == "absent_from_all_saldo" and confirmed_absent:
-        return "confirmed_saldo_gap"
+        return "confirmed_saldo_form_gap"
     if status == "absent_from_all_saldo":
         return "unconfirmed_saldo_or_saol_review"
     if status == "found_in_other_saldo_adjective_analysis":
         return "saldo_adjective_alignment"
     if status == "only_non_adjective_saldo_match":
-        return "saldo_pos_or_adjective_coverage_review"
+        return "confirmed_saldo_adjective_analysis_gap"
     return "unresolved"
 
 
@@ -88,24 +88,35 @@ def build_report(
         if len(examples[case["final_adjudication"]]) < 30:
             examples[case["final_adjudication"]].append(case)
 
+    saldo_deficiency_total = (
+        counts["confirmed_saldo_form_gap"]
+        + counts["confirmed_saldo_adjective_analysis_gap"]
+    )
     report = {
         "cases": len(cases),
+        "saldo_deficiency_total": saldo_deficiency_total,
         "adjudication_counts": dict(counts.most_common()),
         "slot_counts": dict(slot_counts.most_common()),
         "examples": dict(examples),
         "note": (
             "All cases are unique by lemma, slot and written form. Forms absent from "
-            "all SALDO analyses are called confirmed SALDO gaps only when the separate "
-            "SAOL-notation review has confirmed their generation. Forms found under "
-            "another adjective analysis are alignment cases; forms found only outside "
-            "ADJ remain POS or adjective-coverage review cases."
+            "all SALDO analyses are confirmed form gaps only when the separate "
+            "SAOL-notation review has confirmed their generation. Forms found only "
+            "outside ADJ are confirmed missing adjective analyses: the surface form "
+            "exists in SALDO, but its SAOL-attested adjective analysis does not. Forms "
+            "found under another adjective analysis remain alignment cases."
         ),
     }
     return report, cases
 
 
 def render_text(report: dict[str, Any]) -> str:
-    lines = [f"Unika adjektivavvikelser: {report['cases']}", "", "Slutlig bedömning:"]
+    lines = [
+        f"Unika adjektivavvikelser: {report['cases']}",
+        f"Bekräftade SALDO-brister totalt: {report['saldo_deficiency_total']}",
+        "",
+        "Slutlig bedömning:",
+    ]
     for status, count in report["adjudication_counts"].items():
         lines.append(f"  {count:6d}  {status}")
     lines.extend(["", "Per slot:"])
@@ -154,6 +165,7 @@ def main() -> None:
     args.json.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     write_jsonl(args.jsonl, cases)
     print(f"Unika adjektivavvikelser: {report['cases']}")
+    print(f"Bekräftade SALDO-brister totalt: {report['saldo_deficiency_total']}")
     print(f"Text: {args.text}")
     print(f"JSON: {args.json}")
     print(f"JSONL: {args.jsonl}")
