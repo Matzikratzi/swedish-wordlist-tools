@@ -58,15 +58,25 @@ def replay_generated_form(
     token = str(source_token or "").strip().casefold()
     expected = str(written_form or "").casefold()
     lemma_base = str(lemma or "").casefold()
-    base = str(operation_base or "").casefold() or lemma_base
+    stored_base = str(operation_base or "").casefold()
+    base = stored_base or lemma_base
 
     if provenance == "lemma":
         replayed = base
     elif provenance == "explicit":
-        operation = parse_form_operation(token)
-        if operation is None or " " in token:
-            return ReplayResult("unsupported", None)
-        replayed = apply_form_operation(base, operation)
+        # A compound source token such as ``facetterat +e`` documents the
+        # alternative paradigm from which the common form was reconstructed.
+        # The canonical generator stores that reconstructed form itself as the
+        # operation base, so replay consists of verifying the stored base.
+        if " " in token:
+            if not stored_base:
+                return ReplayResult("unsupported", None)
+            replayed = stored_base
+        else:
+            operation = parse_form_operation(token)
+            if operation is None:
+                return ReplayResult("unsupported", None)
+            replayed = apply_form_operation(base, operation)
     elif provenance in {"append", "replace_tail"}:
         operation = parse_form_operation(token)
         if operation is None:
@@ -84,7 +94,7 @@ def replay_generated_form(
                     word, suffix, slot=slot
                 ),
             )
-            if replayed != expected and not operation_base:
+            if replayed != expected and not stored_base:
                 inverse_base = _inverse_append_base(
                     expected, operation.value, slot=slot
                 )
