@@ -8,6 +8,7 @@ from typing import Any, Iterable
 
 DEFAULT_INPUT = Path("reports/saol14-adjective-saldo-global-coverage.jsonl")
 DEFAULT_REPLACE_TAIL_REVIEW = Path("reports/saol14-adjective-replace-tail-review.jsonl")
+DEFAULT_APPEND_REVIEW = Path("reports/saol14-adjective-append-review.jsonl")
 DEFAULT_TEXT = Path("reports/saol14-adjective-saldo-absent-review.txt")
 DEFAULT_JSON = Path("reports/saol14-adjective-saldo-absent-review.json")
 DEFAULT_JSONL = Path("reports/saol14-adjective-saldo-absent-review.jsonl")
@@ -40,6 +41,16 @@ def read_confirmed_replace_tail(path: Path) -> set[tuple[str, str, str]]:
     }
 
 
+def read_confirmed_append(path: Path) -> set[tuple[str, str, str]]:
+    if not path.exists():
+        return set()
+    return {
+        _case_key(row)
+        for row in read_jsonl(path)
+        if row.get("append_assessment") == "literal_append_confirms_form"
+    }
+
+
 def review_priority(form: dict[str, Any]) -> tuple[int, str]:
     provenance = str(form.get("provenance") or "")
     token = str(form.get("source_token") or "")
@@ -58,6 +69,7 @@ def review_assessment(
     form: dict[str, Any],
     *,
     replace_tail_confirmed: bool = False,
+    append_confirmed: bool = False,
 ) -> str:
     """Choose the next evidence-based action for a SALDO-absent form."""
 
@@ -66,6 +78,8 @@ def review_assessment(
     if provenance == "explicit":
         return "strong_saldo_gap_candidate"
     if provenance == "replace_tail" and replace_tail_confirmed:
+        return "strong_saldo_gap_candidate"
+    if provenance == "append" and append_confirmed:
         return "strong_saldo_gap_candidate"
     if provenance == "append" and token in REGULAR_APPEND_TOKENS:
         return "standard_notation_saldo_gap_candidate"
@@ -77,8 +91,10 @@ def review_assessment(
 def build_report(
     rows: Iterable[dict[str, Any]],
     confirmed_replace_tail: set[tuple[str, str, str]] | None = None,
+    confirmed_append: set[tuple[str, str, str]] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     confirmed_replace_tail = confirmed_replace_tail or set()
+    confirmed_append = confirmed_append or set()
     cases: list[dict[str, Any]] = []
     for row in rows:
         for form in row.get("classified_missing_forms", ()):
@@ -86,10 +102,12 @@ def build_report(
                 continue
             case_identity = _case_key({**form, "lemma": row.get("lemma")})
             bar_confirmed = case_identity in confirmed_replace_tail
+            append_literal_confirmed = case_identity in confirmed_append
             rank, group = review_priority(form)
             assessment = review_assessment(
                 form,
                 replace_tail_confirmed=bar_confirmed,
+                append_confirmed=append_literal_confirmed,
             )
             cases.append({
                 "lemma": str(row.get("lemma") or ""),
@@ -103,6 +121,7 @@ def build_report(
                 "review_group": group,
                 "review_assessment": assessment,
                 "bar_notation_confirmed": bar_confirmed,
+                "literal_append_confirmed": append_literal_confirmed,
                 "priority": rank,
                 "notation": str(row.get("effective_notation") or row.get("notation") or ""),
                 "stycke": str(row.get("stycke") or ""),
@@ -131,6 +150,9 @@ def build_report(
         "confirmed_replace_tail_cases": sum(
             1 for case in cases if case["bar_notation_confirmed"]
         ),
+        "confirmed_append_cases": sum(
+            1 for case in cases if case["literal_append_confirmed"]
+        ),
         "review_group_counts": dict(group_counts.most_common()),
         "review_assessment_counts": dict(assessment_counts.most_common()),
         "slot_counts": dict(slot_counts.most_common()),
@@ -139,8 +161,8 @@ def build_report(
         "examples": dict(grouped_examples),
         "note": (
             "Only unique adjective forms absent from every SALDO analysis are included. "
-            "Explicit forms and tail replacements independently confirmed by SAOL's "
-            "lodstreck notation are strong SALDO-gap candidates."
+            "Explicit forms, lodstreck-confirmed replacements and literal append operations "
+            "are strong SALDO-gap candidates."
         ),
     }
     return report, cases
@@ -150,6 +172,7 @@ def render_text(report: dict[str, Any]) -> str:
     lines = [
         f"Former som saknas helt i SALDO: {report['cases']}",
         f"Replace-tail-former bekräftade av lodstreck: {report['confirmed_replace_tail_cases']}",
+        f"Append-former bekräftade bokstavligt: {report['confirmed_append_cases']}",
         "",
         "Bedömd nästa åtgärd:",
     ]
@@ -175,14 +198,16 @@ def render_text(report: dict[str, Any]) -> str:
                 f" | förekomster={item['source_occurrence_count']}"
                 if item["source_occurrence_count"] > 1 else ""
             )
-            confirmation = (
-                " | lodstreck=bekräftad" if item["bar_notation_confirmed"] else ""
-            )
+            confirmations = ""
+            if item["bar_notation_confirmed"]:
+                confirmations += " | lodstreck=bekräftad"
+            if item["literal_append_confirmed"]:
+                confirmations += " | append=bekräftad"
             lines.append(
                 f"  {item['lemma']} | {item['slot']}={item['written_form']} | "
                 f"{item['provenance']} | token={item['source_token']} | "
                 f"base={item['operation_base']} | assessment={item['review_assessment']}"
-                f"{confirmation}{occurrences}"
+                f"{confirmations}{occurrences}"
             )
     return "\n".join(lines) + "\n"
 
@@ -204,13 +229,23 @@ def main() -> None:
         type=Path,
         default=DEFAULT_REPLACE_TAIL_REVIEW,
     )
+    parser.add_argument(
+        "--append-review",
+        type=Path,
+        default=DEFAULT_APPEND_REVIEW,
+    )
     parser.add_argument("--text", type=Path, default=DEFAULT_TEXT)
     parser.add_argument("--json", type=Path, default=DEFAULT_JSON)
     parser.add_argument("--jsonl", type=Path, default=DEFAULT_JSONL)
     args = parser.parse_args()
 
-    confirmations = read_confirmed_replace_tail(args.replace_tail_review)
-    report, cases = build_report(read_jsonl(args.input), confirmations)
+    replace_tail_confirmations = read_confirmed_replace_tail(args.replace_tail_review)
+    append_confirmations = read_confirmed_append(args.append_review)
+    report, cases = build_report(
+        read_jsonl(args.input),
+        replace_tail_confirmations,
+        append_confirmations,
+    )
     args.text.parent.mkdir(parents=True, exist_ok=True)
     args.text.write_text(render_text(report), encoding="utf-8")
     args.json.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -219,6 +254,10 @@ def main() -> None:
     print(
         "Replace-tail-former bekräftade av lodstreck: "
         f"{report['confirmed_replace_tail_cases']}"
+    )
+    print(
+        "Append-former bekräftade bokstavligt: "
+        f"{report['confirmed_append_cases']}"
     )
     print(f"Text: {args.text}")
     print(f"JSON: {args.json}")
