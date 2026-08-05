@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,6 +14,7 @@ from .saol_notation import (
 
 HARD_CAP = 50
 W = r"[a-zåäöéü]+"
+_COMPOUND_PREFIX: ContextVar[str] = ContextVar("adjective_compound_prefix", default="")
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,16 @@ def _value(record: dict[str, Any], key: str) -> str:
     return "" if value is None or str(value) == "(null)" else str(value).strip()
 
 
+def _stycke_prefix(record: dict[str, Any], lemma: str) -> str:
+    stycke = re.sub(r"<[^>]+>", "", _value(record, "stycke")).casefold()
+    if "|" not in stycke:
+        return ""
+    prefix = "".join(stycke.split("|")[:-1])
+    prefix = re.sub(r"^\d+", "", prefix)
+    prefix = "".join(char for char in prefix if char.isalpha() or char == "-")
+    return prefix if prefix and lemma.startswith(prefix) else ""
+
+
 def _neuter_t(word: str) -> str:
     if word.endswith(("rd", "ld")):
         return word[:-1] + "t"
@@ -56,6 +68,9 @@ def _neuter_t(word: str) -> str:
 def _replace_tail(word: str, tail: str) -> str | None:
     if not tail or not tail.isalpha():
         return None
+    prefix = _COMPOUND_PREFIX.get()
+    if prefix and word.startswith(prefix):
+        return prefix + tail
     positions = [i for i, char in enumerate(word) if char == tail[0]]
     return None if not positions else word[: positions[-1]] + tail
 
@@ -315,4 +330,8 @@ def interpret_simple_adjective_slots(record: dict[str, Any]) -> AdjectiveSlots |
         )
     if len(raw_text) == HARD_CAP and ("komp." in text or "superl." in text):
         return None
-    return _regular(lemma, text) or _parallel(lemma, text) or _comparison(lemma, text) or _usage_restricted(lemma, text) or _generic(lemma, text) or _known_structures(lemma, text)
+    token = _COMPOUND_PREFIX.set(_stycke_prefix(record, lemma))
+    try:
+        return _regular(lemma, text) or _parallel(lemma, text) or _comparison(lemma, text) or _usage_restricted(lemma, text) or _generic(lemma, text) or _known_structures(lemma, text)
+    finally:
+        _COMPOUND_PREFIX.reset(token)
