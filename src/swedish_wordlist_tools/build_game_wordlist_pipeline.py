@@ -90,6 +90,16 @@ def run_pipeline(args: argparse.Namespace, runner: Runner = subprocess_runner) -
     return assert_clean_audit(args.audit_json)
 
 
+def summary_lines(report: dict[str, object], args: argparse.Namespace) -> list[str]:
+    return [
+        "Spelordlistebygge klart och integrationsrevisionen är ren.",
+        f"Ord i spelordlistan: {report['integrated_game_words']}",
+        f"Tillagda adjektivformer: {report['added_game_words']}",
+        f"Spelordlista: {args.output}",
+        f"Revisionsrapport: {args.audit_text}",
+    ]
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -118,11 +128,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = build_parser().parse_args()
     report = run_pipeline(args)
-    print("Spelordlistebygge klart och integrationsrevisionen är ren.")
-    print(f"Ord i spelordlistan: {report.get('new_game_words', '?')}")
-    print(f"Tillagda adjektivformer: {report.get('added_game_words', '?')}")
-    print(f"Spelordlista: {args.output}")
-    print(f"Revisionsrapport: {args.audit_text}")
+    for line in summary_lines(report, args):
+        print(line)
 
 
 if __name__ == "__main__":
