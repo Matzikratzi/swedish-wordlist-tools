@@ -42,17 +42,21 @@ class SlotOperation:
 
 
 _BRACKET_COMMENT = re.compile(r"\s*\[[^\]]*\]")
-_FORM_VALUE = re.compile(r":?[a-zåäöéü]+", re.IGNORECASE)
-_EXPLICIT_FORM = re.compile(r"[a-zåäöéü0-9][\wåäöéü:‐‑–-]*", re.IGNORECASE)
+_HTML_TAG = re.compile(r"</?[^>]+>")
+_FORM_PAYLOAD = re.compile(r"[^\s;,_]+")
+_EXPLICIT_FORM = re.compile(r"[^\s;,+_]+")
 _NOTATION_TOKEN_RE = re.compile(
-    r"pl\.|best\.|el\.|[;,]|[+\-][A-Za-zÅÄÖåäöÉéÜü:]*|"
-    r"[A-Za-zÅÄÖåäöÉéÜü0-9][\wÅÄÖåäöÉéÜü:‐‑–-]*",
+    r"pl\.|best\.|el\.|[;,]|[+\-][^\s;,_]*|[^\s;,+_]+",
     re.IGNORECASE,
 )
 
 
 def _clean_notation_spelling(text: str) -> str:
-    return " ".join(_BRACKET_COMMENT.sub("", text).split())
+    # Formatting tags are metadata, not parts of the written form. Preserve
+    # their text content: ``+<k>s</k>`` therefore becomes the single token
+    # ``+s`` rather than the spurious explicit forms ``k`` and ``s``.
+    without_tags = _HTML_TAG.sub("", text)
+    return " ".join(_BRACKET_COMMENT.sub("", without_tags).split())
 
 
 def normalize_notation(text: str) -> str:
@@ -60,7 +64,12 @@ def normalize_notation(text: str) -> str:
 
 
 def tokenize_notation(text: str) -> tuple[str, ...] | None:
-    """Tokenize one SAOL notation branch without changing form spelling."""
+    """Tokenize one SAOL notation branch without changing form spelling.
+
+    ``+`` and ``-`` are structural only at the beginning of a token. Their
+    entire payload is otherwise opaque and may contain colons, hyphens,
+    uppercase letters, diacritics or other non-separator characters.
+    """
 
     cleaned = _clean_notation_spelling(text)
     tokens: list[str] = []
@@ -76,23 +85,23 @@ def tokenize_notation(text: str) -> tuple[str, ...] | None:
 
 
 def parse_form_operation(token: str) -> FormOperation | None:
-    raw = token.strip()
+    raw = _HTML_TAG.sub("", token.strip())
     normalized = raw.casefold()
     if normalized == "+":
         return FormOperation(FormOperationKind.UNCHANGED, source=raw)
     if normalized.startswith("+-"):
         value = raw[2:]
-        if _FORM_VALUE.fullmatch(value):
+        if value and _FORM_PAYLOAD.fullmatch(value):
             return FormOperation(FormOperationKind.APPEND, value, raw)
         return None
     if normalized.startswith("+"):
         value = raw[1:]
-        if _FORM_VALUE.fullmatch(value):
+        if value and _FORM_PAYLOAD.fullmatch(value):
             return FormOperation(FormOperationKind.APPEND, value, raw)
         return None
     if normalized.startswith("-"):
         value = raw[1:]
-        if _FORM_VALUE.fullmatch(value):
+        if value and _FORM_PAYLOAD.fullmatch(value):
             return FormOperation(FormOperationKind.REPLACE_TAIL, value, raw)
         return None
     if _EXPLICIT_FORM.fullmatch(raw):
@@ -237,7 +246,7 @@ def split_alternative_branches(text: str) -> tuple[NotationBranch, ...]:
 
 def split_forms(text: str) -> tuple[str, ...]:
     normalized = normalize_notation(text)
-    normalized = normalized.replace(",", " ").replace(";", " ").replace(":", " ")
+    normalized = normalized.replace(",", " ").replace(";", " ")
     return tuple(
         token
         for token in normalized.split()
