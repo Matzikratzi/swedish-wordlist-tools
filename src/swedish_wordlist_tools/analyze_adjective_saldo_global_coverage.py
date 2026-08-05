@@ -35,23 +35,66 @@ def classify_global_presence(
     return "absent_from_all_saldo", []
 
 
+def _review_category(status: str) -> str:
+    return {
+        "found_in_other_saldo_adjective_analysis": "saldo_alignment_problem",
+        "only_non_adjective_saldo_match": "saldo_word_class_or_coverage_review",
+        "absent_from_all_saldo": "saldo_coverage_or_saol_review",
+    }[status]
+
+
+def _form_identity(form: dict[str, Any]) -> tuple[str, ...]:
+    """Identity for one generated slot form within a SAOL record.
+
+    Duplicate rows can arise when several selected SALDO analyses produce the
+    same comparison row. They must not inflate the number of linguistic cases.
+    """
+
+    return (
+        str(form.get("written_form") or "").casefold(),
+        str(form.get("slot") or ""),
+        str(form.get("provenance") or ""),
+        str(form.get("source_token") or ""),
+        str(form.get("operation_base") or "").casefold(),
+    )
+
+
+def _unique_forms(forms: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    unique: list[dict[str, Any]] = []
+    seen: set[tuple[str, ...]] = set()
+    for form in forms:
+        identity = _form_identity(form)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        unique.append(form)
+    return unique
+
+
 def analyze_rows(
     rows: Iterable[dict[str, Any]],
     form_index: dict[str, list[dict[str, Any]]],
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     output_rows: list[dict[str, Any]] = []
     status_counts: Counter[str] = Counter()
+    review_counts: Counter[str] = Counter()
     examples: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    raw_forms = 0
 
     for row in rows:
+        source_forms = list(row.get("classified_missing_forms", ()))
+        raw_forms += len(source_forms)
         classified_forms = []
-        for form in row.get("classified_missing_forms", ()):
+        for form in _unique_forms(source_forms):
             written_form = str(form.get("written_form") or "")
             status, analyses = classify_global_presence(written_form, form_index)
+            review_category = _review_category(status)
             status_counts[status] += 1
+            review_counts[review_category] += 1
             item = {
                 **form,
                 "global_saldo_status": status,
+                "global_review_category": review_category,
                 "global_saldo_analyses": [
                     {
                         "id": str(analysis.get("id") or ""),
@@ -72,19 +115,24 @@ def analyze_rows(
                     "slot": form.get("slot"),
                     "source_token": form.get("source_token"),
                     "provenance": form.get("provenance"),
+                    "review_category": review_category,
                     "analyses": item["global_saldo_analyses"],
                 })
         output_rows.append({**row, "classified_missing_forms": classified_forms})
 
+    unique_forms = sum(status_counts.values())
     report = {
         "rows": len(output_rows),
-        "forms": sum(status_counts.values()),
+        "raw_forms": raw_forms,
+        "unique_forms": unique_forms,
+        "duplicates_removed": raw_forms - unique_forms,
         "status_counts": dict(status_counts.most_common()),
+        "review_counts": dict(review_counts.most_common()),
         "examples": dict(examples),
         "note": (
-            "Each form already missing from the selected SALDO analysis is looked up in "
-            "the complete SALDO form index. This distinguishes an alignment/selection "
-            "problem from a form absent from SALDO altogether."
+            "Duplicate generated slot forms within one SAOL record are collapsed before "
+            "counting. Each unique form already missing from the selected SALDO analysis "
+            "is then looked up in the complete SALDO form index."
         ),
     }
     return report, output_rows
@@ -93,12 +141,17 @@ def analyze_rows(
 def render_text(report: dict[str, Any]) -> str:
     lines = [
         f"Rader: {report['rows']}",
-        f"Saknade former: {report['forms']}",
+        f"Saknade former, rått: {report['raw_forms']}",
+        f"Unika saknade former: {report['unique_forms']}",
+        f"Dubbletter borttagna: {report['duplicates_removed']}",
         "",
         "Förekomst i hela SALDO:",
     ]
     for status, count in report["status_counts"].items():
         lines.append(f"  {count:6d}  {status}")
+    lines.extend(["", "Nästa granskningskategori:"])
+    for category, count in report["review_counts"].items():
+        lines.append(f"  {count:6d}  {category}")
     for status, examples in report.get("examples", {}).items():
         lines.extend(["", f"Exempel: {status}"])
         for item in examples[:20]:
@@ -109,7 +162,8 @@ def render_text(report: dict[str, Any]) -> str:
             suffix = f" | {analyses}" if analyses else ""
             lines.append(
                 f"  {item['lemma']} | {item['slot']}={item['form']} | "
-                f"{item['provenance']} | token={item['source_token']}{suffix}"
+                f"{item['provenance']} | token={item['source_token']} | "
+                f"review={item['review_category']}{suffix}"
             )
     return "\n".join(lines) + "\n"
 
@@ -144,7 +198,9 @@ def main() -> None:
     )
     write_jsonl(args.jsonl, rows)
     print(f"Rader: {report['rows']}")
-    print(f"Saknade former: {report['forms']}")
+    print(f"Saknade former, rått: {report['raw_forms']}")
+    print(f"Unika saknade former: {report['unique_forms']}")
+    print(f"Dubbletter borttagna: {report['duplicates_removed']}")
     print(f"Text: {args.text}")
     print(f"JSON: {args.json}")
     print(f"JSONL: {args.jsonl}")
