@@ -4,6 +4,7 @@ import unittest
 
 from swedish_wordlist_tools.analyze_adjective_saldo_absent_review import (
     build_report,
+    review_assessment,
     review_priority,
 )
 
@@ -13,6 +14,22 @@ class AnalyzeAdjectiveSaldoAbsentReviewTests(unittest.TestCase):
         self.assertLess(
             review_priority({"provenance": "explicit", "source_token": "durabla"})[0],
             review_priority({"provenance": "append", "source_token": "+a"})[0],
+        )
+
+    def test_assesses_explicit_as_strong_saldo_gap_candidate(self) -> None:
+        self.assertEqual(
+            "strong_saldo_gap_candidate",
+            review_assessment({"provenance": "explicit", "source_token": "durabla"}),
+        )
+
+    def test_assesses_regular_append_separately_from_replace_tail(self) -> None:
+        self.assertEqual(
+            "standard_notation_saldo_gap_candidate",
+            review_assessment({"provenance": "append", "source_token": "+a"}),
+        )
+        self.assertEqual(
+            "targeted_saol_notation_review",
+            review_assessment({"provenance": "replace_tail", "source_token": "-gott"}),
         )
 
     def test_build_report_only_includes_forms_absent_from_all_saldo(self) -> None:
@@ -42,6 +59,10 @@ class AnalyzeAdjectiveSaldoAbsentReviewTests(unittest.TestCase):
         self.assertEqual(1, report["cases"])
         self.assertEqual("durabla", cases[0]["written_form"])
         self.assertEqual("explicit_saol_form", cases[0]["review_group"])
+        self.assertEqual(
+            "strong_saldo_gap_candidate",
+            cases[0]["review_assessment"],
+        )
 
     def test_regular_append_is_grouped_last(self) -> None:
         report, cases = build_report([
@@ -58,6 +79,10 @@ class AnalyzeAdjectiveSaldoAbsentReviewTests(unittest.TestCase):
             }
         ])
         self.assertEqual({"regular_append_form": 1}, report["review_group_counts"])
+        self.assertEqual(
+            {"standard_notation_saldo_gap_candidate": 1},
+            report["review_assessment_counts"],
+        )
         self.assertEqual("regular_append_form", cases[0]["review_group"])
 
 
