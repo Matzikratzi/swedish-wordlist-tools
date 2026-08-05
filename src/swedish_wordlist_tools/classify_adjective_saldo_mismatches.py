@@ -22,13 +22,13 @@ def classify_row(row: dict[str, Any]) -> dict[str, Any] | None:
         derivation = str(form.get("provenance") or "unknown")
         source_token = str(form.get("source_token") or "")
         if row.get("source_correction_applied"):
-            cause = "suspected_saol_error_corrected"
+            cause = "suspected_saol_error"
         elif derivation == "explicit":
-            cause = "saldo_coverage_difference"
+            cause = "needs_saldo_review"
         elif derivation == "lemma":
-            cause = "saldo_alignment_problem"
+            cause = "needs_saldo_alignment_review"
         elif derivation in {"append", "replace_tail"}:
-            cause = "needs_parser_or_saldo_review"
+            cause = "needs_manual_review"
         else:
             cause = "unresolved"
         classified.append({
@@ -87,9 +87,11 @@ def build_report(path: Path = DEFAULT_INPUT) -> tuple[dict[str, Any], list[dict[
         "source_token_counts": dict(source_token_counts.most_common()),
         "examples": dict(examples),
         "note": (
-            "These are preliminary triage categories. Derivation and exact source token "
-            "are read from the canonical generated adjective-form artifact; this classifier "
-            "never parses SAOL notation or generates forms."
+            "These are conservative review categories. Explicit SAOL forms are directed "
+            "to SALDO review; missing lemma forms to SALDO alignment review; append and "
+            "replace-tail forms remain manual review until notation, implementation and "
+            "SALDO coverage have been checked. Derivation and exact source token come "
+            "from the canonical generated artifact."
         ),
     }
     return report, rows
