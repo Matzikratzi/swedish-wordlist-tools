@@ -7,6 +7,7 @@ from swedish_wordlist_tools.saol_notation import (
     apply_form_operation,
     assign_labeled_slots,
     parse_form_operation,
+    tokenize_notation,
 )
 
 
@@ -29,8 +30,13 @@ class SaolNotationTests(unittest.TestCase):
     def test_preserves_spelling_in_noun_operations(self) -> None:
         cases = {
             "+:n": (FormOperationKind.APPEND, ":n"),
+            "+:ar": (FormOperationKind.APPEND, ":ar"),
             "-Klockor": (FormOperationKind.REPLACE_TAIL, "Klockor"),
+            "-änder": (FormOperationKind.REPLACE_TAIL, "änder"),
+            "+<k>s</k>": (FormOperationKind.APPEND, "s"),
             "A-kassor": (FormOperationKind.EXPLICIT, "A-kassor"),
+            "BB:t": (FormOperationKind.EXPLICIT, "BB:t"),
+            "señoror": (FormOperationKind.EXPLICIT, "señoror"),
         }
         for token, expected in cases.items():
             with self.subTest(token=token):
@@ -38,6 +44,12 @@ class SaolNotationTests(unittest.TestCase):
                 self.assertIsNotNone(operation)
                 assert operation is not None
                 self.assertEqual(expected, (operation.kind, operation.value))
+
+    def test_tokenizer_keeps_payloads_atomic(self) -> None:
+        self.assertEqual(("+:n", "+:ar"), tokenize_notation("+:n +:ar"))
+        self.assertEqual(("+en", "-änder"), tokenize_notation("+en -änder"))
+        self.assertEqual(("BB:t", ";", "pl.", "BB:n"), tokenize_notation("BB:t; pl. BB:n"))
+        self.assertEqual(("+t", ";", "pl.", "+", "H", "+s"), tokenize_notation("+t; pl. + H +<k>s</k>"))
 
     def test_rejects_labels_and_separators_as_form_operations(self) -> None:
         for token in ("komp.", "pl.", "el.", "_", "["):
