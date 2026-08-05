@@ -10,6 +10,7 @@ from .saol_notation import (
     FormOperationKind,
     apply_form_operation,
     parse_form_operation,
+    split_alternative_branches,
 )
 
 
@@ -33,11 +34,6 @@ class InterpretedRow:
         return None
 
 
-_TOKEN_RE = re.compile(
-    r"pl\.|best\.|el\.|[;,]|[+\-][A-Za-zÅÄÖåäöÉéÜü:]*|"
-    r"[A-Za-zÅÄÖåäöÉéÜü0-9][\wÅÄÖåäöÉéÜü:‐‑–-]*",
-    re.IGNORECASE,
-)
 _SUP_ELEMENT_RE = re.compile(r"<sup\b[^>]*>.*?</sup>", re.IGNORECASE | re.DOTALL)
 _HTML_TAG_RE = re.compile(r"<[^>]*>")
 _IGNORED_MARKERS = {
@@ -144,24 +140,7 @@ def _clean_notation_comments(pattern: str) -> str:
     return re.sub(r"\s+", " ", pattern).strip()
 
 
-def _tokenize(pattern: str) -> tuple[str, ...] | None:
-    tokens: list[str] = []
-    position = 0
-    for match in _TOKEN_RE.finditer(pattern):
-        if pattern[position : match.start()].strip():
-            return None
-        tokens.append(match.group(0))
-        position = match.end()
-    if pattern[position:].strip():
-        return None
-    return tuple(tokens) if tokens else None
-
-
-def _slot_sequence(pattern: str) -> tuple[tuple[str, str], ...] | None:
-    tokens = _tokenize(_clean_notation_comments(pattern))
-    if tokens is None:
-        return None
-
+def _slot_sequence(tokens: tuple[str, ...]) -> tuple[tuple[str, str], ...] | None:
     result: list[tuple[str, str]] = []
     context = "singular"
     pending_best = False
@@ -247,16 +226,15 @@ def interpret_noun_row(record: dict[str, Any]) -> InterpretedRow | None:
     if pattern is None:
         return _interpret_missing_pattern(record, lemma)
 
-    variants = tuple(
-        part.strip() for part in re.split(r"\s+_\s+", pattern) if part.strip()
-    )
-    if not variants:
+    cleaned_pattern = _clean_notation_comments(pattern)
+    branches = split_alternative_branches(cleaned_pattern)
+    if not branches:
         return None
 
     key_forms: list[KeyForm] = [KeyForm("lemma", lemma, "lemma")]
     seen: set[tuple[str, str]] = {("lemma", lemma)}
-    for variant in variants:
-        slots = _slot_sequence(variant)
+    for branch in branches:
+        slots = _slot_sequence(branch.tokens)
         if slots is None:
             return None
         for slot, token in slots:
