@@ -38,12 +38,14 @@ def generated_row(record: dict[str, Any]) -> dict[str, Any] | None:
             lemma=lemma,
             slot=form.slot,
             notation=notation,
+            stycke=stycke,
         )
         forms.append({
             "written_form": written_form,
             "slot": form.slot,
             "provenance": provenance.kind,
             "source_token": provenance.source_token,
+            "operation_base": provenance.operation_base,
         })
 
     return {
@@ -109,8 +111,8 @@ def main() -> None:
         "artifact": str(args.jsonl),
         "note": (
             "This is the canonical generated adjective-form artifact. Each form stores "
-            "its provenance and source SAOL token. Validators must consume it and must "
-            "not run the adjective interpreter again."
+            "its provenance, source SAOL token, and operation base. Validators must "
+            "consume it and must not run the adjective interpreter again."
         ),
     }
     args.summary.parent.mkdir(parents=True, exist_ok=True)
