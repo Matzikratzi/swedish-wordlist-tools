@@ -35,6 +35,14 @@ class GenerateNounFormsTests(unittest.TestCase):
         self.assertIn("bilen", written)
         self.assertIn("bilar", written)
         self.assertTrue(all("source_stage" in form for form in row["forms"]))
+        self.assertEqual(
+            {"noun_interpreter", "noun_completion"},
+            {form["source_stage"] for form in row["forms"]},
+        )
+        self.assertNotIn(
+            "base_generator",
+            {form["source_stage"] for form in row["forms"]},
+        )
         self.assertIsNotNone(comparison)
 
     def test_comparison_reports_completion_changes(self) -> None:
