@@ -39,7 +39,11 @@ class FormOperation:
 
 
 _BRACKET_COMMENT = re.compile(r"\s*\[[^\]]*\]")
-_FORM_WORD = re.compile(r"[a-zåäöéü]+", re.IGNORECASE)
+_FORM_VALUE = re.compile(r":?[a-zåäöéü]+", re.IGNORECASE)
+_EXPLICIT_FORM = re.compile(
+    r"[a-zåäöéü0-9][\wåäöéü:‐‑–-]*",
+    re.IGNORECASE,
+)
 
 
 def normalize_notation(text: str) -> str:
@@ -62,28 +66,33 @@ def parse_form_operation(token: str) -> FormOperation | None:
     token belongs to. It also leaves ordklass-specific spelling changes to the
     caller. For example, adjective ``+t`` is represented as ``APPEND('t')``;
     the adjective layer may then realize ``glad`` as ``glatt``.
+
+    The spelling carried by the token is preserved. This matters for explicit
+    forms and for notation such as ``+:n`` while comparisons remain
+    case-insensitive.
     """
 
-    normalized = token.strip().casefold()
+    raw = token.strip()
+    normalized = raw.casefold()
     if normalized == "+":
-        return FormOperation(FormOperationKind.UNCHANGED, source=normalized)
+        return FormOperation(FormOperationKind.UNCHANGED, source=raw)
     if normalized.startswith("+-"):
-        value = normalized[2:]
-        if _FORM_WORD.fullmatch(value):
-            return FormOperation(FormOperationKind.APPEND, value, normalized)
+        value = raw[2:]
+        if _FORM_VALUE.fullmatch(value):
+            return FormOperation(FormOperationKind.APPEND, value, raw)
         return None
     if normalized.startswith("+"):
-        value = normalized[1:]
-        if _FORM_WORD.fullmatch(value):
-            return FormOperation(FormOperationKind.APPEND, value, normalized)
+        value = raw[1:]
+        if _FORM_VALUE.fullmatch(value):
+            return FormOperation(FormOperationKind.APPEND, value, raw)
         return None
     if normalized.startswith("-"):
-        value = normalized[1:]
-        if _FORM_WORD.fullmatch(value):
-            return FormOperation(FormOperationKind.REPLACE_TAIL, value, normalized)
+        value = raw[1:]
+        if _FORM_VALUE.fullmatch(value):
+            return FormOperation(FormOperationKind.REPLACE_TAIL, value, raw)
         return None
-    if _FORM_WORD.fullmatch(normalized):
-        return FormOperation(FormOperationKind.EXPLICIT, normalized, normalized)
+    if _EXPLICIT_FORM.fullmatch(raw):
+        return FormOperation(FormOperationKind.EXPLICIT, raw, raw)
     return None
 
 
@@ -132,8 +141,10 @@ def apply_form_operation(
         return append(base, operation.value) if append else base + operation.value
     if operation.kind is FormOperationKind.REPLACE_TAIL:
         handled = replace_tail(base, operation.value) if replace_tail else None
+        if handled is not None:
+            return handled
         overlap, score = _best_overlap_replacement(base, operation.value)
-        return overlap if score >= 2 else handled
+        return overlap if score >= 2 else None
     return None
 
 
