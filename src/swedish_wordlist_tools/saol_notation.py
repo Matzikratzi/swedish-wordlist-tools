@@ -87,6 +87,34 @@ def parse_form_operation(token: str) -> FormOperation | None:
     return None
 
 
+def _best_overlap_replacement(base: str, tail: str) -> tuple[str | None, int]:
+    """Replace the suffix position sharing the longest prefix with ``tail``.
+
+    This is a conservative fallback for rows without a usable lodstreck.  It
+    chooses the position where the existing word ending and the replacement
+    form agree for the greatest number of initial characters.  For example,
+    ``barntillåten`` + ``tillåtet`` aligns at ``tillåte`` rather than at the
+    final ``t`` and therefore yields ``barntillåtet``.
+    """
+
+    best_index = -1
+    best_score = 0
+    for index in range(len(base)):
+        score = 0
+        while (
+            index + score < len(base)
+            and score < len(tail)
+            and base[index + score] == tail[score]
+        ):
+            score += 1
+        if score > best_score:
+            best_index = index
+            best_score = score
+    if best_index < 0:
+        return None, 0
+    return base[:best_index] + tail, best_score
+
+
 def apply_form_operation(
     base: str,
     operation: FormOperation,
@@ -103,7 +131,9 @@ def apply_form_operation(
     if operation.kind is FormOperationKind.APPEND:
         return append(base, operation.value) if append else base + operation.value
     if operation.kind is FormOperationKind.REPLACE_TAIL:
-        return replace_tail(base, operation.value) if replace_tail else None
+        handled = replace_tail(base, operation.value) if replace_tail else None
+        overlap, score = _best_overlap_replacement(base, operation.value)
+        return overlap if score >= 2 else handled
     return None
 
 
