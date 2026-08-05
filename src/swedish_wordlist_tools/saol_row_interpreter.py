@@ -7,8 +7,10 @@ from typing import Any
 
 from .inflect import normalise_pattern
 from .saol_notation import (
+    FormOperation,
     FormOperationKind,
     apply_form_operation,
+    assign_labeled_slots,
     parse_form_operation,
     split_alternative_branches,
 )
@@ -36,15 +38,17 @@ class InterpretedRow:
 
 _SUP_ELEMENT_RE = re.compile(r"<sup\b[^>]*>.*?</sup>", re.IGNORECASE | re.DOTALL)
 _HTML_TAG_RE = re.compile(r"<[^>]*>")
-_IGNORED_MARKERS = {
-    "i:",
-    "anv:",
-    "används:",
-    "användas:",
-    "kan:",
-    "ofta:",
-    "vanl:",
-}
+_NOUN_IGNORED_MARKERS = frozenset(
+    {
+        "i:",
+        "anv:",
+        "används:",
+        "användas:",
+        "kan:",
+        "ofta:",
+        "vanl:",
+    }
+)
 
 
 def _comparison_key(value: Any) -> str:
@@ -104,14 +108,10 @@ def _append_to_first_word(lemma: str, suffix: str) -> str:
     return first + suffix + (separator + rest if separator else "")
 
 
-def apply_form_token(
-    record: dict[str, Any], lemma: str, token: str
+def apply_form_operation_to_noun(
+    record: dict[str, Any], lemma: str, operation: FormOperation
 ) -> str | None:
-    """Apply one SAOL form instruction without deciding its grammatical slot."""
-
-    operation = parse_form_operation(token)
-    if operation is None:
-        return None
+    """Realize one already parsed operation for a noun lemma."""
 
     if operation.kind is FormOperationKind.REPLACE_TAIL:
         parts = _compound_parts(record, lemma)
@@ -127,6 +127,17 @@ def apply_form_token(
     )
 
 
+def apply_form_token(
+    record: dict[str, Any], lemma: str, token: str
+) -> str | None:
+    """Compatibility wrapper for callers that still provide a raw token."""
+
+    operation = parse_form_operation(token)
+    if operation is None:
+        return None
+    return apply_form_operation_to_noun(record, lemma, operation)
+
+
 def _clean_notation_comments(pattern: str) -> str:
     pattern = _SUP_ELEMENT_RE.sub("", pattern)
     pattern = _HTML_TAG_RE.sub("", pattern)
@@ -138,68 +149,6 @@ def _clean_notation_comments(pattern: str) -> str:
     )
     pattern = re.sub(r"\b(?:ibl|vard|högt|vanl)\.\s*", "", pattern, flags=re.IGNORECASE)
     return re.sub(r"\s+", " ", pattern).strip()
-
-
-def _slot_sequence(tokens: tuple[str, ...]) -> tuple[tuple[str, str], ...] | None:
-    result: list[tuple[str, str]] = []
-    context = "singular"
-    pending_best = False
-    seen_singular_form = False
-    last_slot: str | None = None
-    alternative_next = False
-    saw_notation_marker = False
-
-    for token in tokens:
-        lower = token.casefold()
-        if token in {";", ","}:
-            saw_notation_marker = True
-            continue
-        if lower in _IGNORED_MARKERS:
-            saw_notation_marker = True
-            continue
-        if lower in {"el.", "h"}:
-            saw_notation_marker = True
-            alternative_next = last_slot is not None
-            continue
-        if lower == "best.":
-            saw_notation_marker = True
-            pending_best = True
-            alternative_next = False
-            continue
-        if lower == "pl.":
-            saw_notation_marker = True
-            context = "plural_definite" if pending_best else "plural"
-            pending_best = False
-            alternative_next = False
-            continue
-
-        operation = parse_form_operation(token)
-        if operation is None:
-            return None
-        if operation.kind is not FormOperationKind.EXPLICIT:
-            saw_notation_marker = True
-
-        if alternative_next and last_slot is not None:
-            slot = last_slot
-            alternative_next = False
-        elif context == "plural_definite":
-            slot = "pl_def"
-        elif context == "plural":
-            slot = "pl_indef"
-            context = "after_plural"
-        elif not seen_singular_form:
-            slot = "sg_def"
-            seen_singular_form = True
-        else:
-            slot = "pl_indef"
-            context = "after_plural"
-        result.append((slot, token))
-        last_slot = slot
-        pending_best = False
-
-    if not saw_notation_marker:
-        return None
-    return tuple(result) if result else None
 
 
 def _interpret_missing_pattern(record: dict[str, Any], lemma: str) -> InterpretedRow | None:
@@ -234,16 +183,26 @@ def interpret_noun_row(record: dict[str, Any]) -> InterpretedRow | None:
     key_forms: list[KeyForm] = [KeyForm("lemma", lemma, "lemma")]
     seen: set[tuple[str, str]] = {("lemma", lemma)}
     for branch in branches:
-        slots = _slot_sequence(branch.tokens)
-        if slots is None:
+        slot_operations = assign_labeled_slots(
+            branch.tokens,
+            singular_slot="sg_def",
+            plural_slot="pl_indef",
+            definite_plural_slot="pl_def",
+            ignored_markers=_NOUN_IGNORED_MARKERS,
+        )
+        if slot_operations is None:
             return None
-        for slot, token in slots:
-            written_form = apply_form_token(record, lemma, token)
+        for assigned in slot_operations:
+            written_form = apply_form_operation_to_noun(
+                record, lemma, assigned.operation
+            )
             if written_form is None:
                 return None
-            marker = (slot, written_form)
+            marker = (assigned.slot, written_form)
             if marker not in seen:
                 seen.add(marker)
-                key_forms.append(KeyForm(slot, written_form, token))
+                key_forms.append(
+                    KeyForm(assigned.slot, written_form, assigned.token)
+                )
 
     return InterpretedRow(lemma, pattern, tuple(key_forms))
