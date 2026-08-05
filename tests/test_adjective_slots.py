@@ -91,6 +91,22 @@ class AdjectiveSlotsTests(unittest.TestCase):
             self.parse("enda", "ende, vard. superl. endaste").written_forms(),
         )
 
+    def test_usage_restricted_neuter_with_explicit_plural(self) -> None:
+        slots = self.parse("adenoid", "n. sing. obest. obrukl., adenoida")
+        self.assertEqual(("adenoid", "adenoida"), slots.written_forms())
+        self.assertEqual("neuter_singular", slots.restrictions[0].scope)
+        self.assertEqual("uncommon", slots.restrictions[0].label)
+
+    def test_usage_restricted_neuter_avoided(self) -> None:
+        slots = self.parse("fadd", "n. sing. obest. undviks:, fadda")
+        self.assertEqual(("fadd", "fadda"), slots.written_forms())
+        self.assertEqual("avoided", slots.restrictions[0].label)
+
+    def test_mostly_uninflected_explicit_occasional_plural(self) -> None:
+        slots = self.parse("beige", "mest: oböjl., best. och: pl. ibl. beigea")
+        self.assertEqual(("beige", "beigea"), slots.written_forms())
+        self.assertEqual(("mostly_uninflected", "occasional"), tuple(item.label for item in slots.restrictions))
+
     def test_rejects_truncated_comparison(self) -> None:
         self.assertIsNone(interpret_simple_adjective_slots({"normaliserat_ord": "nära", "text": "komp. närmare el. närmre, superl. närmast el. närm"}))
 
