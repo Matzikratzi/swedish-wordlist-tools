@@ -35,6 +35,11 @@ def slot_operation_token(slot: str, notation: str) -> str | None:
         and lexical
     ):
         return lexical[-1]
+    # In notation such as ``n. +, +a`` the unchanged neuter is written as a
+    # bare plus sign, which is intentionally absent from _OPERATION.  The sole
+    # lexical operation token therefore supplies the plural slot.
+    if slot == "definite_or_plural" and normalized.startswith("n. +,") and lexical:
+        return lexical[-1]
     if slot == "comparative":
         match = re.search(r"komp\.\s+([+-]?[a-zåäöéü]+)", normalized)
         return match.group(1) if match else None
@@ -53,15 +58,23 @@ def form_provenance(*, written_form: str, lemma: str, slot: str, notation: str) 
 
     form = str(written_form or "").casefold()
     folded_lemma = str(lemma or "").casefold()
-    tokens = _tokens(notation)
+    normalized = " ".join(str(notation or "").casefold().split())
+    tokens = _tokens(normalized)
 
     if form == folded_lemma:
         return "lemma"
     if form in {token for token in tokens if not token.startswith(("+", "-"))}:
         return "explicit"
 
-    token = slot_operation_token(slot, notation)
+    token = slot_operation_token(slot, normalized)
     if token:
         return _operation_kind(token)
+
+    # Parallel paradigms separated by ``_`` may imply an alternative common
+    # form from an explicitly written alternative neuter/plural pair, e.g.
+    # ``fasetterat +e _ facetterat +e`` -> ``facetterad``.  The alternative
+    # stem is supplied explicitly by SAOL, rather than inferred from the lemma.
+    if slot == "common_singular" and " _ " in normalized:
+        return "explicit"
 
     return "unknown"
