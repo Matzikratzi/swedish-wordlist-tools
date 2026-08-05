@@ -6,6 +6,8 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable
 
+from .replay_adjective_form import replay_generated_form
+
 DEFAULT_INPUT = Path("reports/saol14-adjective-slots-saldo.jsonl")
 DEFAULT_TEXT = Path("reports/saol14-adjective-mismatch-causes.txt")
 DEFAULT_JSON = Path("reports/saol14-adjective-mismatch-causes.json")
@@ -21,20 +23,32 @@ def classify_row(row: dict[str, Any]) -> dict[str, Any] | None:
     for form in missing:
         derivation = str(form.get("provenance") or "unknown")
         source_token = str(form.get("source_token") or "")
+        replay = replay_generated_form(
+            lemma=str(row.get("lemma") or ""),
+            stycke=str(row.get("stycke") or ""),
+            written_form=str(form.get("written_form") or ""),
+            slot=str(form.get("slot") or ""),
+            provenance=derivation,
+            source_token=source_token,
+        )
         if row.get("source_correction_applied"):
             cause = "suspected_saol_error"
-        elif derivation == "explicit":
-            cause = "needs_saldo_review"
         elif derivation == "lemma":
             cause = "needs_saldo_alignment_review"
-        elif derivation in {"append", "replace_tail"}:
-            cause = "needs_manual_review"
+        elif replay.status == "mismatch":
+            cause = "needs_parser_review"
+        elif derivation == "explicit":
+            cause = "needs_saldo_review"
+        elif replay.status == "match":
+            cause = "generation_consistent_review_saldo_or_saol"
         else:
-            cause = "unresolved"
+            cause = "needs_manual_review"
         classified.append({
             **form,
             "derivation": derivation,
             "source_token": source_token,
+            "replay_status": replay.status,
+            "replayed_form": replay.replayed_form or "",
             "preliminary_cause": cause,
         })
     return {**row, "classified_missing_forms": classified}
@@ -59,6 +73,11 @@ def build_report(path: Path = DEFAULT_INPUT) -> tuple[dict[str, Any], list[dict[
         for row in rows
         for form in row["classified_missing_forms"]
     )
+    replay_counts = Counter(
+        form["replay_status"]
+        for row in rows
+        for form in row["classified_missing_forms"]
+    )
     source_token_counts = Counter(
         form["source_token"]
         for row in rows
@@ -77,6 +96,8 @@ def build_report(path: Path = DEFAULT_INPUT) -> tuple[dict[str, Any], list[dict[
                     "form": form.get("written_form"),
                     "derivation": form.get("derivation"),
                     "source_token": form.get("source_token"),
+                    "replay_status": form.get("replay_status"),
+                    "replayed_form": form.get("replayed_form"),
                     "saldo_forms": row.get("saldo_forms", []),
                 })
     report = {
@@ -84,14 +105,14 @@ def build_report(path: Path = DEFAULT_INPUT) -> tuple[dict[str, Any], list[dict[
         "missing_forms": sum(cause_counts.values()),
         "cause_counts": dict(cause_counts.most_common()),
         "derivation_counts": dict(derivation_counts.most_common()),
+        "replay_counts": dict(replay_counts.most_common()),
         "source_token_counts": dict(source_token_counts.most_common()),
         "examples": dict(examples),
         "note": (
-            "These are conservative review categories. Explicit SAOL forms are directed "
-            "to SALDO review; missing lemma forms to SALDO alignment review; append and "
-            "replace-tail forms remain manual review until notation, implementation and "
-            "SALDO coverage have been checked. Derivation and exact source token come "
-            "from the canonical generated artifact."
+            "The replay check applies the stored primitive source token to lemma/stycke. "
+            "It does not inspect full SAOL notation or choose slots. A match confirms that "
+            "the canonical form is consistent with its stored operation; it does not by "
+            "itself decide whether SALDO or SAOL is correct."
         ),
     }
     return report, rows
@@ -106,6 +127,9 @@ def render_text(report: dict[str, Any]) -> str:
     ]
     for cause, count in report["cause_counts"].items():
         lines.append(f"  {count:6d}  {cause}")
+    lines.extend(["", "Återspelning av lagrad operation:"])
+    for status, count in report["replay_counts"].items():
+        lines.append(f"  {count:6d}  {status}")
     lines.extend(["", "Härledning:"])
     for derivation, count in report["derivation_counts"].items():
         lines.append(f"  {count:6d}  {derivation}")
@@ -116,9 +140,12 @@ def render_text(report: dict[str, Any]) -> str:
         lines.extend(["", f"Exempel: {cause}"])
         for item in examples[:20]:
             token = f" | token={item['source_token']}" if item.get("source_token") else ""
+            replay = f" | replay={item['replay_status']}"
+            if item.get("replayed_form"):
+                replay += f":{item['replayed_form']}"
             lines.append(
                 f"  {item['lemma']} | {item['notation']} | "
-                f"{item['slot']}={item['form']} | {item['derivation']}{token}"
+                f"{item['slot']}={item['form']} | {item['derivation']}{token}{replay}"
             )
     return "\n".join(lines) + "\n"
 
