@@ -30,6 +30,19 @@ class ReplayAdjectiveFormTests(unittest.TestCase):
         self.assertEqual("match", result.status)
         self.assertEqual("bakåtböjda", result.replayed_form)
 
+    def test_replays_explicit_alternative_common_form_from_stored_base(self) -> None:
+        result = replay_generated_form(
+            lemma="fasetterad",
+            stycke="fasetterad",
+            written_form="facetterad",
+            slot="common_singular",
+            provenance="explicit",
+            source_token="facetterat +e",
+            operation_base="facetterad",
+        )
+        self.assertEqual("match", result.status)
+        self.assertEqual("facetterad", result.replayed_form)
+
     def test_detects_mismatch(self) -> None:
         result = replay_generated_form(
             lemma="glad",
