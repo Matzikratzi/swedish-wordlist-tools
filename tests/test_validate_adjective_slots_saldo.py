@@ -15,7 +15,12 @@ def generated(lemma: str, forms: list[tuple[str, str]]) -> dict[str, object]:
         "effective_notation": "+t +a",
         "stycke": lemma,
         "forms": [
-            {"written_form": written_form, "slot": slot, "provenance": "row"}
+            {
+                "written_form": written_form,
+                "slot": slot,
+                "provenance": "row",
+                "source_token": "",
+            }
             for written_form, slot in forms
         ],
     }
@@ -55,6 +60,7 @@ class ValidateAdjectiveSlotsSaldoTests(unittest.TestCase):
                 "written_form": "glatt",
                 "slot": "neuter_singular",
                 "provenance": "row",
+                "source_token": "",
                 "in_saldo": False,
             }],
             row["missing_forms"],
