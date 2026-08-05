@@ -19,6 +19,7 @@ def classify_row(row: dict[str, Any]) -> dict[str, Any] | None:
     if not missing:
         return None
 
+    notation = str(row.get("effective_notation") or row.get("notation") or "")
     classified = []
     for form in missing:
         derivation = str(form.get("provenance") or "unknown")
@@ -30,6 +31,7 @@ def classify_row(row: dict[str, Any]) -> dict[str, Any] | None:
             slot=str(form.get("slot") or ""),
             provenance=derivation,
             source_token=source_token,
+            notation=notation,
         )
         if row.get("source_correction_applied"):
             cause = "suspected_saol_error"
@@ -110,9 +112,9 @@ def build_report(path: Path = DEFAULT_INPUT) -> tuple[dict[str, Any], list[dict[
         "examples": dict(examples),
         "note": (
             "The replay check applies the stored primitive source token to lemma/stycke. "
-            "It does not inspect full SAOL notation or choose slots. A match confirms that "
-            "the canonical form is consistent with its stored operation; it does not by "
-            "itself decide whether SALDO or SAOL is correct."
+            "A documented lodstreck takes precedence over overlap fallback. Parallel "
+            "alternative paradigms are unsupported because their active base may not be "
+            "the entry lemma. A match confirms consistency, not whether SALDO or SAOL is right."
         ),
     }
     return report, rows
