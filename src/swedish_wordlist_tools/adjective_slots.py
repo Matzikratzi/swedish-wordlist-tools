@@ -297,6 +297,12 @@ def interpret_simple_adjective_slots(record: dict[str, Any]) -> AdjectiveSlots |
     text = normalize_notation(raw_text)
     if not lemma or " " in lemma or not lemma.isalpha():
         return None
+    if not raw_text:
+        return _slots(
+            lemma,
+            [(lemma, "lemma")],
+            "lemma_only_no_inflection_text",
+        )
     if len(raw_text) == HARD_CAP and ("komp." in text or "superl." in text):
         return None
     return _regular(lemma, text) or _parallel(lemma, text) or _comparison(lemma, text) or _usage_restricted(lemma, text) or _generic(lemma, text) or _known_structures(lemma, text)
