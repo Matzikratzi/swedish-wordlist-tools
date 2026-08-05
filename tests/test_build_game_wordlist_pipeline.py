@@ -10,6 +10,7 @@ from swedish_wordlist_tools.build_game_wordlist_pipeline import (
     build_parser,
     pipeline_commands,
     run_pipeline,
+    summary_lines,
 )
 
 
@@ -63,6 +64,20 @@ class BuildGameWordlistPipelineTests(unittest.TestCase):
             report = run_pipeline(args, runner)
             self.assertEqual(3, len(seen))
             self.assertTrue(report["integration_is_clean"])
+
+    def test_summary_uses_integrated_game_word_count(self) -> None:
+        args = build_parser().parse_args([])
+        lines = summary_lines(
+            {
+                "integration_is_clean": True,
+                "integrated_game_words": 577121,
+                "added_game_words": 13962,
+            },
+            args,
+        )
+        self.assertIn("Ord i spelordlistan: 577121", lines)
+        self.assertIn("Tillagda adjektivformer: 13962", lines)
+        self.assertNotIn("Ord i spelordlistan: ?", lines)
 
 
 if __name__ == "__main__":
