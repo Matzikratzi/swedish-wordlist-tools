@@ -20,6 +20,7 @@ def classify_row(row: dict[str, Any]) -> dict[str, Any] | None:
     classified = []
     for form in missing:
         derivation = str(form.get("provenance") or "unknown")
+        source_token = str(form.get("source_token") or "")
         if row.get("source_correction_applied"):
             cause = "suspected_saol_error_corrected"
         elif derivation == "explicit":
@@ -33,6 +34,7 @@ def classify_row(row: dict[str, Any]) -> dict[str, Any] | None:
         classified.append({
             **form,
             "derivation": derivation,
+            "source_token": source_token,
             "preliminary_cause": cause,
         })
     return {**row, "classified_missing_forms": classified}
@@ -57,6 +59,12 @@ def build_report(path: Path = DEFAULT_INPUT) -> tuple[dict[str, Any], list[dict[
         for row in rows
         for form in row["classified_missing_forms"]
     )
+    source_token_counts = Counter(
+        form["source_token"]
+        for row in rows
+        for form in row["classified_missing_forms"]
+        if form.get("source_token")
+    )
     examples: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         for form in row["classified_missing_forms"]:
@@ -68,6 +76,7 @@ def build_report(path: Path = DEFAULT_INPUT) -> tuple[dict[str, Any], list[dict[
                     "slot": form.get("slot"),
                     "form": form.get("written_form"),
                     "derivation": form.get("derivation"),
+                    "source_token": form.get("source_token"),
                     "saldo_forms": row.get("saldo_forms", []),
                 })
     report = {
@@ -75,11 +84,12 @@ def build_report(path: Path = DEFAULT_INPUT) -> tuple[dict[str, Any], list[dict[
         "missing_forms": sum(cause_counts.values()),
         "cause_counts": dict(cause_counts.most_common()),
         "derivation_counts": dict(derivation_counts.most_common()),
+        "source_token_counts": dict(source_token_counts.most_common()),
         "examples": dict(examples),
         "note": (
-            "These are preliminary triage categories. Derivation is read from the "
-            "canonical generated adjective-form artifact; this classifier never parses "
-            "SAOL notation or generates forms."
+            "These are preliminary triage categories. Derivation and exact source token "
+            "are read from the canonical generated adjective-form artifact; this classifier "
+            "never parses SAOL notation or generates forms."
         ),
     }
     return report, rows
@@ -97,12 +107,16 @@ def render_text(report: dict[str, Any]) -> str:
     lines.extend(["", "Härledning:"])
     for derivation, count in report["derivation_counts"].items():
         lines.append(f"  {count:6d}  {derivation}")
+    lines.extend(["", "Vanligaste SAOL-token för saknade former:"])
+    for token, count in list(report.get("source_token_counts", {}).items())[:30]:
+        lines.append(f"  {count:6d}  {token}")
     for cause, examples in report.get("examples", {}).items():
         lines.extend(["", f"Exempel: {cause}"])
         for item in examples[:20]:
+            token = f" | token={item['source_token']}" if item.get("source_token") else ""
             lines.append(
                 f"  {item['lemma']} | {item['notation']} | "
-                f"{item['slot']}={item['form']} | {item['derivation']}"
+                f"{item['slot']}={item['form']} | {item['derivation']}{token}"
             )
     return "\n".join(lines) + "\n"
 
