@@ -104,9 +104,18 @@ def parse_form_operation(token: str) -> FormOperation | None:
         if value and _FORM_PAYLOAD.fullmatch(value):
             return FormOperation(FormOperationKind.REPLACE_TAIL, value, raw)
         return None
-    if _EXPLICIT_FORM.fullmatch(raw):
-        return FormOperation(FormOperationKind.EXPLICIT, raw, raw)
-    return None
+
+    # Token-final colon and period belong to SAOL's explanatory metalanguage,
+    # not to explicit word forms. Colons inside forms remain valid (BB:t), as
+    # do punctuation-free full forms with capitals, hyphens and diacritics.
+    if (
+        not raw
+        or raw.endswith((":", "."))
+        or not raw[0].isalnum()
+        or not _EXPLICIT_FORM.fullmatch(raw)
+    ):
+        return None
+    return FormOperation(FormOperationKind.EXPLICIT, raw, raw)
 
 
 def assign_labeled_slots(
