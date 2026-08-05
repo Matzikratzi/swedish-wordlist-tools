@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import unicodedata
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable
@@ -19,27 +18,56 @@ DEFAULT_CSV = Path("reports/saol14-compound-heads.csv")
 DEFAULT_SUMMARY = Path("reports/saol14-compound-heads-summary.json")
 
 
-def accentless(value: str) -> str:
-    decomposed = unicodedata.normalize("NFKD", compact_word(value))
-    return "".join(char for char in decomposed if not unicodedata.combining(char))
+def exact_key(value: str) -> str:
+    """Return the comparison key without removing Swedish diacritics."""
+    return compact_word(value)
+
+
+def usable_form(form: str) -> bool:
+    """Exclude SALDO composition forms such as ``grund-`` and ``grunds-``."""
+    return bool(form) and not form.rstrip().endswith("-")
 
 
 def analysis_marker(analysis: SaldoAnalysis) -> tuple[str, str, tuple[str, ...]]:
     return analysis.entry_id, analysis.upos, tuple(sorted(analysis.lemmas, key=str.casefold))
 
 
-def build_head_index(saldo: dict[str, list[SaldoAnalysis]]) -> dict[str, list[SaldoAnalysis]]:
-    index: dict[str, list[SaldoAnalysis]] = defaultdict(list)
-    seen: set[tuple[str, str, tuple[str, ...]]] = set()
+def build_head_indexes(
+    saldo: dict[str, list[SaldoAnalysis]],
+) -> tuple[dict[str, list[SaldoAnalysis]], dict[str, list[SaldoAnalysis]]]:
+    """Build separate exact lemma and usable-word-form indexes.
+
+    Compound heads first match the lemma index. The word-form index is only a
+    fallback when there is no exact lemma match. Matching is case-insensitive
+    and ignores layout punctuation through ``compact_word``, while preserving
+    Swedish letters and diacritics.
+    """
+    lemma_index: dict[str, list[SaldoAnalysis]] = defaultdict(list)
+    form_index: dict[str, list[SaldoAnalysis]] = defaultdict(list)
+    seen_analyses: set[tuple[str, str, tuple[str, ...]]] = set()
+
     for analyses in saldo.values():
         for analysis in analyses:
             marker = analysis_marker(analysis)
-            if marker in seen:
+            if marker in seen_analyses:
                 continue
-            seen.add(marker)
-            for lemma in analysis.lemmas:
-                index[accentless(lemma)].append(analysis)
-    return dict(index)
+            seen_analyses.add(marker)
+
+            lemma_keys = {exact_key(lemma) for lemma in analysis.lemmas}
+            lemma_keys.discard("")
+            for key in lemma_keys:
+                lemma_index[key].append(analysis)
+
+            form_keys = {
+                exact_key(form)
+                for form in analysis.forms
+                if usable_form(form)
+            }
+            form_keys.discard("")
+            for key in form_keys:
+                form_index[key].append(analysis)
+
+    return dict(lemma_index), dict(form_index)
 
 
 def recovered_parts(row: dict[str, Any], split: dict[str, Any]) -> tuple[str, str] | None:
@@ -59,11 +87,15 @@ def candidate_dict(analysis: SaldoAnalysis) -> dict[str, Any]:
         "id": analysis.entry_id,
         "upos": analysis.upos,
         "lemmas": sorted(analysis.lemmas, key=str.casefold),
-        "forms": sorted(analysis.forms, key=str.casefold),
+        "forms": sorted((form for form in analysis.forms if usable_form(form)), key=str.casefold),
     }
 
 
-def analyse_row(row: dict[str, Any], head_index: dict[str, list[SaldoAnalysis]]) -> dict[str, Any]:
+def analyse_row(
+    row: dict[str, Any],
+    lemma_index: dict[str, list[SaldoAnalysis]],
+    form_index: dict[str, list[SaldoAnalysis]],
+) -> dict[str, Any]:
     result = dict(row)
     splits = row.get("saol_bar_splits", [])
     if row.get("saol_bar_reason") != "unique_saol_bar_split" or len(splits) != 1:
@@ -83,7 +115,9 @@ def analyse_row(row: dict[str, Any], head_index: dict[str, list[SaldoAnalysis]])
 
     left, head = recovered
     upos = str(row.get("upos", "")).upper()
-    candidates = head_index.get(accentless(head), [])
+    key = exact_key(head)
+    lemma_candidates = lemma_index.get(key, [])
+    candidates = lemma_candidates if lemma_candidates else form_index.get(key, [])
     same_pos = [candidate for candidate in candidates if upos and candidate.upos == upos]
     chosen = same_pos if same_pos else candidates
 
@@ -113,8 +147,12 @@ def analyse_row(row: dict[str, Any], head_index: dict[str, list[SaldoAnalysis]])
     return result
 
 
-def analyse_rows(rows: Iterable[dict[str, Any]], head_index: dict[str, list[SaldoAnalysis]]) -> list[dict[str, Any]]:
-    return [analyse_row(row, head_index) for row in rows]
+def analyse_rows(
+    rows: Iterable[dict[str, Any]],
+    lemma_index: dict[str, list[SaldoAnalysis]],
+    form_index: dict[str, list[SaldoAnalysis]],
+) -> list[dict[str, Any]]:
+    return [analyse_row(row, lemma_index, form_index) for row in rows]
 
 
 def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
@@ -150,8 +188,8 @@ def analyse_compound_heads(
     csv_path: Path = DEFAULT_CSV,
     summary_path: Path = DEFAULT_SUMMARY,
 ) -> dict[str, Any]:
-    head_index = build_head_index(read_saldo_analyses(saldo_path))
-    rows = analyse_rows(read_jsonl(input_path), head_index)
+    lemma_index, form_index = build_head_indexes(read_saldo_analyses(saldo_path))
+    rows = analyse_rows(read_jsonl(input_path), lemma_index, form_index)
     rows.sort(key=lambda row: (str(row.get("head_match_reason", "")), str(row.get("lemma", "")).casefold()))
     counts = Counter(str(row.get("head_match_reason", "")) for row in rows)
     write_jsonl(jsonl_path, rows)
@@ -170,7 +208,7 @@ def analyse_compound_heads(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Match the rightmost SAOL compound part against SALDO")
+    parser = argparse.ArgumentParser(description="Match the rightmost SAOL compound part exactly against SALDO")
     parser.add_argument("input", nargs="?", type=Path, default=DEFAULT_INPUT)
     parser.add_argument("saldo", nargs="?", type=Path, default=DEFAULT_SALDO)
     parser.add_argument("--jsonl", type=Path, default=DEFAULT_JSONL)
