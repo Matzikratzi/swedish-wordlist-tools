@@ -32,6 +32,15 @@ class FormOperation:
     source: str = ""
 
 
+@dataclass(frozen=True)
+class SlotOperation:
+    """One form operation assigned to an ordklass-provided grammatical slot."""
+
+    slot: str
+    token: str
+    operation: FormOperation
+
+
 _BRACKET_COMMENT = re.compile(r"\s*\[[^\]]*\]")
 _FORM_VALUE = re.compile(r":?[a-zåäöéü]+", re.IGNORECASE)
 _EXPLICIT_FORM = re.compile(r"[a-zåäöéü0-9][\wåäöéü:‐‑–-]*", re.IGNORECASE)
@@ -89,6 +98,83 @@ def parse_form_operation(token: str) -> FormOperation | None:
     if _EXPLICIT_FORM.fullmatch(raw):
         return FormOperation(FormOperationKind.EXPLICIT, raw, raw)
     return None
+
+
+def assign_labeled_slots(
+    tokens: tuple[str, ...],
+    *,
+    singular_slot: str,
+    plural_slot: str,
+    definite_plural_slot: str,
+    ignored_markers: frozenset[str] = frozenset(),
+) -> tuple[SlotOperation, ...] | None:
+    """Assign SAOL form operations using common ``best.``, ``pl.`` and ``el.`` labels.
+
+    Slot names are supplied by the ordklass layer. The shared interpreter owns
+    only the notation state: first unlabelled form, later plural form, explicit
+    plural labels, definite-plural labels and alternatives of the previous slot.
+    """
+
+    result: list[SlotOperation] = []
+    context = "singular"
+    pending_best = False
+    seen_singular_form = False
+    last_slot: str | None = None
+    alternative_next = False
+    saw_notation_marker = False
+
+    for token in tokens:
+        lower = token.casefold()
+        if token in {";", ","}:
+            saw_notation_marker = True
+            continue
+        if lower in ignored_markers:
+            saw_notation_marker = True
+            continue
+        if lower in {"el.", "h"}:
+            saw_notation_marker = True
+            alternative_next = last_slot is not None
+            continue
+        if lower == "best.":
+            saw_notation_marker = True
+            pending_best = True
+            alternative_next = False
+            continue
+        if lower == "pl.":
+            saw_notation_marker = True
+            context = "plural_definite" if pending_best else "plural"
+            pending_best = False
+            alternative_next = False
+            continue
+
+        operation = parse_form_operation(token)
+        if operation is None:
+            return None
+        if operation.kind is not FormOperationKind.EXPLICIT:
+            saw_notation_marker = True
+
+        if alternative_next and last_slot is not None:
+            slot = last_slot
+            alternative_next = False
+        elif context == "plural_definite":
+            slot = definite_plural_slot
+        elif context == "plural":
+            slot = plural_slot
+            context = "after_plural"
+        elif not seen_singular_form:
+            slot = singular_slot
+            seen_singular_form = True
+        else:
+            slot = plural_slot
+            context = "after_plural"
+
+        result.append(SlotOperation(slot, token, operation))
+        last_slot = slot
+        pending_best = False
+
+    if not saw_notation_marker:
+        return None
+    return tuple(result) if result else None
 
 
 def _best_overlap_replacement(base: str, tail: str) -> tuple[str | None, int]:
