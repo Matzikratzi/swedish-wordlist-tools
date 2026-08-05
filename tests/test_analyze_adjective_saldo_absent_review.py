@@ -22,10 +22,17 @@ class AnalyzeAdjectiveSaldoAbsentReviewTests(unittest.TestCase):
             review_assessment({"provenance": "explicit", "source_token": "durabla"}),
         )
 
-    def test_assesses_regular_append_separately_from_replace_tail(self) -> None:
+    def test_assesses_confirmed_generated_operations_as_strong_gaps(self) -> None:
         self.assertEqual(
             "standard_notation_saldo_gap_candidate",
             review_assessment({"provenance": "append", "source_token": "+a"}),
+        )
+        self.assertEqual(
+            "strong_saldo_gap_candidate",
+            review_assessment(
+                {"provenance": "append", "source_token": "+a"},
+                append_confirmed=True,
+            ),
         )
         self.assertEqual(
             "targeted_saol_notation_review",
@@ -94,7 +101,31 @@ class AnalyzeAdjectiveSaldoAbsentReviewTests(unittest.TestCase):
             cases[0]["review_assessment"],
         )
 
-    def test_regular_append_is_grouped_last(self) -> None:
+    def test_literal_append_confirmation_is_promoted(self) -> None:
+        rows = [{
+            "lemma": "bakåtböjd",
+            "classified_missing_forms": [{
+                "written_form": "bakåtböjda",
+                "slot": "definite_or_plural",
+                "provenance": "append",
+                "source_token": "+a",
+                "operation_base": "bakåtböjd",
+                "global_saldo_status": "absent_from_all_saldo",
+            }],
+        }]
+        report, cases = build_report(
+            rows,
+            set(),
+            {("bakåtböjd", "definite_or_plural", "bakåtböjda")},
+        )
+        self.assertEqual(1, report["confirmed_append_cases"])
+        self.assertTrue(cases[0]["literal_append_confirmed"])
+        self.assertEqual(
+            "strong_saldo_gap_candidate",
+            cases[0]["review_assessment"],
+        )
+
+    def test_unconfirmed_regular_append_keeps_intermediate_assessment(self) -> None:
         report, cases = build_report([
             {
                 "lemma": "bakåtböjd",
