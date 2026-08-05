@@ -25,6 +25,19 @@ class SaolNotationTests(unittest.TestCase):
                 assert operation is not None
                 self.assertEqual(expected, (operation.kind, operation.value))
 
+    def test_preserves_spelling_in_noun_operations(self) -> None:
+        cases = {
+            "+:n": (FormOperationKind.APPEND, ":n"),
+            "-Klockor": (FormOperationKind.REPLACE_TAIL, "Klockor"),
+            "A-kassor": (FormOperationKind.EXPLICIT, "A-kassor"),
+        }
+        for token, expected in cases.items():
+            with self.subTest(token=token):
+                operation = parse_form_operation(token)
+                self.assertIsNotNone(operation)
+                assert operation is not None
+                self.assertEqual(expected, (operation.kind, operation.value))
+
     def test_rejects_labels_and_separators_as_form_operations(self) -> None:
         for token in ("komp.", "pl.", "el.", "_", "["):
             with self.subTest(token=token):
@@ -55,6 +68,19 @@ class SaolNotationTests(unittest.TestCase):
                 "obunden",
                 replacement,
                 replace_tail=lambda base, tail: "obundna" if (base, tail) == ("obunden", "bundna") else None,
+            ),
+        )
+
+    def test_prefers_explicit_replacement_handler_to_overlap_guess(self) -> None:
+        replacement = parse_form_operation("-klockor")
+        self.assertIsNotNone(replacement)
+        assert replacement is not None
+        self.assertEqual(
+            "alarmklockor",
+            apply_form_operation(
+                "alarmklocka",
+                replacement,
+                replace_tail=lambda _base, _tail: "alarmklockor",
             ),
         )
 
