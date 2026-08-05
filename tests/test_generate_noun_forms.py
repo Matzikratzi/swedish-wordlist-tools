@@ -71,6 +71,11 @@ class GenerateNounFormsTests(unittest.TestCase):
         self.assertIsNotNone(row)
         assert comparison is not None
         self.assertEqual("replace_tail", comparison["change_reasons"].get("alarmklockor"))
+        self.assertEqual(
+            "legacy_malformed_form",
+            comparison["removed_form_reasons"].get("alarmklocklockor"),
+        )
+        self.assertEqual([], comparison["semantic_removed_forms"])
 
     def test_classifies_legacy_comment_tokens_as_noise(self) -> None:
         row, comparison = canonical_noun_row({
@@ -94,6 +99,21 @@ class GenerateNounFormsTests(unittest.TestCase):
         self.assertIsNotNone(row)
         assert comparison is not None
         self.assertEqual(["a"], comparison["legacy_noise_removed_forms"])
+        self.assertEqual([], comparison["semantic_removed_forms"])
+
+    def test_classifies_suffix_on_wrong_phrase_word_as_malformed(self) -> None:
+        row, comparison = canonical_noun_row({
+            "normaliserat_ord": "a conto-betalning",
+            "upos": "NOUN",
+            "text": "+en +ar",
+            "stycke": "a conto-be·tal·ning",
+        })
+        self.assertIsNotNone(row)
+        assert comparison is not None
+        self.assertEqual(
+            ["aar conto-betalning", "aen conto-betalning"],
+            comparison["legacy_malformed_removed_forms"],
+        )
         self.assertEqual([], comparison["semantic_removed_forms"])
 
     def test_unsupported_noun_is_preserved_in_comparison(self) -> None:
