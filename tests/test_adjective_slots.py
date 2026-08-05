@@ -71,6 +71,20 @@ class AdjectiveSlotsTests(unittest.TestCase):
         self.assertEqual(("förnäm", "förnämt", "förnäma", "förnämare", "förnämst", "förnämast"), self.parse("förnäm", "+t +a, komp. +are, superl. +st H +ast").written_forms())
         self.assertEqual(("god", "gott", "goda", "bättre", "bäst"), self.parse("god", "gott goda, bättre bäst").written_forms())
 
+    def test_unlabelled_irregular_comparison_after_positive_forms(self) -> None:
+        self.assertEqual(("dålig", "dåligt", "dåliga", "sämre", "sämst"), self.parse("dålig", "+t +a, sämre sämst").written_forms())
+        self.assertEqual(("gammal", "gammalt", "gamla", "äldre", "äldst"), self.parse("gammal", "+t gamla, äldre äldst").written_forms())
+        self.assertEqual(("stor", "stort", "stora", "större", "störst"), self.parse("stor", "+t +a, större störst").written_forms())
+
+    def test_fully_labelled_irregular_positive_paradigm(self) -> None:
+        self.assertEqual(
+            ("liten", "litet", "lille", "lilla", "små", "mindre", "minst"),
+            self.parse("liten", "litet, best. lille lilla; pl. små; mindre minst").written_forms(),
+        )
+
+    def test_labelled_neuter_only_explicit_form(self) -> None:
+        self.assertEqual(("vareviga", "varteviga"), self.parse("vareviga", "n. varteviga").written_forms())
+
     def test_rejects_truncated_comparison(self) -> None:
         self.assertIsNone(interpret_simple_adjective_slots({"normaliserat_ord": "nära", "text": "komp. närmare el. närmre, superl. närmast el. närm"}))
 
