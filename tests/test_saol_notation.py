@@ -5,6 +5,7 @@ import unittest
 from swedish_wordlist_tools.saol_notation import (
     FormOperationKind,
     apply_form_operation,
+    assign_labeled_slots,
     parse_form_operation,
 )
 
@@ -42,6 +43,35 @@ class SaolNotationTests(unittest.TestCase):
         for token in ("komp.", "pl.", "el.", "_", "["):
             with self.subTest(token=token):
                 self.assertIsNone(parse_form_operation(token))
+
+    def test_assigns_common_labels_to_supplied_slots(self) -> None:
+        assigned = assign_labeled_slots(
+            ("+n", ";", "pl.", "+", "el.", "-metrar", ",", "best.", "pl.", "+na"),
+            singular_slot="sg_def",
+            plural_slot="pl_indef",
+            definite_plural_slot="pl_def",
+        )
+        self.assertIsNotNone(assigned)
+        assert assigned is not None
+        self.assertEqual(
+            (
+                ("sg_def", "+n"),
+                ("pl_indef", "+"),
+                ("pl_indef", "-metrar"),
+                ("pl_def", "+na"),
+            ),
+            tuple((item.slot, item.token) for item in assigned),
+        )
+
+    def test_rejects_unmarked_explicit_prose_as_slot_sequence(self) -> None:
+        self.assertIsNone(
+            assign_labeled_slots(
+                ("helt", "okänd", "notation"),
+                singular_slot="sg_def",
+                plural_slot="pl_indef",
+                definite_plural_slot="pl_def",
+            )
+        )
 
     def test_applies_default_operations(self) -> None:
         self.assertEqual("blå", apply_form_operation("blå", parse_form_operation("+")))
