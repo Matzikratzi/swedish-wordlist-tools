@@ -113,11 +113,11 @@ class GameWordlistTests(unittest.TestCase):
                 encoding="utf-8",
             )
             report = build_game_wordlist(
-                source,
-                saldo_path,
-                adjective_path,
-                output,
-                report_path,
+                input_path=source,
+                saldo_path=saldo_path,
+                output_path=output,
+                report_path=report_path,
+                adjective_forms_path=adjective_path,
             )
             self.assertEqual(
                 output.read_text(encoding="utf-8"),
@@ -147,11 +147,11 @@ class GameWordlistTests(unittest.TestCase):
             )
 
             build_game_wordlist(
-                source,
-                saldo_path,
-                adjective_path,
-                output,
-                report_path,
+                input_path=source,
+                saldo_path=saldo_path,
+                output_path=output,
+                report_path=report_path,
+                adjective_forms_path=adjective_path,
             )
 
             self.assertIn("durabla", output.read_text(encoding="utf-8").splitlines())
