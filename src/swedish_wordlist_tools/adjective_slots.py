@@ -127,7 +127,6 @@ def _parallel(lemma: str, text: str) -> AdjectiveSlots | None:
         return None
     values: list[tuple[str | None, str]] = [(lemma, "common_singular")]
 
-    # Two complete neuter/plural branches, including participial +e notation.
     parsed: list[tuple[str, str, str | None]] = []
     for branch in branches:
         m = re.fullmatch(rf"(?P<n>-?{W}) (?P<p>\+e|{W})", branch)
@@ -147,7 +146,6 @@ def _parallel(lemma: str, text: str) -> AdjectiveSlots | None:
             values.extend(((neuter, "neuter_singular"), (plural, "definite_or_plural")))
         return _slots(lemma, values, "parallel_alternative_paradigms")
 
-    # Shared +t notation with two explicitly written plural forms.
     plurals: list[str] = []
     for branch in branches:
         m = re.fullmatch(rf"\+t (?P<p>{W})", branch)
@@ -187,6 +185,18 @@ def _comparison(lemma: str, text: str) -> AdjectiveSlots | None:
     m = re.fullmatch(rf"\+t, (?P<c>{W}) h (?P<ca>\+{W}), (?P<s>{W}) h (?P<sa>\+{W})", text)
     if m:
         return _slots(lemma, [(lemma, "common_singular"), (_neuter_t(lemma), "neuter_singular"), (m.group("c"), "comparative"), (_resolve(lemma, m.group("ca")), "comparative"), (m.group("s"), "superlative"), (_resolve(lemma, m.group("sa")), "superlative")], "generic_explicit_slots")
+
+    # Regular positive forms followed by two explicit irregular comparison forms.
+    m = re.fullmatch(rf"\+t (?P<p>\+a|{W}), (?P<c>{W}) (?P<s>{W})", text)
+    if m:
+        plural = _resolve(lemma, m.group("p"))
+        return _slots(lemma, [
+            (lemma, "common_singular"),
+            (_neuter_t(lemma), "neuter_singular"),
+            (plural, "definite_or_plural"),
+            (m.group("c"), "comparative"),
+            (m.group("s"), "superlative"),
+        ], "positive_with_explicit_comparison")
     return None
 
 
@@ -194,6 +204,9 @@ def _generic(lemma: str, text: str) -> AdjectiveSlots | None:
     m = re.fullmatch(rf"n\. \+, (?P<p>{W})", text)
     if m:
         return _slots(lemma, [(lemma, "common_singular"), (lemma, "neuter_singular"), (m.group("p"), "definite_or_plural")], "generic_explicit_slots")
+    m = re.fullmatch(rf"n\. (?P<n>{W})", text)
+    if m:
+        return _slots(lemma, [(lemma, "common_singular"), (m.group("n"), "neuter_singular")], "generic_explicit_slots")
     m = re.fullmatch(rf"(?P<a>{W}) el\. (?P<b>{W})", text)
     if m:
         return _slots(lemma, [(lemma, "common_singular"), (m.group("a"), "definite_or_plural"), (m.group("b"), "definite_or_plural")], "generic_explicit_slots")
@@ -203,6 +216,19 @@ def _generic(lemma: str, text: str) -> AdjectiveSlots | None:
     m = re.fullmatch(rf"\+-t (?P<p>{W})", text)
     if m:
         return _slots(lemma, [(lemma, "common_singular"), (lemma + "t", "neuter_singular"), (m.group("p"), "definite_or_plural")], "generic_explicit_slots")
+
+    # Fully labelled positive paradigm followed by unlabelled comparison forms.
+    m = re.fullmatch(rf"(?P<n>{W}), best\. (?P<masc>{W}) (?P<definite>{W}); pl\. (?P<plural>{W}); (?P<c>{W}) (?P<s>{W})", text)
+    if m:
+        return _slots(lemma, [
+            (lemma, "common_singular"),
+            (m.group("n"), "neuter_singular"),
+            (m.group("masc"), "masculine_definite"),
+            (m.group("definite"), "definite_or_plural"),
+            (m.group("plural"), "definite_or_plural"),
+            (m.group("c"), "comparative"),
+            (m.group("s"), "superlative"),
+        ], "generic_labelled_full_paradigm")
     return None
 
 
