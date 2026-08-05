@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from collections import Counter
 from pathlib import Path
 from typing import Any, Iterable
@@ -18,6 +19,20 @@ DEFAULT_JSONL = Path("reports/saol14-noun-forms.jsonl")
 DEFAULT_SUMMARY = Path("reports/saol14-noun-forms-summary.json")
 DEFAULT_COMPARISON = Path("reports/saol14-noun-forms-comparison.jsonl")
 DEFAULT_COMPARISON_TEXT = Path("reports/saol14-noun-forms-comparison.txt")
+
+_LEGACY_COMMENT_TOKENS = frozenset(
+    {
+        "anv",
+        "användas",
+        "används",
+        "i",
+        "kan",
+        "ofta",
+        "som",
+        "undviks",
+        "vanl",
+    }
+)
 
 
 def _record_id(record: dict[str, Any]) -> str:
@@ -54,6 +69,9 @@ def _unsupported_comparison(record: dict[str, Any]) -> dict[str, Any]:
         "added_forms": [],
         "removed_forms": [],
         "change_reasons": {},
+        "removed_form_reasons": {},
+        "legacy_noise_removed_forms": [],
+        "semantic_removed_forms": [],
     }
 
 
@@ -103,6 +121,25 @@ def _change_reasons(
     return dict(sorted(reasons.items(), key=lambda item: item[0].casefold()))
 
 
+def _removed_form_reason(form: str, lemma: str) -> str:
+    normalized = re.sub(r"[^0-9a-zåäöéü-]+", "", form.casefold())
+    if normalized in _LEGACY_COMMENT_TOKENS:
+        return "legacy_comment_token"
+    folded_lemma = lemma.casefold()
+    if normalized and len(normalized) < len(folded_lemma) and folded_lemma.startswith(normalized):
+        return "legacy_truncated_token"
+    return "semantic_difference"
+
+
+def _removed_form_reasons(removed: set[str], lemma: str) -> dict[str, str]:
+    return dict(
+        sorted(
+            ((form, _removed_form_reason(form, lemma)) for form in removed),
+            key=lambda item: item[0].casefold(),
+        )
+    )
+
+
 def canonical_noun_row(record: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     if _saol_upos(record) != "NOUN":
         return None, None
@@ -118,6 +155,11 @@ def canonical_noun_row(record: dict[str, Any]) -> tuple[dict[str, Any] | None, d
     canonical_written = {form.written_form for form in canonical_forms}
     added = canonical_written - legacy_written
     removed = legacy_written - canonical_written
+    removed_reasons = _removed_form_reasons(removed, canonical.lemma)
+    legacy_noise = {
+        form for form, reason in removed_reasons.items() if reason.startswith("legacy_")
+    }
+    semantic_removed = removed - legacy_noise
 
     row = {
         "record_id": _record_id(record),
@@ -145,6 +187,9 @@ def canonical_noun_row(record: dict[str, Any]) -> tuple[dict[str, Any] | None, d
         "added_forms": sorted(added, key=str.casefold),
         "removed_forms": sorted(removed, key=str.casefold),
         "change_reasons": _change_reasons(record, canonical_forms, added),
+        "removed_form_reasons": removed_reasons,
+        "legacy_noise_removed_forms": sorted(legacy_noise, key=str.casefold),
+        "semantic_removed_forms": sorted(semantic_removed, key=str.casefold),
     }
     return row, comparison
 
@@ -171,6 +216,11 @@ def generate_noun_artifact(records: Iterable[dict[str, Any]]) -> tuple[list[dict
         for row in comparisons
         for reason in row.get("change_reasons", {}).values()
     )
+    removed_reason_counts = Counter(
+        str(reason)
+        for row in comparisons
+        for reason in row.get("removed_form_reasons", {}).values()
+    )
     form_kind_counts = Counter(str(form["kind"]) for row in rows for form in row["forms"])
     stage_counts = Counter(str(form["source_stage"]) for row in rows for form in row["forms"])
     canonical_written = {
@@ -183,6 +233,16 @@ def generate_noun_artifact(records: Iterable[dict[str, Any]]) -> tuple[list[dict
     removed_written = {
         str(form).casefold() for row in comparisons for form in row.get("removed_forms", [])
     }
+    legacy_noise_written = {
+        str(form).casefold()
+        for row in comparisons
+        for form in row.get("legacy_noise_removed_forms", [])
+    }
+    semantic_removed_written = {
+        str(form).casefold()
+        for row in comparisons
+        for form in row.get("semantic_removed_forms", [])
+    }
     summary = {
         "noun_records": noun_records,
         "generated_noun_records": len(rows),
@@ -191,10 +251,13 @@ def generate_noun_artifact(records: Iterable[dict[str, Any]]) -> tuple[list[dict
         "canonical_unique_written_forms": len(canonical_written),
         "comparison_status_counts": dict(sorted(status_counts.items())),
         "change_reason_counts": dict(sorted(reason_counts.items())),
+        "removed_form_reason_counts": dict(sorted(removed_reason_counts.items())),
         "form_kind_counts": dict(sorted(form_kind_counts.items())),
         "source_stage_counts": dict(sorted(stage_counts.items())),
         "unique_forms_added": len(added_written),
         "unique_forms_removed": len(removed_written),
+        "unique_legacy_noise_removed": len(legacy_noise_written),
+        "unique_semantic_forms_removed": len(semantic_removed_written),
     }
     return rows, comparisons, summary
 
@@ -220,8 +283,13 @@ def render_comparison(summary: dict[str, Any], comparisons: list[dict[str, Any]]
         f"Både tillagda och borttagna: {counts.get('changed_forms', 0)}",
         f"Unika tillagda former: {summary['unique_forms_added']}",
         f"Unika borttagna former: {summary['unique_forms_removed']}",
-        "Orsaker: " + ", ".join(
+        f"Varav gammalt generatorskräp: {summary['unique_legacy_noise_removed']}",
+        f"Semantiskt borttagna former: {summary['unique_semantic_forms_removed']}",
+        "Orsaker till tillägg: " + ", ".join(
             f"{reason}={count}" for reason, count in summary["change_reason_counts"].items()
+        ),
+        "Orsaker till borttagning: " + ", ".join(
+            f"{reason}={count}" for reason, count in summary["removed_form_reason_counts"].items()
         ),
     ]
     for status, heading in (
@@ -237,12 +305,15 @@ def render_comparison(summary: dict[str, Any], comparisons: list[dict[str, Any]]
         for row in selected[:100]:
             added = ", ".join(row.get("added_forms", [])) or "-"
             removed = ", ".join(row.get("removed_forms", [])) or "-"
+            noise = ", ".join(row.get("legacy_noise_removed_forms", [])) or "-"
+            semantic = ", ".join(row.get("semantic_removed_forms", [])) or "-"
             reasons = ", ".join(
                 f"{form}:{reason}" for form, reason in row.get("change_reasons", {}).items()
             ) or "-"
             lines.append(
                 f"  {row['lemma']} | {row['notation']} | stycke={row.get('stycke', '')} | "
-                f"tillagt: {added} | borttaget: {removed} | orsaker: {reasons}"
+                f"tillagt: {added} | borttaget: {removed} | generatorskräp: {noise} | "
+                f"semantiskt borttaget: {semantic} | orsaker: {reasons}"
             )
     return "\n".join(lines) + "\n"
 
