@@ -31,6 +31,13 @@ class AnalyzeAdjectiveSaldoAbsentReviewTests(unittest.TestCase):
             "targeted_saol_notation_review",
             review_assessment({"provenance": "replace_tail", "source_token": "-gott"}),
         )
+        self.assertEqual(
+            "strong_saldo_gap_candidate",
+            review_assessment(
+                {"provenance": "replace_tail", "source_token": "-gott"},
+                replace_tail_confirmed=True,
+            ),
+        )
 
     def test_build_report_only_includes_forms_absent_from_all_saldo(self) -> None:
         report, cases = build_report([
@@ -59,6 +66,29 @@ class AnalyzeAdjectiveSaldoAbsentReviewTests(unittest.TestCase):
         self.assertEqual(1, report["cases"])
         self.assertEqual("durabla", cases[0]["written_form"])
         self.assertEqual("explicit_saol_form", cases[0]["review_group"])
+        self.assertEqual(
+            "strong_saldo_gap_candidate",
+            cases[0]["review_assessment"],
+        )
+
+    def test_bar_confirmed_replace_tail_is_promoted(self) -> None:
+        rows = [{
+            "lemma": "allgod",
+            "classified_missing_forms": [{
+                "written_form": "allgott",
+                "slot": "neuter_singular",
+                "provenance": "replace_tail",
+                "source_token": "-gott",
+                "operation_base": "allgod",
+                "global_saldo_status": "absent_from_all_saldo",
+            }],
+        }]
+        report, cases = build_report(
+            rows,
+            {("allgod", "neuter_singular", "allgott")},
+        )
+        self.assertEqual(1, report["confirmed_replace_tail_cases"])
+        self.assertTrue(cases[0]["bar_notation_confirmed"])
         self.assertEqual(
             "strong_saldo_gap_candidate",
             cases[0]["review_assessment"],
