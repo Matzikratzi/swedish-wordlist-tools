@@ -13,23 +13,88 @@ DEFAULT_JSON = Path("reports/saol14-adjective-mismatch-causes.json")
 DEFAULT_JSONL = Path("reports/saol14-adjective-mismatch-causes.jsonl")
 
 _WORD = re.compile(r"[a-zåäöéü]+", re.IGNORECASE)
+_OPERATION = re.compile(r"[+-]?[a-zåäöéü]+", re.IGNORECASE)
 
 
 def _tokens(notation: str) -> tuple[str, ...]:
-    return tuple(re.findall(r"[+-]?[a-zåäöéü]+", notation.casefold()))
+    return tuple(_OPERATION.findall(notation.casefold()))
 
 
-def _form_derivation(form: str, lemma: str, notation: str) -> str:
+def _operation_kind(token: str) -> str:
+    if token.startswith("-"):
+        return "replace_tail"
+    if token.startswith("+"):
+        return "append"
+    return "explicit"
+
+
+def _slot_operation_token(slot: str, notation: str) -> str | None:
+    """Find the operation token that most directly supplies one adjective slot.
+
+    This deliberately handles the common SAOL layouts rather than assigning every
+    generated form the same derivation merely because the notation contains '-'.
+    """
+
+    normalized = " ".join(notation.casefold().split())
+
+    # The overwhelmingly common positive pattern has neuter first and
+    # definite/plural second: '-fött +a', '+t +a', 'litet små'.
+    first_branch = normalized.split(" _ ", 1)[0]
+    lexical = [token for token in _tokens(first_branch) if token not in {"pl", "n", "best", "mask", "komp", "superl"}]
+
+    if slot == "neuter_singular" and lexical:
+        return lexical[0]
+    if slot == "definite_or_plural" and len(lexical) >= 2:
+        return lexical[1]
+
+    # Labelled one-form patterns such as 'pl. -a'.
+    if slot == "definite_or_plural" and normalized.startswith(("pl. ", "best. ")) and lexical:
+        return lexical[-1]
+
+    if slot == "comparative":
+        match = re.search(r"komp\.\s+([+-]?[a-zåäöéü]+)", normalized)
+        return match.group(1) if match else None
+    if slot == "superlative":
+        match = re.search(r"superl\.\s+([+-]?[a-zåäöéü]+)", normalized)
+        return match.group(1) if match else None
+    return None
+
+
+def _form_derivation(form: str, lemma: str, notation: str, slot: str) -> str:
     tokens = _tokens(notation)
     if form == lemma:
         return "lemma"
     if form in {token for token in tokens if not token.startswith(("+", "-"))}:
         return "explicit"
-    if any(token.startswith("-") and len(token) > 1 for token in tokens):
-        return "replace_tail"
+
+    token = _slot_operation_token(slot, notation)
+    if token:
+        return _operation_kind(token)
+
     if any(token.startswith("+") for token in tokens):
         return "append"
+    if any(token.startswith("-") and len(token) > 1 for token in tokens):
+        return "replace_tail"
     return "unknown_derivation"
+
+
+def _common_prefix_length(left: str, right: str) -> int:
+    count = 0
+    for a, b in zip(left.casefold(), right.casefold()):
+        if a != b:
+            break
+        count += 1
+    return count
+
+
+def _looks_like_lost_prefix(form: str, lemma: str, derivation: str) -> bool:
+    """Flag replace-tail output that has implausibly discarded the lemma prefix."""
+
+    return (
+        derivation == "replace_tail"
+        and len(form) < len(lemma)
+        and _common_prefix_length(form, lemma) < 2
+    )
 
 
 def classify_row(row: dict[str, Any]) -> dict[str, Any] | None:
@@ -41,9 +106,13 @@ def classify_row(row: dict[str, Any]) -> dict[str, Any] | None:
     classified = []
     for form in missing:
         written = str(form.get("written_form") or "")
-        derivation = _form_derivation(written, lemma, notation)
+        slot = str(form.get("slot") or "")
+        derivation = _form_derivation(written, lemma, notation, slot)
+        lost_prefix = _looks_like_lost_prefix(written, lemma, derivation)
         if row.get("source_correction_applied"):
             cause = "suspected_saol_error_corrected"
+        elif lost_prefix:
+            cause = "possible_lost_prefix"
         elif derivation == "explicit":
             cause = "saldo_coverage_difference"
         elif derivation == "lemma":
@@ -52,7 +121,12 @@ def classify_row(row: dict[str, Any]) -> dict[str, Any] | None:
             cause = "needs_parser_or_saldo_review"
         else:
             cause = "unresolved"
-        classified.append({**form, "derivation": derivation, "preliminary_cause": cause})
+        classified.append({
+            **form,
+            "derivation": derivation,
+            "preliminary_cause": cause,
+            "possible_lost_prefix": lost_prefix,
+        })
     return {**row, "classified_missing_forms": classified}
 
 
@@ -96,8 +170,9 @@ def build_report(path: Path = DEFAULT_INPUT) -> tuple[dict[str, Any], list[dict[
         "examples": dict(examples),
         "note": (
             "These are preliminary triage categories. Explicit SAOL forms normally point to "
-            "SALDO coverage differences; generated append/replace forms still require manual "
-            "review of notation, implementation, SALDO alignment and source extraction."
+            "SALDO coverage differences. Generated forms that appear to lose the lemma prefix "
+            "are isolated before the remaining append/replace forms are reviewed against SAOL "
+            "notation, implementation, SALDO alignment and source extraction."
         ),
     }
     return report, rows
