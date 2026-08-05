@@ -140,8 +140,18 @@ def _has_suffix_on_wrong_phrase_word(form: str, lemma: str) -> bool:
     )
 
 
+def _overlap_length(left: str, right: str) -> int:
+    """Return the longest suffix/prefix overlap between two strings."""
+
+    limit = min(len(left), len(right))
+    for length in range(limit, 0, -1):
+        if left[-length:] == right[:length]:
+            return length
+    return 0
+
+
 def _is_single_duplicated_segment(form: str, canonical: str) -> bool:
-    """Return true when deleting one adjacent duplicate repairs the old form."""
+    """Return true when one duplicated or shifted-overlap segment repairs the old form."""
 
     old = form.casefold()
     new = canonical.casefold()
@@ -158,7 +168,16 @@ def _is_single_duplicated_segment(form: str, canonical: str) -> bool:
         duplicated = old[split:end]
         if len(duplicated) != excess or not duplicated:
             continue
-        if new[:split].endswith(duplicated) or new[split:].startswith(duplicated):
+        left = new[:split]
+        right = new[split:]
+        if left.endswith(duplicated) or right.startswith(duplicated):
+            return True
+        # The legacy tail replacer could repeat an almost identical segment
+        # shifted by one character, e.g. registeregistren -> registren.
+        if len(duplicated) >= 4 and (
+            _overlap_length(left, duplicated) >= len(duplicated) - 1
+            or _overlap_length(duplicated, right) >= len(duplicated) - 1
+        ):
             return True
     return False
 
