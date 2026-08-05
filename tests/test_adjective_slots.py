@@ -85,6 +85,12 @@ class AdjectiveSlotsTests(unittest.TestCase):
     def test_labelled_neuter_only_explicit_form(self) -> None:
         self.assertEqual(("vareviga", "varteviga"), self.parse("vareviga", "n. varteviga").written_forms())
 
+    def test_labelled_masculine_and_colloquial_superlative(self) -> None:
+        self.assertEqual(
+            ("enda", "ende", "endaste"),
+            self.parse("enda", "ende, vard. superl. endaste").written_forms(),
+        )
+
     def test_rejects_truncated_comparison(self) -> None:
         self.assertIsNone(interpret_simple_adjective_slots({"normaliserat_ord": "nära", "text": "komp. närmare el. närmre, superl. närmast el. närm"}))
 
