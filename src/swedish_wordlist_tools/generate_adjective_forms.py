@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any, Iterable
 
-from .adjective_form_provenance import form_provenance
+from .adjective_form_provenance import form_provenance_details
 from .analyze_adjectives import _interpret_record, _value
 from .jsonl import read_jsonl
 from .saol_boundaries import restore_replacement_bar_prefix
@@ -33,15 +33,17 @@ def generated_row(record: dict[str, Any]) -> dict[str, Any] | None:
             notation=notation,
             written_form=form.written_form,
         )
+        provenance = form_provenance_details(
+            written_form=written_form,
+            lemma=lemma,
+            slot=form.slot,
+            notation=notation,
+        )
         forms.append({
             "written_form": written_form,
             "slot": form.slot,
-            "provenance": form_provenance(
-                written_form=written_form,
-                lemma=lemma,
-                slot=form.slot,
-                notation=notation,
-            ),
+            "provenance": provenance.kind,
+            "source_token": provenance.source_token,
         })
 
     return {
@@ -106,8 +108,9 @@ def main() -> None:
         ),
         "artifact": str(args.jsonl),
         "note": (
-            "This is the canonical generated adjective-form artifact. Validators "
-            "must consume it and must not run the adjective interpreter again."
+            "This is the canonical generated adjective-form artifact. Each form stores "
+            "its provenance and source SAOL token. Validators must consume it and must "
+            "not run the adjective interpreter again."
         ),
     }
     args.summary.parent.mkdir(parents=True, exist_ok=True)
