@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .inflect import normalise_pattern
+from .saol_notation import apply_form_operation, parse_form_operation
 
 
 @dataclass(frozen=True)
@@ -98,25 +99,35 @@ def _replace_unmarked_final_component(lemma: str, replacement: str) -> str | Non
     return result + (separator + rest if separator else "")
 
 
+def _append_to_first_word(lemma: str, suffix: str) -> str:
+    first, separator, rest = lemma.partition(" ")
+    return first + suffix + (separator + rest if separator else "")
+
+
+def _replace_noun_tail(
+    record: dict[str, Any], lemma: str, replacement: str
+) -> str | None:
+    parts = _compound_parts(record, lemma)
+    if parts is not None:
+        prefix, _head = parts
+        return prefix + replacement
+    return _replace_unmarked_final_component(lemma, replacement)
+
+
 def apply_form_token(
     record: dict[str, Any], lemma: str, token: str
 ) -> str | None:
-    if token == "+":
-        return lemma
-    if token.startswith("+"):
-        suffix = token[1:]
-        first, separator, rest = lemma.partition(" ")
-        return first + suffix + (separator + rest if separator else "")
-    if token.startswith("-"):
-        replacement = token[1:]
-        if not replacement:
-            return None
-        parts = _compound_parts(record, lemma)
-        if parts is not None:
-            prefix, _head = parts
-            return prefix + replacement
-        return _replace_unmarked_final_component(lemma, replacement)
-    return token
+    """Apply one SAOL form instruction without deciding its grammatical slot."""
+
+    operation = parse_form_operation(token)
+    if operation is None:
+        return None
+    return apply_form_operation(
+        lemma,
+        operation,
+        append=_append_to_first_word,
+        replace_tail=lambda base, tail: _replace_noun_tail(record, base, tail),
+    )
 
 
 def _clean_notation_comments(pattern: str) -> str:
@@ -175,6 +186,9 @@ def _slot_sequence(pattern: str) -> tuple[tuple[str, str], ...] | None:
             pending_best = False
             alternative_next = False
             continue
+
+        if parse_form_operation(token) is None:
+            return None
 
         if alternative_next and last_slot is not None:
             slot = last_slot
