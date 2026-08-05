@@ -82,16 +82,7 @@ def _derive_definite_plural(
     singular_definites: tuple[str, ...],
     plural: str,
 ) -> str:
-    """Derive the regular definite plural from interpreted key forms.
-
-    The decision uses the forms SAOL supplied, not the spelling of the complete
-    notation pattern:
-
-    * zero plural with an ``-et`` singular takes ``-en``;
-    * an ``-n`` plural paired with an ``-t`` singular takes ``-a``;
-    * other plurals take regular ``-na``;
-    * plurals already ending in ``-en`` take ``-a``.
-    """
+    """Derive the regular definite plural from interpreted key forms."""
     folded_plural = plural.casefold()
     folded_lemma = lemma.casefold()
     folded_singulars = tuple(form.casefold() for form in singular_definites)
@@ -154,21 +145,34 @@ def _complete_from_slots(entry: GeneratedEntry) -> GeneratedEntry:
     return _merge_forms(entry, tuple(additions))
 
 
+def _requires_unmarked_head_guess(record: dict[str, Any], row: InterpretedRow) -> bool:
+    """Return true when a noun tail replacement lacks SAOL's marked boundary.
+
+    A ``-form`` instruction replaces a final component. For canonical noun
+    generation we only accept that operation when ``stycke`` identifies the
+    component with ``|``. The lower-level interpreter may still expose its
+    spelling-overlap fallback for diagnostics and isolated parsing tests.
+    """
+    has_replacement = any(
+        key_form.source.startswith("-")
+        for key_form in row.key_forms
+        if key_form.slot != "lemma"
+    )
+    if not has_replacement:
+        return False
+    return "|" not in str(record.get("stycke", ""))
+
+
 def complete_noun_entry(
     record: dict[str, Any],
     entry: GeneratedEntry | None,
 ) -> GeneratedEntry | None:
-    """Build a noun paradigm from SAOL operations mapped to noun slots.
-
-    ``entry`` is retained in the signature for callers that still run the old
-    base generator first, but noun completion no longer depends on its pattern
-    classes. The interpreted SAOL row is authoritative.
-    """
+    """Build a noun paradigm from SAOL operations mapped to noun slots."""
     if str(record.get("upos", "")).upper() != "NOUN":
         return entry
 
     row = interpret_noun_row(record)
-    if row is None:
+    if row is None or _requires_unmarked_head_guess(record, row):
         return None
 
     interpreted = _entry_from_interpreted_row(row)
