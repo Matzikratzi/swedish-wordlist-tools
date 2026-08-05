@@ -6,7 +6,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from .inflect import normalise_pattern
-from .saol_notation import apply_form_operation, parse_form_operation
+from .saol_notation import (
+    FormOperationKind,
+    apply_form_operation,
+    parse_form_operation,
+)
 
 
 @dataclass(frozen=True)
@@ -104,16 +108,6 @@ def _append_to_first_word(lemma: str, suffix: str) -> str:
     return first + suffix + (separator + rest if separator else "")
 
 
-def _replace_noun_tail(
-    record: dict[str, Any], lemma: str, replacement: str
-) -> str | None:
-    parts = _compound_parts(record, lemma)
-    if parts is not None:
-        prefix, _head = parts
-        return prefix + replacement
-    return _replace_unmarked_final_component(lemma, replacement)
-
-
 def apply_form_token(
     record: dict[str, Any], lemma: str, token: str
 ) -> str | None:
@@ -122,11 +116,18 @@ def apply_form_token(
     operation = parse_form_operation(token)
     if operation is None:
         return None
+
+    if operation.kind is FormOperationKind.REPLACE_TAIL:
+        parts = _compound_parts(record, lemma)
+        if parts is not None:
+            prefix, _head = parts
+            return prefix + operation.value
+
     return apply_form_operation(
         lemma,
         operation,
         append=_append_to_first_word,
-        replace_tail=lambda base, tail: _replace_noun_tail(record, base, tail),
+        replace_tail=_replace_unmarked_final_component,
     )
 
 
@@ -167,28 +168,37 @@ def _slot_sequence(pattern: str) -> tuple[tuple[str, str], ...] | None:
     seen_singular_form = False
     last_slot: str | None = None
     alternative_next = False
+    saw_notation_marker = False
 
     for token in tokens:
         lower = token.casefold()
         if token in {";", ","}:
+            saw_notation_marker = True
             continue
         if lower in _IGNORED_MARKERS:
+            saw_notation_marker = True
             continue
         if lower in {"el.", "h"}:
+            saw_notation_marker = True
             alternative_next = last_slot is not None
             continue
         if lower == "best.":
+            saw_notation_marker = True
             pending_best = True
             alternative_next = False
             continue
         if lower == "pl.":
+            saw_notation_marker = True
             context = "plural_definite" if pending_best else "plural"
             pending_best = False
             alternative_next = False
             continue
 
-        if parse_form_operation(token) is None:
+        operation = parse_form_operation(token)
+        if operation is None:
             return None
+        if operation.kind is not FormOperationKind.EXPLICIT:
+            saw_notation_marker = True
 
         if alternative_next and last_slot is not None:
             slot = last_slot
@@ -206,11 +216,10 @@ def _slot_sequence(pattern: str) -> tuple[tuple[str, str], ...] | None:
             context = "after_plural"
         result.append((slot, token))
         last_slot = slot
-        # `best.` modifies the next form only. Without clearing it here,
-        # `best. +; i: pl. används: anmodanden` incorrectly makes the
-        # later plural form definite plural.
         pending_best = False
 
+    if not saw_notation_marker:
+        return None
     return tuple(result) if result else None
 
 
