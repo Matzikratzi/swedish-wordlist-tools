@@ -30,6 +30,20 @@ class SaolRowInterpreterTests(unittest.TestCase):
         self.assertEqual("hunden", row.form("sg_def") if row else None)
         self.assertEqual("hundar", row.form("pl_indef") if row else None)
 
+    def test_applies_suffixes_to_final_word_in_phrase(self) -> None:
+        row = interpret_noun_row(
+            self.record("a conto-betalning", "+en +ar", "a conto-be·tal·ning")
+        )
+        self.assertIsNotNone(row)
+        self.assertEqual(
+            "a conto-betalningen",
+            row.form("sg_def") if row else None,
+        )
+        self.assertEqual(
+            "a conto-betalningar",
+            row.form("pl_indef") if row else None,
+        )
+
     def test_interprets_zero_plural_label(self) -> None:
         row = interpret_noun_row(self.record("fiskelag", "+et; pl. +"))
         self.assertIsNotNone(row)
