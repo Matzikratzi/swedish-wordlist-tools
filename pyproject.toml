@@ -48,6 +48,7 @@ saol14-analyze-imperatives = "swedish_wordlist_tools.analyze_imperatives:main"
 saol14-analyze-verb-hv = "swedish_wordlist_tools.analyze_verb_hv:main"
 saol14-analyze-adjectives = "swedish_wordlist_tools.analyze_adjectives:main"
 saol14-validate-adjective-slots-saldo = "swedish_wordlist_tools.validate_adjective_slots_saldo:main"
+saol14-analyze-adjective-replace-tail = "swedish_wordlist_tools.analyze_adjective_replace_tail:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
