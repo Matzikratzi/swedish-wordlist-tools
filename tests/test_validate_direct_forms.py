@@ -20,7 +20,7 @@ class ValidateDirectFormsTests(unittest.TestCase):
         self.assertEqual("lemma_same_upos", method)
         self.assertEqual([analysis], analyses)
 
-    def test_reports_generated_forms_as_subset(self) -> None:
+    def test_reports_completed_noun_forms_as_subset(self) -> None:
         record = {
             "id": 1,
             "normaliserat_ord": "flicka",
@@ -32,12 +32,38 @@ class ValidateDirectFormsTests(unittest.TestCase):
             "id": "flicka..nn.1",
             "upos": "NOUN",
             "lemmas": {"flicka"},
-            "forms": {"flicka", "flickan", "flickar", "flickarna"},
+            "forms": {
+                "flicka", "flickas", "flickan", "flickans",
+                "flickar", "flickars", "flickarna", "flickarnas",
+                "flickor",
+            },
         }
         row = validation_row(record, "lemma_same_upos", [analysis])
         self.assertEqual("saol_forms_are_subset", row["status"])
-        self.assertEqual(["flickarna"], row["missing_from_saol"])
+        self.assertEqual(["flickor"], row["missing_from_saol"])
         self.assertEqual([], row["extra_from_saol"])
+
+    def test_reports_zero_plural_disagreement_separately(self) -> None:
+        record = {
+            "id": 2,
+            "normaliserat_ord": "ansvar",
+            "upos": "NOUN",
+            "ordkl": "subst.",
+            "text": "+et; pl. +",
+        }
+        analysis = {
+            "id": "ansvar..nn.1",
+            "upos": "NOUN",
+            "lemmas": {"ansvar"},
+            "forms": {"ansvar", "ansvars", "ansvaret", "ansvarets"},
+        }
+        row = validation_row(record, "lemma_same_upos", [analysis])
+        self.assertEqual("saol_zero_plural_differs_from_saldo", row["status"])
+        self.assertEqual(["ansvaren", "ansvarens"], row["extra_from_saol"])
+        self.assertEqual(
+            "saol_forms_are_subset->saol_zero_plural_differs_from_saldo",
+            row["status_transition"],
+        )
 
     def test_excludes_hyphen_terminated_saldo_forms(self) -> None:
         record = {

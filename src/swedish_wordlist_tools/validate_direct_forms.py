@@ -16,11 +16,13 @@ from .compare_sources import (
 )
 from .inflect import generate_entry
 from .jsonl import read_jsonl
+from .noun_paradigm import complete_noun_entry
 
 DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
 DEFAULT_SALDO = Path("data/raw/saldom.xml")
 DEFAULT_JSONL = Path("reports/saol14-direct-form-validation.jsonl")
 DEFAULT_SUMMARY = Path("reports/saol14-direct-form-validation-summary.json")
+ZERO_PLURAL_PATTERN = "+et; pl. +"
 
 
 def _usable_form(value: str) -> bool:
@@ -64,12 +66,24 @@ def select_direct_match(
     return None
 
 
+def _form_status(generated_forms: set[str], saldo_forms: set[str], supported: bool) -> str:
+    if not supported:
+        return "saol_pattern_unsupported"
+    if generated_forms == saldo_forms:
+        return "exact_form_set"
+    if generated_forms <= saldo_forms:
+        return "saol_forms_are_subset"
+    return "form_set_mismatch"
+
+
 def validation_row(
     record: dict[str, Any],
     match_method: str,
     analyses: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    generated = generate_entry(record)
+    initial = generate_entry(record)
+    generated = complete_noun_entry(record, initial)
+    initial_forms = set(initial.forms if initial else ())
     generated_forms = set(generated.forms if generated else ())
     saldo_forms = {
         str(form)
@@ -77,17 +91,25 @@ def validation_row(
         for form in analysis["forms"]
         if _usable_form(str(form))
     }
+
+    initial_status = _form_status(initial_forms, saldo_forms, initial is not None)
+    status = _form_status(generated_forms, saldo_forms, generated is not None)
     missing_from_saol = saldo_forms - generated_forms
     extra_from_saol = generated_forms - saldo_forms
+    completion_applied = generated is not None and generated_forms != initial_forms
 
-    if generated is None:
-        status = "saol_pattern_unsupported"
-    elif generated_forms == saldo_forms:
-        status = "exact_form_set"
-    elif generated_forms <= saldo_forms:
-        status = "saol_forms_are_subset"
-    else:
-        status = "form_set_mismatch"
+    # SAOL's `+et; pl. +` explicitly states that the indefinite plural is
+    # identical to the lemma. From that, definite plural in -en follows. SALDO
+    # sometimes omits those plural forms (typically for mass/collective nouns)
+    # or records another plural. That is a source disagreement, not evidence
+    # that the SAOL parser generated an impossible form.
+    if (
+        status == "form_set_mismatch"
+        and initial_status == "saol_forms_are_subset"
+        and str(record.get("text", "")).strip() == ZERO_PLURAL_PATTERN
+        and completion_applied
+    ):
+        status = "saol_zero_plural_differs_from_saldo"
 
     return {
         "record_id": str(record.get("id") or record.get("subnr") or ""),
@@ -97,6 +119,9 @@ def validation_row(
         "ordkl": str(record.get("ordkl", "")),
         "notation": str(record.get("text", "")),
         "match_method": match_method,
+        "completion_applied": completion_applied,
+        "status_before_completion": initial_status,
+        "status_transition": f"{initial_status}->{status}",
         "saldo_ids": sorted({str(analysis["id"]) for analysis in analyses}),
         "saldo_lemmas": sorted(
             {str(lemma) for analysis in analyses for lemma in analysis["lemmas"]},
@@ -139,9 +164,23 @@ def validate_direct_forms(
 
     status_counts = Counter(str(row["status"]) for row in rows)
     method_counts = Counter(str(row["match_method"]) for row in rows)
+    completion_counts = Counter(
+        "applied" if row["completion_applied"] else "not_applied" for row in rows
+    )
+    completion_transition_counts = Counter(
+        str(row["status_transition"])
+        for row in rows
+        if row["completion_applied"]
+    )
+    completion_pattern_transition_counts: dict[str, Counter[str]] = {}
     upos_status_counts: dict[str, Counter[str]] = {}
     for row in rows:
         upos_status_counts.setdefault(str(row["upos"]), Counter())[str(row["status"])] += 1
+        if row["completion_applied"]:
+            pattern = str(row["notation"])
+            completion_pattern_transition_counts.setdefault(pattern, Counter())[
+                str(row["status_transition"])
+            ] += 1
 
     summary = {
         "saol": str(saol_path),
@@ -149,6 +188,12 @@ def validate_direct_forms(
         "matched_records": len(rows),
         "status_counts": dict(sorted(status_counts.items())),
         "match_method_counts": dict(sorted(method_counts.items())),
+        "completion_counts": dict(sorted(completion_counts.items())),
+        "completion_transition_counts": dict(sorted(completion_transition_counts.items())),
+        "completion_pattern_transition_counts": {
+            pattern: dict(sorted(counts.items()))
+            for pattern, counts in sorted(completion_pattern_transition_counts.items())
+        },
         "upos_status_counts": {
             upos: dict(sorted(counts.items()))
             for upos, counts in sorted(upos_status_counts.items())
@@ -180,6 +225,10 @@ def main() -> None:
     print(f"Direktmatchade poster: {summary['matched_records']}")
     for status, count in summary["status_counts"].items():
         print(f"{status}: {count}")
+    print(f"Substantivkomplettering använd: {summary['completion_counts'].get('applied', 0)}")
+    print("Övergångar efter komplettering:")
+    for transition, count in summary["completion_transition_counts"].items():
+        print(f"  {transition}: {count}")
     print(f"Detaljer: {summary['jsonl']}")
     print(f"Summering: {args.summary}")
 
