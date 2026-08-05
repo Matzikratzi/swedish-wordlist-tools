@@ -28,6 +28,29 @@ class ClassifyAdjectiveSaldoMismatchesTest(unittest.TestCase):
         self.assertEqual(form["derivation"], "replace_tail")
         self.assertEqual(form["preliminary_cause"], "needs_parser_or_saldo_review")
 
+    def test_second_slot_is_classified_as_append(self) -> None:
+        row = classify_row({
+            "lemma": "bakåtböjd",
+            "effective_notation": "-böjt +a",
+            "missing_forms": [{"written_form": "bakåtböjda", "slot": "definite_or_plural"}],
+        })
+        assert row is not None
+        form = row["classified_missing_forms"][0]
+        self.assertEqual(form["derivation"], "append")
+        self.assertEqual(form["preliminary_cause"], "needs_parser_or_saldo_review")
+
+    def test_lost_prefix_is_flagged_separately(self) -> None:
+        row = classify_row({
+            "lemma": "förstfödd",
+            "effective_notation": "-fött +a",
+            "missing_forms": [{"written_form": "fött", "slot": "neuter_singular"}],
+        })
+        assert row is not None
+        form = row["classified_missing_forms"][0]
+        self.assertEqual(form["derivation"], "replace_tail")
+        self.assertTrue(form["possible_lost_prefix"])
+        self.assertEqual(form["preliminary_cause"], "possible_lost_prefix")
+
     def test_missing_lemma_points_to_alignment(self) -> None:
         row = classify_row({
             "lemma": "facetterad",
