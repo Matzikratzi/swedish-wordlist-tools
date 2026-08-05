@@ -111,6 +111,11 @@ def _append_to_last_word(lemma: str, suffix: str) -> str:
     return prefix + separator + final_word + suffix
 
 
+def _append_to_first_word(lemma: str, suffix: str) -> str:
+    first, separator, rest = lemma.partition(" ")
+    return first + suffix + (separator + rest if separator else "")
+
+
 def apply_form_operation_to_noun(
     record: dict[str, Any], lemma: str, operation: FormOperation
 ) -> str | None:
@@ -133,12 +138,23 @@ def apply_form_operation_to_noun(
 def apply_form_token(
     record: dict[str, Any], lemma: str, token: str
 ) -> str | None:
-    """Compatibility wrapper for callers that still provide a raw token."""
+    """Compatibility wrapper for non-noun callers that provide a raw token.
+
+    Historical callers such as the verb-slot interpreter inflect the first
+    word of a phrase (for example ``blamera sig`` -> ``blamerade sig``).
+    Canonical noun interpretation bypasses this wrapper and uses the noun-
+    specific last-word realization above.
+    """
 
     operation = parse_form_operation(token)
     if operation is None:
         return None
-    return apply_form_operation_to_noun(record, lemma, operation)
+    return apply_form_operation(
+        lemma,
+        operation,
+        append=_append_to_first_word,
+        replace_tail=_replace_unmarked_final_component,
+    )
 
 
 def _clean_notation_comments(pattern: str) -> str:
