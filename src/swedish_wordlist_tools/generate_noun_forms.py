@@ -141,53 +141,26 @@ def _has_suffix_on_wrong_phrase_word(form: str, lemma: str) -> bool:
 
 
 def _is_single_duplicated_segment(form: str, canonical: str) -> bool:
-    """Return true when removing one adjacent overlap repairs the old form.
-
-    Besides exact duplication, accept the legacy tail-replacement shape where
-    the repeated segment is shifted by one character, such as
-    ``registeregistren`` -> ``registren``.
-    """
+    """Return true when deleting one adjacent duplicate repairs the old form."""
 
     old = form.casefold()
     new = canonical.casefold()
     if len(old) <= len(new):
         return False
-
-    prefix_length = 0
-    for old_char, new_char in zip(old, new):
-        if old_char != new_char:
-            break
-        prefix_length += 1
-
-    suffix_length = 0
-    max_suffix = len(new) - prefix_length
-    for old_char, new_char in zip(reversed(old), reversed(new)):
-        if suffix_length >= max_suffix or old_char != new_char:
-            break
-        suffix_length += 1
-
-    old_middle_end = len(old) - suffix_length if suffix_length else len(old)
-    new_middle_end = len(new) - suffix_length if suffix_length else len(new)
-    removed = old[prefix_length:old_middle_end]
-    replacement = new[prefix_length:new_middle_end]
-
-    if replacement or len(removed) < 3:
-        return False
-
-    left = new[:prefix_length]
-    right = new[new_middle_end:]
-    if left.endswith(removed) or right.startswith(removed):
-        return True
-
-    return (
-        len(removed) >= 4
-        and (
-            left.endswith(removed[1:])
-            or left.endswith(removed[:-1])
-            or right.startswith(removed[1:])
-            or right.startswith(removed[:-1])
-        )
-    )
+    excess = len(old) - len(new)
+    for split in range(len(new) + 1):
+        suffix_length = len(new) - split
+        if not old.startswith(new[:split]):
+            continue
+        if suffix_length and not old.endswith(new[split:]):
+            continue
+        end = len(old) - suffix_length if suffix_length else len(old)
+        duplicated = old[split:end]
+        if len(duplicated) != excess or not duplicated:
+            continue
+        if new[:split].endswith(duplicated) or new[split:].startswith(duplicated):
+            return True
+    return False
 
 
 def _removed_form_reason(

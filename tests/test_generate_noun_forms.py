@@ -77,21 +77,6 @@ class GenerateNounFormsTests(unittest.TestCase):
         )
         self.assertEqual([], comparison["semantic_removed_forms"])
 
-    def test_classifies_shifted_overlap_as_malformed(self) -> None:
-        row, comparison = canonical_noun_row({
-            "normaliserat_ord": "adressregister",
-            "upos": "NOUN",
-            "text": "-registret; pl. +, best. pl. -registren",
-            "stycke": "adress|reg·ister",
-        })
-        self.assertIsNotNone(row)
-        assert comparison is not None
-        self.assertEqual(
-            ["adressregisteregistren", "adressregisteregistret"],
-            comparison["legacy_malformed_removed_forms"],
-        )
-        self.assertEqual([], comparison["semantic_removed_forms"])
-
     def test_classifies_legacy_comment_tokens_as_noise(self) -> None:
         row, comparison = canonical_noun_row({
             "normaliserat_ord": "ansökan",
