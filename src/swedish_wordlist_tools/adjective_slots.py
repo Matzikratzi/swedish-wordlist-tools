@@ -18,10 +18,18 @@ class AdjectiveForm:
 
 
 @dataclass(frozen=True)
+class UsageRestriction:
+    scope: str
+    label: str
+    forms: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class AdjectiveSlots:
     lemma: str
     forms: tuple[AdjectiveForm, ...]
     rule: str
+    restrictions: tuple[UsageRestriction, ...] = ()
 
     def written_forms(self) -> tuple[str, ...]:
         return tuple(dict.fromkeys(form.written_form for form in self.forms))
@@ -62,7 +70,12 @@ def _resolve(lemma: str, token: str, *, neuter: bool = False) -> str | None:
     return token if token.isalpha() else None
 
 
-def _slots(lemma: str, values: list[tuple[str | None, str]], rule: str) -> AdjectiveSlots | None:
+def _slots(
+    lemma: str,
+    values: list[tuple[str | None, str]],
+    rule: str,
+    restrictions: tuple[UsageRestriction, ...] = (),
+) -> AdjectiveSlots | None:
     if any(value is None for value, _ in values):
         return None
     forms: list[AdjectiveForm] = []
@@ -73,7 +86,7 @@ def _slots(lemma: str, values: list[tuple[str | None, str]], rule: str) -> Adjec
         if marker not in seen:
             forms.append(AdjectiveForm(value, slot))
             seen.add(marker)
-    return AdjectiveSlots(lemma, tuple(forms), rule)
+    return AdjectiveSlots(lemma, tuple(forms), rule, restrictions)
 
 
 def _regular(lemma: str, text: str) -> AdjectiveSlots | None:
@@ -199,6 +212,46 @@ def _comparison(lemma: str, text: str) -> AdjectiveSlots | None:
     return None
 
 
+def _usage_restricted(lemma: str, text: str) -> AdjectiveSlots | None:
+    m = re.fullmatch(rf"n\. sing\. obest\. (?P<label>obrukl\.|undviks:)(?:, (?P<p>-?{W}))?", text)
+    if m:
+        values: list[tuple[str | None, str]] = [(lemma, "common_singular")]
+        resolved = _resolve(lemma, m.group("p")) if m.group("p") else None
+        if resolved:
+            values.append((resolved, "definite_or_plural"))
+        label = "uncommon" if m.group("label") == "obrukl." else "avoided"
+        return _slots(
+            lemma,
+            values,
+            "usage_restricted_explicit_slots",
+            (UsageRestriction("neuter_singular", label),),
+        )
+
+    m = re.fullmatch(rf"neutr\. undviks:, (?P<p>[+-]?{W})", text)
+    if m:
+        plural = _resolve(lemma, m.group("p"))
+        return _slots(
+            lemma,
+            [(lemma, "common_singular"), (plural, "definite_or_plural")],
+            "usage_restricted_explicit_slots",
+            (UsageRestriction("neuter_singular", "avoided"),),
+        )
+
+    m = re.fullmatch(rf"mest: oböjl\., best\. och: pl\. ibl\. (?P<p>{W})", text)
+    if m:
+        plural = m.group("p")
+        return _slots(
+            lemma,
+            [(lemma, "common_singular"), (plural, "definite_or_plural")],
+            "usage_restricted_explicit_slots",
+            (
+                UsageRestriction("paradigm", "mostly_uninflected"),
+                UsageRestriction("definite_or_plural", "occasional", (plural,)),
+            ),
+        )
+    return None
+
+
 def _generic(lemma: str, text: str) -> AdjectiveSlots | None:
     m = re.fullmatch(rf"n\. \+, (?P<p>{W})", text)
     if m:
@@ -246,4 +299,4 @@ def interpret_simple_adjective_slots(record: dict[str, Any]) -> AdjectiveSlots |
         return None
     if len(raw_text) == HARD_CAP and ("komp." in text or "superl." in text):
         return None
-    return _regular(lemma, text) or _parallel(lemma, text) or _comparison(lemma, text) or _generic(lemma, text) or _known_structures(lemma, text)
+    return _regular(lemma, text) or _parallel(lemma, text) or _comparison(lemma, text) or _usage_restricted(lemma, text) or _generic(lemma, text) or _known_structures(lemma, text)
