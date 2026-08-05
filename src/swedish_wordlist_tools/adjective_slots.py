@@ -4,7 +4,12 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from .saol_notation import normalize_notation
+from .saol_notation import (
+    FormOperationKind,
+    apply_form_operation,
+    normalize_notation,
+    parse_form_operation,
+)
 
 HARD_CAP = 50
 W = r"[a-zåäöéü]+"
@@ -49,25 +54,30 @@ def _neuter_t(word: str) -> str:
 
 
 def _replace_tail(word: str, tail: str) -> str | None:
-    tail = tail.lstrip("-")
     if not tail or not tail.isalpha():
         return None
     positions = [i for i, char in enumerate(word) if char == tail[0]]
     return None if not positions else word[: positions[-1]] + tail
 
 
+def _append_adjective(base: str, suffix: str, *, neuter: bool) -> str | None:
+    if not suffix.isalpha():
+        return None
+    if neuter and suffix == "t":
+        return _neuter_t(base)
+    return base + suffix
+
+
 def _resolve(lemma: str, token: str, *, neuter: bool = False) -> str | None:
-    if token == "+":
-        return lemma
-    if token == "+t" and neuter:
-        return _neuter_t(lemma)
-    if token == "+-t" and neuter:
-        return lemma + "t"
-    if token.startswith("+"):
-        return lemma + token[1:] if token[1:].isalpha() else None
-    if token.startswith("-"):
-        return _replace_tail(lemma, token)
-    return token if token.isalpha() else None
+    operation = parse_form_operation(token)
+    if operation is None:
+        return None
+    return apply_form_operation(
+        lemma,
+        operation,
+        append=lambda base, suffix: _append_adjective(base, suffix, neuter=neuter),
+        replace_tail=_replace_tail,
+    )
 
 
 def _slots(
