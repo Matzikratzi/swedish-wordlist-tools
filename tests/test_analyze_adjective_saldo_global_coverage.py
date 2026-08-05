@@ -42,6 +42,7 @@ class AnalyzeAdjectiveSaldoGlobalCoverageTests(unittest.TestCase):
         report, rows = analyze_rows(
             [{
                 "lemma": "fasetterad",
+                "record_id": "1",
                 "classified_missing_forms": [{
                     "written_form": "facetterad",
                     "slot": "common_singular",
@@ -60,8 +61,9 @@ class AnalyzeAdjectiveSaldoGlobalCoverageTests(unittest.TestCase):
             form["global_saldo_status"],
         )
         self.assertEqual("saldo_alignment_problem", form["global_review_category"])
+        self.assertEqual(1, form["source_occurrence_count"])
 
-    def test_duplicate_forms_within_one_record_are_counted_once(self) -> None:
+    def test_duplicate_forms_across_rows_are_counted_once(self) -> None:
         duplicate = {
             "written_form": "bemälda",
             "slot": "definite_or_plural",
@@ -70,20 +72,51 @@ class AnalyzeAdjectiveSaldoGlobalCoverageTests(unittest.TestCase):
             "operation_base": "bemälda",
         }
         report, rows = analyze_rows(
-            [{
-                "lemma": "bemälde",
-                "classified_missing_forms": [duplicate, dict(duplicate)],
-            }],
+            [
+                {
+                    "lemma": "bemälde",
+                    "record_id": "100",
+                    "homonym_number": "1",
+                    "classified_missing_forms": [duplicate],
+                },
+                {
+                    "lemma": "bemälde",
+                    "record_id": "101",
+                    "homonym_number": "0",
+                    "classified_missing_forms": [dict(duplicate)],
+                },
+            ],
             self.form_index,
         )
         self.assertEqual(2, report["raw_forms"])
         self.assertEqual(1, report["unique_forms"])
         self.assertEqual(1, report["duplicates_removed"])
-        self.assertEqual(1, len(rows[0]["classified_missing_forms"]))
+        self.assertEqual(1, len(rows))
+        form = rows[0]["classified_missing_forms"][0]
+        self.assertEqual(2, form["source_occurrence_count"])
+        self.assertEqual({"100", "101"}, {
+            occurrence["record_id"] for occurrence in form["source_occurrences"]
+        })
         self.assertEqual(
             "saldo_coverage_or_saol_review",
-            rows[0]["classified_missing_forms"][0]["global_review_category"],
+            form["global_review_category"],
         )
+
+    def test_different_lemmas_are_not_collapsed(self) -> None:
+        form = {
+            "written_form": "gemensamma",
+            "slot": "definite_or_plural",
+            "provenance": "append",
+            "source_token": "+a",
+        }
+        report, _rows = analyze_rows(
+            [
+                {"lemma": "första", "classified_missing_forms": [form]},
+                {"lemma": "andra", "classified_missing_forms": [dict(form)]},
+            ],
+            self.form_index,
+        )
+        self.assertEqual(2, report["unique_forms"])
 
 
 if __name__ == "__main__":
