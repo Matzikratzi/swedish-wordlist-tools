@@ -11,6 +11,8 @@ DEFAULT_TEXT = Path("reports/saol14-adjective-saldo-absent-review.txt")
 DEFAULT_JSON = Path("reports/saol14-adjective-saldo-absent-review.json")
 DEFAULT_JSONL = Path("reports/saol14-adjective-saldo-absent-review.jsonl")
 
+REGULAR_APPEND_TOKENS = {"+a", "+t", "+e", "+ma"}
+
 
 def read_jsonl(path: Path) -> Iterable[dict[str, Any]]:
     with path.open(encoding="utf-8") as handle:
@@ -26,11 +28,25 @@ def review_priority(form: dict[str, Any]) -> tuple[int, str]:
         return 0, "explicit_saol_form"
     if provenance == "replace_tail":
         return 1, "replace_tail_form"
-    if provenance == "append" and token not in {"+a", "+t", "+e", "+ma"}:
+    if provenance == "append" and token not in REGULAR_APPEND_TOKENS:
         return 2, "uncommon_append_form"
     if provenance == "append":
         return 3, "regular_append_form"
     return 4, "other"
+
+
+def review_assessment(form: dict[str, Any]) -> str:
+    """Choose the next evidence-based action for a SALDO-absent form."""
+
+    provenance = str(form.get("provenance") or "")
+    token = str(form.get("source_token") or "")
+    if provenance == "explicit":
+        return "strong_saldo_gap_candidate"
+    if provenance == "append" and token in REGULAR_APPEND_TOKENS:
+        return "standard_notation_saldo_gap_candidate"
+    if provenance == "replace_tail":
+        return "targeted_saol_notation_review"
+    return "manual_notation_review"
 
 
 def build_report(rows: Iterable[dict[str, Any]]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -40,6 +56,7 @@ def build_report(rows: Iterable[dict[str, Any]]) -> tuple[dict[str, Any], list[d
             if form.get("global_saldo_status") != "absent_from_all_saldo":
                 continue
             rank, group = review_priority(form)
+            assessment = review_assessment(form)
             cases.append({
                 "lemma": str(row.get("lemma") or ""),
                 "homonym_number": str(row.get("homonym_number") or ""),
@@ -50,6 +67,7 @@ def build_report(rows: Iterable[dict[str, Any]]) -> tuple[dict[str, Any], list[d
                 "operation_base": str(form.get("operation_base") or ""),
                 "source_occurrence_count": int(form.get("source_occurrence_count") or 1),
                 "review_group": group,
+                "review_assessment": assessment,
                 "priority": rank,
                 "notation": str(row.get("effective_notation") or row.get("notation") or ""),
                 "stycke": str(row.get("stycke") or ""),
@@ -64,6 +82,7 @@ def build_report(rows: Iterable[dict[str, Any]]) -> tuple[dict[str, Any], list[d
     ))
 
     group_counts = Counter(case["review_group"] for case in cases)
+    assessment_counts = Counter(case["review_assessment"] for case in cases)
     slot_counts = Counter(case["slot"] for case in cases)
     provenance_counts = Counter(case["provenance"] for case in cases)
     token_counts = Counter(case["source_token"] for case in cases if case["source_token"])
@@ -75,14 +94,15 @@ def build_report(rows: Iterable[dict[str, Any]]) -> tuple[dict[str, Any], list[d
     report = {
         "cases": len(cases),
         "review_group_counts": dict(group_counts.most_common()),
+        "review_assessment_counts": dict(assessment_counts.most_common()),
         "slot_counts": dict(slot_counts.most_common()),
         "provenance_counts": dict(provenance_counts.most_common()),
         "source_token_counts": dict(token_counts.most_common()),
         "examples": dict(grouped_examples),
         "note": (
             "Only unique adjective forms absent from every SALDO analysis are included. "
-            "Explicit SAOL forms are reviewed first, followed by tail replacements and "
-            "then regular append operations."
+            "Explicit forms are strong SALDO-gap candidates. Standard append operations "
+            "are separated from tail replacements that still merit targeted notation review."
         ),
     }
     return report, cases
@@ -92,8 +112,11 @@ def render_text(report: dict[str, Any]) -> str:
     lines = [
         f"Former som saknas helt i SALDO: {report['cases']}",
         "",
-        "Prioriterad granskningsgrupp:",
+        "Bedömd nästa åtgärd:",
     ]
+    for assessment, count in report["review_assessment_counts"].items():
+        lines.append(f"  {count:6d}  {assessment}")
+    lines.extend(["", "Prioriterad granskningsgrupp:"])
     for group, count in report["review_group_counts"].items():
         lines.append(f"  {count:6d}  {group}")
     lines.extend(["", "Per slot:"])
@@ -116,7 +139,8 @@ def render_text(report: dict[str, Any]) -> str:
             lines.append(
                 f"  {item['lemma']} | {item['slot']}={item['written_form']} | "
                 f"{item['provenance']} | token={item['source_token']} | "
-                f"base={item['operation_base']}{occurrences}"
+                f"base={item['operation_base']} | assessment={item['review_assessment']}"
+                f"{occurrences}"
             )
     return "\n".join(lines) + "\n"
 
