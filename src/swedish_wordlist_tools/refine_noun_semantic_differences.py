@@ -134,28 +134,47 @@ def _is_legacy_explicit_form_error(row: dict[str, Any], form: str) -> bool:
 
 
 def _is_stycke_guided_tail_error(row: dict[str, Any], form: str) -> bool:
+    """Recognize a replacement applied at any cut except SAOL's ``|`` cut.
+
+    For a row such as ``gräs|and`` with the new replacement form ``gräsänder``,
+    the replacement payload is ``änder`` and the only correct cut is after
+    ``gräs``. The old generator could instead produce ``gränder`` by cutting
+    after ``gr``. This rule enumerates those mechanically possible wrong cuts;
+    it contains no knowledge about the lemma, suffix, or Swedish morphology.
+    """
+
     stycke = _clean_stycke(str(row.get("stycke", "")))
-    if "|" not in stycke:
+    if stycke.count("|") != 1:
         return False
-    prefix = stycke.rsplit("|", 1)[0]
+
+    prefix, head = stycke.split("|", 1)
     lemma = str(row.get("lemma", "")).casefold()
     old = form.casefold()
-    if not prefix or not lemma or not old.startswith(lemma):
+    if not prefix or not head or prefix + head != lemma or not old:
         return False
 
     reasons = {
         str(key).casefold(): str(value)
         for key, value in row.get("change_reasons", {}).items()
     }
+    correct_cut = len(prefix)
+
     for candidate in row.get("added_forms", []):
         candidate_folded = str(candidate).casefold()
         if reasons.get(candidate_folded) != "replace_tail":
             continue
-        if not candidate_folded.startswith(prefix):
+        if candidate_folded == old or not candidate_folded.startswith(prefix):
             continue
-        tail = candidate_folded[len(prefix):]
-        if tail and old in {lemma + tail, lemma + tail[1:]}:
-            return True
+
+        replacement = candidate_folded[correct_cut:]
+        if not replacement:
+            continue
+
+        for wrong_cut in range(len(lemma) + 1):
+            if wrong_cut == correct_cut:
+                continue
+            if old == lemma[:wrong_cut] + replacement:
+                return True
     return False
 
 
