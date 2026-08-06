@@ -83,6 +83,14 @@ def _notation_colon_fragments(row: dict[str, Any]) -> frozenset[str]:
 
 
 def _is_legacy_colon_fragment(row: dict[str, Any], form: str) -> bool:
+    """True only for a detached suffix *after* a notation colon.
+
+    A complete form such as ``:n`` or ``BB:t`` still contains its colon and is
+    therefore not the detached fragment produced by the old tokenizer.
+    """
+
+    if ":" in form:
+        return False
     normalized = _metadata_key(form)
     return bool(normalized) and normalized in _notation_colon_fragments(row)
 
