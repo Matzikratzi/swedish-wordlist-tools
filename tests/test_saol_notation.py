@@ -84,7 +84,7 @@ class SaolNotationTests(unittest.TestCase):
             tokenize_notation(shorter),
         )
         exact_but_not_prefix = "x" * 38 + " helform el. annan"
-        self.assertEqual(55, len(exact_but_not_prefix))
+        self.assertEqual(56, len(exact_but_not_prefix))
 
     def test_rejects_labels_and_separators_as_form_operations(self) -> None:
         for token in ("komp.", "pl.", "el.", "t.ex.", "x.y.z.", "_", "["):
