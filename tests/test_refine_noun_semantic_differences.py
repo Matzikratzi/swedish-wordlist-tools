@@ -35,9 +35,45 @@ class RefineNounSemanticDifferencesTests(unittest.TestCase):
                 },
                 "armémuseumuseer",
             ),
+            (
+                {
+                    "lemma": "abcdef",
+                    "stycke": "abc|def",
+                    "added_forms": ["abcXYZ"],
+                    "change_reasons": {"abcXYZ": "replace_tail"},
+                },
+                "abXYZ",
+            ),
+            (
+                {
+                    "lemma": "abcdef",
+                    "stycke": "abc|def",
+                    "added_forms": ["abcXYZ"],
+                    "change_reasons": {"abcXYZ": "replace_tail"},
+                },
+                "abcdeXYZ",
+            ),
         ):
             with self.subTest(form=form):
                 self.assertEqual("legacy_stycke_tail_error", classify_form(row, form))
+
+    def test_does_not_classify_correct_stycke_replacement_as_old_error(self) -> None:
+        row = {
+            "lemma": "abcdef",
+            "stycke": "abc|def",
+            "added_forms": ["abcXYZ"],
+            "change_reasons": {"abcXYZ": "replace_tail"},
+        }
+        self.assertEqual("review_required", classify_form(row, "abcXYZ"))
+
+    def test_does_not_guess_stycke_errors_without_replace_tail_provenance(self) -> None:
+        row = {
+            "lemma": "abcdef",
+            "stycke": "abc|def",
+            "added_forms": ["abcXYZ"],
+            "change_reasons": {"abcXYZ": "explicit"},
+        }
+        self.assertEqual("review_required", classify_form(row, "abXYZ"))
 
     def test_classifies_metadata_from_the_rows_own_notation(self) -> None:
         cases = (
