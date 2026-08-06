@@ -43,23 +43,35 @@ class SlotOperation:
 
 _BRACKET_COMMENT = re.compile(r"\s*\[[^\]]*\]")
 _HTML_TAG = re.compile(r"</?[^>]+>")
-# SAOL occasionally omits whitespace after a period-final label, for example
-# ``el.+en``. Treat the period as a lexical boundary before an operation.
 _GLUED_LABEL_OPERATION = re.compile(
     r"(?<!\w)([A-Za-zÅÄÖåäöÉéÜü]+\.)(?=[+\-])"
 )
+_TRUNCATED_FINAL_TOKEN = re.compile(r"(?:^|\s)\S+-$")
 _FORM_PAYLOAD = re.compile(r"[^\s;,_]+")
 _EXPLICIT_FORM = re.compile(r"[^\s;,+_]+")
 _NOTATION_TOKEN_RE = re.compile(
     r"pl\.|best\.|el\.|[;,]|[+\-][^\s;,_]*|[^\s;,+_]+",
     re.IGNORECASE,
 )
+_SOURCE_TEXT_LIMIT = 50
+
+
+def _drop_truncated_final_token(text: str) -> str:
+    """Drop a visibly cut-off final token at SAOL export's text limit.
+
+    The structured source truncates ``text`` at 50 characters. A final token
+    ending in ``-`` at exactly that boundary is incomplete, not a form. Tokens
+    ending in ``-`` in shorter strings are preserved because they may be
+    intentional notation.
+    """
+
+    if len(text) != _SOURCE_TEXT_LIMIT or not _TRUNCATED_FINAL_TOKEN.search(text):
+        return text
+    return _TRUNCATED_FINAL_TOKEN.sub("", text).rstrip()
 
 
 def _clean_notation_spelling(text: str) -> str:
-    # Formatting tags are metadata, not parts of the written form. Preserve
-    # their text content: ``+<k>s</k>`` therefore becomes the single token
-    # ``+s`` rather than the spurious explicit forms ``k`` and ``s``.
+    text = _drop_truncated_final_token(text)
     without_tags = _HTML_TAG.sub("", text)
     without_brackets = _BRACKET_COMMENT.sub("", without_tags)
     with_label_boundaries = _GLUED_LABEL_OPERATION.sub(r"\1 ", without_brackets)
@@ -91,12 +103,7 @@ def normalize_notation(text: str) -> str:
 
 
 def tokenize_notation(text: str) -> tuple[str, ...] | None:
-    """Tokenize one SAOL notation branch without changing form spelling.
-
-    ``+`` and ``-`` are structural only at the beginning of a token. Their
-    entire payload is otherwise opaque and may contain colons, hyphens,
-    uppercase letters, diacritics or other non-separator characters.
-    """
+    """Tokenize one SAOL notation branch without changing form spelling."""
 
     cleaned = _clean_notation_spelling(text)
     tokens: list[str] = []
@@ -132,9 +139,6 @@ def parse_form_operation(token: str) -> FormOperation | None:
             return FormOperation(FormOperationKind.REPLACE_TAIL, value, raw)
         return None
 
-    # Colon-marked prose and abbreviated labels are metadata, not forms.
-    # Colons inside forms remain valid (BB:t), as do punctuation-free full
-    # forms with capitals, hyphens and diacritics.
     if (
         not raw
         or _is_comment_word(raw)
@@ -154,14 +158,7 @@ def assign_labeled_slots(
     definite_plural_slot: str,
     ignored_markers: frozenset[str] = frozenset(),
 ) -> tuple[SlotOperation, ...] | None:
-    """Assign form operations while ignoring SAOL's explanatory prose.
-
-    Slot names are supplied by the ordklass layer. Colon-marked words form
-    ordinary Swedish comments and are skipped without interpreting their
-    meaning. Unknown period-final tokens are grammatical or usage labels and
-    are skipped in the same way. The form operations and explicit forms that
-    remain are assigned to the best available slots.
-    """
+    """Assign form operations while ignoring SAOL's explanatory prose."""
 
     result: list[SlotOperation] = []
     context = "singular"
