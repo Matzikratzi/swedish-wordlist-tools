@@ -68,7 +68,20 @@ class RefineNounSemanticDifferencesTests(unittest.TestCase):
                     classify_form({"notation": f"+n; {token} +ar"}, removed_form),
                 )
 
-    def test_does_not_treat_internal_colons_as_metadata(self) -> None:
+    def test_classifies_suffixes_split_from_internal_colons(self) -> None:
+        for notation, fragment in (
+            ("+:qz +:ar", "qz"),
+            ("ABC:qz; pl. ABC:ar", "qz"),
+            ("abc:na", "na"),
+            ("BB:t; pl. BB:n", "t"),
+        ):
+            with self.subTest(notation=notation, fragment=fragment):
+                self.assertEqual(
+                    "legacy_colon_fragment",
+                    classify_form({"notation": notation}, fragment),
+                )
+
+    def test_does_not_treat_complete_internal_colon_forms_as_fragments(self) -> None:
         for notation, form in (
             ("BB:t; pl. BB:n", "BB:t"),
             ("+:n +:ar", ":n"),
@@ -87,15 +100,11 @@ class RefineNounSemanticDifferencesTests(unittest.TestCase):
             classify_form({"notation": "+n señoror"}, "señoror"),
         )
 
-    def test_keeps_unexplained_forms_for_review(self) -> None:
-        row = {
-            "lemma": "abc",
-            "notation": "abc:et; pl. abc:n",
-            "stycke": "abc",
-            "added_forms": ["abc:n"],
-            "change_reasons": {"abc:n": "explicit"},
-        }
-        self.assertEqual("review_required", classify_form(row, "n"))
+    def test_does_not_infer_colon_fragments_without_matching_notation(self) -> None:
+        self.assertEqual(
+            "review_required",
+            classify_form({"notation": "+n +ar"}, "n"),
+        )
 
     def test_builds_reduced_review(self) -> None:
         review = build_review(
@@ -133,12 +142,21 @@ class RefineNounSemanticDifferencesTests(unittest.TestCase):
                     "added_forms": ["abc:n"],
                     "change_reasons": {"abc:n": "explicit"},
                 },
+                {
+                    "record_id": "4",
+                    "lemma": "okänd",
+                    "notation": "+n +ar",
+                    "stycke": "okänd",
+                    "semantic_removed_forms": ["mystisk"],
+                    "added_forms": [],
+                    "change_reasons": {},
+                },
             ]
         )
-        self.assertEqual(3, review["semantic_rows"])
+        self.assertEqual(4, review["semantic_rows"])
         self.assertEqual(1, review["review_required_rows"])
         self.assertEqual(1, review["review_required_forms"])
-        self.assertEqual("abc", review["rows"][0]["lemma"])
+        self.assertEqual("okänd", review["rows"][0]["lemma"])
 
 
 if __name__ == "__main__":
