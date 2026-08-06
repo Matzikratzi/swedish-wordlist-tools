@@ -111,8 +111,6 @@ def _explicit_added_forms(row: dict[str, Any]) -> tuple[str, ...]:
 
 
 def _explicit_notation_forms(row: dict[str, Any]) -> tuple[str, ...]:
-    """Read complete explicit forms directly from the shared notation parser."""
-
     result: list[str] = []
     for token in _notation_tokens(row):
         operations = parse_form_operations(token)
@@ -125,8 +123,6 @@ def _explicit_notation_forms(row: dict[str, Any]) -> tuple[str, ...]:
 
 
 def _explicit_forms(row: dict[str, Any]) -> tuple[str, ...]:
-    """Return explicit forms whether or not they are new in the comparison."""
-
     return tuple(dict.fromkeys((*_explicit_added_forms(row), *_explicit_notation_forms(row))))
 
 
@@ -168,6 +164,55 @@ def _is_legacy_explicit_form_error(row: dict[str, Any], form: str) -> bool:
             if _is_hyphenated_explicit_token_damage(old, lemma, explicit):
                 return True
     return False
+
+
+def _optional_operation_fragments(row: dict[str, Any]) -> frozenset[str]:
+    """Return payloads produced by a compact optional operation token."""
+
+    result: set[str] = set()
+    for token in _notation_tokens(row):
+        if "(" not in token or ")" not in token:
+            continue
+        operations = parse_form_operations(token)
+        if operations is None:
+            continue
+        for operation in operations:
+            if operation.kind in {
+                FormOperationKind.APPEND,
+                FormOperationKind.REPLACE_TAIL,
+            } and operation.value:
+                result.add(operation.value.casefold())
+    return frozenset(result)
+
+
+def _is_optional_operation_fragment(row: dict[str, Any], form: str) -> bool:
+    return bool(form) and form.casefold() in _optional_operation_fragments(row)
+
+
+def _repeated_hyphen_component_forms(row: dict[str, Any]) -> frozenset[str]:
+    """Reproduce legacy blind append of a repeated final hyphen component."""
+
+    lemma = str(row.get("lemma", ""))
+    _prefix, separator, component = lemma.rpartition("-")
+    if not separator or not component:
+        return frozenset()
+
+    result: set[str] = set()
+    for token in _notation_tokens(row):
+        operations = parse_form_operations(token)
+        if operations is None:
+            continue
+        for operation in operations:
+            if operation.kind is not FormOperationKind.APPEND:
+                continue
+            stem, colon, _ending = operation.value.partition(":")
+            if colon and stem.casefold() == component.casefold():
+                result.add((lemma + stem).casefold())
+    return frozenset(result)
+
+
+def _is_repeated_hyphen_component(row: dict[str, Any], form: str) -> bool:
+    return bool(form) and form.casefold() in _repeated_hyphen_component_forms(row)
 
 
 def _is_stycke_guided_tail_error(row: dict[str, Any], form: str) -> bool:
@@ -236,10 +281,12 @@ def classify_form(row: dict[str, Any], form: str) -> str:
         return "legacy_notation_metadata"
     if _is_legacy_colon_fragment(row, form):
         return "legacy_colon_fragment"
-    # Field-boundary truncation is more specific than damage inferred from an
-    # explicit form elsewhere in the same notation, so it must win precedence.
     if _is_truncated_overflow_error(row, form):
         return "legacy_truncated_overflow_error"
+    if _is_optional_operation_fragment(row, form):
+        return "legacy_optional_operation_fragment"
+    if _is_repeated_hyphen_component(row, form):
+        return "legacy_repeated_hyphen_component"
     if _is_legacy_explicit_form_error(row, form):
         return "legacy_explicit_form_error"
     if _is_stycke_guided_tail_error(row, form):
@@ -309,9 +356,11 @@ def render_review(review: dict[str, Any]) -> str:
         f"Verifierade markup-/etikettfragment: {counts.get('legacy_notation_markup', 0)}",
         f"Verifierad notationsmetadata: {counts.get('legacy_notation_metadata', 0)}",
         f"Verifierade kolonfragment: {counts.get('legacy_colon_fragment', 0)}",
+        f"Verifierade avhuggningsfel vid fältgränsen: {counts.get('legacy_truncated_overflow_error', 0)}",
+        f"Verifierade fragment från valfria operationer: {counts.get('legacy_optional_operation_fragment', 0)}",
+        f"Verifierade dubblerade bindestrecksled: {counts.get('legacy_repeated_hyphen_component', 0)}",
         f"Verifierade explicita formfel: {counts.get('legacy_explicit_form_error', 0)}",
         f"Verifierade stycke-styrda tail-fel: {counts.get('legacy_stycke_tail_error', 0)}",
-        f"Verifierade avhuggningsfel vid fältgränsen: {counts.get('legacy_truncated_overflow_error', 0)}",
         f"Poster kvar för granskning: {review['review_required_rows']}",
         f"Former kvar för granskning: {review['review_required_forms']}",
         "",
