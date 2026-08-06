@@ -122,25 +122,34 @@ def _explicit_added_forms(row: dict[str, Any]) -> tuple[str, ...]:
     )
 
 
-def _is_cut_and_splice_explicit_error(old: str, lemma: str, explicit: str) -> bool:
-    """Recognize an old form made from a lemma prefix and explicit-form suffix.
+def _legacy_replace_final_component(lemma: str, replacement: str) -> str | None:
+    """Reproduce the old generator's one-character-anchor replacement."""
 
-    The legacy generator sometimes treated a complete explicit form as a tail
-    operation and joined it at an arbitrary overlap. Test every possible cut in
-    both strings, but require a non-trivial suffix and a result different from
-    both source strings. This encodes the mechanical failure, not any word.
+    if not replacement:
+        return None
+    anchor = replacement[0]
+    positions = [index for index, char in enumerate(lemma) if char == anchor]
+    if not positions:
+        return None
+    return lemma[: positions[-1]] + replacement
+
+
+def _is_hyphenated_explicit_token_damage(old: str, lemma: str, explicit: str) -> bool:
+    """Recognize damage caused by legacy splitting of a hyphenated full form.
+
+    The old token regex split ``a-b-c`` into ``a``, ``-b`` and ``-c``. The
+    latter pieces were then applied as replacement operations. Reproduce only
+    that exact mechanism; unhyphenated explicit forms cannot match this rule.
     """
 
-    if old in {lemma, explicit}:
+    parts = explicit.split("-")
+    if len(parts) < 2:
         return False
-    for lemma_cut in range(1, len(lemma) + 1):
-        for explicit_cut in range(1, len(explicit) - 1):
-            suffix = explicit[explicit_cut:]
-            if len(suffix) < 2:
-                continue
-            if old == lemma[:lemma_cut] + suffix:
-                return True
-    return False
+    return any(
+        _legacy_replace_final_component(lemma, part) == old
+        for part in parts[1:]
+        if part
+    )
 
 
 def _is_legacy_explicit_form_error(row: dict[str, Any], form: str) -> bool:
@@ -154,8 +163,12 @@ def _is_legacy_explicit_form_error(row: dict[str, Any], form: str) -> bool:
             explicit.startswith(old) or explicit.endswith(old)
         ):
             return True
-        if lemma and _is_cut_and_splice_explicit_error(old, lemma, explicit):
-            return True
+        if lemma:
+            for start in range(1, len(explicit)):
+                if old == lemma + explicit[start:]:
+                    return True
+            if _is_hyphenated_explicit_token_damage(old, lemma, explicit):
+                return True
     return False
 
 
