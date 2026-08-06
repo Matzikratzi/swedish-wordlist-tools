@@ -47,6 +47,10 @@ _GLUED_LABEL_OPERATION = re.compile(
     r"(?<!\w)([A-Za-zÅÄÖåäöÉéÜü]+\.)(?=[+\-])"
 )
 _TRUNCATED_FINAL_TOKEN = re.compile(r"(?:^|\s)\S+-$")
+_TRUNCATED_ALTERNATIVE = re.compile(
+    r"^(?P<prefix>.*\b(?P<complete>[^\s,;]+))\s+el\.\s+(?P<fragment>[^\s,;]+)$",
+    re.IGNORECASE,
+)
 _FORM_PAYLOAD = re.compile(r"[^\s;,_]+")
 _EXPLICIT_FORM = re.compile(r"[^\s;,+_]+")
 _OPTIONAL_FORM_TOKEN = re.compile(r"^([^()]*)\(([^()]+)\)([^()]*)$")
@@ -58,11 +62,29 @@ _SOURCE_TEXT_LIMIT = 50
 
 
 def _drop_truncated_final_token(text: str) -> str:
-    """Drop a visibly cut-off final token at SAOL export's text limit."""
+    """Drop a visibly cut-off final token at SAOL export's text limit.
 
-    if len(text) != _SOURCE_TEXT_LIMIT or not _TRUNCATED_FINAL_TOKEN.search(text):
+    Besides a token ending in ``-``, SAOL can end immediately after a strict
+    prefix of the preceding alternative form, for example ``närmast el. närm``.
+    In that narrow structure the incomplete ``el.`` branch is discarded while
+    the complete form before it is preserved.
+    """
+
+    if len(text) != _SOURCE_TEXT_LIMIT:
         return text
-    return _TRUNCATED_FINAL_TOKEN.sub("", text).rstrip()
+    if _TRUNCATED_FINAL_TOKEN.search(text):
+        return _TRUNCATED_FINAL_TOKEN.sub("", text).rstrip()
+
+    alternative = _TRUNCATED_ALTERNATIVE.fullmatch(text)
+    if alternative is None:
+        return text
+    complete = alternative.group("complete")
+    fragment = alternative.group("fragment")
+    if len(fragment) >= len(complete) or not complete.casefold().startswith(
+        fragment.casefold()
+    ):
+        return text
+    return alternative.group("prefix").rstrip()
 
 
 def _clean_notation_spelling(text: str) -> str:
