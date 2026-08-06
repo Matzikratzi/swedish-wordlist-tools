@@ -76,16 +76,13 @@ class RefineNounSemanticDifferencesTests(unittest.TestCase):
         self.assertEqual("review_required", classify_form(row, "abXYZ"))
 
     def test_classifies_markup_tag_names_from_the_row(self) -> None:
-        for notation, form in (
-            ("+n; <k>xyz</k>", "k"),
-            ("+n; <z>xyz</z>", "z"),
-            ("+n; <abc-7>xyz</abc-7>", "abc-7"),
+        for notation, form, expected in (
+            ("+n; <k>xyz</k>", "k", "source_error_discarded_form"),
+            ("+n; <z>xyz</z>", "z", "legacy_notation_markup"),
+            ("+n; <abc-7>xyz</abc-7>", "abc-7", "legacy_notation_markup"),
         ):
             with self.subTest(notation=notation, form=form):
-                self.assertEqual(
-                    "legacy_notation_markup",
-                    classify_form({"notation": notation}, form),
-                )
+                self.assertEqual(expected, classify_form({"notation": notation}, form))
 
     def test_classifies_parts_of_arbitrary_dotted_labels(self) -> None:
         for notation, form in (
