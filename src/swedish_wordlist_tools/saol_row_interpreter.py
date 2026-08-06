@@ -12,6 +12,7 @@ from .saol_notation import (
     apply_form_operation,
     assign_labeled_slots,
     parse_form_operation,
+    parse_form_operations,
     split_alternative_branches,
 )
 
@@ -108,12 +109,7 @@ def _replace_unmarked_final_component(lemma: str, replacement: str) -> str | Non
 
 
 def _append_to_hyphen_component(word: str, suffix: str) -> str:
-    """Append normally, unless the payload repeats the final hyphen component.
-
-    ``användar-id`` with ``+id:t`` therefore becomes ``användar-id:t``. The
-    rule is mechanical: it applies to arbitrary final components and payloads,
-    and only when the payload begins with the whole component.
-    """
+    """Append normally, unless the payload repeats the final hyphen component."""
 
     prefix, separator, component = word.rpartition("-")
     if (
@@ -213,6 +209,42 @@ def _interpret_missing_pattern(record: dict[str, Any], lemma: str) -> Interprete
     return None
 
 
+def _colon_stem(value: str) -> str | None:
+    stem, separator, _ending = value.partition(":")
+    return stem if separator and stem else None
+
+
+def _branch_lemma_variant(lemma: str, tokens: tuple[str, ...]) -> tuple[str, str] | None:
+    """Derive a branch's alternative base spelling from its first colon form.
+
+    ``ID:t`` implies base form ``ID``. For a hyphen compound, ``+ID:t`` on
+    ``användar-id`` implies ``användar-ID``. The rule only changes spelling
+    case of the full lemma or its final hyphen component.
+    """
+
+    for token in tokens:
+        operations = parse_form_operations(token)
+        if operations is None:
+            continue
+        for operation in operations:
+            stem = _colon_stem(operation.value)
+            if stem is None:
+                continue
+            if operation.kind is FormOperationKind.EXPLICIT:
+                if stem.casefold() == lemma.casefold() and stem != lemma:
+                    return stem, token
+                continue
+            if operation.kind is not FormOperationKind.APPEND:
+                continue
+            prefix, separator, component = lemma.rpartition("-")
+            if separator and stem.casefold() == component.casefold() and stem != component:
+                return prefix + separator + stem, token
+            if stem.casefold() == lemma.casefold() and stem != lemma:
+                return stem, token
+        return None
+    return None
+
+
 def interpret_noun_row(record: dict[str, Any]) -> InterpretedRow | None:
     if str(record.get("upos", "")).upper() != "NOUN":
         return None
@@ -231,6 +263,14 @@ def interpret_noun_row(record: dict[str, Any]) -> InterpretedRow | None:
     key_forms: list[KeyForm] = [KeyForm("lemma", lemma, "lemma")]
     seen: set[tuple[str, str]] = {("lemma", lemma)}
     for branch in branches:
+        lemma_variant = _branch_lemma_variant(lemma, branch.tokens)
+        if lemma_variant is not None:
+            written_form, source = lemma_variant
+            marker = ("lemma", written_form)
+            if marker not in seen:
+                seen.add(marker)
+                key_forms.append(KeyForm("lemma", written_form, source))
+
         slot_operations = assign_labeled_slots(
             branch.tokens,
             singular_slot="sg_def",
