@@ -49,6 +49,7 @@ _GLUED_LABEL_OPERATION = re.compile(
 _TRUNCATED_FINAL_TOKEN = re.compile(r"(?:^|\s)\S+-$")
 _FORM_PAYLOAD = re.compile(r"[^\s;,_]+")
 _EXPLICIT_FORM = re.compile(r"[^\s;,+_]+")
+_OPTIONAL_OPERATION = re.compile(r"^([+\-])([^()]*)\(([^()]+)\)([^()]*)$")
 _NOTATION_TOKEN_RE = re.compile(
     r"pl\.|best\.|el\.|[;,]|[+\-][^\s;,_]*|[^\s;,+_]+",
     re.IGNORECASE,
@@ -57,13 +58,7 @@ _SOURCE_TEXT_LIMIT = 50
 
 
 def _drop_truncated_final_token(text: str) -> str:
-    """Drop a visibly cut-off final token at SAOL export's text limit.
-
-    The structured source truncates ``text`` at 50 characters. A final token
-    ending in ``-`` at exactly that boundary is incomplete, not a form. Tokens
-    ending in ``-`` in shorter strings are preserved because they may be
-    intentional notation.
-    """
+    """Drop a visibly cut-off final token at SAOL export's text limit."""
 
     if len(text) != _SOURCE_TEXT_LIMIT or not _TRUNCATED_FINAL_TOKEN.search(text):
         return text
@@ -79,21 +74,15 @@ def _clean_notation_spelling(text: str) -> str:
 
 
 def _unwrap_token(token: str) -> str:
-    """Remove punctuation that only wraps a notation token."""
-
     return _HTML_TAG.sub("", token.strip()).strip("()")
 
 
 def _is_comment_word(token: str) -> bool:
-    """Return true for one word in SAOL's colon-marked explanatory prose."""
-
     raw = _unwrap_token(token)
     return bool(raw) and not raw.startswith(("+", "-")) and raw.endswith(":")
 
 
 def _is_generic_label(token: str) -> bool:
-    """Return true for an abbreviated grammatical or usage label."""
-
     raw = _unwrap_token(token)
     return bool(raw) and not raw.startswith(("+", "-")) and raw.endswith(".")
 
@@ -150,6 +139,31 @@ def parse_form_operation(token: str) -> FormOperation | None:
     return FormOperation(FormOperationKind.EXPLICIT, raw, raw)
 
 
+def parse_form_operations(token: str) -> tuple[FormOperation, ...] | None:
+    """Parse a token and expand one parenthesized optional payload segment.
+
+    For example, ``+(e)n`` expands mechanically to ``+n`` and ``+en``.
+    No word, suffix, or part of speech is encoded in this rule.
+    """
+
+    raw = _unwrap_token(token)
+    match = _OPTIONAL_OPERATION.fullmatch(raw)
+    if match is None:
+        operation = parse_form_operation(raw)
+        return (operation,) if operation is not None else None
+
+    marker, before, optional, after = match.groups()
+    variants = (marker + before + after, marker + before + optional + after)
+    operations: list[FormOperation] = []
+    for variant in variants:
+        operation = parse_form_operation(variant)
+        if operation is None:
+            return None
+        if operation not in operations:
+            operations.append(operation)
+    return tuple(operations)
+
+
 def assign_labeled_slots(
     tokens: tuple[str, ...],
     *,
@@ -196,10 +210,10 @@ def assign_labeled_slots(
             saw_notation_marker = True
             continue
 
-        operation = parse_form_operation(raw)
-        if operation is None:
+        operations = parse_form_operations(raw)
+        if operations is None:
             return None
-        if operation.kind is not FormOperationKind.EXPLICIT:
+        if any(operation.kind is not FormOperationKind.EXPLICIT for operation in operations):
             saw_notation_marker = True
 
         if alternative_next and last_slot is not None:
@@ -217,7 +231,7 @@ def assign_labeled_slots(
             slot = plural_slot
             context = "after_plural"
 
-        result.append(SlotOperation(slot, raw, operation))
+        result.extend(SlotOperation(slot, raw, operation) for operation in operations)
         last_slot = slot
         pending_best = False
 
@@ -269,8 +283,6 @@ def apply_form_operation(
 
 
 def split_alternative_branches(text: str) -> tuple[NotationBranch, ...]:
-    """Split top-level ``_`` alternatives and validate every branch."""
-
     cleaned = _clean_notation_spelling(text)
     branches: list[NotationBranch] = []
     for branch_text in re.split(r"\s+_\s+", cleaned):
