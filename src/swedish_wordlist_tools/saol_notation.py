@@ -43,6 +43,11 @@ class SlotOperation:
 
 _BRACKET_COMMENT = re.compile(r"\s*\[[^\]]*\]")
 _HTML_TAG = re.compile(r"</?[^>]+>")
+# SAOL occasionally omits whitespace after a period-final label, for example
+# ``el.+en``. Treat the period as a lexical boundary before an operation.
+_GLUED_LABEL_OPERATION = re.compile(
+    r"(?<!\w)([A-Za-zÅÄÖåäöÉéÜü]+\.)(?=[+\-])"
+)
 _FORM_PAYLOAD = re.compile(r"[^\s;,_]+")
 _EXPLICIT_FORM = re.compile(r"[^\s;,+_]+")
 _NOTATION_TOKEN_RE = re.compile(
@@ -56,7 +61,9 @@ def _clean_notation_spelling(text: str) -> str:
     # their text content: ``+<k>s</k>`` therefore becomes the single token
     # ``+s`` rather than the spurious explicit forms ``k`` and ``s``.
     without_tags = _HTML_TAG.sub("", text)
-    return " ".join(_BRACKET_COMMENT.sub("", without_tags).split())
+    without_brackets = _BRACKET_COMMENT.sub("", without_tags)
+    with_label_boundaries = _GLUED_LABEL_OPERATION.sub(r"\1 ", without_brackets)
+    return " ".join(with_label_boundaries.split())
 
 
 def _unwrap_token(token: str) -> str:
