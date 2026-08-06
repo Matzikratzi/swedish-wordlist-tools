@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .jsonl import read_jsonl
+from .noun_source_errors import noun_lemma_only_source_error
 from .saol_notation import FormOperationKind, parse_form_operations, split_alternative_branches
 
 DEFAULT_COMPARISON = Path("reports/saol14-noun-forms-comparison.jsonl")
@@ -32,12 +33,16 @@ def _notation_tokens(row: dict[str, Any]) -> tuple[str, ...]:
     return tuple(token for branch in branches for token in branch.tokens) if branches else ()
 
 
-def _has_k_source_error(row: dict[str, Any]) -> bool:
-    return "<k>" in str(row.get("notation", "")).casefold()
+def _source_error_record(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "normaliserat_ord": row.get("lemma", ""),
+        "text": row.get("notation", ""),
+        "stycke": row.get("stycke", ""),
+    }
 
 
 def _is_source_error_discarded_form(row: dict[str, Any], form: str) -> bool:
-    if not _has_k_source_error(row):
+    if noun_lemma_only_source_error(_source_error_record(row)) is None:
         return False
     return bool(form) and form.casefold() != str(row.get("lemma", "")).casefold()
 
@@ -167,8 +172,6 @@ def _is_legacy_explicit_form_error(row: dict[str, Any], form: str) -> bool:
 
 
 def _optional_operation_fragments(row: dict[str, Any]) -> frozenset[str]:
-    """Return payloads produced by a compact optional operation token."""
-
     result: set[str] = set()
     for token in _notation_tokens(row):
         if "(" not in token or ")" not in token:
@@ -190,8 +193,6 @@ def _is_optional_operation_fragment(row: dict[str, Any], form: str) -> bool:
 
 
 def _repeated_hyphen_component_forms(row: dict[str, Any]) -> frozenset[str]:
-    """Reproduce legacy blind append of a repeated final hyphen component."""
-
     lemma = str(row.get("lemma", ""))
     _prefix, separator, component = lemma.rpartition("-")
     if not separator or not component:
