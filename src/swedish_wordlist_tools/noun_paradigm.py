@@ -6,6 +6,7 @@ from typing import Any
 
 from .inflect import GeneratedEntry, GeneratedWordForm
 from .msd import parse_msd
+from .noun_source_errors import noun_lemma_only_source_error
 from .saol_notation import FormOperationKind, parse_form_operation
 from .saol_row_interpreter import InterpretedRow, interpret_noun_row
 
@@ -58,15 +59,15 @@ def _entry_from_interpreted_row(row: InterpretedRow) -> GeneratedEntry:
     )
 
 
-def _lemma_only_entry(record: dict[str, Any]) -> GeneratedEntry | None:
-    """Preserve only the headword when source markup makes forms unreliable."""
+def _lemma_only_entry(record: dict[str, Any], reason: str) -> GeneratedEntry | None:
+    """Preserve only the headword when source data makes forms unreliable."""
 
     lemma = str(record.get("normaliserat_ord", "")).strip()
     if not lemma:
         return None
     return GeneratedEntry(
         lemma=lemma,
-        pattern="(source error: <k> markup)",
+        pattern=f"(source error: {reason})",
         word_forms=(GeneratedWordForm(lemma, _CI, "lemma"),),
         pattern_group="source-error lemma only",
     )
@@ -187,12 +188,6 @@ def _has_usable_compound_bar(record: dict[str, Any], lemma: str) -> bool:
     return normalized.casefold() == lemma.casefold()
 
 
-def _has_k_markup_source_error(record: dict[str, Any]) -> bool:
-    """Return whether SAOL's text field contains forbidden ``<k>`` markup."""
-
-    return "<k>" in str(record.get("text", "")).casefold()
-
-
 def complete_noun_entry(
     record: dict[str, Any],
     entry: GeneratedEntry | None,
@@ -201,8 +196,9 @@ def complete_noun_entry(
     if str(record.get("upos", "")).upper() != "NOUN":
         return entry
 
-    if _has_k_markup_source_error(record):
-        return _lemma_only_entry(record)
+    source_error = noun_lemma_only_source_error(record)
+    if source_error is not None:
+        return _lemma_only_entry(record, source_error)
 
     row = interpret_noun_row(record)
     if row is None:
