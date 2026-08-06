@@ -21,8 +21,6 @@ def _clean_stycke(value: str) -> str:
 
 
 def _metadata_key(value: str) -> str:
-    """Normalize one notation metadata token like ``(mest:`` or ``ibl.``."""
-
     value = value.strip().strip("()")
     if value.endswith((":", ".")):
         value = value[:-1]
@@ -38,14 +36,10 @@ def _notation_tokens(row: dict[str, Any]) -> tuple[str, ...]:
 
 
 def _has_k_source_error(row: dict[str, Any]) -> bool:
-    """Return whether this row is governed by the lemma-only ``<k>`` policy."""
-
     return "<k>" in str(row.get("notation", "")).casefold()
 
 
 def _is_source_error_discarded_form(row: dict[str, Any], form: str) -> bool:
-    """Classify all non-lemma legacy forms from a lemma-only source-error row."""
-
     if not _has_k_source_error(row):
         return False
     lemma = str(row.get("lemma", "")).casefold()
@@ -53,8 +47,6 @@ def _is_source_error_discarded_form(row: dict[str, Any], form: str) -> bool:
 
 
 def _notation_metadata_forms(row: dict[str, Any]) -> frozenset[str]:
-    """Return comment words and period-final labels from the row notation."""
-
     result: set[str] = set()
     for token in _notation_tokens(row):
         raw = token.strip().strip("()")
@@ -73,22 +65,12 @@ def _is_notation_metadata(row: dict[str, Any], form: str) -> bool:
 
 
 def _notation_markup_fragments(row: dict[str, Any]) -> frozenset[str]:
-    """Return fragments introduced by markup or dotted labels in notation.
-
-    The rule reads structure from the row itself. Tag names come from literal
-    ``<...>`` markup, while a dotted label such as ``t.ex.`` contributes the
-    components ``t`` and ``ex``. No tag names, abbreviations, or Swedish words
-    are hard-coded.
-    """
-
     notation = str(row.get("notation", ""))
     result: set[str] = set()
-
     for match in re.finditer(r"</?\s*([0-9A-Za-zÅÄÖåäöÉéÜü-]+)", notation):
         key = _metadata_key(match.group(1))
         if key:
             result.add(key)
-
     for token in _notation_tokens(row):
         raw = token.strip().strip("()")
         if raw.startswith(("+", "-")) or not raw.endswith("."):
@@ -100,7 +82,6 @@ def _notation_markup_fragments(row: dict[str, Any]) -> frozenset[str]:
             key = _metadata_key(part)
             if key:
                 result.add(key)
-
     return frozenset(result)
 
 
@@ -110,8 +91,6 @@ def _is_legacy_notation_markup(row: dict[str, Any], form: str) -> bool:
 
 
 def _notation_colon_fragments(row: dict[str, Any]) -> frozenset[str]:
-    """Return suffix fragments after internal colons in notation forms."""
-
     result: set[str] = set()
     for token in _notation_tokens(row):
         raw = token.strip().strip("()")
@@ -125,8 +104,6 @@ def _notation_colon_fragments(row: dict[str, Any]) -> frozenset[str]:
 
 
 def _is_legacy_colon_fragment(row: dict[str, Any], form: str) -> bool:
-    """True only for a detached suffix *after* a notation colon."""
-
     if ":" in form:
         return False
     normalized = _metadata_key(form)
@@ -134,8 +111,6 @@ def _is_legacy_colon_fragment(row: dict[str, Any], form: str) -> bool:
 
 
 def _explicit_added_forms(row: dict[str, Any]) -> tuple[str, ...]:
-    """Return forms emitted as complete explicit forms by the new generator."""
-
     reasons = {
         str(key).casefold(): str(value)
         for key, value in row.get("change_reasons", {}).items()
@@ -147,62 +122,68 @@ def _explicit_added_forms(row: dict[str, Any]) -> tuple[str, ...]:
     )
 
 
-def _is_legacy_explicit_form_error(row: dict[str, Any], form: str) -> bool:
-    """Recognize old damage to a complete explicit SAOL form."""
+def _is_cut_and_splice_explicit_error(old: str, lemma: str, explicit: str) -> bool:
+    """Recognize an old form made from a lemma prefix and explicit-form suffix.
 
+    The legacy generator sometimes treated a complete explicit form as a tail
+    operation and joined it at an arbitrary overlap. Test every possible cut in
+    both strings, but require a non-trivial suffix and a result different from
+    both source strings. This encodes the mechanical failure, not any word.
+    """
+
+    if old in {lemma, explicit}:
+        return False
+    for lemma_cut in range(1, len(lemma) + 1):
+        for explicit_cut in range(1, len(explicit) - 1):
+            suffix = explicit[explicit_cut:]
+            if len(suffix) < 2:
+                continue
+            if old == lemma[:lemma_cut] + suffix:
+                return True
+    return False
+
+
+def _is_legacy_explicit_form_error(row: dict[str, Any], form: str) -> bool:
     old = form.casefold()
     lemma = str(row.get("lemma", "")).casefold()
     if not old:
         return False
-
     for candidate in _explicit_added_forms(row):
         explicit = candidate.casefold()
         if len(old) < len(explicit) and (
             explicit.startswith(old) or explicit.endswith(old)
         ):
             return True
-        if not lemma or not old.startswith(lemma):
-            continue
-        for start in range(1, len(explicit)):
-            if old == lemma + explicit[start:]:
-                return True
+        if lemma and _is_cut_and_splice_explicit_error(old, lemma, explicit):
+            return True
     return False
 
 
 def _is_stycke_guided_tail_error(row: dict[str, Any], form: str) -> bool:
-    """Recognize a replacement applied at any cut except SAOL's ``|`` cut."""
-
     stycke = _clean_stycke(str(row.get("stycke", "")))
     if stycke.count("|") != 1:
         return False
-
     prefix, head = stycke.split("|", 1)
     lemma = str(row.get("lemma", "")).casefold()
     old = form.casefold()
     if not prefix or not head or prefix + head != lemma or not old:
         return False
-
     reasons = {
         str(key).casefold(): str(value)
         for key, value in row.get("change_reasons", {}).items()
     }
     correct_cut = len(prefix)
-
     for candidate in row.get("added_forms", []):
         candidate_folded = str(candidate).casefold()
         if reasons.get(candidate_folded) != "replace_tail":
             continue
         if candidate_folded == old or not candidate_folded.startswith(prefix):
             continue
-
         replacement = candidate_folded[correct_cut:]
         if not replacement:
             continue
-
         for wrong_cut in range(len(lemma) + 1):
-            if wrong_cut == correct_cut:
-                continue
-            if old == lemma[:wrong_cut] + replacement:
+            if wrong_cut != correct_cut and old == lemma[:wrong_cut] + replacement:
                 return True
     return False
 
@@ -217,27 +198,17 @@ def _common_prefix_length(left: str, right: str) -> int:
 
 
 def _is_truncated_overflow_error(row: dict[str, Any], form: str) -> bool:
-    """Recognize old forms produced from a final token cut at field width 50.
-
-    This is intentionally narrow: the raw notation must be exactly 50
-    characters, its final token must end in ``-``, and the old form must share
-    all but at most one lemma character before adding a suffix of that truncated
-    token. No lemma or Swedish word is named here.
-    """
-
     notation = str(row.get("notation", ""))
     if len(notation) != 50:
         return False
     final_token = notation.rstrip().rsplit(maxsplit=1)[-1]
     if not final_token.endswith("-"):
         return False
-
     token_body = final_token[:-1].casefold()
     lemma = str(row.get("lemma", "")).casefold()
     old = form.casefold()
     if not token_body or not lemma or not old:
         return False
-
     shared = _common_prefix_length(lemma, old)
     if shared < max(1, len(lemma) - 1):
         return False
@@ -267,7 +238,6 @@ def build_review(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
     reviewed: list[dict[str, Any]] = []
     reason_counts: Counter[str] = Counter()
     notation_counts: Counter[str] = Counter()
-
     for row in rows:
         forms = [str(form) for form in row.get("semantic_removed_forms", [])]
         if not forms:
@@ -276,8 +246,7 @@ def build_review(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
         candidates = [
             form for form, reason in classifications.items() if reason == "review_required"
         ]
-        for reason in classifications.values():
-            reason_counts[reason] += 1
+        reason_counts.update(classifications.values())
         if candidates:
             notation_counts[str(row.get("notation", ""))] += 1
         reviewed.append(
@@ -292,7 +261,6 @@ def build_review(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
                 "change_reasons": row.get("change_reasons", {}),
             }
         )
-
     review_rows = [row for row in reviewed if row["review_required_forms"]]
     review_rows.sort(
         key=lambda row: (
@@ -306,9 +274,7 @@ def build_review(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
         "semantic_forms": sum(len(row["classifications"]) for row in reviewed),
         "classification_counts": dict(sorted(reason_counts.items())),
         "review_required_rows": len(review_rows),
-        "review_required_forms": sum(
-            len(row["review_required_forms"]) for row in review_rows
-        ),
+        "review_required_forms": sum(len(row["review_required_forms"]) for row in review_rows),
         "review_notation_groups": [
             {"notation": notation, "count": count}
             for notation, count in sorted(
@@ -341,9 +307,7 @@ def render_review(review: dict[str, Any]) -> str:
     lines.extend(["", "Kvarvarande poster:"])
     for row in review["rows"]:
         forms = ", ".join(row["review_required_forms"])
-        lines.append(
-            f"  {row['lemma']} | {row['notation']} | stycke={row['stycke']} | {forms}"
-        )
+        lines.append(f"  {row['lemma']} | {row['notation']} | stycke={row['stycke']} | {forms}")
     return "\n".join(lines) + "\n"
 
 
@@ -361,9 +325,7 @@ def main() -> None:
     args = build_parser().parse_args()
     review = build_review(read_jsonl(args.comparison))
     args.json.parent.mkdir(parents=True, exist_ok=True)
-    args.json.write_text(
-        json.dumps(review, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    args.json.write_text(json.dumps(review, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     args.text.write_text(render_review(review), encoding="utf-8")
     print(f"Poster kvar för granskning: {review['review_required_rows']}")
     print(f"Former kvar för granskning: {review['review_required_forms']}")
