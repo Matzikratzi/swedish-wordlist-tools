@@ -207,10 +207,13 @@ class SaolRowInterpreterTests(unittest.TestCase):
         self.assertIsNotNone(definite)
         self.assertEqual("allsvenskan", definite.form("sg_def") if definite else None)
 
-    def test_rejects_unparsed_prose(self) -> None:
-        self.assertIsNone(
-            interpret_noun_row(self.record("herr", "+n; i: vissa: uttryck: gen. herrans"))
+    def test_keeps_explicit_form_after_comment(self) -> None:
+        row = interpret_noun_row(
+            self.record("herr", "+n; i: vissa: uttryck: gen. herrans")
         )
+        self.assertIsNotNone(row)
+        self.assertEqual("herrn", row.form("sg_def") if row else None)
+        self.assertEqual("herrans", row.form("pl_indef") if row else None)
 
     def test_bracketed_pronunciation_is_removed_before_interpretation(self) -> None:
         row = interpret_noun_row(self.record("baguette", "+n [-en]; pl. +r [-er]"))
