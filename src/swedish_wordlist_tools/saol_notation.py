@@ -49,7 +49,7 @@ _GLUED_LABEL_OPERATION = re.compile(
 _TRUNCATED_FINAL_TOKEN = re.compile(r"(?:^|\s)\S+-$")
 _FORM_PAYLOAD = re.compile(r"[^\s;,_]+")
 _EXPLICIT_FORM = re.compile(r"[^\s;,+_]+")
-_OPTIONAL_OPERATION = re.compile(r"^([+\-])([^()]*)\(([^()]+)\)([^()]*)$")
+_OPTIONAL_FORM_TOKEN = re.compile(r"^([^()]*)\(([^()]+)\)([^()]*)$")
 _NOTATION_TOKEN_RE = re.compile(
     r"pl\.|best\.|el\.|[;,]|[+\-][^\s;,_]*|[^\s;,+_]+",
     re.IGNORECASE,
@@ -107,6 +107,25 @@ def tokenize_notation(text: str) -> tuple[str, ...] | None:
     return tuple(tokens) if tokens else None
 
 
+def expand_optional_form_token(token: str) -> tuple[str, ...]:
+    """Expand one parenthesized optional segment in any form token.
+
+    The expansion is orthographic and ordklass-neutral. Examples:
+    ``+(e)n`` -> ``+n``, ``+en``; ``håll(e)s`` -> ``hålls``, ``hålles``;
+    ``fyrti(o)förste`` -> ``fyrtiförste``, ``fyrtioförste``.
+    Tokens with no optional segment are returned unchanged. Nested, empty or
+    multiple parenthesized segments are deliberately left unchanged.
+    """
+
+    raw = token.strip()
+    match = _OPTIONAL_FORM_TOKEN.fullmatch(raw)
+    if match is None:
+        return (raw,)
+    before, optional, after = match.groups()
+    variants = (before + after, before + optional + after)
+    return tuple(dict.fromkeys(variants))
+
+
 def parse_form_operation(token: str) -> FormOperation | None:
     raw = _unwrap_token(token)
     normalized = raw.casefold()
@@ -140,22 +159,10 @@ def parse_form_operation(token: str) -> FormOperation | None:
 
 
 def parse_form_operations(token: str) -> tuple[FormOperation, ...] | None:
-    """Parse a token and expand one parenthesized optional payload segment.
+    """Parse all orthographic variants of one optional form token."""
 
-    For example, ``+(e)n`` expands mechanically to ``+n`` and ``+en``.
-    No word, suffix, or part of speech is encoded in this rule.
-    """
-
-    raw = _unwrap_token(token)
-    match = _OPTIONAL_OPERATION.fullmatch(raw)
-    if match is None:
-        operation = parse_form_operation(raw)
-        return (operation,) if operation is not None else None
-
-    marker, before, optional, after = match.groups()
-    variants = (marker + before + after, marker + before + optional + after)
     operations: list[FormOperation] = []
-    for variant in variants:
+    for variant in expand_optional_form_token(_unwrap_token(token)):
         operation = parse_form_operation(variant)
         if operation is None:
             return None
