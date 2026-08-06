@@ -181,6 +181,15 @@ class NounParadigmTests(unittest.TestCase):
             set(entry.forms if entry else ()),
         )
 
+    def test_skips_any_k_markup_in_source_text(self) -> None:
+        for pattern in (
+            "+t; pl. + H +<k>s</k>",
+            "+en; gamla: former: <k>nåde</k> och: <k>nåder<",
+            "+n <K>godtyckligt</K>",
+        ):
+            with self.subTest(pattern=pattern):
+                self.assertIsNone(self.complete("testord", pattern))
+
     def test_unmarked_genitive_after_s_x_or_z(self) -> None:
         entry = self.complete("hus", "+et; pl. +")
         self.assertIsNotNone(entry)
