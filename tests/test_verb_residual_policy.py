@@ -29,7 +29,7 @@ class VerbResidualPolicyTests(unittest.TestCase):
         slots = self.parse("lyster", "pres.")
         self.assertEqual(("lyster",), slots.written_forms())
         self.assertEqual(
-            ("infinitive", "present"),
+            ("lemma", "infinitive", "present"),
             tuple(form.slot for form in slots.forms),
         )
 
@@ -44,7 +44,7 @@ class VerbResidualPolicyTests(unittest.TestCase):
         )
         self.assertEqual(("måste", "måst"), slots.written_forms())
         self.assertEqual(
-            ("infinitive", "present", "preterite", "supine"),
+            ("lemma", "infinitive", "present", "preterite", "supine"),
             tuple(form.slot for form in slots.forms),
         )
 
