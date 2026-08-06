@@ -38,17 +38,6 @@ class InterpretedRow:
 
 _SUP_ELEMENT_RE = re.compile(r"<sup\b[^>]*>.*?</sup>", re.IGNORECASE | re.DOTALL)
 _HTML_TAG_RE = re.compile(r"<[^>]*>")
-_NOUN_IGNORED_MARKERS = frozenset(
-    {
-        "i:",
-        "anv:",
-        "används:",
-        "användas:",
-        "kan:",
-        "ofta:",
-        "vanl:",
-    }
-)
 
 
 def _comparison_key(value: Any) -> str:
@@ -201,16 +190,11 @@ def apply_form_token(
     )
 
 
-def _clean_notation_comments(pattern: str) -> str:
+def _clean_notation_structure(pattern: str) -> str:
+    """Remove typography only; comment and label syntax is parsed generically."""
+
     pattern = _SUP_ELEMENT_RE.sub("", pattern)
     pattern = _HTML_TAG_RE.sub("", pattern)
-    pattern = re.sub(
-        r"(?:^|(?<=[;,]))\s*(?:som|i):\s*pl\.\s*(?:anv\.|används:)\s*(?:ofta:\s*|vanl\.\s*)?",
-        " pl. ",
-        pattern,
-        flags=re.IGNORECASE,
-    )
-    pattern = re.sub(r"\b(?:ibl|vard|högt|vanl)\.\s*", "", pattern, flags=re.IGNORECASE)
     return re.sub(r"\s+", " ", pattern).strip()
 
 
@@ -238,7 +222,7 @@ def interpret_noun_row(record: dict[str, Any]) -> InterpretedRow | None:
     if pattern is None:
         return _interpret_missing_pattern(record, lemma)
 
-    cleaned_pattern = _clean_notation_comments(pattern)
+    cleaned_pattern = _clean_notation_structure(pattern)
     branches = split_alternative_branches(cleaned_pattern)
     if not branches:
         return None
@@ -251,7 +235,6 @@ def interpret_noun_row(record: dict[str, Any]) -> InterpretedRow | None:
             singular_slot="sg_def",
             plural_slot="pl_indef",
             definite_plural_slot="pl_def",
-            ignored_markers=_NOUN_IGNORED_MARKERS,
         )
         if slot_operations is None:
             return None
