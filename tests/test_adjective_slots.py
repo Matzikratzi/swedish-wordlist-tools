@@ -114,8 +114,15 @@ class AdjectiveSlotsTests(unittest.TestCase):
             self.assertEqual("lemma_only_no_inflection_text", slots.rule)
             self.assertEqual("lemma", slots.forms[0].slot)
 
-    def test_rejects_truncated_comparison(self) -> None:
-        self.assertIsNone(interpret_simple_adjective_slots({"normaliserat_ord": "nära", "text": "komp. närmare el. närmre, superl. närmast el. närm"}))
+    def test_preserves_safe_forms_before_truncated_alternative(self) -> None:
+        slots = self.parse(
+            "nära",
+            "komp. närmare el. närmre, superl. närmast el. närm",
+        )
+        self.assertEqual(
+            ("nära", "närmare", "närmre", "närmast"),
+            slots.written_forms(),
+        )
 
 
 if __name__ == "__main__":
