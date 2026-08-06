@@ -2,6 +2,14 @@
 
 Den här listan innehåller fel som har konstaterats i SAOL14-boken eller i den strukturerade SAOL14-exporten. Den ska inte innehålla äldre OCR- eller facitproblem från andra projektsteg.
 
+Alla poster vars `text`-fält innehåller `<k>`-markup inventeras med:
+
+```bash
+python -m swedish_wordlist_tools.analyze_saol_k_markup
+```
+
+Rapporten skiljer balanserad typografisk markup från trasiga taggar. Poster med sådan markup hör hemma på denna källfelslista eftersom formatering inte ska behöva tolkas som SAOL-notation.
+
 ## fansin / fanzine
 
 - **Post:** `fansin` / `fanzine`
@@ -10,6 +18,14 @@ Den här listan innehåller fel som har konstaterats i SAOL14-boken eller i den 
 - **Problem:** Typografisk markup för kursivt `s` har följt med in i `text`-fältet.
 - **Avsedd notation:** `+et; pl. + _ +t [-et]; pl. + H +s`
 - **Lokal hantering:** HTML-taggar tas bort före tokenisering, så `+<k>s</k>` tolkas som `+s`.
+
+## nåd
+
+- **Post:** `nåd`
+- **Text i exporten:** `+en; de: åld. formerna: <k>nåde</k> och: <k>nåder<`
+- **Problem:** Typografisk `<k>`-markup har följt med in i `text`-fältet och den sista markeringen är dessutom trasig: `<k>nåder<` saknar korrekt avslutning.
+- **Avsedd notation:** `+en; de: åld. formerna: nåde och: nåder`
+- **Lokal hantering:** Dokumenteras som källfel. Parsern ska inte ha ett ordspecialfall för `nåd`.
 
 ## filigran
 
