@@ -54,6 +54,32 @@ class RefineNounSemanticDifferencesTests(unittest.TestCase):
                     classify_form(row, form),
                 )
 
+    def test_classifies_arbitrary_colon_final_tokens_structurally(self) -> None:
+        cases = (
+            ("xqz:", "xqz"),
+            ("123abc:", "123abc"),
+            ("räksmörgås:", "räksmörgås"),
+            ("ÅÄÖ:", "ÅÄÖ"),
+        )
+        for token, removed_form in cases:
+            with self.subTest(token=token):
+                self.assertEqual(
+                    "legacy_notation_metadata",
+                    classify_form({"notation": f"+n; {token} +ar"}, removed_form),
+                )
+
+    def test_does_not_treat_internal_colons_as_metadata(self) -> None:
+        for notation, form in (
+            ("BB:t; pl. BB:n", "BB:t"),
+            ("+:n +:ar", ":n"),
+            ("abc:na", "abc:na"),
+        ):
+            with self.subTest(notation=notation, form=form):
+                self.assertEqual(
+                    "review_required",
+                    classify_form({"notation": notation}, form),
+                )
+
     def test_does_not_use_a_global_metadata_word_list(self) -> None:
         self.assertEqual("review_required", classify_form({}, "ibl"))
         self.assertEqual(
