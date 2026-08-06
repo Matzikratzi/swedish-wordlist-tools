@@ -51,6 +51,15 @@ class SaolNotationTests(unittest.TestCase):
         self.assertEqual(("BB:t", ";", "pl.", "BB:n"), tokenize_notation("BB:t; pl. BB:n"))
         self.assertEqual(("+t", ";", "pl.", "+", "H", "+s"), tokenize_notation("+t; pl. + H +<k>s</k>"))
 
+    def test_tokenizer_inserts_boundary_after_glued_label(self) -> None:
+        self.assertEqual(
+            ("+et", "el.", "+en", ";", "pl.", "+", "el.", "+er"),
+            tokenize_notation("+et el.+en; pl. + el. +er"),
+        )
+        self.assertEqual(("pl.", "+ar"), tokenize_notation("pl.+ar"))
+        self.assertEqual(("BB:t",), tokenize_notation("BB:t"))
+        self.assertEqual(("+:n",), tokenize_notation("+:n"))
+
     def test_rejects_labels_and_separators_as_form_operations(self) -> None:
         for token in ("komp.", "pl.", "el.", "_", "["):
             with self.subTest(token=token):
