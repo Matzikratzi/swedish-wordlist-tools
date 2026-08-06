@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .jsonl import read_jsonl
+from .verb_residual_policy import interpret_residual_verb_slots
 from .verb_slots import diagnose_verb_record, interpret_verb_slots
 
 DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
@@ -43,17 +44,25 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     interpreted = 0
     excluded = 0
+    residual = 0
 
     for record in records:
         lemma = _value(record, "normaliserat_ord")
         exclusion = _excluded_reason(lemma)
         diagnosis = diagnose_verb_record(record)
         slots = interpret_verb_slots(record) if exclusion is None else None
+        residual_slots = (
+            interpret_residual_verb_slots(record)
+            if exclusion is None and slots is None
+            else None
+        )
+        effective_slots = slots or residual_slots
         if exclusion is not None:
             excluded += 1
             exclusion_counts[exclusion] += 1
-        elif slots is not None:
+        elif effective_slots is not None:
             interpreted += 1
+            residual += int(residual_slots is not None)
         else:
             diagnosis_counts[diagnosis] += 1
             if len(diagnosis_samples[diagnosis]) < 30:
@@ -73,8 +82,9 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
                 "stycke": _value(record, "stycke"),
                 "diagnosis": diagnosis,
                 "excluded_reason": exclusion,
-                "interpreted": slots is not None,
-                "forms": list(slots.written_forms()) if slots else [],
+                "interpreted": effective_slots is not None,
+                "residual_policy": residual_slots is not None,
+                "forms": list(effective_slots.written_forms()) if effective_slots else [],
             }
         )
 
@@ -82,6 +92,7 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
     return {
         "verb_records": len(records),
         "interpreted_playable_records": interpreted,
+        "residual_policy_records": residual,
         "intentionally_excluded_records": excluded,
         "genuinely_uninterpreted_records": remaining,
         "exclusion_counts": dict(exclusion_counts.most_common()),
@@ -95,6 +106,7 @@ def render_text(report: dict[str, Any]) -> str:
     lines = [
         f"Verbposter: {report['verb_records']}",
         f"Tolkade spelbara poster: {report['interpreted_playable_records']}",
+        f"Varav konservativ restpolicy: {report['residual_policy_records']}",
         f"Avsiktligt exkluderade poster: {report['intentionally_excluded_records']}",
         f"Verkligt otolkade poster: {report['genuinely_uninterpreted_records']}",
         "",
@@ -135,6 +147,7 @@ def main() -> None:
     args.json.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"Verbposter: {report['verb_records']}")
     print(f"Tolkade spelbara poster: {report['interpreted_playable_records']}")
+    print(f"Varav konservativ restpolicy: {report['residual_policy_records']}")
     print(f"Avsiktligt exkluderade poster: {report['intentionally_excluded_records']}")
     print(f"Verkligt otolkade poster: {report['genuinely_uninterpreted_records']}")
     print(f"Text: {args.text}")
