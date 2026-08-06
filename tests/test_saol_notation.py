@@ -61,9 +61,27 @@ class SaolNotationTests(unittest.TestCase):
         self.assertEqual(("+:n",), tokenize_notation("+:n"))
 
     def test_rejects_labels_and_separators_as_form_operations(self) -> None:
-        for token in ("komp.", "pl.", "el.", "_", "["):
+        for token in ("komp.", "pl.", "el.", "t.ex.", "x.y.z.", "_", "["):
             with self.subTest(token=token):
                 self.assertIsNone(parse_form_operation(token))
+
+    def test_ignores_arbitrary_multi_period_labels_in_slot_assignment(self) -> None:
+        assigned = assign_labeled_slots(
+            ("+et", ";", "pl.", "+", "el.", "om:", "t.ex.", "färgämnen:", "+er"),
+            singular_slot="sg_def",
+            plural_slot="pl_indef",
+            definite_plural_slot="pl_def",
+        )
+        self.assertIsNotNone(assigned)
+        assert assigned is not None
+        self.assertEqual(
+            (
+                ("sg_def", "+et"),
+                ("pl_indef", "+"),
+                ("pl_indef", "+er"),
+            ),
+            tuple((item.slot, item.token) for item in assigned),
+        )
 
     def test_assigns_common_labels_to_supplied_slots(self) -> None:
         assigned = assign_labeled_slots(
