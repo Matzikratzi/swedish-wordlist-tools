@@ -93,6 +93,50 @@ class RefineNounSemanticDifferencesTests(unittest.TestCase):
                     classify_form({"notation": notation}, form),
                 )
 
+    def test_classifies_damage_to_arbitrary_explicit_forms(self) -> None:
+        cases = (
+            (
+                {
+                    "lemma": "basform",
+                    "added_forms": ["heltannanform"],
+                    "change_reasons": {"heltannanform": "explicit"},
+                },
+                "annanform",
+            ),
+            (
+                {
+                    "lemma": "basform",
+                    "added_forms": ["heltannanform"],
+                    "change_reasons": {"heltannanform": "explicit"},
+                },
+                "heltannan",
+            ),
+            (
+                {
+                    "lemma": "basform",
+                    "added_forms": ["heltannanform"],
+                    "change_reasons": {"heltannanform": "explicit"},
+                },
+                "basformannanform",
+            ),
+        )
+        for row, damaged in cases:
+            with self.subTest(damaged=damaged):
+                self.assertEqual(
+                    "legacy_explicit_form_error",
+                    classify_form(row, damaged),
+                )
+
+    def test_does_not_guess_explicit_damage_without_explicit_provenance(self) -> None:
+        row = {
+            "lemma": "basform",
+            "added_forms": ["heltannanform"],
+            "change_reasons": {"heltannanform": "append"},
+        }
+        for form in ("annanform", "heltannan", "basformannanform"):
+            with self.subTest(form=form):
+                self.assertEqual("review_required", classify_form(row, form))
+
     def test_does_not_use_a_global_metadata_word_list(self) -> None:
         self.assertEqual("review_required", classify_form({}, "ibl"))
         self.assertEqual(
