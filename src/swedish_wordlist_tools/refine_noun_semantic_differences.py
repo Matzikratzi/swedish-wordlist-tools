@@ -236,12 +236,14 @@ def classify_form(row: dict[str, Any], form: str) -> str:
         return "legacy_notation_metadata"
     if _is_legacy_colon_fragment(row, form):
         return "legacy_colon_fragment"
+    # Field-boundary truncation is more specific than damage inferred from an
+    # explicit form elsewhere in the same notation, so it must win precedence.
+    if _is_truncated_overflow_error(row, form):
+        return "legacy_truncated_overflow_error"
     if _is_legacy_explicit_form_error(row, form):
         return "legacy_explicit_form_error"
     if _is_stycke_guided_tail_error(row, form):
         return "legacy_stycke_tail_error"
-    if _is_truncated_overflow_error(row, form):
-        return "legacy_truncated_overflow_error"
     return "review_required"
 
 
