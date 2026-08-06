@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .jsonl import read_jsonl
-from .saol_notation import split_alternative_branches
+from .saol_notation import FormOperationKind, parse_form_operations, split_alternative_branches
 
 DEFAULT_COMPARISON = Path("reports/saol14-noun-forms-comparison.jsonl")
 DEFAULT_JSON = Path("reports/saol14-noun-semantic-review.json")
@@ -28,11 +28,8 @@ def _metadata_key(value: str) -> str:
 
 
 def _notation_tokens(row: dict[str, Any]) -> tuple[str, ...]:
-    notation = str(row.get("notation", ""))
-    branches = split_alternative_branches(notation)
-    if not branches:
-        return ()
-    return tuple(token for branch in branches for token in branch.tokens)
+    branches = split_alternative_branches(str(row.get("notation", "")))
+    return tuple(token for branch in branches for token in branch.tokens) if branches else ()
 
 
 def _has_k_source_error(row: dict[str, Any]) -> bool:
@@ -42,17 +39,14 @@ def _has_k_source_error(row: dict[str, Any]) -> bool:
 def _is_source_error_discarded_form(row: dict[str, Any], form: str) -> bool:
     if not _has_k_source_error(row):
         return False
-    lemma = str(row.get("lemma", "")).casefold()
-    return bool(form) and form.casefold() != lemma
+    return bool(form) and form.casefold() != str(row.get("lemma", "")).casefold()
 
 
 def _notation_metadata_forms(row: dict[str, Any]) -> frozenset[str]:
     result: set[str] = set()
     for token in _notation_tokens(row):
         raw = token.strip().strip("()")
-        if raw.startswith(("+", "-")):
-            continue
-        if raw.endswith((":", ".")):
+        if not raw.startswith(("+", "-")) and raw.endswith((":", ".")):
             key = _metadata_key(raw)
             if key:
                 result.add(key)
@@ -76,12 +70,8 @@ def _notation_markup_fragments(row: dict[str, Any]) -> frozenset[str]:
         if raw.startswith(("+", "-")) or not raw.endswith("."):
             continue
         parts = [part for part in raw.split(".") if part]
-        if len(parts) < 2:
-            continue
-        for part in parts:
-            key = _metadata_key(part)
-            if key:
-                result.add(key)
+        if len(parts) >= 2:
+            result.update(key for part in parts if (key := _metadata_key(part)))
     return frozenset(result)
 
 
@@ -94,12 +84,10 @@ def _notation_colon_fragments(row: dict[str, Any]) -> frozenset[str]:
     result: set[str] = set()
     for token in _notation_tokens(row):
         raw = token.strip().strip("()")
-        if ":" not in raw or raw.endswith(":"):
-            continue
-        fragment = raw.rsplit(":", 1)[1]
-        key = _metadata_key(fragment)
-        if key:
-            result.add(key)
+        if ":" in raw and not raw.endswith(":"):
+            key = _metadata_key(raw.rsplit(":", 1)[1])
+            if key:
+                result.add(key)
     return frozenset(result)
 
 
@@ -122,26 +110,34 @@ def _explicit_added_forms(row: dict[str, Any]) -> tuple[str, ...]:
     )
 
 
-def _legacy_replace_final_component(lemma: str, replacement: str) -> str | None:
-    """Reproduce the old generator's one-character-anchor replacement."""
+def _explicit_notation_forms(row: dict[str, Any]) -> tuple[str, ...]:
+    """Read complete explicit forms directly from the shared notation parser."""
 
+    result: list[str] = []
+    for token in _notation_tokens(row):
+        operations = parse_form_operations(token)
+        if operations is None:
+            continue
+        for operation in operations:
+            if operation.kind is FormOperationKind.EXPLICIT and operation.value not in result:
+                result.append(operation.value)
+    return tuple(result)
+
+
+def _explicit_forms(row: dict[str, Any]) -> tuple[str, ...]:
+    """Return explicit forms whether or not they are new in the comparison."""
+
+    return tuple(dict.fromkeys((*_explicit_added_forms(row), *_explicit_notation_forms(row))))
+
+
+def _legacy_replace_final_component(lemma: str, replacement: str) -> str | None:
     if not replacement:
         return None
-    anchor = replacement[0]
-    positions = [index for index, char in enumerate(lemma) if char == anchor]
-    if not positions:
-        return None
-    return lemma[: positions[-1]] + replacement
+    positions = [index for index, char in enumerate(lemma) if char == replacement[0]]
+    return lemma[: positions[-1]] + replacement if positions else None
 
 
 def _is_hyphenated_explicit_token_damage(old: str, lemma: str, explicit: str) -> bool:
-    """Recognize damage caused by legacy splitting of a hyphenated full form.
-
-    The old token regex split ``a-b-c`` into ``a``, ``-b`` and ``-c``. The
-    latter pieces were then applied as replacement operations. Reproduce only
-    that exact mechanism; unhyphenated explicit forms cannot match this rule.
-    """
-
     parts = explicit.split("-")
     if len(parts) < 2:
         return False
@@ -157,8 +153,10 @@ def _is_legacy_explicit_form_error(row: dict[str, Any], form: str) -> bool:
     lemma = str(row.get("lemma", "")).casefold()
     if not old:
         return False
-    for candidate in _explicit_added_forms(row):
+    for candidate in _explicit_forms(row):
         explicit = candidate.casefold()
+        if old in {lemma, explicit}:
+            continue
         if len(old) < len(explicit) and (
             explicit.startswith(old) or explicit.endswith(old)
         ):
@@ -287,7 +285,9 @@ def build_review(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
         "semantic_forms": sum(len(row["classifications"]) for row in reviewed),
         "classification_counts": dict(sorted(reason_counts.items())),
         "review_required_rows": len(review_rows),
-        "review_required_forms": sum(len(row["review_required_forms"]) for row in review_rows),
+        "review_required_forms": sum(
+            len(row["review_required_forms"]) for row in review_rows
+        ),
         "review_notation_groups": [
             {"notation": notation, "count": count}
             for notation, count in sorted(
@@ -320,7 +320,9 @@ def render_review(review: dict[str, Any]) -> str:
     lines.extend(["", "Kvarvarande poster:"])
     for row in review["rows"]:
         forms = ", ".join(row["review_required_forms"])
-        lines.append(f"  {row['lemma']} | {row['notation']} | stycke={row['stycke']} | {forms}")
+        lines.append(
+            f"  {row['lemma']} | {row['notation']} | stycke={row['stycke']} | {forms}"
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -338,7 +340,9 @@ def main() -> None:
     args = build_parser().parse_args()
     review = build_review(read_jsonl(args.comparison))
     args.json.parent.mkdir(parents=True, exist_ok=True)
-    args.json.write_text(json.dumps(review, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    args.json.write_text(
+        json.dumps(review, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
     args.text.write_text(render_review(review), encoding="utf-8")
     print(f"Poster kvar för granskning: {review['review_required_rows']}")
     print(f"Former kvar för granskning: {review['review_required_forms']}")
