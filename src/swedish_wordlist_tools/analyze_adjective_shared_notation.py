@@ -8,7 +8,12 @@ from typing import Any, Iterable
 
 from .analyze_adjectives import _interpret_record, _value
 from .jsonl import read_jsonl
-from .saol_notation import expand_optional_form_token, parse_form_operations, tokenize_notation
+from .saol_notation import (
+    FormOperationKind,
+    expand_optional_form_token,
+    parse_form_operations,
+    tokenize_notation,
+)
 
 DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
 DEFAULT_JSON = Path("reports/saol14-adjective-shared-notation.json")
@@ -28,17 +33,29 @@ def _is_metadata_token(token: str) -> bool:
 
 
 def _shared_structure(tokens: tuple[str, ...] | None) -> bool:
+    """Return whether tokens form actual SAOL notation rather than plain prose.
+
+    Every ordinary word is a syntactically valid explicit form token. Therefore
+    successful tokenization and form parsing alone are not enough: the row must
+    also contain a notation marker, such as punctuation/labels or a non-explicit
+    form operation (``+``, ``+a``, ``-re`` and so on).
+    """
+
     if not tokens:
         return False
     saw_form = False
+    saw_notation_marker = False
     for token in tokens:
         if _is_metadata_token(token):
+            saw_notation_marker = True
             continue
         operations = parse_form_operations(token)
         if operations is None:
             return False
         saw_form = True
-    return saw_form
+        if any(operation.kind is not FormOperationKind.EXPLICIT for operation in operations):
+            saw_notation_marker = True
+    return saw_form and saw_notation_marker
 
 
 def analyze_records(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
