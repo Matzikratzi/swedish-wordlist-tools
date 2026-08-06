@@ -46,6 +46,7 @@ def _drop_unterminated_final_token(
     for index in range(len(result) - 1, -1, -1):
         if result[index][1] in final_variants:
             del result[index]
+            break
     return tuple(result)
 
 
