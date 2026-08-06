@@ -39,17 +39,32 @@ class RefineNounSemanticDifferencesTests(unittest.TestCase):
             with self.subTest(form=form):
                 self.assertEqual("legacy_stycke_tail_error", classify_form(row, form))
 
-    def test_classifies_lexicographic_labels(self) -> None:
-        for label in ("ibl", "vard", "högt"):
-            with self.subTest(label=label):
+    def test_classifies_metadata_from_the_rows_own_notation(self) -> None:
+        cases = (
+            ({"notation": "+n; pl. + ibl. -metrar"}, "ibl"),
+            ({"notation": "+en om: gipsförband: ibl. +et; pl. +er"}, "gipsförband"),
+            ({"notation": "+n; pl. + el. (mest: om: enstaka: mynt:) rubler"}, "mest"),
+            ({"notation": "+t; pl. +n el. (mest: i: fråga: om: musik:) tempi"}, "musik"),
+            ({"notation": "+en; som: måttord: pl. +"}, "måttord"),
+        )
+        for row, form in cases:
+            with self.subTest(form=form):
                 self.assertEqual(
-                    "legacy_lexicographic_label",
-                    classify_form({}, label),
+                    "legacy_notation_metadata",
+                    classify_form(row, form),
                 )
+
+    def test_does_not_use_a_global_metadata_word_list(self) -> None:
+        self.assertEqual("review_required", classify_form({}, "ibl"))
+        self.assertEqual(
+            "review_required",
+            classify_form({"notation": "+n señoror"}, "señoror"),
+        )
 
     def test_keeps_unexplained_forms_for_review(self) -> None:
         row = {
             "lemma": "abc",
+            "notation": "abc:et; pl. abc:n",
             "stycke": "abc",
             "added_forms": ["abc:n"],
             "change_reasons": {"abc:n": "explicit"},
