@@ -173,6 +173,17 @@ def _has_usable_compound_bar(record: dict[str, Any], lemma: str) -> bool:
     return normalized.casefold() == lemma.casefold()
 
 
+def _has_k_markup_source_error(record: dict[str, Any]) -> bool:
+    """Return whether SAOL's text field contains forbidden ``<k>`` markup.
+
+    Any occurrence is treated as a source-data bug, even when the markup is
+    balanced. These records are skipped until the source has been corrected or
+    an explicit source-correction layer is introduced.
+    """
+
+    return "<k>" in str(record.get("text", "")).casefold()
+
+
 def complete_noun_entry(
     record: dict[str, Any],
     entry: GeneratedEntry | None,
@@ -180,6 +191,9 @@ def complete_noun_entry(
     """Build a noun paradigm from SAOL operations mapped to noun slots."""
     if str(record.get("upos", "")).upper() != "NOUN":
         return entry
+
+    if _has_k_markup_source_error(record):
+        return None
 
     row = interpret_noun_row(record)
     if row is None:
