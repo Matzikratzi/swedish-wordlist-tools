@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .jsonl import read_jsonl
-from .saol_notation import tokenize_notation
+from .saol_notation import split_alternative_branches
 
 DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
 DEFAULT_JSON = Path("reports/saol14-nonoverlap-replacements.json")
@@ -46,10 +46,17 @@ def common_prefix_length(left: str, right: str) -> int:
 
 
 def replacement_tokens(text: str) -> tuple[str, ...]:
-    tokens = tokenize_notation(text)
-    if not tokens:
+    """Return replacement operations from every underscore alternative branch."""
+
+    branches = split_alternative_branches(text)
+    if not branches:
         return ()
-    return tuple(token for token in tokens if token.startswith("-") and len(token) > 1)
+    return tuple(
+        token
+        for branch in branches
+        for token in branch.tokens
+        if token.startswith("-") and len(token) > 1
+    )
 
 
 def analyze_nonoverlap_replacements(
