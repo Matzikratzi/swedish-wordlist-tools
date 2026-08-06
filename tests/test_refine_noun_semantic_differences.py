@@ -75,6 +75,34 @@ class RefineNounSemanticDifferencesTests(unittest.TestCase):
         }
         self.assertEqual("review_required", classify_form(row, "abXYZ"))
 
+    def test_classifies_markup_tag_names_from_the_row(self) -> None:
+        for notation, form in (
+            ("+n; <k>xyz</k>", "k"),
+            ("+n; <z>xyz</z>", "z"),
+            ("+n; <abc-7>xyz</abc-7>", "abc-7"),
+        ):
+            with self.subTest(notation=notation, form=form):
+                self.assertEqual(
+                    "legacy_notation_markup",
+                    classify_form({"notation": notation}, form),
+                )
+
+    def test_classifies_parts_of_arbitrary_dotted_labels(self) -> None:
+        for notation, form in (
+            ("+n; t.ex. xyz: +ar", "t"),
+            ("+n; t.ex. xyz: +ar", "ex"),
+            ("+n; q.r.s. xyz: +ar", "r"),
+        ):
+            with self.subTest(notation=notation, form=form):
+                self.assertEqual(
+                    "legacy_notation_markup",
+                    classify_form({"notation": notation}, form),
+                )
+
+    def test_does_not_guess_markup_fragments_without_matching_notation(self) -> None:
+        self.assertEqual("review_required", classify_form({"notation": "+n"}, "k"))
+        self.assertEqual("review_required", classify_form({"notation": "+n"}, "ex"))
+
     def test_classifies_metadata_from_the_rows_own_notation(self) -> None:
         cases = (
             ({"notation": "+n; pl. + ibl. -metrar"}, "ibl"),
