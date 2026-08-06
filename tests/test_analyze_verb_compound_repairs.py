@@ -32,9 +32,10 @@ class AnalyzeVerbCompoundRepairsTests(unittest.TestCase):
                 {
                     "normaliserat_ord": "omskriva",
                     "upos": "VERB",
-                    # Deliberately not directly interpretable. The exact
-                    # bar-marked head must supply the finite forms.
-                    "text": "helt okänd syntax",
+                    # Contains no possible word-form token and is therefore
+                    # guaranteed to be unavailable to every direct fallback.
+                    # The exact bar-marked head must supply the finite forms.
+                    "text": "???",
                     "stycke": "om|skriv·a",
                 },
             ]
