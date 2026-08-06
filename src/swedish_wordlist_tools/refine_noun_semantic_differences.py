@@ -38,12 +38,7 @@ def _notation_tokens(row: dict[str, Any]) -> tuple[str, ...]:
 
 
 def _notation_metadata_forms(row: dict[str, Any]) -> frozenset[str]:
-    """Return comment words and period-final labels from the row notation.
-
-    The vocabulary is derived from SAOL's syntax in the current row. No list of
-    Swedish comment words is maintained here: a token ending in ``:`` is
-    explanatory prose, and a token ending in ``.`` is a label.
-    """
+    """Return comment words and period-final labels from the row notation."""
 
     result: set[str] = set()
     for token in _notation_tokens(row):
@@ -62,13 +57,45 @@ def _is_notation_metadata(row: dict[str, Any], form: str) -> bool:
     return bool(normalized) and normalized in _notation_metadata_forms(row)
 
 
-def _notation_colon_fragments(row: dict[str, Any]) -> frozenset[str]:
-    """Return suffix fragments after internal colons in notation forms.
+def _notation_markup_fragments(row: dict[str, Any]) -> frozenset[str]:
+    """Return fragments introduced by markup or dotted labels in notation.
 
-    Old generators sometimes split ``+:n``, ``BB:t`` or ``abc:na`` at the
-    colon and emitted ``n``, ``t`` or ``na`` as standalone forms. A final colon
-    such as in ``xqz:`` is comment syntax and is deliberately excluded here.
+    The rule reads structure from the row itself. Tag names come from literal
+    ``<...>`` markup, while a dotted label such as ``t.ex.`` contributes the
+    components ``t`` and ``ex``. No tag names, abbreviations, or Swedish words
+    are hard-coded.
     """
+
+    notation = str(row.get("notation", ""))
+    result: set[str] = set()
+
+    for match in re.finditer(r"</?\s*([0-9A-Za-zÅÄÖåäöÉéÜü-]+)", notation):
+        key = _metadata_key(match.group(1))
+        if key:
+            result.add(key)
+
+    for token in _notation_tokens(row):
+        raw = token.strip().strip("()")
+        if raw.startswith(("+", "-")) or not raw.endswith("."):
+            continue
+        parts = [part for part in raw.split(".") if part]
+        if len(parts) < 2:
+            continue
+        for part in parts:
+            key = _metadata_key(part)
+            if key:
+                result.add(key)
+
+    return frozenset(result)
+
+
+def _is_legacy_notation_markup(row: dict[str, Any], form: str) -> bool:
+    normalized = _metadata_key(form)
+    return bool(normalized) and normalized in _notation_markup_fragments(row)
+
+
+def _notation_colon_fragments(row: dict[str, Any]) -> frozenset[str]:
+    """Return suffix fragments after internal colons in notation forms."""
 
     result: set[str] = set()
     for token in _notation_tokens(row):
@@ -106,13 +133,7 @@ def _explicit_added_forms(row: dict[str, Any]) -> tuple[str, ...]:
 
 
 def _is_legacy_explicit_form_error(row: dict[str, Any], form: str) -> bool:
-    """Recognize old damage to a complete explicit SAOL form.
-
-    The rule is deliberately structural. It only considers forms that the new
-    generator marked ``explicit``. The old form must then be either a proper
-    prefix/suffix of that complete form, or the exact result of appending a
-    suffix of the explicit form to the lemma.
-    """
+    """Recognize old damage to a complete explicit SAOL form."""
 
     old = form.casefold()
     lemma = str(row.get("lemma", "")).casefold()
@@ -134,14 +155,7 @@ def _is_legacy_explicit_form_error(row: dict[str, Any], form: str) -> bool:
 
 
 def _is_stycke_guided_tail_error(row: dict[str, Any], form: str) -> bool:
-    """Recognize a replacement applied at any cut except SAOL's ``|`` cut.
-
-    For a row such as ``gräs|and`` with the new replacement form ``gräsänder``,
-    the replacement payload is ``änder`` and the only correct cut is after
-    ``gräs``. The old generator could instead produce ``gränder`` by cutting
-    after ``gr``. This rule enumerates those mechanically possible wrong cuts;
-    it contains no knowledge about the lemma, suffix, or Swedish morphology.
-    """
+    """Recognize a replacement applied at any cut except SAOL's ``|`` cut."""
 
     stycke = _clean_stycke(str(row.get("stycke", "")))
     if stycke.count("|") != 1:
@@ -179,6 +193,8 @@ def _is_stycke_guided_tail_error(row: dict[str, Any], form: str) -> bool:
 
 
 def classify_form(row: dict[str, Any], form: str) -> str:
+    if _is_legacy_notation_markup(row, form):
+        return "legacy_notation_markup"
     if _is_notation_metadata(row, form):
         return "legacy_notation_metadata"
     if _is_legacy_colon_fragment(row, form):
@@ -251,6 +267,7 @@ def render_review(review: dict[str, Any]) -> str:
     lines = [
         f"Semantiska poster före förfining: {review['semantic_rows']}",
         f"Semantiska former före förfining: {review['semantic_forms']}",
+        f"Verifierade markup-/etikettfragment: {counts.get('legacy_notation_markup', 0)}",
         f"Verifierad notationsmetadata: {counts.get('legacy_notation_metadata', 0)}",
         f"Verifierade kolonfragment: {counts.get('legacy_colon_fragment', 0)}",
         f"Verifierade explicita formfel: {counts.get('legacy_explicit_form_error', 0)}",
