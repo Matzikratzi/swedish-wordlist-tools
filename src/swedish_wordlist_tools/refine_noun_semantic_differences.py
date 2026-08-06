@@ -29,6 +29,14 @@ def _metadata_key(value: str) -> str:
     return re.sub(r"[^0-9a-zåäöéü-]+", "", value.casefold())
 
 
+def _notation_tokens(row: dict[str, Any]) -> tuple[str, ...]:
+    notation = str(row.get("notation", ""))
+    branches = split_alternative_branches(notation)
+    if not branches:
+        return ()
+    return tuple(token for branch in branches for token in branch.tokens)
+
+
 def _notation_metadata_forms(row: dict[str, Any]) -> frozenset[str]:
     """Return comment words and period-final labels from the row notation.
 
@@ -37,27 +45,46 @@ def _notation_metadata_forms(row: dict[str, Any]) -> frozenset[str]:
     explanatory prose, and a token ending in ``.`` is a label.
     """
 
-    notation = str(row.get("notation", ""))
-    branches = split_alternative_branches(notation)
-    if not branches:
-        return frozenset()
-
     result: set[str] = set()
-    for branch in branches:
-        for token in branch.tokens:
-            raw = token.strip().strip("()")
-            if raw.startswith(("+", "-")):
-                continue
-            if raw.endswith((":", ".")):
-                key = _metadata_key(raw)
-                if key:
-                    result.add(key)
+    for token in _notation_tokens(row):
+        raw = token.strip().strip("()")
+        if raw.startswith(("+", "-")):
+            continue
+        if raw.endswith((":", ".")):
+            key = _metadata_key(raw)
+            if key:
+                result.add(key)
     return frozenset(result)
 
 
 def _is_notation_metadata(row: dict[str, Any], form: str) -> bool:
     normalized = _metadata_key(form)
     return bool(normalized) and normalized in _notation_metadata_forms(row)
+
+
+def _notation_colon_fragments(row: dict[str, Any]) -> frozenset[str]:
+    """Return suffix fragments after internal colons in notation forms.
+
+    Old generators sometimes split ``+:n``, ``BB:t`` or ``abc:na`` at the
+    colon and emitted ``n``, ``t`` or ``na`` as standalone forms. A final colon
+    such as in ``xqz:`` is comment syntax and is deliberately excluded here.
+    """
+
+    result: set[str] = set()
+    for token in _notation_tokens(row):
+        raw = token.strip().strip("()")
+        if ":" not in raw or raw.endswith(":"):
+            continue
+        fragment = raw.rsplit(":", 1)[1]
+        key = _metadata_key(fragment)
+        if key:
+            result.add(key)
+    return frozenset(result)
+
+
+def _is_legacy_colon_fragment(row: dict[str, Any], form: str) -> bool:
+    normalized = _metadata_key(form)
+    return bool(normalized) and normalized in _notation_colon_fragments(row)
 
 
 def _is_stycke_guided_tail_error(row: dict[str, Any], form: str) -> bool:
@@ -89,6 +116,8 @@ def _is_stycke_guided_tail_error(row: dict[str, Any], form: str) -> bool:
 def classify_form(row: dict[str, Any], form: str) -> str:
     if _is_notation_metadata(row, form):
         return "legacy_notation_metadata"
+    if _is_legacy_colon_fragment(row, form):
+        return "legacy_colon_fragment"
     if _is_stycke_guided_tail_error(row, form):
         return "legacy_stycke_tail_error"
     return "review_required"
@@ -156,6 +185,7 @@ def render_review(review: dict[str, Any]) -> str:
         f"Semantiska poster före förfining: {review['semantic_rows']}",
         f"Semantiska former före förfining: {review['semantic_forms']}",
         f"Verifierad notationsmetadata: {counts.get('legacy_notation_metadata', 0)}",
+        f"Verifierade kolonfragment: {counts.get('legacy_colon_fragment', 0)}",
         f"Verifierade stycke-styrda tail-fel: {counts.get('legacy_stycke_tail_error', 0)}",
         f"Poster kvar för granskning: {review['review_required_rows']}",
         f"Former kvar för granskning: {review['review_required_forms']}",
