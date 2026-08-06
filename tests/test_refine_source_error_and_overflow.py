@@ -26,7 +26,7 @@ class RefineSourceErrorAndOverflowTests(unittest.TestCase):
         )
 
     def test_classifies_narrow_field_overflow_artifact(self) -> None:
-        notation = "x" * 37 + " abcdefghij-"
+        notation = "x" * 38 + " abcdefghij-"
         self.assertEqual(50, len(notation))
         row = {"lemma": "prefixabcdefghijk", "notation": notation}
         self.assertEqual(
