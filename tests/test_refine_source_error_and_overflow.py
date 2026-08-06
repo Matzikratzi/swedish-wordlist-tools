@@ -19,10 +19,39 @@ class RefineSourceErrorAndOverflowTests(unittest.TestCase):
                 )
         self.assertEqual("review_required", classify_form(row, "grundform"))
 
-    def test_does_not_apply_lemma_only_policy_without_k_markup(self) -> None:
+    def test_discards_nonlemma_forms_for_known_bh_source_errors(self) -> None:
+        for lemma, stycke in (
+            ("bygelbehå", "bygel|be·hå"),
+            ("sportbehå", "sport|be·hå"),
+        ):
+            row = {
+                "lemma": lemma,
+                "notation": "+n +ar _ -bh:n -bh:ar",
+                "stycke": stycke,
+            }
+            for form in (lemma + "n", lemma + "ar", lemma.removesuffix("behå") + "bh"):
+                with self.subTest(lemma=lemma, form=form):
+                    self.assertEqual(
+                        "source_error_discarded_form",
+                        classify_form(row, form),
+                    )
+            self.assertEqual("review_required", classify_form(row, lemma))
+
+    def test_does_not_apply_lemma_only_policy_without_source_error(self) -> None:
         self.assertEqual(
             "review_required",
             classify_form({"lemma": "grundform", "notation": "+en"}, "grundformen"),
+        )
+        self.assertEqual(
+            "review_required",
+            classify_form(
+                {
+                    "lemma": "annanbehå",
+                    "notation": "+n +ar _ -bh:n -bh:ar",
+                    "stycke": "annan|be·hå",
+                },
+                "annanbehån",
+            ),
         )
 
     def test_classifies_narrow_field_overflow_artifact(self) -> None:
