@@ -83,16 +83,54 @@ def _notation_colon_fragments(row: dict[str, Any]) -> frozenset[str]:
 
 
 def _is_legacy_colon_fragment(row: dict[str, Any], form: str) -> bool:
-    """True only for a detached suffix *after* a notation colon.
-
-    A complete form such as ``:n`` or ``BB:t`` still contains its colon and is
-    therefore not the detached fragment produced by the old tokenizer.
-    """
+    """True only for a detached suffix *after* a notation colon."""
 
     if ":" in form:
         return False
     normalized = _metadata_key(form)
     return bool(normalized) and normalized in _notation_colon_fragments(row)
+
+
+def _explicit_added_forms(row: dict[str, Any]) -> tuple[str, ...]:
+    """Return forms emitted as complete explicit forms by the new generator."""
+
+    reasons = {
+        str(key).casefold(): str(value)
+        for key, value in row.get("change_reasons", {}).items()
+    }
+    return tuple(
+        str(candidate)
+        for candidate in row.get("added_forms", [])
+        if reasons.get(str(candidate).casefold()) == "explicit"
+    )
+
+
+def _is_legacy_explicit_form_error(row: dict[str, Any], form: str) -> bool:
+    """Recognize old damage to a complete explicit SAOL form.
+
+    The rule is deliberately structural. It only considers forms that the new
+    generator marked ``explicit``. The old form must then be either a proper
+    prefix/suffix of that complete form, or the exact result of appending a
+    suffix of the explicit form to the lemma.
+    """
+
+    old = form.casefold()
+    lemma = str(row.get("lemma", "")).casefold()
+    if not old:
+        return False
+
+    for candidate in _explicit_added_forms(row):
+        explicit = candidate.casefold()
+        if len(old) < len(explicit) and (
+            explicit.startswith(old) or explicit.endswith(old)
+        ):
+            return True
+        if not lemma or not old.startswith(lemma):
+            continue
+        for start in range(1, len(explicit)):
+            if old == lemma + explicit[start:]:
+                return True
+    return False
 
 
 def _is_stycke_guided_tail_error(row: dict[str, Any], form: str) -> bool:
@@ -126,6 +164,8 @@ def classify_form(row: dict[str, Any], form: str) -> str:
         return "legacy_notation_metadata"
     if _is_legacy_colon_fragment(row, form):
         return "legacy_colon_fragment"
+    if _is_legacy_explicit_form_error(row, form):
+        return "legacy_explicit_form_error"
     if _is_stycke_guided_tail_error(row, form):
         return "legacy_stycke_tail_error"
     return "review_required"
@@ -194,6 +234,7 @@ def render_review(review: dict[str, Any]) -> str:
         f"Semantiska former före förfining: {review['semantic_forms']}",
         f"Verifierad notationsmetadata: {counts.get('legacy_notation_metadata', 0)}",
         f"Verifierade kolonfragment: {counts.get('legacy_colon_fragment', 0)}",
+        f"Verifierade explicita formfel: {counts.get('legacy_explicit_form_error', 0)}",
         f"Verifierade stycke-styrda tail-fel: {counts.get('legacy_stycke_tail_error', 0)}",
         f"Poster kvar för granskning: {review['review_required_rows']}",
         f"Former kvar för granskning: {review['review_required_forms']}",
