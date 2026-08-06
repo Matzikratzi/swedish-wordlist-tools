@@ -32,7 +32,9 @@ class AnalyzeVerbCompoundRepairsTests(unittest.TestCase):
                 {
                     "normaliserat_ord": "omskriva",
                     "upos": "VERB",
-                    "text": "",
+                    # Deliberately not directly interpretable. The exact
+                    # bar-marked head must supply the finite forms.
+                    "text": "helt okänd syntax",
                     "stycke": "om|skriv·a",
                 },
             ]
@@ -43,6 +45,10 @@ class AnalyzeVerbCompoundRepairsTests(unittest.TestCase):
         self.assertEqual(2, report["exported_interpreted_records"])
         self.assertTrue(report["arithmetic_matches"])
         self.assertEqual("omskriva", report["records"][0]["lemma"])
+        self.assertEqual(
+            ["omskriva", "omskrev", "omskrivit"],
+            report["records"][0]["forms"],
+        )
 
 
 if __name__ == "__main__":
