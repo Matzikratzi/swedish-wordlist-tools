@@ -36,7 +36,7 @@ class VerbGameFallbackTests(unittest.TestCase):
         assert slots is not None
         self.assertEqual(("torde", "tör"), slots.written_forms())
         self.assertEqual(("lemma", "infinitive", "present"), slots.slots())
-        self.assertEqual(("tör",), slots.forms_for("present"))
+        self.assertEqual(("torde", "tör"), slots.forms_for("present"))
 
     def test_keeps_explicit_supine_from_defective_paradigm(self) -> None:
         slots = interpret_playable_verb_slots(
