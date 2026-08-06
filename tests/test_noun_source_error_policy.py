@@ -4,6 +4,7 @@ import unittest
 
 from swedish_wordlist_tools.inflect import generate_entry
 from swedish_wordlist_tools.noun_paradigm import complete_noun_entry
+from swedish_wordlist_tools.noun_source_errors import noun_lemma_only_source_error
 from swedish_wordlist_tools.saol_notation import tokenize_notation
 
 
@@ -25,6 +26,38 @@ class NounSourceErrorPolicyTests(unittest.TestCase):
             assert entry is not None
             self.assertEqual((lemma,), entry.forms)
             self.assertEqual("source-error lemma only", entry.pattern_group)
+
+    def test_known_bh_source_rows_preserve_only_lemma(self) -> None:
+        for lemma, stycke in (
+            ("bygelbehå", "bygel|be·hå"),
+            ("sportbehå", "sport|be·hå"),
+        ):
+            record = {
+                "normaliserat_ord": lemma,
+                "upos": "NOUN",
+                "ordkl": "subst.",
+                "stycke": stycke,
+                "text": "+n +ar _ -bh:n -bh:ar",
+            }
+            self.assertIsNotNone(noun_lemma_only_source_error(record))
+            entry = complete_noun_entry(record, generate_entry(record))
+            self.assertIsNotNone(entry)
+            assert entry is not None
+            self.assertEqual((lemma,), entry.forms)
+            self.assertEqual("source-error lemma only", entry.pattern_group)
+
+    def test_bh_policy_requires_complete_source_signature(self) -> None:
+        base = {
+            "normaliserat_ord": "bygelbehå",
+            "upos": "NOUN",
+            "ordkl": "subst.",
+            "stycke": "bygel|be·hå",
+            "text": "+n +ar _ -bh:n -bh:ar",
+        }
+        changed_text = dict(base, text="+n +ar")
+        changed_stycke = dict(base, stycke="bygelbehå")
+        self.assertIsNone(noun_lemma_only_source_error(changed_text))
+        self.assertIsNone(noun_lemma_only_source_error(changed_stycke))
 
     def test_drops_truncated_final_token_only_at_source_limit(self) -> None:
         truncated = "dagen-efter-pillret; pl. +, best. pl. dagen-efter-"
