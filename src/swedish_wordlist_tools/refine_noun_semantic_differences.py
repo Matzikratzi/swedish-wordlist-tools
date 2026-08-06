@@ -37,6 +37,21 @@ def _notation_tokens(row: dict[str, Any]) -> tuple[str, ...]:
     return tuple(token for branch in branches for token in branch.tokens)
 
 
+def _has_k_source_error(row: dict[str, Any]) -> bool:
+    """Return whether this row is governed by the lemma-only ``<k>`` policy."""
+
+    return "<k>" in str(row.get("notation", "")).casefold()
+
+
+def _is_source_error_discarded_form(row: dict[str, Any], form: str) -> bool:
+    """Classify all non-lemma legacy forms from a lemma-only source-error row."""
+
+    if not _has_k_source_error(row):
+        return False
+    lemma = str(row.get("lemma", "")).casefold()
+    return bool(form) and form.casefold() != lemma
+
+
 def _notation_metadata_forms(row: dict[str, Any]) -> frozenset[str]:
     """Return comment words and period-final labels from the row notation."""
 
@@ -192,7 +207,47 @@ def _is_stycke_guided_tail_error(row: dict[str, Any], form: str) -> bool:
     return False
 
 
+def _common_prefix_length(left: str, right: str) -> int:
+    length = 0
+    for left_char, right_char in zip(left.casefold(), right.casefold()):
+        if left_char != right_char:
+            break
+        length += 1
+    return length
+
+
+def _is_truncated_overflow_error(row: dict[str, Any], form: str) -> bool:
+    """Recognize old forms produced from a final token cut at field width 50.
+
+    This is intentionally narrow: the raw notation must be exactly 50
+    characters, its final token must end in ``-``, and the old form must share
+    all but at most one lemma character before adding a suffix of that truncated
+    token. No lemma or Swedish word is named here.
+    """
+
+    notation = str(row.get("notation", ""))
+    if len(notation) != 50:
+        return False
+    final_token = notation.rstrip().rsplit(maxsplit=1)[-1]
+    if not final_token.endswith("-"):
+        return False
+
+    token_body = final_token[:-1].casefold()
+    lemma = str(row.get("lemma", "")).casefold()
+    old = form.casefold()
+    if not token_body or not lemma or not old:
+        return False
+
+    shared = _common_prefix_length(lemma, old)
+    if shared < max(1, len(lemma) - 1):
+        return False
+    extra = old[shared:]
+    return bool(extra) and token_body.endswith(extra)
+
+
 def classify_form(row: dict[str, Any], form: str) -> str:
+    if _is_source_error_discarded_form(row, form):
+        return "source_error_discarded_form"
     if _is_legacy_notation_markup(row, form):
         return "legacy_notation_markup"
     if _is_notation_metadata(row, form):
@@ -203,6 +258,8 @@ def classify_form(row: dict[str, Any], form: str) -> str:
         return "legacy_explicit_form_error"
     if _is_stycke_guided_tail_error(row, form):
         return "legacy_stycke_tail_error"
+    if _is_truncated_overflow_error(row, form):
+        return "legacy_truncated_overflow_error"
     return "review_required"
 
 
@@ -267,11 +324,13 @@ def render_review(review: dict[str, Any]) -> str:
     lines = [
         f"Semantiska poster före förfining: {review['semantic_rows']}",
         f"Semantiska former före förfining: {review['semantic_forms']}",
+        f"Källfelsformer bortvalda enligt lemma-only-policy: {counts.get('source_error_discarded_form', 0)}",
         f"Verifierade markup-/etikettfragment: {counts.get('legacy_notation_markup', 0)}",
         f"Verifierad notationsmetadata: {counts.get('legacy_notation_metadata', 0)}",
         f"Verifierade kolonfragment: {counts.get('legacy_colon_fragment', 0)}",
         f"Verifierade explicita formfel: {counts.get('legacy_explicit_form_error', 0)}",
         f"Verifierade stycke-styrda tail-fel: {counts.get('legacy_stycke_tail_error', 0)}",
+        f"Verifierade avhuggningsfel vid fältgränsen: {counts.get('legacy_truncated_overflow_error', 0)}",
         f"Poster kvar för granskning: {review['review_required_rows']}",
         f"Former kvar för granskning: {review['review_required_forms']}",
         "",
