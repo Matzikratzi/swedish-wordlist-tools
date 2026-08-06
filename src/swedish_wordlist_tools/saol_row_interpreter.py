@@ -69,13 +69,6 @@ def _compound_parts(record: dict[str, Any], lemma: str) -> tuple[str, str] | Non
 
 
 def _stycke_carrier(record: dict[str, Any], lemma: str) -> tuple[str, str] | None:
-    """Return the phrase part identified by ``stycke`` and its trailing text.
-
-    SAOL may store a phrase lemma such as ``företa sig`` while ``stycke``
-    describes only the inflecting lexeme, for example ``före|ta``. In that
-    case the carrier is ``företa`` and the untouched tail is `` sig``.
-    """
-
     stycke = _clean_stycke(record.get("stycke"))
     if not stycke:
         return None
@@ -114,16 +107,35 @@ def _replace_unmarked_final_component(lemma: str, replacement: str) -> str | Non
     return prefix + separator + result if separator else result
 
 
+def _append_to_hyphen_component(word: str, suffix: str) -> str:
+    """Append normally, unless the payload repeats the final hyphen component.
+
+    ``användar-id`` with ``+id:t`` therefore becomes ``användar-id:t``. The
+    rule is mechanical: it applies to arbitrary final components and payloads,
+    and only when the payload begins with the whole component.
+    """
+
+    prefix, separator, component = word.rpartition("-")
+    if (
+        separator
+        and component
+        and len(suffix) > len(component)
+        and suffix.casefold().startswith(component.casefold())
+    ):
+        return prefix + separator + suffix
+    return word + suffix
+
+
 def _append_to_last_word(lemma: str, suffix: str) -> str:
     prefix, separator, final_word = lemma.rpartition(" ")
-    if not separator:
-        return lemma + suffix
-    return prefix + separator + final_word + suffix
+    result = _append_to_hyphen_component(final_word if separator else lemma, suffix)
+    return prefix + separator + result if separator else result
 
 
 def _append_to_first_word(lemma: str, suffix: str) -> str:
     first, separator, rest = lemma.partition(" ")
-    return first + suffix + (separator + rest if separator else "")
+    result = _append_to_hyphen_component(first, suffix)
+    return result + (separator + rest if separator else "")
 
 
 def _apply_to_carrier(
@@ -137,7 +149,7 @@ def _apply_to_carrier(
     return apply_form_operation(
         carrier,
         operation,
-        append=lambda value, suffix: value + suffix,
+        append=_append_to_last_word,
         replace_tail=_replace_unmarked_final_component,
     )
 
@@ -145,8 +157,6 @@ def _apply_to_carrier(
 def apply_form_operation_to_noun(
     record: dict[str, Any], lemma: str, operation: FormOperation
 ) -> str | None:
-    """Realize one already parsed operation for a noun lemma."""
-
     if operation.kind is FormOperationKind.REPLACE_TAIL:
         parts = _compound_parts(record, lemma)
         if parts is not None:
@@ -164,13 +174,6 @@ def apply_form_operation_to_noun(
 def apply_form_token(
     record: dict[str, Any], lemma: str, token: str
 ) -> str | None:
-    """Apply a raw form token to the lexeme selected by SAOL ``stycke``.
-
-    For phrase lemmas, ``stycke`` is authoritative about the inflecting carrier:
-    ``före|ta`` in ``företa sig`` yields ``företog sig``. When ``stycke`` does
-    not identify a shorter carrier, the historical first-word fallback remains.
-    """
-
     operation = parse_form_operation(token)
     if operation is None:
         return None
@@ -191,8 +194,6 @@ def apply_form_token(
 
 
 def _clean_notation_structure(pattern: str) -> str:
-    """Remove typography only; comment and label syntax is parsed generically."""
-
     pattern = _SUP_ELEMENT_RE.sub("", pattern)
     pattern = _HTML_TAG_RE.sub("", pattern)
     return re.sub(r"\s+", " ", pattern).strip()
