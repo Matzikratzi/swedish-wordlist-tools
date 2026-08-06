@@ -23,6 +23,10 @@ COMPLETE_HYPHENATED_LEMMA = re.compile(
     rf"{ALPHA_COMPONENT}(?:-{ALPHA_COMPONENT})+",
     re.IGNORECASE,
 )
+INTENTIONALLY_EXCLUDED_REASONS = frozenset({
+    "suffix_or_prefix_lemma",
+    "multiword_lemma",
+})
 
 
 def _value(record: dict[str, Any], key: str) -> str:
@@ -41,12 +45,6 @@ def _is_complete_hyphenated_lemma(lemma: str) -> bool:
 
 
 def _restore_hyphens(form: str, original_lemma: str) -> str | None:
-    """Restore original compound boundaries after proxy parsing.
-
-    The proxy parser removes internal hyphens so the existing adjective rules
-    can be reused unchanged. Swedish adjective inflection affects the final
-    component, so boundaries before that component stay at the same offsets.
-    """
     parts = original_lemma.split("-")
     boundaries: list[int] = []
     position = 0
@@ -162,13 +160,26 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
             "ordkl": _value(record, "ordkl"),
             "interpreted": slots is not None,
             "remaining_reason": reason,
+            "intentionally_excluded": reason in INTENTIONALLY_EXCLUDED_REASONS,
             "rule": slots.rule if slots else None,
             "forms": list(slots.written_forms()) if slots else [],
             "source": _value(record, "source"),
         })
 
     interpreted = sum(1 for row in rows if row["interpreted"])
+    intentionally_excluded = sum(1 for row in rows if row["intentionally_excluded"])
+    unresolved = len(records) - interpreted - intentionally_excluded
     rows.sort(key=lambda row: (not row["at_hard_cap"], row["interpreted"], row["lemma"], row["homonr"]))
+    excluded_counts = {
+        reason: count
+        for reason, count in remaining_reason_counts.items()
+        if reason in INTENTIONALLY_EXCLUDED_REASONS
+    }
+    unresolved_counts = {
+        reason: count
+        for reason, count in remaining_reason_counts.items()
+        if reason not in INTENTIONALLY_EXCLUDED_REASONS
+    }
     return {
         "adjective_records": len(records),
         "with_text": sum(1 for row in rows if row["text"]),
@@ -176,6 +187,10 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
         "interpreted_simple_records": interpreted,
         "interpreted_simple_percent": round(100 * interpreted / len(records), 2) if records else 0.0,
         "remaining_records": len(records) - interpreted,
+        "intentionally_excluded_records": intentionally_excluded,
+        "unresolved_records": unresolved,
+        "intentionally_excluded_reason_counts": dict(Counter(excluded_counts).most_common()),
+        "unresolved_reason_counts": dict(Counter(unresolved_counts).most_common()),
         "at_hard_cap": length_counts["at_hard_cap"],
         "with_bar": sum(1 for row in rows if row["has_bar"]),
         "unique_raw_patterns": len(pattern_counts),
@@ -186,10 +201,9 @@ def build_report(saol_path: Path = DEFAULT_SAOL) -> dict[str, Any]:
         "top_remaining_patterns": remaining_pattern_counts.most_common(100),
         "records": rows,
         "note": (
-            "The parser handles conservative adjective rows, including complete "
-            "hyphenated lemmas through a boundary-preserving proxy. Leading-hyphen "
-            "suffix entries remain non-playable and are reported separately; no forms "
-            "are exported."
+            "Leading-hyphen suffix entries and lemmas containing spaces are intentionally "
+            "excluded from the playable word list. unresolved_records counts only genuine "
+            "single-word parsing gaps."
         ),
     }
 
@@ -199,23 +213,29 @@ def render_text(report: dict[str, Any]) -> str:
         f"Adjektivposter: {report['adjective_records']}",
         f"Med text: {report['with_text']}",
         f"Utan text: {report['without_text']}",
-        f"Enkelt tolkade: {report['interpreted_simple_records']} "
+        f"Tolkade spelbara poster: {report['interpreted_simple_records']} "
         f"({report['interpreted_simple_percent']:.2f} %)",
-        f"Återstår: {report['remaining_records']}",
+        f"Avsiktligt exkluderade poster: {report['intentionally_excluded_records']}",
+        f"Verkligt otolkade poster: {report['unresolved_records']}",
         f"Vid 50-teckensgränsen: {report['at_hard_cap']}",
         f"Med lodstreck i stycke: {report['with_bar']}",
         f"Unika råa textmönster: {report['unique_raw_patterns']}",
         "",
-        "Tolkade regler:",
+        "Avsiktligt exkluderade:",
     ]
+    for reason, count in report["intentionally_excluded_reason_counts"].items():
+        lines.append(f"  {count:6d}  {reason}")
+    lines.extend(["", "Verkligt otolkade:"])
+    if not report["unresolved_reason_counts"]:
+        lines.append("  (inga)")
+    for reason, count in report["unresolved_reason_counts"].items():
+        lines.append(f"  {count:6d}  {reason}")
+
+    lines.extend(["", "Tolkade regler:"])
     for rule, count in report["rule_counts"].items():
         lines.append(f"  {count:6d}  {rule}")
 
-    lines.extend(["", "Varför återstående poster inte tolkades:"])
-    for reason, count in report["remaining_reason_counts"].items():
-        lines.append(f"  {count:6d}  {reason}")
-
-    lines.extend(["", "Exempel per återstående orsak:"])
+    lines.extend(["", "Exempel per exkluderad/återstående orsak:"])
     for reason, samples in report["remaining_reason_samples"].items():
         lines.append(f"  {reason}:")
         for row in samples[:12]:
@@ -223,9 +243,6 @@ def render_text(report: dict[str, Any]) -> str:
                 f"    {row['lemma']} (homonr={row['homonr'] or '-'}) | text={row['text']!r}"
             )
 
-    lines.extend(["", "Vanligaste återstående råa textmönster:"])
-    for pattern, count in report["top_remaining_patterns"]:
-        lines.append(f"  {count:6d}  {pattern}")
     lines.extend(["", "Poster vid 50-teckensgränsen:"])
     capped = [row for row in report["records"] if row["at_hard_cap"]]
     if not capped:
@@ -251,12 +268,10 @@ def main() -> None:
     args.json.parent.mkdir(parents=True, exist_ok=True)
     args.json.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"Adjektivposter: {report['adjective_records']}")
-    print(
-        f"Enkelt tolkade: {report['interpreted_simple_records']} "
-        f"({report['interpreted_simple_percent']:.2f} %)"
-    )
-    print(f"Återstår: {report['remaining_records']}")
-    for reason, count in report["remaining_reason_counts"].items():
+    print(f"Tolkade spelbara poster: {report['interpreted_simple_records']}")
+    print(f"Avsiktligt exkluderade poster: {report['intentionally_excluded_records']}")
+    print(f"Verkligt otolkade poster: {report['unresolved_records']}")
+    for reason, count in report["unresolved_reason_counts"].items():
         print(f"{reason}: {count}")
     print(f"Vid 50-teckensgränsen: {report['at_hard_cap']}")
     print(f"Text: {args.text}")

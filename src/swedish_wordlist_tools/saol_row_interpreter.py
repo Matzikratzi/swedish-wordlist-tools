@@ -6,6 +6,15 @@ from dataclasses import dataclass
 from typing import Any
 
 from .inflect import normalise_pattern
+from .saol_notation import (
+    FormOperation,
+    FormOperationKind,
+    apply_form_operation,
+    assign_labeled_slots,
+    parse_form_operation,
+    parse_form_operations,
+    split_alternative_branches,
+)
 
 
 @dataclass(frozen=True)
@@ -28,22 +37,8 @@ class InterpretedRow:
         return None
 
 
-_TOKEN_RE = re.compile(
-    r"pl\.|best\.|el\.|[;,]|[+\-][A-Za-zÅÄÖåäöÉéÜü:]*|"
-    r"[A-Za-zÅÄÖåäöÉéÜü0-9][\wÅÄÖåäöÉéÜü:‐‑–-]*",
-    re.IGNORECASE,
-)
 _SUP_ELEMENT_RE = re.compile(r"<sup\b[^>]*>.*?</sup>", re.IGNORECASE | re.DOTALL)
 _HTML_TAG_RE = re.compile(r"<[^>]*>")
-_IGNORED_MARKERS = {
-    "i:",
-    "anv:",
-    "används:",
-    "användas:",
-    "kan:",
-    "ofta:",
-    "vanl:",
-}
 
 
 def _comparison_key(value: Any) -> str:
@@ -74,6 +69,20 @@ def _compound_parts(record: dict[str, Any], lemma: str) -> tuple[str, str] | Non
     return prefix, head
 
 
+def _stycke_carrier(record: dict[str, Any], lemma: str) -> tuple[str, str] | None:
+    stycke = _clean_stycke(record.get("stycke"))
+    if not stycke:
+        return None
+    carrier = stycke.replace("|", "")
+    if not carrier:
+        return None
+    if _comparison_key(lemma) == _comparison_key(carrier):
+        return carrier, ""
+    if lemma.startswith(carrier + " "):
+        return carrier, lemma[len(carrier) :]
+    return None
+
+
 def _common_prefix_length(left: str, right: str) -> int:
     length = 0
     for left_char, right_char in zip(left.casefold(), right.casefold()):
@@ -84,120 +93,106 @@ def _common_prefix_length(left: str, right: str) -> int:
 
 
 def _replace_unmarked_final_component(lemma: str, replacement: str) -> str | None:
-    first, separator, rest = lemma.partition(" ")
+    prefix, separator, final_word = lemma.rpartition(" ")
+    target = final_word if separator else lemma
     best_start: int | None = None
     best_length = 0
-    for start in range(len(first)):
-        shared = _common_prefix_length(first[start:], replacement)
+    for start in range(len(target)):
+        shared = _common_prefix_length(target[start:], replacement)
         if shared > best_length:
             best_start = start
             best_length = shared
     if best_start is None or best_length < 3:
         return None
-    result = first[:best_start] + replacement
+    result = target[:best_start] + replacement
+    return prefix + separator + result if separator else result
+
+
+def _append_to_hyphen_component(word: str, suffix: str) -> str:
+    """Append normally, unless the payload repeats the final hyphen component."""
+
+    prefix, separator, component = word.rpartition("-")
+    if (
+        separator
+        and component
+        and len(suffix) > len(component)
+        and suffix.casefold().startswith(component.casefold())
+    ):
+        return prefix + separator + suffix
+    return word + suffix
+
+
+def _append_to_last_word(lemma: str, suffix: str) -> str:
+    prefix, separator, final_word = lemma.rpartition(" ")
+    result = _append_to_hyphen_component(final_word if separator else lemma, suffix)
+    return prefix + separator + result if separator else result
+
+
+def _append_to_first_word(lemma: str, suffix: str) -> str:
+    first, separator, rest = lemma.partition(" ")
+    result = _append_to_hyphen_component(first, suffix)
     return result + (separator + rest if separator else "")
+
+
+def _apply_to_carrier(
+    record: dict[str, Any], carrier: str, operation: FormOperation
+) -> str | None:
+    if operation.kind is FormOperationKind.REPLACE_TAIL:
+        parts = _compound_parts(record, carrier)
+        if parts is not None:
+            prefix, _head = parts
+            return prefix + operation.value
+    return apply_form_operation(
+        carrier,
+        operation,
+        append=_append_to_last_word,
+        replace_tail=_replace_unmarked_final_component,
+    )
+
+
+def apply_form_operation_to_noun(
+    record: dict[str, Any], lemma: str, operation: FormOperation
+) -> str | None:
+    if operation.kind is FormOperationKind.REPLACE_TAIL:
+        parts = _compound_parts(record, lemma)
+        if parts is not None:
+            prefix, _head = parts
+            return prefix + operation.value
+
+    return apply_form_operation(
+        lemma,
+        operation,
+        append=_append_to_last_word,
+        replace_tail=_replace_unmarked_final_component,
+    )
 
 
 def apply_form_token(
     record: dict[str, Any], lemma: str, token: str
 ) -> str | None:
-    if token == "+":
-        return lemma
-    if token.startswith("+"):
-        suffix = token[1:]
-        first, separator, rest = lemma.partition(" ")
-        return first + suffix + (separator + rest if separator else "")
-    if token.startswith("-"):
-        replacement = token[1:]
-        if not replacement:
-            return None
-        parts = _compound_parts(record, lemma)
-        if parts is not None:
-            prefix, _head = parts
-            return prefix + replacement
-        return _replace_unmarked_final_component(lemma, replacement)
-    return token
+    operation = parse_form_operation(token)
+    if operation is None:
+        return None
+
+    carrier = _stycke_carrier(record, lemma)
+    if carrier is not None:
+        carrier_text, tail = carrier
+        written_carrier = _apply_to_carrier(record, carrier_text, operation)
+        if written_carrier is not None:
+            return written_carrier + tail
+
+    return apply_form_operation(
+        lemma,
+        operation,
+        append=_append_to_first_word,
+        replace_tail=_replace_unmarked_final_component,
+    )
 
 
-def _clean_notation_comments(pattern: str) -> str:
+def _clean_notation_structure(pattern: str) -> str:
     pattern = _SUP_ELEMENT_RE.sub("", pattern)
     pattern = _HTML_TAG_RE.sub("", pattern)
-    pattern = re.sub(
-        r"(?:^|(?<=[;,]))\s*(?:som|i):\s*pl\.\s*(?:anv\.|används:)\s*(?:ofta:\s*|vanl\.\s*)?",
-        " pl. ",
-        pattern,
-        flags=re.IGNORECASE,
-    )
-    pattern = re.sub(r"\b(?:ibl|vard|högt|vanl)\.\s*", "", pattern, flags=re.IGNORECASE)
     return re.sub(r"\s+", " ", pattern).strip()
-
-
-def _tokenize(pattern: str) -> tuple[str, ...] | None:
-    tokens: list[str] = []
-    position = 0
-    for match in _TOKEN_RE.finditer(pattern):
-        if pattern[position : match.start()].strip():
-            return None
-        tokens.append(match.group(0))
-        position = match.end()
-    if pattern[position:].strip():
-        return None
-    return tuple(tokens) if tokens else None
-
-
-def _slot_sequence(pattern: str) -> tuple[tuple[str, str], ...] | None:
-    tokens = _tokenize(_clean_notation_comments(pattern))
-    if tokens is None:
-        return None
-
-    result: list[tuple[str, str]] = []
-    context = "singular"
-    pending_best = False
-    seen_singular_form = False
-    last_slot: str | None = None
-    alternative_next = False
-
-    for token in tokens:
-        lower = token.casefold()
-        if token in {";", ","}:
-            continue
-        if lower in _IGNORED_MARKERS:
-            continue
-        if lower in {"el.", "h"}:
-            alternative_next = last_slot is not None
-            continue
-        if lower == "best.":
-            pending_best = True
-            alternative_next = False
-            continue
-        if lower == "pl.":
-            context = "plural_definite" if pending_best else "plural"
-            pending_best = False
-            alternative_next = False
-            continue
-
-        if alternative_next and last_slot is not None:
-            slot = last_slot
-            alternative_next = False
-        elif context == "plural_definite":
-            slot = "pl_def"
-        elif context == "plural":
-            slot = "pl_indef"
-            context = "after_plural"
-        elif not seen_singular_form:
-            slot = "sg_def"
-            seen_singular_form = True
-        else:
-            slot = "pl_indef"
-            context = "after_plural"
-        result.append((slot, token))
-        last_slot = slot
-        # `best.` modifies the next form only. Without clearing it here,
-        # `best. +; i: pl. används: anmodanden` incorrectly makes the
-        # later plural form definite plural.
-        pending_best = False
-
-    return tuple(result) if result else None
 
 
 def _interpret_missing_pattern(record: dict[str, Any], lemma: str) -> InterpretedRow | None:
@@ -214,6 +209,42 @@ def _interpret_missing_pattern(record: dict[str, Any], lemma: str) -> Interprete
     return None
 
 
+def _colon_stem(value: str) -> str | None:
+    stem, separator, _ending = value.partition(":")
+    return stem if separator and stem else None
+
+
+def _branch_lemma_variant(lemma: str, tokens: tuple[str, ...]) -> tuple[str, str] | None:
+    """Derive a branch's alternative base spelling from its first colon form.
+
+    ``ID:t`` implies base form ``ID``. For a hyphen compound, ``+ID:t`` on
+    ``användar-id`` implies ``användar-ID``. The rule only changes spelling
+    case of the full lemma or its final hyphen component.
+    """
+
+    for token in tokens:
+        operations = parse_form_operations(token)
+        if operations is None:
+            continue
+        for operation in operations:
+            stem = _colon_stem(operation.value)
+            if stem is None:
+                continue
+            if operation.kind is FormOperationKind.EXPLICIT:
+                if stem.casefold() == lemma.casefold() and stem != lemma:
+                    return stem, token
+                continue
+            if operation.kind is not FormOperationKind.APPEND:
+                continue
+            prefix, separator, component = lemma.rpartition("-")
+            if separator and stem.casefold() == component.casefold() and stem != component:
+                return prefix + separator + stem, token
+            if stem.casefold() == lemma.casefold() and stem != lemma:
+                return stem, token
+        return None
+    return None
+
+
 def interpret_noun_row(record: dict[str, Any]) -> InterpretedRow | None:
     if str(record.get("upos", "")).upper() != "NOUN":
         return None
@@ -224,25 +255,41 @@ def interpret_noun_row(record: dict[str, Any]) -> InterpretedRow | None:
     if pattern is None:
         return _interpret_missing_pattern(record, lemma)
 
-    variants = tuple(
-        part.strip() for part in re.split(r"\s+_\s+", pattern) if part.strip()
-    )
-    if not variants:
+    cleaned_pattern = _clean_notation_structure(pattern)
+    branches = split_alternative_branches(cleaned_pattern)
+    if not branches:
         return None
 
     key_forms: list[KeyForm] = [KeyForm("lemma", lemma, "lemma")]
     seen: set[tuple[str, str]] = {("lemma", lemma)}
-    for variant in variants:
-        slots = _slot_sequence(variant)
-        if slots is None:
-            return None
-        for slot, token in slots:
-            written_form = apply_form_token(record, lemma, token)
-            if written_form is None:
-                return None
-            marker = (slot, written_form)
+    for branch in branches:
+        lemma_variant = _branch_lemma_variant(lemma, branch.tokens)
+        if lemma_variant is not None:
+            written_form, source = lemma_variant
+            marker = ("lemma", written_form)
             if marker not in seen:
                 seen.add(marker)
-                key_forms.append(KeyForm(slot, written_form, token))
+                key_forms.append(KeyForm("lemma", written_form, source))
+
+        slot_operations = assign_labeled_slots(
+            branch.tokens,
+            singular_slot="sg_def",
+            plural_slot="pl_indef",
+            definite_plural_slot="pl_def",
+        )
+        if slot_operations is None:
+            return None
+        for assigned in slot_operations:
+            written_form = apply_form_operation_to_noun(
+                record, lemma, assigned.operation
+            )
+            if written_form is None:
+                return None
+            marker = (assigned.slot, written_form)
+            if marker not in seen:
+                seen.add(marker)
+                key_forms.append(
+                    KeyForm(assigned.slot, written_form, assigned.token)
+                )
 
     return InterpretedRow(lemma, pattern, tuple(key_forms))

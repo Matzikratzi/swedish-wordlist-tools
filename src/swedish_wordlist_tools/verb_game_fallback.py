@@ -5,6 +5,7 @@ from typing import Any
 
 from .inflect import normalise_pattern
 from .lexeme_slots import LexemeSlots, SlotForm, build_lexeme_slots
+from .verb_residual_policy import interpret_residual_verb_slots
 from .verb_slots import interpret_verb_slots
 
 _WORD = r"[A-Za-zÅÄÖåäöÉéÜü]+(?:-[A-Za-zÅÄÖåäöÉéÜü]+)*"
@@ -42,6 +43,15 @@ def _metadata(record: dict[str, Any], *, fallback_kind: str) -> dict[str, str]:
         "ordkl": str(record.get("ordkl") or ""),
         "fallback_kind": fallback_kind,
     }
+
+
+def _is_playable_lemma(lemma: str) -> bool:
+    return bool(
+        lemma
+        and " " not in lemma
+        and not lemma.startswith("-")
+        and not lemma.endswith("-")
+    )
 
 
 def _explicit_labelled_forms(pattern: str) -> tuple[SlotForm, ...]:
@@ -94,16 +104,25 @@ def _attested_forms(
 
 
 def interpret_playable_verb_slots(record: dict[str, Any]) -> LexemeSlots | None:
-    """Interpret a verb for game export, preferring the strict row parser."""
+    """Interpret a playable verb, preferring the strict shared parser.
+
+    Multiword lemmas and affix entries are deliberately excluded before any
+    parser is called. Residual rows then use the same narrow policy as the verb
+    audit, keeping the canonical export and the analysis in agreement.
+    """
+    if str(record.get("upos", "")).upper() != "VERB":
+        return None
+    lemma = str(record.get("normaliserat_ord") or "").strip()
+    if not _is_playable_lemma(lemma):
+        return None
+
     parsed = interpret_verb_slots(record)
     if parsed is not None:
         return parsed
 
-    if str(record.get("upos", "")).upper() != "VERB":
-        return None
-    lemma = str(record.get("normaliserat_ord") or "").strip()
-    if not lemma:
-        return None
+    residual = interpret_residual_verb_slots(record)
+    if residual is not None:
+        return residual
 
     pattern = normalise_pattern(record.get("text"))
     forms = _attested_forms(record, lemma, pattern)

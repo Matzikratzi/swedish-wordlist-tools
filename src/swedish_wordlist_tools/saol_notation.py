@@ -8,7 +8,7 @@ from typing import Callable
 
 @dataclass(frozen=True)
 class NotationBranch:
-    """One SAOL alternative branch after comments and whitespace are normalized."""
+    """One SAOL alternative branch with validated notation tokens."""
 
     text: str
     tokens: tuple[str, ...]
@@ -25,86 +25,261 @@ class FormOperationKind(str, Enum):
 
 @dataclass(frozen=True)
 class FormOperation:
-    """An ordklass-neutral interpretation of one form token.
-
-    Examples:
-    ``+`` becomes ``UNCHANGED``; ``+a`` becomes ``APPEND('a')``;
-    ``-bundna`` becomes ``REPLACE_TAIL('bundna')``; and a fully written form
-    such as ``bättre`` becomes ``EXPLICIT('bättre')``.
-    """
+    """An ordklass-neutral interpretation of one form token."""
 
     kind: FormOperationKind
     value: str = ""
     source: str = ""
 
 
+@dataclass(frozen=True)
+class SlotOperation:
+    """One form operation assigned to an ordklass-provided grammatical slot."""
+
+    slot: str
+    token: str
+    operation: FormOperation
+
+
 _BRACKET_COMMENT = re.compile(r"\s*\[[^\]]*\]")
-_FORM_WORD = re.compile(r"[a-zåäöéü]+", re.IGNORECASE)
+_HTML_TAG = re.compile(r"</?[^>]+>")
+_GLUED_LABEL_OPERATION = re.compile(
+    r"(?<!\w)([A-Za-zÅÄÖåäöÉéÜü]+\.)(?=[+\-])"
+)
+_TRUNCATED_FINAL_TOKEN = re.compile(r"(?:^|\s)\S+-$")
+_TRUNCATED_ALTERNATIVE = re.compile(
+    r"^(?P<prefix>.*\b(?P<complete>[^\s,;]+))\s+el\.\s+(?P<fragment>[^\s,;]+)$",
+    re.IGNORECASE,
+)
+_FORM_PAYLOAD = re.compile(r"[^\s;,_]+")
+_EXPLICIT_FORM = re.compile(r"[^\s;,+_]+")
+_OPTIONAL_FORM_TOKEN = re.compile(r"^([^()]*)\(([^()]+)\)([^()]*)$")
+_NOTATION_TOKEN_RE = re.compile(
+    r"pl\.|best\.|el\.|[;,]|[+\-][^\s;,_]*|[^\s;,+_]+",
+    re.IGNORECASE,
+)
+_SOURCE_TEXT_LIMIT = 50
+
+
+def _drop_truncated_final_token(text: str) -> str:
+    """Drop a visibly cut-off final token at SAOL export's text limit.
+
+    Besides a token ending in ``-``, SAOL can end immediately after a strict
+    prefix of the preceding alternative form, for example ``närmast el. närm``.
+    In that narrow structure the incomplete ``el.`` branch is discarded while
+    the complete form before it is preserved.
+    """
+
+    if len(text) != _SOURCE_TEXT_LIMIT:
+        return text
+    if _TRUNCATED_FINAL_TOKEN.search(text):
+        return _TRUNCATED_FINAL_TOKEN.sub("", text).rstrip()
+
+    alternative = _TRUNCATED_ALTERNATIVE.fullmatch(text)
+    if alternative is None:
+        return text
+    complete = alternative.group("complete")
+    fragment = alternative.group("fragment")
+    if len(fragment) >= len(complete) or not complete.casefold().startswith(
+        fragment.casefold()
+    ):
+        return text
+    return alternative.group("prefix").rstrip()
+
+
+def _clean_notation_spelling(text: str) -> str:
+    text = _drop_truncated_final_token(text)
+    without_tags = _HTML_TAG.sub("", text)
+    without_brackets = _BRACKET_COMMENT.sub("", without_tags)
+    with_label_boundaries = _GLUED_LABEL_OPERATION.sub(r"\1 ", without_brackets)
+    return " ".join(with_label_boundaries.split())
+
+
+def _unwrap_token(token: str) -> str:
+    return _HTML_TAG.sub("", token.strip()).strip("()")
+
+
+def _is_comment_word(token: str) -> bool:
+    raw = _unwrap_token(token)
+    return bool(raw) and not raw.startswith(("+", "-")) and raw.endswith(":")
+
+
+def _is_generic_label(token: str) -> bool:
+    raw = _unwrap_token(token)
+    return bool(raw) and not raw.startswith(("+", "-")) and raw.endswith(".")
 
 
 def normalize_notation(text: str) -> str:
-    """Remove non-form bracket comments and normalize separators/whitespace.
+    return _clean_notation_spelling(text).casefold()
 
-    SAOL uses bracketed material for pronunciation or morphophonemic comments,
-    e.g. ``högt [hök>t]`` and ``perent [-en>t]``. Those comments describe a
-    form but are never themselves playable word material.
+
+def tokenize_notation(text: str) -> tuple[str, ...] | None:
+    """Tokenize one SAOL notation branch without changing form spelling."""
+
+    cleaned = _clean_notation_spelling(text)
+    tokens: list[str] = []
+    position = 0
+    for match in _NOTATION_TOKEN_RE.finditer(cleaned):
+        if cleaned[position : match.start()].strip():
+            return None
+        tokens.append(match.group(0))
+        position = match.end()
+    if cleaned[position:].strip():
+        return None
+    return tuple(tokens) if tokens else None
+
+
+def expand_optional_form_token(token: str) -> tuple[str, ...]:
+    """Expand one parenthesized optional segment in any form token.
+
+    The expansion is orthographic and ordklass-neutral. Examples:
+    ``+(e)n`` -> ``+n``, ``+en``; ``håll(e)s`` -> ``hålls``, ``hålles``;
+    ``fyrti(o)förste`` -> ``fyrtiförste``, ``fyrtioförste``.
+    Tokens with no optional segment are returned unchanged. Nested, empty or
+    multiple parenthesized segments are deliberately left unchanged.
     """
 
-    text = _BRACKET_COMMENT.sub("", text)
-    text = " ".join(text.split()).casefold()
-    return text
+    raw = token.strip()
+    match = _OPTIONAL_FORM_TOKEN.fullmatch(raw)
+    if match is None:
+        return (raw,)
+    before, optional, after = match.groups()
+    variants = (before + after, before + optional + after)
+    return tuple(dict.fromkeys(variants))
 
 
 def parse_form_operation(token: str) -> FormOperation | None:
-    """Parse one lexical SAOL token into a primitive form operation.
-
-    The function deliberately does not decide *which grammatical slot* the
-    token belongs to. It also leaves ordklass-specific spelling changes to the
-    caller. For example, adjective ``+t`` is represented as ``APPEND('t')``;
-    the adjective layer may then realize ``glad`` as ``glatt``.
-    """
-
-    normalized = token.strip().casefold()
+    raw = _unwrap_token(token)
+    normalized = raw.casefold()
     if normalized == "+":
-        return FormOperation(FormOperationKind.UNCHANGED, source=normalized)
+        return FormOperation(FormOperationKind.UNCHANGED, source=raw)
     if normalized.startswith("+-"):
-        value = normalized[2:]
-        if _FORM_WORD.fullmatch(value):
-            return FormOperation(FormOperationKind.APPEND, value, normalized)
+        value = raw[2:]
+        if value and _FORM_PAYLOAD.fullmatch(value):
+            return FormOperation(FormOperationKind.APPEND, value, raw)
         return None
     if normalized.startswith("+"):
-        value = normalized[1:]
-        if _FORM_WORD.fullmatch(value):
-            return FormOperation(FormOperationKind.APPEND, value, normalized)
+        value = raw[1:]
+        if value and _FORM_PAYLOAD.fullmatch(value):
+            return FormOperation(FormOperationKind.APPEND, value, raw)
         return None
     if normalized.startswith("-"):
-        value = normalized[1:]
-        if _FORM_WORD.fullmatch(value):
-            return FormOperation(FormOperationKind.REPLACE_TAIL, value, normalized)
+        value = raw[1:]
+        if value and _FORM_PAYLOAD.fullmatch(value):
+            return FormOperation(FormOperationKind.REPLACE_TAIL, value, raw)
         return None
-    if _FORM_WORD.fullmatch(normalized):
-        return FormOperation(FormOperationKind.EXPLICIT, normalized, normalized)
-    return None
+
+    if (
+        not raw
+        or _is_comment_word(raw)
+        or _is_generic_label(raw)
+        or not raw[0].isalnum()
+        or not _EXPLICIT_FORM.fullmatch(raw)
+    ):
+        return None
+    return FormOperation(FormOperationKind.EXPLICIT, raw, raw)
+
+
+def parse_form_operations(token: str) -> tuple[FormOperation, ...] | None:
+    """Parse all orthographic variants of one optional form token."""
+
+    operations: list[FormOperation] = []
+    for variant in expand_optional_form_token(_unwrap_token(token)):
+        operation = parse_form_operation(variant)
+        if operation is None:
+            return None
+        if operation not in operations:
+            operations.append(operation)
+    return tuple(operations)
+
+
+def assign_labeled_slots(
+    tokens: tuple[str, ...],
+    *,
+    singular_slot: str,
+    plural_slot: str,
+    definite_plural_slot: str,
+    ignored_markers: frozenset[str] = frozenset(),
+) -> tuple[SlotOperation, ...] | None:
+    """Assign form operations while ignoring SAOL's explanatory prose."""
+
+    result: list[SlotOperation] = []
+    context = "singular"
+    pending_best = False
+    seen_singular_form = False
+    last_slot: str | None = None
+    alternative_next = False
+    saw_notation_marker = False
+
+    for token in tokens:
+        raw = _unwrap_token(token)
+        lower = raw.casefold()
+        if raw in {";", ","}:
+            saw_notation_marker = True
+            continue
+        if lower in ignored_markers:
+            saw_notation_marker = True
+            continue
+        if lower in {"el.", "h"}:
+            saw_notation_marker = True
+            alternative_next = last_slot is not None
+            continue
+        if lower == "best.":
+            saw_notation_marker = True
+            pending_best = True
+            alternative_next = False
+            continue
+        if lower == "pl.":
+            saw_notation_marker = True
+            context = "plural_definite" if pending_best else "plural"
+            pending_best = False
+            alternative_next = False
+            continue
+        if _is_comment_word(raw) or _is_generic_label(raw):
+            saw_notation_marker = True
+            continue
+
+        operations = parse_form_operations(raw)
+        if operations is None:
+            return None
+        if any(operation.kind is not FormOperationKind.EXPLICIT for operation in operations):
+            saw_notation_marker = True
+
+        if alternative_next and last_slot is not None:
+            slot = last_slot
+            alternative_next = False
+        elif context == "plural_definite":
+            slot = definite_plural_slot
+        elif context == "plural":
+            slot = plural_slot
+            context = "after_plural"
+        elif not seen_singular_form:
+            slot = singular_slot
+            seen_singular_form = True
+        else:
+            slot = plural_slot
+            context = "after_plural"
+
+        result.extend(SlotOperation(slot, raw, operation) for operation in operations)
+        last_slot = slot
+        pending_best = False
+
+    if not saw_notation_marker:
+        return None
+    return tuple(result) if result else None
 
 
 def _best_overlap_replacement(base: str, tail: str) -> tuple[str | None, int]:
-    """Replace the suffix position sharing the longest prefix with ``tail``.
-
-    This is a conservative fallback for rows without a usable lodstreck.  It
-    chooses the position where the existing word ending and the replacement
-    form agree for the greatest number of initial characters.  For example,
-    ``barntillåten`` + ``tillåtet`` aligns at ``tillåte`` rather than at the
-    final ``t`` and therefore yields ``barntillåtet``.
-    """
-
     best_index = -1
     best_score = 0
+    folded_base = base.casefold()
+    folded_tail = tail.casefold()
     for index in range(len(base)):
         score = 0
         while (
             index + score < len(base)
             and score < len(tail)
-            and base[index + score] == tail[score]
+            and folded_base[index + score] == folded_tail[score]
         ):
             score += 1
         if score > best_score:
@@ -122,8 +297,6 @@ def apply_form_operation(
     append: Callable[[str, str], str | None] | None = None,
     replace_tail: Callable[[str, str], str | None] | None = None,
 ) -> str | None:
-    """Apply a primitive operation, with optional ordklass-specific handlers."""
-
     if operation.kind is FormOperationKind.UNCHANGED:
         return base
     if operation.kind is FormOperationKind.EXPLICIT:
@@ -131,38 +304,30 @@ def apply_form_operation(
     if operation.kind is FormOperationKind.APPEND:
         return append(base, operation.value) if append else base + operation.value
     if operation.kind is FormOperationKind.REPLACE_TAIL:
-        handled = replace_tail(base, operation.value) if replace_tail else None
         overlap, score = _best_overlap_replacement(base, operation.value)
-        return overlap if score >= 2 else handled
+        if score >= 2:
+            return overlap
+        return replace_tail(base, operation.value) if replace_tail else None
     return None
 
 
 def split_alternative_branches(text: str) -> tuple[NotationBranch, ...]:
-    """Split top-level SAOL alternatives marked by ``_``.
-
-    The returned tokens retain punctuation-bearing labels (``komp.``, ``pl.``)
-    so an ordklass-specific slot mapper can interpret them.
-    """
-
-    normalized = normalize_notation(text)
+    cleaned = _clean_notation_spelling(text)
     branches: list[NotationBranch] = []
-    for branch in normalized.split(" _ "):
-        branch = branch.strip()
-        if not branch:
-            continue
-        branches.append(NotationBranch(branch, tuple(branch.split())))
+    for branch_text in re.split(r"\s+_\s+", cleaned):
+        branch_text = branch_text.strip()
+        if not branch_text:
+            return ()
+        tokens = tokenize_notation(branch_text)
+        if tokens is None:
+            return ()
+        branches.append(NotationBranch(branch_text, tokens))
     return tuple(branches)
 
 
 def split_forms(text: str) -> tuple[str, ...]:
-    """Return lexical/operation tokens while discarding common separators.
-
-    This is intentionally ordklass-neutral. Labels are preserved; only pure
-    separators are removed. ``el.`` and ``H`` both mean alternative form.
-    """
-
     normalized = normalize_notation(text)
-    normalized = normalized.replace(",", " ").replace(";", " ").replace(":", " ")
+    normalized = normalized.replace(",", " ").replace(";", " ")
     return tuple(
         token
         for token in normalized.split()

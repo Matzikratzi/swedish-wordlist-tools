@@ -5,10 +5,13 @@ from typing import Any
 
 from .inflect import normalise_pattern
 from .lexeme_slots import LexemeSlots, SlotForm, build_lexeme_slots
+from .saol_notation import expand_optional_form_token
 from .saol_row_interpreter import apply_form_token
 
 _TEXT_HARD_CAP = 50
-_FORM_TOKEN_RE = re.compile(r"[+\-]?[A-Za-zÅÄÖåäöÉéÜü]+(?:-[A-Za-zÅÄÖåäöÉéÜü]+)*")
+_FORM_TOKEN_RE = re.compile(
+    r"[+\-]?[A-Za-zÅÄÖåäöÉéÜü()]+(?:-[A-Za-zÅÄÖåäöÉéÜü()]+)*"
+)
 _MARKER_RE = re.compile(
     r"(?:\bel\.|\bvard\.|\båld\.|\bprov\.|\bibl\.|\bn\.|\bH\b)",
     re.IGNORECASE,
@@ -16,12 +19,14 @@ _MARKER_RE = re.compile(
 _PRESENT_RE = re.compile(r"\bpres\.\s*", re.IGNORECASE)
 _TRUNCATED_PRESENT_RE = re.compile(r"(?:[,;]\s*)?\bpre(?:s\.?)?\s*$", re.IGNORECASE)
 _NO_INFLECTION_RE = re.compile(r"^\s*(?:ingen\s*:?[ ]*böjning\s*:?)\s*$", re.IGNORECASE)
-_PAREN_COMMENT_RE = re.compile(r"\([^)]*\)")
+# Parentheses containing prose punctuation or whitespace are comments. A compact
+# parenthesized segment inside a form token, such as håll(e)s, is preserved and
+# expanded by the shared SAOL notation layer.
+_PAREN_COMMENT_RE = re.compile(r"\([^)]*[:\s][^)]*\)")
 _PARTICIPLE_NEUTER_MARKER_RE = re.compile(r"\bn\.\b", re.IGNORECASE)
 
 
 def _source_is_truncated(record: dict[str, Any]) -> bool:
-    """Return true at the observed hard cap of the SAOL ``text`` export."""
     return len(str(record.get("text") or "")) == _TEXT_HARD_CAP
 
 
@@ -31,16 +36,15 @@ def _drop_unterminated_final_token(
     *,
     source_is_truncated: bool,
 ) -> tuple[tuple[str, str], ...]:
-    """Discard the final form token when a source row ends at the hard cap."""
     if not source_is_truncated or not assignments:
         return assignments
     matches = tuple(_FORM_TOKEN_RE.finditer(variant))
     if not matches or matches[-1].end() != len(variant):
         return assignments
-    final_token = matches[-1].group(0)
+    final_variants = set(expand_optional_form_token(matches[-1].group(0)))
     result = list(assignments)
     for index in range(len(result) - 1, -1, -1):
-        if result[index][1] == final_token:
+        if result[index][1] in final_variants:
             del result[index]
             break
     return tuple(result)
@@ -92,8 +96,16 @@ def _apply_token(record: dict[str, Any], lemma: str, token: str) -> str | None:
     return _replace_verb_final_component(lemma, replacement) if replacement else None
 
 
+def _expanded_matches(pattern: str) -> tuple[str, ...]:
+    return tuple(
+        variant
+        for match in _FORM_TOKEN_RE.finditer(pattern)
+        for variant in expand_optional_form_token(match.group(0))
+    )
+
+
 def _tokens(pattern: str) -> tuple[str, ...] | None:
-    matches = tuple(match.group(0) for match in _FORM_TOKEN_RE.finditer(pattern))
+    matches = _expanded_matches(pattern)
     remainder = _FORM_TOKEN_RE.sub(" ", pattern)
     if remainder.strip():
         return None
@@ -103,7 +115,7 @@ def _tokens(pattern: str) -> tuple[str, ...] | None:
 def _alternative_tokens(text: str) -> tuple[str, ...]:
     cleaned = _MARKER_RE.sub(" ", text)
     cleaned = _PAREN_COMMENT_RE.sub(" ", cleaned)
-    tokens = tuple(match.group(0) for match in _FORM_TOKEN_RE.finditer(cleaned))
+    tokens = _expanded_matches(cleaned)
     ignored = {"el", "vard", "åld", "prov", "ibl", "n", "h"}
     return tuple(token for token in tokens if token.casefold() not in ignored)
 
@@ -133,14 +145,12 @@ def _first_two_group_assignments(text: str) -> tuple[tuple[str, str], ...] | Non
 
 
 def _looks_like_participle_group(group: str) -> bool:
-    """Recognise the expanded perfect-participle group structurally."""
     if _PARTICIPLE_NEUTER_MARKER_RE.search(group):
         return True
     return len(_alternative_tokens(group)) >= 2
 
 
 def _expanded_comma_assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
-    """Parse core forms before an explicit perfect-participle group."""
     groups = [part.strip() for part in pattern.split(",") if part.strip()]
     if len(groups) < 3:
         return None
@@ -186,10 +196,7 @@ def _labelled_assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
         compact = _alternative_tokens(groups[0])
         if len(compact) != 2:
             return None
-        assignments.extend((
-            ("preterite", compact[0]),
-            ("supine", compact[1]),
-        ))
+        assignments.extend((("preterite", compact[0]), ("supine", compact[1])))
     else:
         return None
 
@@ -217,7 +224,6 @@ def _simple_assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
 
 
 def _semicolon_core_assignments(pattern: str) -> tuple[tuple[str, str], ...] | None:
-    """Keep a complete compact core before a following usage comment."""
     first, separator, _rest = pattern.partition(";")
     if not separator:
         return None
@@ -229,13 +235,6 @@ def _truncated_comma_core_assignments(
     *,
     source_is_truncated: bool,
 ) -> tuple[tuple[str, str], ...] | None:
-    """Keep complete comma groups before a tail cut at the 50-char cap.
-
-    With three groups, the first two are preterite and supine and the third is
-    an incomplete participle/comment group. With four or more groups, the first
-    three are present, preterite and supine and the last group is incomplete.
-    The rule is used only at the observed source hard cap.
-    """
     if not source_is_truncated:
         return None
     groups = [part.strip() for part in pattern.split(",") if part.strip()]
@@ -266,8 +265,7 @@ def _comma_assignments(
     if expanded is not None:
         return expanded
     truncated_core = _truncated_comma_core_assignments(
-        pattern,
-        source_is_truncated=source_is_truncated,
+        pattern, source_is_truncated=source_is_truncated
     )
     if truncated_core is not None:
         return truncated_core
@@ -292,8 +290,7 @@ def _assignments(
 
 
 def _record_variants(
-    record: dict[str, Any],
-    pattern: str,
+    record: dict[str, Any], pattern: str
 ) -> tuple[tuple[str, tuple[tuple[str, str], ...]], ...] | None:
     variants = tuple(part.strip() for part in re.split(r"\s+_\s+", pattern) if part.strip())
     if not variants:
@@ -309,9 +306,7 @@ def _record_variants(
             return None
         if truncated and index == len(variants) - 1:
             assignments = _drop_unterminated_final_token(
-                assignments,
-                variant,
-                source_is_truncated=True,
+                assignments, variant, source_is_truncated=True
             )
         result.append((variant, assignments))
     return tuple(result)
