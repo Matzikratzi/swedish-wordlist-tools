@@ -8,27 +8,11 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .jsonl import read_jsonl
+from .saol_notation import split_alternative_branches
 
 DEFAULT_COMPARISON = Path("reports/saol14-noun-forms-comparison.jsonl")
 DEFAULT_JSON = Path("reports/saol14-noun-semantic-review.json")
 DEFAULT_TEXT = Path("reports/saol14-noun-semantic-review.txt")
-
-_LEXICOGRAPHIC_LABELS = frozenset(
-    {
-        "anv",
-        "användas",
-        "används",
-        "högt",
-        "i",
-        "ibl",
-        "kan",
-        "ofta",
-        "som",
-        "undviks",
-        "vanl",
-        "vard",
-    }
-)
 
 
 def _clean_stycke(value: str) -> str:
@@ -36,9 +20,44 @@ def _clean_stycke(value: str) -> str:
     return value.replace("·", "").replace(".", "").casefold()
 
 
-def _is_label(form: str) -> bool:
-    normalized = re.sub(r"[^0-9a-zåäöéü-]+", "", form.casefold())
-    return normalized in _LEXICOGRAPHIC_LABELS
+def _metadata_key(value: str) -> str:
+    """Normalize one notation metadata token like ``(mest:`` or ``ibl.``."""
+
+    value = value.strip().strip("()")
+    if value.endswith((":", ".")):
+        value = value[:-1]
+    return re.sub(r"[^0-9a-zåäöéü-]+", "", value.casefold())
+
+
+def _notation_metadata_forms(row: dict[str, Any]) -> frozenset[str]:
+    """Return comment words and period-final labels from the row notation.
+
+    The vocabulary is derived from SAOL's syntax in the current row. No list of
+    Swedish comment words is maintained here: a token ending in ``:`` is
+    explanatory prose, and a token ending in ``.`` is a label.
+    """
+
+    notation = str(row.get("notation", ""))
+    branches = split_alternative_branches(notation)
+    if not branches:
+        return frozenset()
+
+    result: set[str] = set()
+    for branch in branches:
+        for token in branch.tokens:
+            raw = token.strip().strip("()")
+            if raw.startswith(("+", "-")):
+                continue
+            if raw.endswith((":", ".")):
+                key = _metadata_key(raw)
+                if key:
+                    result.add(key)
+    return frozenset(result)
+
+
+def _is_notation_metadata(row: dict[str, Any], form: str) -> bool:
+    normalized = _metadata_key(form)
+    return bool(normalized) and normalized in _notation_metadata_forms(row)
 
 
 def _is_stycke_guided_tail_error(row: dict[str, Any], form: str) -> bool:
@@ -68,8 +87,8 @@ def _is_stycke_guided_tail_error(row: dict[str, Any], form: str) -> bool:
 
 
 def classify_form(row: dict[str, Any], form: str) -> str:
-    if _is_label(form):
-        return "legacy_lexicographic_label"
+    if _is_notation_metadata(row, form):
+        return "legacy_notation_metadata"
     if _is_stycke_guided_tail_error(row, form):
         return "legacy_stycke_tail_error"
     return "review_required"
@@ -136,7 +155,7 @@ def render_review(review: dict[str, Any]) -> str:
     lines = [
         f"Semantiska poster före förfining: {review['semantic_rows']}",
         f"Semantiska former före förfining: {review['semantic_forms']}",
-        f"Verifierade etikettord: {counts.get('legacy_lexicographic_label', 0)}",
+        f"Verifierad notationsmetadata: {counts.get('legacy_notation_metadata', 0)}",
         f"Verifierade stycke-styrda tail-fel: {counts.get('legacy_stycke_tail_error', 0)}",
         f"Poster kvar för granskning: {review['review_required_rows']}",
         f"Former kvar för granskning: {review['review_required_forms']}",
@@ -156,7 +175,7 @@ def render_review(review: dict[str, Any]) -> str:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Refine noun semantic differences using SAOL stycke structure"
+        description="Refine noun semantic differences using shared SAOL notation structure"
     )
     parser.add_argument("comparison", nargs="?", type=Path, default=DEFAULT_COMPARISON)
     parser.add_argument("--json", type=Path, default=DEFAULT_JSON)
