@@ -6,12 +6,15 @@ from swedish_wordlist_tools.refine_noun_semantic_differences import classify_for
 
 
 class ExplicitFormCutAndSpliceTests(unittest.TestCase):
-    def test_classifies_arbitrary_cut_and_splice_damage(self) -> None:
+    def test_classifies_arbitrary_hyphen_token_damage(self) -> None:
         row = {
             "lemma": "alpha-beta-gamma",
-            "added_forms": ["alpha-beta-delta"],
-            "change_reasons": {"alpha-beta-delta": "explicit"},
+            "added_forms": ["alpha-beta-melta"],
+            "change_reasons": {"alpha-beta-melta": "explicit"},
         }
+        # The old tokenizer split the explicit form into ``alpha``, ``-beta``
+        # and ``-melta``. Applying ``-melta`` at the last ``m`` in the lemma
+        # mechanically produced this damaged legacy form.
         self.assertEqual(
             "legacy_explicit_form_error",
             classify_form(row, "alpha-beta-gammelta"),
@@ -31,8 +34,8 @@ class ExplicitFormCutAndSpliceTests(unittest.TestCase):
     def test_requires_explicit_provenance(self) -> None:
         row = {
             "lemma": "alpha-beta-gamma",
-            "added_forms": ["alpha-beta-delta"],
-            "change_reasons": {"alpha-beta-delta": "append"},
+            "added_forms": ["alpha-beta-melta"],
+            "change_reasons": {"alpha-beta-melta": "append"},
         }
         self.assertEqual(
             "review_required",
@@ -42,11 +45,11 @@ class ExplicitFormCutAndSpliceTests(unittest.TestCase):
     def test_does_not_classify_source_forms_themselves(self) -> None:
         row = {
             "lemma": "alpha-beta-gamma",
-            "added_forms": ["alpha-beta-delta"],
-            "change_reasons": {"alpha-beta-delta": "explicit"},
+            "added_forms": ["alpha-beta-melta"],
+            "change_reasons": {"alpha-beta-melta": "explicit"},
         }
         self.assertEqual("review_required", classify_form(row, "alpha-beta-gamma"))
-        self.assertEqual("review_required", classify_form(row, "alpha-beta-delta"))
+        self.assertEqual("review_required", classify_form(row, "alpha-beta-melta"))
 
 
 if __name__ == "__main__":
