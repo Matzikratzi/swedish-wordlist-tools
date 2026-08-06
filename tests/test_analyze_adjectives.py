@@ -81,11 +81,40 @@ class AnalyzeAdjectivesTests(unittest.TestCase):
         ])
         report = build_report(path)
         self.assertEqual(0, report["interpreted_simple_records"])
+        self.assertEqual(1, report["intentionally_excluded_records"])
+        self.assertEqual(0, report["unresolved_records"])
         self.assertEqual(
             {"suffix_or_prefix_lemma": 1},
-            report["remaining_reason_counts"],
+            report["intentionally_excluded_reason_counts"],
         )
         self.assertEqual([], report["records"][0]["forms"])
+
+    def test_excludes_multiword_lemmas_but_reports_real_parser_gaps(self) -> None:
+        path = self.write_records([
+            {
+                "normaliserat_ord": "livs levande",
+                "upos": "ADJ",
+                "text": "(null)",
+                "stycke": "livs levande",
+            },
+            {
+                "normaliserat_ord": "okänd",
+                "upos": "ADJ",
+                "text": "helt okänd notation",
+                "stycke": "okänd",
+            },
+        ])
+        report = build_report(path)
+        self.assertEqual(1, report["intentionally_excluded_records"])
+        self.assertEqual(1, report["unresolved_records"])
+        self.assertEqual(
+            {"multiword_lemma": 1},
+            report["intentionally_excluded_reason_counts"],
+        )
+        self.assertEqual(
+            {"unparsed_singleword_pattern": 1},
+            report["unresolved_reason_counts"],
+        )
 
 
 if __name__ == "__main__":
