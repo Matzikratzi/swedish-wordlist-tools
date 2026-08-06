@@ -60,6 +60,32 @@ class SaolNotationTests(unittest.TestCase):
         self.assertEqual(("BB:t",), tokenize_notation("BB:t"))
         self.assertEqual(("+:n",), tokenize_notation("+:n"))
 
+    def test_drops_strict_prefix_alternative_at_source_limit(self) -> None:
+        text = "komp. närmare el. närmre, superl. närmast el. närm"
+        self.assertEqual(50, len(text))
+        self.assertEqual(
+            (
+                "komp.",
+                "närmare",
+                "el.",
+                "närmre",
+                ",",
+                "superl.",
+                "närmast",
+            ),
+            tokenize_notation(text),
+        )
+
+    def test_keeps_complete_or_nonlimited_alternatives(self) -> None:
+        shorter = "komp. närmare el. närm"
+        self.assertLess(len(shorter), 50)
+        self.assertEqual(
+            ("komp.", "närmare", "el.", "närm"),
+            tokenize_notation(shorter),
+        )
+        exact_but_not_prefix = "x" * 38 + " helform el. annan"
+        self.assertEqual(55, len(exact_but_not_prefix))
+
     def test_rejects_labels_and_separators_as_form_operations(self) -> None:
         for token in ("komp.", "pl.", "el.", "t.ex.", "x.y.z.", "_", "["):
             with self.subTest(token=token):
