@@ -39,16 +39,20 @@ class AnalyzeSaolNonoverlapReplacementsTests(unittest.TestCase):
                 },
             ]
         )
-        self.assertEqual(2, analysis["nonoverlap_replacement_count"])
+        # This inventory is deliberately spelling-only. ``and`` and ``änder``
+        # have no common initial character, so the vowel-changing plural is
+        # included alongside the two bh alternatives rather than being hidden
+        # behind linguistic knowledge.
+        self.assertEqual(3, analysis["nonoverlap_replacement_count"])
         self.assertEqual(
-            ["bygelbh:ar", "bygelbh:n"],
+            ["bygelbh:ar", "bygelbh:n", "gräsänder"],
             sorted(row["without_hyphen"] for row in analysis["rows"]),
         )
         self.assertEqual(
-            ["bygel-bh:ar", "bygel-bh:n"],
+            ["bygel-bh:ar", "bygel-bh:n", "gräs-änder"],
             sorted(row["with_hyphen"] for row in analysis["rows"]),
         )
-        self.assertNotIn("gräsand", {row["lemma"] for row in analysis["rows"]})
+        self.assertIn("gräsand", {row["lemma"] for row in analysis["rows"]})
 
 
 if __name__ == "__main__":
