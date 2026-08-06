@@ -58,6 +58,20 @@ def _entry_from_interpreted_row(row: InterpretedRow) -> GeneratedEntry:
     )
 
 
+def _lemma_only_entry(record: dict[str, Any]) -> GeneratedEntry | None:
+    """Preserve only the headword when source markup makes forms unreliable."""
+
+    lemma = str(record.get("normaliserat_ord", "")).strip()
+    if not lemma:
+        return None
+    return GeneratedEntry(
+        lemma=lemma,
+        pattern="(source error: <k> markup)",
+        word_forms=(GeneratedWordForm(lemma, _CI, "lemma"),),
+        pattern_group="source-error lemma only",
+    )
+
+
 def _merge_forms(
     entry: GeneratedEntry,
     additions: tuple[GeneratedWordForm, ...],
@@ -174,12 +188,7 @@ def _has_usable_compound_bar(record: dict[str, Any], lemma: str) -> bool:
 
 
 def _has_k_markup_source_error(record: dict[str, Any]) -> bool:
-    """Return whether SAOL's text field contains forbidden ``<k>`` markup.
-
-    Any occurrence is treated as a source-data bug, even when the markup is
-    balanced. These records are skipped until the source has been corrected or
-    an explicit source-correction layer is introduced.
-    """
+    """Return whether SAOL's text field contains forbidden ``<k>`` markup."""
 
     return "<k>" in str(record.get("text", "")).casefold()
 
@@ -193,7 +202,7 @@ def complete_noun_entry(
         return entry
 
     if _has_k_markup_source_error(record):
-        return None
+        return _lemma_only_entry(record)
 
     row = interpret_noun_row(record)
     if row is None:
