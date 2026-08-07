@@ -6,12 +6,13 @@ import unicodedata
 from pathlib import Path
 from typing import Any, Iterable
 
+from .artifact_paths import SAOL14_ADJECTIVE_FORMS, SAOL14_GAMEWORDS
 from .saldo import read_saldo_analyses
 
 DEFAULT_INPUT = Path("data/processed/saol14-saldo-forms.txt")
 DEFAULT_SALDO = Path("data/raw/saldom.xml")
-DEFAULT_ADJECTIVE_FORMS = Path("reports/saol14-adjective-forms.jsonl")
-DEFAULT_OUTPUT = Path("data/processed/saol14-game-words.txt")
+DEFAULT_ADJECTIVE_FORMS = SAOL14_ADJECTIVE_FORMS
+DEFAULT_OUTPUT = SAOL14_GAMEWORDS
 DEFAULT_REPORT = Path("reports/saol14-game-words.json")
 
 
