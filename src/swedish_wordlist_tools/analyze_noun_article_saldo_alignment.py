@@ -36,8 +36,8 @@ def _status(saol_forms: set[str], saldo_forms: set[str]) -> str:
     return "disjoint"
 
 
-def _article_key(row: dict[str, Any]) -> tuple[str, str]:
-    return (str(row.get("record_id") or ""), str(row.get("lemma") or "").casefold())
+def _article_id(row: dict[str, Any]) -> str:
+    return str(row.get("article_id") or row.get("record_id") or "")
 
 
 def _variant_lemmas(row: dict[str, Any]) -> tuple[str, ...]:
@@ -49,97 +49,115 @@ def _variant_lemmas(row: dict[str, Any]) -> tuple[str, ...]:
     return (lemma,) if lemma else ()
 
 
-def _article_saol_forms(rows: list[dict[str, Any]]) -> set[str]:
-    forms: set[str] = set()
+def _variant_paradigm_map(rows: list[dict[str, Any]]) -> dict[str, set[str]]:
+    result: dict[str, set[str]] = {}
     for row in rows:
-        variants = row.get("variant_paradigms") or ()
-        if variants:
-            for variant in variants:
-                for form in variant.get("forms", ()):
-                    written = str(form.get("written_form") or "")
-                    if written:
-                        forms.add(written)
+        paradigms = row.get("variant_paradigms") or ()
+        if paradigms:
+            for paradigm in paradigms:
+                lemma = str(paradigm.get("lemma") or "").strip()
+                if not lemma:
+                    continue
+                bucket = result.setdefault(lemma, set())
+                bucket.update(
+                    str(form.get("written_form") or "")
+                    for form in paradigm.get("forms", ())
+                    if str(form.get("written_form") or "")
+                )
         else:
-            for form in row.get("forms", ()):
-                written = str(form.get("written_form") or "")
-                if written:
-                    forms.add(written)
-    return forms
+            lemma = str(row.get("lemma") or "").strip()
+            if lemma:
+                result.setdefault(lemma, set()).update(
+                    str(form.get("written_form") or "")
+                    for form in row.get("forms", ())
+                    if str(form.get("written_form") or "")
+                )
+    return result
 
 
-def _article_variant_lemmas(rows: list[dict[str, Any]]) -> tuple[str, ...]:
-    values: list[str] = []
-    for row in rows:
-        values.extend(_variant_lemmas(row))
-    return tuple(dict.fromkeys(value for value in values if value))
+def _saldo_variant_alignment(
+    lemma: str,
+    saol_forms: set[str],
+    saldo: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    analyses = [
+        analysis
+        for analysis in saldo.get(lemma.casefold(), ())
+        if str(analysis.get("upos") or "").upper() == "NOUN"
+    ]
+    saldo_forms = {
+        form
+        for analysis in analyses
+        for form in _analysis_forms(analysis)
+    }
+    return {
+        "lemma": lemma,
+        "status": _status(saol_forms, saldo_forms),
+        "saol_forms": sorted(saol_forms, key=str.casefold),
+        "saldo_forms": sorted(saldo_forms, key=str.casefold),
+        "only_in_saol": sorted(saol_forms - saldo_forms, key=str.casefold),
+        "only_in_saldo": sorted(saldo_forms - saol_forms, key=str.casefold),
+        "saldo_analysis_count": len(analyses),
+        "saldo_ids": sorted({str(analysis.get("id") or "") for analysis in analyses}),
+        "saldo_lemmas": sorted(
+            {str(value) for analysis in analyses for value in analysis.get("lemmas", ())},
+            key=str.casefold,
+        ),
+    }
 
 
 def analyze(
     noun_rows: Iterable[dict[str, Any]],
     saldo: dict[str, list[dict[str, Any]]],
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    grouped: dict[str, list[dict[str, Any]]] = {}
     for row in noun_rows:
         if not row.get("variant_paradigms"):
             continue
-        grouped.setdefault(_article_key(row), []).append(row)
+        grouped.setdefault(_article_id(row), []).append(row)
 
     output: list[dict[str, Any]] = []
-    for (record_id, article_lemma), rows in grouped.items():
-        variant_lemmas = _article_variant_lemmas(rows)
-        saol_forms = _article_saol_forms(rows)
-        analyses: list[dict[str, Any]] = []
-        seen: set[int] = set()
-        matched_variant_lemmas: list[str] = []
-        missing_variant_lemmas: list[str] = []
-
-        for lemma in variant_lemmas:
-            candidates = [
-                analysis
-                for analysis in saldo.get(lemma.casefold(), ())
-                if str(analysis.get("upos") or "").upper() == "NOUN"
-            ]
-            if candidates:
-                matched_variant_lemmas.append(lemma)
-            else:
-                missing_variant_lemmas.append(lemma)
-            for analysis in candidates:
-                marker = id(analysis)
-                if marker in seen:
-                    continue
-                seen.add(marker)
-                analyses.append(analysis)
-
-        saldo_forms = {
-            form
-            for analysis in analyses
-            for form in _analysis_forms(analysis)
-        }
-        status = _status(saol_forms, saldo_forms)
+    for article_id, rows in grouped.items():
         row0 = rows[0]
+        paradigm_map = _variant_paradigm_map(rows)
+        variant_lemmas: list[str] = []
+        for row in rows:
+            variant_lemmas.extend(_variant_lemmas(row))
+        variant_lemmas = list(dict.fromkeys(variant_lemmas))
+
+        variant_rows = [
+            _saldo_variant_alignment(lemma, paradigm_map.get(lemma, set()), saldo)
+            for lemma in variant_lemmas
+        ]
+        saol_forms = {form for variant in variant_rows for form in variant["saol_forms"]}
+        saldo_forms = {form for variant in variant_rows for form in variant["saldo_forms"]}
+        article_status = _status(saol_forms, saldo_forms)
+        matched = [variant["lemma"] for variant in variant_rows if variant["status"] != "missing"]
+        missing = [variant["lemma"] for variant in variant_rows if variant["status"] == "missing"]
+
         output.append({
-            "record_id": record_id,
-            "article_lemma": article_lemma,
+            "article_id": article_id,
+            "record_id": str(row0.get("record_id") or article_id),
+            "article_lemma": str(row0.get("lemma") or ""),
             "variant_mode": str(row0.get("variant_mode") or ""),
-            "variant_lemmas": list(variant_lemmas),
-            "matched_variant_lemmas": matched_variant_lemmas,
-            "missing_variant_lemmas": missing_variant_lemmas,
-            "saldo_analysis_count": len(analyses),
-            "status": status,
+            "source_homonym_numbers": list(row0.get("source_homonym_numbers") or [str(row0.get("homonym_number") or "")]),
+            "variant_lemmas": variant_lemmas,
+            "variants": variant_rows,
+            "matched_variant_lemmas": matched,
+            "missing_variant_lemmas": missing,
+            "status": article_status,
             "saol_forms": sorted(saol_forms, key=str.casefold),
             "saldo_forms": sorted(saldo_forms, key=str.casefold),
-            "extra_from_saol": sorted(saol_forms - saldo_forms, key=str.casefold),
-            "missing_from_saol": sorted(saldo_forms - saol_forms, key=str.casefold),
-            "saldo_ids": sorted({str(analysis.get("id") or "") for analysis in analyses}),
-            "saldo_lemmas": sorted(
-                {str(lemma) for analysis in analyses for lemma in analysis.get("lemmas", ())},
-                key=str.casefold,
-            ),
+            "only_in_saol": sorted(saol_forms - saldo_forms, key=str.casefold),
+            "only_in_saldo": sorted(saldo_forms - saol_forms, key=str.casefold),
         })
 
-    output.sort(key=lambda row: (row["status"], row["article_lemma"]))
+    output.sort(key=lambda row: (row["status"], row["article_lemma"].casefold(), row["article_id"]))
     status_counts = Counter(row["status"] for row in output)
-    missing_variant_counts = Counter(
+    variant_status_counts = Counter(
+        variant["status"] for row in output for variant in row["variants"]
+    )
+    coverage_counts = Counter(
         "all_variants_missing" if not row["matched_variant_lemmas"] else
         "some_variants_missing" if row["missing_variant_lemmas"] else
         "all_variants_matched"
@@ -147,17 +165,27 @@ def analyze(
     )
     summary = {
         "variant_articles": len(output),
+        "variant_paradigms": sum(len(row["variants"]) for row in output),
         "status_counts": dict(sorted(status_counts.items())),
-        "variant_coverage_counts": dict(sorted(missing_variant_counts.items())),
+        "variant_status_counts": dict(sorted(variant_status_counts.items())),
+        "variant_coverage_counts": dict(sorted(coverage_counts.items())),
         "non_exact": sum(count for status, count in status_counts.items() if status != "exact"),
     }
     return output, summary
 
 
+def _render_forms(label: str, forms: list[str], indent: str = "      ") -> list[str]:
+    if not forms:
+        return [f"{indent}{label}: –"]
+    return [f"{indent}{label}: " + ", ".join(forms)]
+
+
 def render(rows: list[dict[str, Any]], summary: dict[str, Any]) -> str:
     lines = [
         f"Variantartiklar: {summary['variant_articles']}",
-        f"Status: {summary['status_counts']}",
+        f"Variantparadigm: {summary['variant_paradigms']}",
+        f"Artikelstatus: {summary['status_counts']}",
+        f"Variantstatus: {summary['variant_status_counts']}",
         f"Varianttäckning i SALDO: {summary['variant_coverage_counts']}",
         f"Icke exakta artiklar: {summary['non_exact']}",
         "",
@@ -166,17 +194,28 @@ def render(rows: list[dict[str, Any]], summary: dict[str, Any]) -> str:
     for row in rows:
         if row["status"] == "exact":
             continue
+        lines.append("")
         lines.append(
-            f"  {row['article_lemma']} [{row['variant_mode']}] status={row['status']} "
-            f"record_id={row['record_id']}"
+            f"  {row['article_lemma']} [{row['variant_mode']}] "
+            f"status={row['status']} article_id={row['article_id']}"
         )
-        lines.append("    Varianter: " + ", ".join(row["variant_lemmas"]))
-        lines.append("    SALDO-matchade varianter: " + (", ".join(row["matched_variant_lemmas"]) or "–"))
-        lines.append("    SALDO-saknade varianter: " + (", ".join(row["missing_variant_lemmas"]) or "–"))
-        lines.append("    SAOL: " + (", ".join(row["saol_forms"]) or "–"))
-        lines.append("    SALDO: " + (", ".join(row["saldo_forms"]) or "–"))
-        lines.append("    Extra SAOL: " + (", ".join(row["extra_from_saol"]) or "–"))
-        lines.append("    Saknas SAOL: " + (", ".join(row["missing_from_saol"]) or "–"))
+        lines.append("    Varianter:")
+        for index, variant in enumerate(row["variants"], start=1):
+            lines.append(
+                f"      {index}. {variant['lemma']} — status={variant['status']} "
+                f"SALDO-analyser={variant['saldo_analysis_count']}"
+            )
+            lines.extend(_render_forms("SAOL", variant["saol_forms"], "         "))
+            lines.extend(_render_forms("SALDO", variant["saldo_forms"], "         "))
+            if variant["only_in_saol"]:
+                lines.extend(_render_forms("Finns bara i SAOL", variant["only_in_saol"], "         "))
+            if variant["only_in_saldo"]:
+                lines.extend(_render_forms("Finns bara i SALDO", variant["only_in_saldo"], "         "))
+        lines.append(
+            "    Artikelunion: "
+            f"SAOL={len(row['saol_forms'])} former, SALDO={len(row['saldo_forms'])} former, "
+            f"bara SAOL={len(row['only_in_saol'])}, bara SALDO={len(row['only_in_saldo'])}"
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -204,7 +243,9 @@ def main() -> None:
     args.text.write_text(render(rows, summary), encoding="utf-8")
     args.summary.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"Variantartiklar: {summary['variant_articles']}")
-    print(f"Status: {summary['status_counts']}")
+    print(f"Variantparadigm: {summary['variant_paradigms']}")
+    print(f"Artikelstatus: {summary['status_counts']}")
+    print(f"Variantstatus: {summary['variant_status_counts']}")
     print(f"Varianttäckning: {summary['variant_coverage_counts']}")
     print(f"Icke exakta: {summary['non_exact']}")
     print(f"Text: {args.text}")
