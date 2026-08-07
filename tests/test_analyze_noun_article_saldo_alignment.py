@@ -56,7 +56,8 @@ class AnalyzeNounArticleSaldoAlignmentTests(unittest.TestCase):
             "foo": [{"id": "a", "upos": "NOUN", "lemmas": {"foo"}, "forms": {"foo"}}]
         }
         rows, summary = analyze(noun_rows, saldo)
-        self.assertEqual("saol_subset", rows[0]["status"])
+        # SALDO contains only one of the two SAOL forms, so SALDO is the subset.
+        self.assertEqual("saldo_subset", rows[0]["status"])
         self.assertEqual(["foe"], rows[0]["missing_variant_lemmas"])
         self.assertEqual(1, summary["variant_coverage_counts"]["some_variants_missing"])
 
