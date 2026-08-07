@@ -15,6 +15,9 @@ TARGET_STATUS = "form_set_mismatch"
 SALDO_MISSING_PLURAL = "saldo_missing_plural"
 SALDO_MISSING_DEFINITE_PLURAL = "saldo_missing_definite_plural"
 SALDO_MISSING_DEFINITE_SINGULAR = "saldo_missing_definite_singular"
+SALDO_ALTERNATIVE_DEFINITE_SINGULAR_MISSING_PLURAL = (
+    "saldo_alternative_definite_singular_missing_plural"
+)
 UNCLASSIFIED = "unclassified"
 
 
@@ -42,8 +45,8 @@ def classify_row(row: dict[str, Any]) -> tuple[str, str]:
     """Classify only mechanically certain SAOL–SALDO differences.
 
     A classification says what differs between the sources; it does not change
-    the canonical SAOL generator and it does not speculate about why SALDO omits
-    a form.
+    the canonical SAOL generator and it does not speculate about why either
+    source chose its paradigm.
     """
 
     if str(row.get("status", "")) != TARGET_STATUS:
@@ -55,7 +58,7 @@ def classify_row(row: dict[str, Any]) -> tuple[str, str]:
     extra = _casefolded(row.get("extra_from_saol", ()))
     missing = _casefolded(row.get("missing_from_saol", ()))
 
-    if upos != "NOUN" or not lemma or missing:
+    if upos != "NOUN" or not lemma:
         return UNCLASSIFIED, "no_verified_general_classification"
 
     explicit_plural_patterns = {
@@ -67,7 +70,11 @@ def classify_row(row: dict[str, Any]) -> tuple[str, str]:
         "+et +er": ("er", "ers", "erna", "ernas"),
     }
     plural_suffixes = explicit_plural_patterns.get(notation)
-    if plural_suffixes is not None and extra == _suffixed_forms(lemma, plural_suffixes):
+    if (
+        not missing
+        and plural_suffixes is not None
+        and extra == _suffixed_forms(lemma, plural_suffixes)
+    ):
         return (
             SALDO_MISSING_PLURAL,
             f"SAOL notation {notation} explicitly supplies a plural paradigm; SALDO lacks exactly that paradigm",
@@ -79,7 +86,8 @@ def classify_row(row: dict[str, Any]) -> tuple[str, str]:
     }
     definite_plural_suffixes = definite_zero_plural_patterns.get(notation)
     if (
-        definite_plural_suffixes is not None
+        not missing
+        and definite_plural_suffixes is not None
         and extra == _suffixed_forms(lemma, definite_plural_suffixes)
     ):
         return (
@@ -96,13 +104,34 @@ def classify_row(row: dict[str, Any]) -> tuple[str, str]:
     }
     definite_singular_suffixes = definite_singular_patterns.get(notation)
     if (
-        definite_singular_suffixes is not None
+        not missing
+        and definite_singular_suffixes is not None
         and extra == _suffixed_forms(lemma, definite_singular_suffixes)
     ):
         return (
             SALDO_MISSING_DEFINITE_SINGULAR,
             f"SAOL notation {notation} explicitly supplies the definite singular form; SALDO lacks exactly that form and its genitive",
         )
+
+    # Some sources disagree in two mechanically visible ways at once: SAOL
+    # explicitly supplies a plural paradigm that SALDO lacks, while SALDO has
+    # one competing definite-singular pair that SAOL does not contain.  Keep
+    # this as a source-difference classification rather than treating either
+    # paradigm as a generator error.
+    alternative_definite_pairs = {
+        "+n +er": (("en", "ens"),),
+        "+et +er": (("t", "ts"), ("en", "ens")),
+        "+en +ar": (("et", "ets"),),
+        "+en +er": (("et", "ets"),),
+    }
+    alternative_pairs = alternative_definite_pairs.get(notation, ())
+    if plural_suffixes is not None and extra == _suffixed_forms(lemma, plural_suffixes):
+        for pair in alternative_pairs:
+            if missing == _suffixed_forms(lemma, pair):
+                return (
+                    SALDO_ALTERNATIVE_DEFINITE_SINGULAR_MISSING_PLURAL,
+                    f"SAOL notation {notation} explicitly supplies the plural paradigm that SALDO lacks, while SALDO has exactly one competing definite-singular pair",
+                )
 
     return UNCLASSIFIED, "no_verified_general_classification"
 
