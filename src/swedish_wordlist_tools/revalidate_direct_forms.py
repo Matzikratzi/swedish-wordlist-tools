@@ -13,20 +13,99 @@ from .canonical_form_artifacts import (
     forms_from_artifacts,
     load_word_class_artifacts,
 )
-from .compare_sources import _build_form_index, read_saldo
+from .compare_sources import _is_affix_entry, _key, _normalise, _saol_upos
 from .jsonl import read_jsonl
+from .saldo_form_artifact import (
+    DEFAULT_SALDO_FORMS,
+    build_form_index,
+    read_saldo_forms,
+)
 from .validate_direct_forms import (
     DEFAULT_JSONL,
-    DEFAULT_SALDO,
     DEFAULT_SAOL,
     DEFAULT_SUMMARY,
     _analysis_forms,
     _form_status,
-    select_direct_match,
     write_jsonl,
 )
 
 ARTIFACT_WORD_CLASSES = frozenset({"NOUN", "ADJ"})
+
+
+def _casefolded(forms: set[str]) -> set[str]:
+    return {form.casefold() for form in forms}
+
+
+def _homonym_score(
+    generated_forms: set[str], analysis: dict[str, Any]
+) -> tuple[int, int, int, int]:
+    saldo_forms = _analysis_forms(analysis)
+    generated_folded = _casefolded(generated_forms)
+    saldo_folded = _casefolded(saldo_forms)
+    overlap = len(generated_folded & saldo_folded)
+    symmetric_difference = len(generated_folded ^ saldo_folded)
+    return (
+        int(generated_folded == saldo_folded),
+        int(generated_folded <= saldo_folded),
+        overlap,
+        -symmetric_difference,
+    )
+
+
+def _best_matching_analyses(
+    generated_forms: set[str], analyses: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    if len(analyses) <= 1 or not generated_forms:
+        return analyses
+    scored = [(_homonym_score(generated_forms, analysis), analysis) for analysis in analyses]
+    best_score = max(score for score, _ in scored)
+    return [analysis for score, analysis in scored if score == best_score]
+
+
+def select_direct_match_from_artifacts(
+    record: dict[str, Any],
+    saldo: dict[str, list[dict[str, Any]]],
+    form_index: dict[str, list[dict[str, Any]]],
+    generated_forms: set[str],
+) -> tuple[str, list[dict[str, Any]]] | None:
+    """Match a SAOL record to SALDO without generating any forms.
+
+    Homonym resolution is based only on the already-materialized SAOL form set
+    passed in by the caller and the already-materialized SALDO form artifact.
+    """
+
+    lemma = _normalise(str(record.get("normaliserat_ord", "")))
+    if not lemma or _is_affix_entry(record, lemma):
+        return None
+
+    lemma_key = _key(lemma)
+    saol_upos = _saol_upos(record)
+    analyses = saldo.get(lemma_key, [])
+    if analyses:
+        matching = [analysis for analysis in analyses if analysis["upos"] == saol_upos]
+        if saol_upos and saol_upos != "X" and matching:
+            return "lemma_same_upos", _best_matching_analyses(generated_forms, matching)
+
+        unknown = [analysis for analysis in analyses if not analysis["upos"]]
+        if saol_upos and saol_upos != "X" and unknown:
+            chosen = _best_matching_analyses(generated_forms, unknown)
+            if len(chosen) == 1:
+                return "lemma_unknown_saldo_upos", chosen
+
+        saldo_classes = {analysis["upos"] for analysis in analyses}
+        if saol_upos in {"", "X"} and len(saldo_classes) == 1 and "" not in saldo_classes:
+            return "lemma_inferred_saol_upos", _best_matching_analyses(generated_forms, analyses)
+        return None
+
+    form_candidates = [
+        analysis
+        for analysis in form_index.get(lemma_key, [])
+        if saol_upos and saol_upos != "X" and analysis["upos"] == saol_upos
+    ]
+    chosen = _best_matching_analyses(generated_forms, form_candidates)
+    if len(chosen) == 1:
+        return "unique_form_same_upos", chosen
+    return None
 
 
 def canonical_validation_row(
@@ -34,11 +113,9 @@ def canonical_validation_row(
     match_method: str,
     analyses: list[dict[str, Any]],
     *,
-    generated_forms: set[str] | None = None,
-    generator: str = "record_local_canonical",
+    generated_forms: set[str],
+    generator: str,
 ) -> dict[str, Any]:
-    if generated_forms is None:
-        generated_forms = canonical_record_forms(record)
     saldo_forms = {
         form
         for analysis in analyses
@@ -69,24 +146,25 @@ def canonical_validation_row(
 
 def revalidate_direct_forms(
     saol_path: Path = DEFAULT_SAOL,
-    saldo_path: Path = DEFAULT_SALDO,
+    saldo_forms_path: Path = DEFAULT_SALDO_FORMS,
     jsonl_path: Path = DEFAULT_JSONL,
     summary_path: Path = DEFAULT_SUMMARY,
     *,
     noun_forms_path: Path = DEFAULT_NOUN_FORMS,
     adjective_forms_path: Path = DEFAULT_ADJECTIVE_FORMS,
 ) -> dict[str, Any]:
-    """Revalidate direct SAOL–SALDO matches from canonical artifacts.
+    """Revalidate direct SAOL–SALDO matches from materialized form artifacts.
 
-    NOUN and ADJ are deliberately read from their already-generated JSONL
-    artifacts.  The validator must not run those interpreters again: otherwise
-    validation can silently disagree with the forms that are actually exported.
-    Other word classes keep their existing record-local path until they have an
-    equivalent per-record canonical artifact.
+    NOUN and ADJ forms are read only from their canonical JSONL artifacts.
+    SALDO forms are read only from the canonical SALDO JSONL artifact.  The
+    comparison and homonym selection do not run either form generator.
+
+    Word classes without a canonical SAOL artifact still use their existing
+    record-local form path and are explicitly labelled as such in the output.
     """
 
-    saldo = read_saldo(saldo_path)
-    form_index = _build_form_index(saldo)
+    saldo = read_saldo_forms(saldo_forms_path)
+    form_index = build_form_index(saldo)
     artifacts = load_word_class_artifacts(
         noun_path=noun_forms_path,
         adjective_path=adjective_forms_path,
@@ -94,12 +172,7 @@ def revalidate_direct_forms(
     rows: list[dict[str, Any]] = []
 
     for record in read_jsonl(saol_path):
-        selected = select_direct_match(record, saldo, form_index)
-        if selected is None:
-            continue
-        method, analyses = selected
         upos = str(record.get("upos") or "").upper()
-
         artifact_forms = forms_from_artifacts(record, artifacts)
         if upos in ARTIFACT_WORD_CLASSES:
             generated_forms = artifact_forms or set()
@@ -111,6 +184,16 @@ def revalidate_direct_forms(
         else:
             generated_forms = canonical_record_forms(record)
             generator = "record_local_canonical"
+
+        selected = select_direct_match_from_artifacts(
+            record,
+            saldo,
+            form_index,
+            generated_forms,
+        )
+        if selected is None:
+            continue
+        method, analyses = selected
 
         rows.append(
             canonical_validation_row(
@@ -133,10 +216,10 @@ def revalidate_direct_forms(
 
     summary = {
         "saol": str(saol_path),
-        "saldo": str(saldo_path),
+        "saldo_forms": str(saldo_forms_path),
         "noun_forms": str(noun_forms_path),
         "adjective_forms": str(adjective_forms_path),
-        "generator": "canonical_artifacts_for_noun_adj",
+        "comparison": "materialized_form_artifacts",
         "generator_counts": dict(sorted(generator_counts.items())),
         "matched_records": len(rows),
         "status_counts": dict(sorted(status_counts.items())),
@@ -157,12 +240,11 @@ def revalidate_direct_forms(
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Revalidate direct SAOL-SALDO matches; NOUN/ADJ are read from "
-            "their canonical generated artifacts"
+            "Compare materialized SAOL and SALDO form artifacts; NOUN/ADJ are never regenerated"
         )
     )
     parser.add_argument("saol", nargs="?", type=Path, default=DEFAULT_SAOL)
-    parser.add_argument("saldo", nargs="?", type=Path, default=DEFAULT_SALDO)
+    parser.add_argument("--saldo-forms", type=Path, default=DEFAULT_SALDO_FORMS)
     parser.add_argument("--noun-forms", type=Path, default=DEFAULT_NOUN_FORMS)
     parser.add_argument("--adjective-forms", type=Path, default=DEFAULT_ADJECTIVE_FORMS)
     parser.add_argument("--jsonl", type=Path, default=DEFAULT_JSONL)
@@ -171,13 +253,15 @@ def main() -> None:
 
     summary = revalidate_direct_forms(
         args.saol,
-        args.saldo,
+        args.saldo_forms,
         args.jsonl,
         args.summary,
         noun_forms_path=args.noun_forms,
         adjective_forms_path=args.adjective_forms,
     )
     print(f"Direktmatchade poster: {summary['matched_records']}")
+    print(f"Jämförelse: {summary['comparison']}")
+    print(f"SALDO-artefakt: {summary['saldo_forms']}")
     for generator, count in summary["generator_counts"].items():
         print(f"{generator}: {count}")
     for status, count in summary["status_counts"].items():
