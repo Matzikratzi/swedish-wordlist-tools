@@ -11,50 +11,10 @@ from .classify_form_mismatches import DEFAULT_JSONL as DEFAULT_CLASSIFICATIONS, 
 DEFAULT_JSONL = Path("reports/saol14-form-mismatch-classification-audit.jsonl")
 DEFAULT_SUMMARY = Path("reports/saol14-form-mismatch-classification-audit-summary.json")
 DEFAULT_TEXT = Path("reports/saol14-form-mismatch-classification-audit.txt")
-GAMEWORD_BASENAME = "saol14-gamewords.txt"
-GAMEWORD_CANDIDATES = (
-    Path("data/processed/saol14-gamewords.txt"),
-    Path("saol14-gamewords.txt"),
-    Path("data/saol14-gamewords.txt"),
-    Path("reports/saol14-gamewords.txt"),
-)
 
 VERIFIED = "verified"
 STALE_VALIDATION = "stale_validation"
 NOT_APPLICABLE = "not_applicable"
-
-
-def resolve_gamewords_path(explicit: Path | None = None, *, root: Path = Path(".")) -> Path:
-    """Resolve the final gamewords artifact without silently guessing a missing path."""
-    if explicit is not None:
-        if explicit.is_file():
-            return explicit
-        raise FileNotFoundError(f"Angiven gamewords-fil finns inte: {explicit}")
-
-    for candidate in GAMEWORD_CANDIDATES:
-        path = root / candidate
-        if path.is_file():
-            return path
-
-    matches = sorted(
-        (path for path in root.rglob(GAMEWORD_BASENAME) if path.is_file()),
-        key=lambda path: (len(path.parts), str(path)),
-    )
-    if len(matches) == 1:
-        return matches[0]
-    if len(matches) > 1:
-        listed = "\n  ".join(str(path) for path in matches)
-        raise FileNotFoundError(
-            "Flera saol14-gamewords.txt hittades; ange rätt fil med --gamewords:\n  " + listed
-        )
-
-    searched = "\n  ".join(str(root / candidate) for candidate in GAMEWORD_CANDIDATES)
-    raise FileNotFoundError(
-        "Hittade ingen saol14-gamewords.txt. Kontrollerade:\n  "
-        + searched
-        + "\nSökvägen kan anges med --gamewords PATH. "
-        + "Kör annars: find . -name 'saol14-gamewords.txt' -print"
-    )
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -78,13 +38,26 @@ def read_gamewords(path: Path) -> set[str]:
     }
 
 
-def audit_row(row: dict[str, Any], gamewords: set[str]) -> dict[str, Any]:
+def audit_row(
+    row: dict[str, Any],
+    gamewords: set[str] | None = None,
+) -> dict[str, Any]:
+    """Re-audit one prior classification against its canonical per-record forms.
+
+    The primary source of truth is ``generated_forms`` on the validation row.
+    Those forms were loaded from the canonical NOUN/ADJ artifacts by
+    ``revalidate_direct_forms``. A global gamewords set can optionally provide
+    a second, weaker cross-check, but it is deliberately not required because
+    it cannot distinguish homonyms or source records.
+    """
+
     classification = str(row.get("mismatch_classification") or UNCLASSIFIED)
     if classification == UNCLASSIFIED:
         return {
             **row,
             "classification_audit": NOT_APPLICABLE,
             "classification_audit_reasons": [],
+            "forms_missing_from_canonical_record": [],
             "forms_missing_from_gamewords": [],
         }
 
@@ -99,19 +72,34 @@ def audit_row(row: dict[str, Any], gamewords: set[str]) -> dict[str, Any]:
         for form in row.get("extra_from_saol", ())
         if str(form)
     }
-    missing_from_gamewords = sorted(claimed_saol_only - gamewords)
-    if missing_from_gamewords:
-        reasons.append("claimed_saol_forms_absent_from_gamewords")
+    generated_forms = {
+        str(form).casefold()
+        for form in row.get("generated_forms", ())
+        if str(form)
+    }
+    missing_from_canonical_record = sorted(claimed_saol_only - generated_forms)
+    if missing_from_canonical_record:
+        reasons.append("claimed_saol_forms_absent_from_canonical_record")
+
+    missing_from_gamewords: list[str] = []
+    if gamewords is not None:
+        missing_from_gamewords = sorted(claimed_saol_only - gamewords)
+        if missing_from_gamewords:
+            reasons.append("claimed_saol_forms_absent_from_gamewords")
 
     return {
         **row,
         "classification_audit": STALE_VALIDATION if reasons else VERIFIED,
         "classification_audit_reasons": reasons,
+        "forms_missing_from_canonical_record": missing_from_canonical_record,
         "forms_missing_from_gamewords": missing_from_gamewords,
     }
 
 
-def audit_rows(rows: Iterable[dict[str, Any]], gamewords: set[str]) -> list[dict[str, Any]]:
+def audit_rows(
+    rows: Iterable[dict[str, Any]],
+    gamewords: set[str] | None = None,
+) -> list[dict[str, Any]]:
     return [audit_row(row, gamewords) for row in rows]
 
 
@@ -141,7 +129,12 @@ def build_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 "classification": str(row.get("mismatch_classification") or ""),
                 "generator": str(row.get("generator") or ""),
                 "reasons": list(row.get("classification_audit_reasons") or ()),
-                "forms_missing_from_gamewords": list(row.get("forms_missing_from_gamewords") or ()),
+                "forms_missing_from_canonical_record": list(
+                    row.get("forms_missing_from_canonical_record") or ()
+                ),
+                "forms_missing_from_gamewords": list(
+                    row.get("forms_missing_from_gamewords") or ()
+                ),
             }
             for row in rows
             if row["classification_audit"] == STALE_VALIDATION
@@ -185,11 +178,13 @@ def render_text(summary: dict[str, Any]) -> str:
         lines.append("  (inga)")
     for row in stale_rows[:100]:
         reasons = ", ".join(row["reasons"]) or "-"
-        missing = ", ".join(row["forms_missing_from_gamewords"]) or "-"
+        missing_record = ", ".join(row["forms_missing_from_canonical_record"]) or "-"
+        missing_gamewords = ", ".join(row["forms_missing_from_gamewords"]) or "-"
         lines.append(
             f"  {row['lemma']} ({row['homonym_number']}) | {row['upos']} | "
             f"{row['classification']} | generator={row['generator']} | "
-            f"saknas i gamewords={missing} | skäl={reasons}"
+            f"saknas i kanonisk post={missing_record} | "
+            f"saknas i gamewords={missing_gamewords} | skäl={reasons}"
         )
     return "\n".join(lines) + "\n"
 
@@ -202,14 +197,14 @@ def audit_file(
     summary_path: Path = DEFAULT_SUMMARY,
     text_path: Path = DEFAULT_TEXT,
 ) -> dict[str, Any]:
-    resolved_gamewords = resolve_gamewords_path(gamewords_path)
-    rows = audit_rows(read_jsonl(classifications_path), read_gamewords(resolved_gamewords))
+    gamewords = read_gamewords(gamewords_path) if gamewords_path is not None else None
+    rows = audit_rows(read_jsonl(classifications_path), gamewords)
     write_jsonl(jsonl_path, rows)
     summary = build_summary(rows)
     summary.update(
         {
             "classifications": str(classifications_path),
-            "gamewords": str(resolved_gamewords),
+            "gamewords": str(gamewords_path) if gamewords_path is not None else None,
             "jsonl": str(jsonl_path),
             "summary": str(summary_path),
             "text": str(text_path),
@@ -224,10 +219,14 @@ def audit_file(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Revidera mismatchklassningar mot kanonisk artefaktkälla och slutlig gamewords-lista"
+        description="Revidera tidigare mismatchklassningar mot kanoniska per-post-former"
     )
     parser.add_argument("classifications", nargs="?", type=Path, default=DEFAULT_CLASSIFICATIONS)
-    parser.add_argument("--gamewords", type=Path)
+    parser.add_argument(
+        "--gamewords",
+        type=Path,
+        help="valfri extra global kontroll; primär kontroll använder generated_forms per post",
+    )
     parser.add_argument("--jsonl", type=Path, default=DEFAULT_JSONL)
     parser.add_argument("--summary", type=Path, default=DEFAULT_SUMMARY)
     parser.add_argument("--text", type=Path, default=DEFAULT_TEXT)
@@ -242,7 +241,10 @@ def main() -> None:
     print(f"Reviderade mismatchposter: {summary['rows']}")
     for name, count in summary["audit_counts"].items():
         print(f"{name}: {count}")
-    print(f"Gamewords: {summary['gamewords']}")
+    if summary["gamewords"]:
+        print(f"Extra gamewords-kontroll: {summary['gamewords']}")
+    else:
+        print("Extra gamewords-kontroll: ej använd (per-post-artefakten är primär källa)")
     print(f"Rapport: {summary['text']}")
 
 
