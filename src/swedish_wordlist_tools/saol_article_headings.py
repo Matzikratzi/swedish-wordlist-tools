@@ -9,12 +9,14 @@ def id_key(row: dict[str, Any]) -> tuple[str, str]:
 
 
 def is_plain_reference(row: dict[str, Any]) -> bool:
-    """Return True for SAOL's plain hänvisningsposter, written `(hv)` in ordkl.
+    """Return True for SAOL hänvisningsposter whose ordkl starts with `(hv)`.
 
-    The homonym number is deliberately ignored: reference entries can have
-    homonr=0 (e.g. inflected-form redirects) or homonr=1 (e.g. `acne -> akne`).
+    SAOL also annotates some references with information about the referenced
+    form, for example `(hv) <i>komp.</i>` for `färre -> få`. The homonym
+    number is deliberately ignored: reference entries can have homonr=0
+    (inflected-form redirects), homonr=1 (`acne -> akne`) or higher numbers.
     """
-    return str(row.get("ordkl") or "").strip().casefold() == "(hv)"
+    return str(row.get("ordkl") or "").strip().casefold().startswith("(hv)")
 
 
 def _heading(row: dict[str, Any]) -> str:
@@ -35,7 +37,7 @@ def materialize_heading_model(records: Iterable[dict[str, Any]]) -> dict[str, An
         plain_refs = [row for row in peers if is_plain_reference(row)]
         lexical = [row for row in peers if not is_plain_reference(row)]
 
-        # Plain (hv) rows are redirect/reference records, independent of homonr.
+        # (hv) rows are redirect/reference records, independent of homonr.
         for row in plain_refs:
             references.append({
                 "source_id": key[0],
@@ -45,6 +47,7 @@ def materialize_heading_model(records: Iterable[dict[str, Any]]) -> dict[str, An
                 "target_normalised_word": str(row.get("normaliserat_ord") or ""),
                 "ordkl": str(row.get("ordkl") or ""),
                 "upos": str(row.get("upos") or ""),
+                "text": str(row.get("text") or ""),
                 "source": str(row.get("source") or ""),
             })
 
