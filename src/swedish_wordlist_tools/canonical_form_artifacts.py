@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
-DEFAULT_NOUN_FORMS = Path("reports/saol14-noun-forms.jsonl")
-DEFAULT_ADJECTIVE_FORMS = Path("reports/saol14-adjective-forms.jsonl")
+from .artifact_paths import SAOL14_ADJECTIVE_FORMS, SAOL14_NOUN_FORMS
+
+DEFAULT_NOUN_FORMS = SAOL14_NOUN_FORMS
+DEFAULT_ADJECTIVE_FORMS = SAOL14_ADJECTIVE_FORMS
 
 ArtifactKey = tuple[str, str, str]
 
