@@ -56,6 +56,44 @@ class ClassifyFormMismatchesTests(unittest.TestCase):
         self.assertEqual(SALDO_MISSING_PLURAL, classification)
         self.assertIn("+t +n", rationale)
 
+    def test_classifies_exact_missing_r_plural_paradigm(self):
+        classification, rationale = classify_row(
+            self.row(
+                notation="+n +r",
+                lemma="beblandelse",
+                extra_from_saol=[
+                    "beblandelser",
+                    "beblandelsers",
+                    "beblandelserna",
+                    "beblandelsernas",
+                ],
+            )
+        )
+        self.assertEqual(SALDO_MISSING_PLURAL, classification)
+        self.assertIn("+n +r", rationale)
+
+    def test_classifies_exact_missing_er_plural_for_n_er(self):
+        classification, rationale = classify_row(
+            self.row(
+                notation="+n +er",
+                lemma="nivå",
+                extra_from_saol=["nivåer", "nivåers", "nivåerna", "nivåernas"],
+            )
+        )
+        self.assertEqual(SALDO_MISSING_PLURAL, classification)
+        self.assertIn("+n +er", rationale)
+
+    def test_classifies_exact_missing_er_plural_for_et_er(self):
+        classification, rationale = classify_row(
+            self.row(
+                notation="+et +er",
+                lemma="garn",
+                extra_from_saol=["garner", "garners", "garnerna", "garnernas"],
+            )
+        )
+        self.assertEqual(SALDO_MISSING_PLURAL, classification)
+        self.assertIn("+et +er", rationale)
+
     def test_classifies_missing_definite_zero_plural(self):
         classification, rationale = classify_row(
             self.row(
@@ -67,14 +105,32 @@ class ClassifyFormMismatchesTests(unittest.TestCase):
         self.assertEqual(SALDO_MISSING_DEFINITE_PLURAL, classification)
         self.assertIn("definite plural", rationale)
 
+    def test_classifies_missing_definite_zero_plural_na(self):
+        classification, rationale = classify_row(
+            self.row(
+                notation="+en; pl. +",
+                lemma="cent",
+                extra_from_saol=["centna", "centnas"],
+            )
+        )
+        self.assertEqual(SALDO_MISSING_DEFINITE_PLURAL, classification)
+        self.assertIn("definite plural", rationale)
+
     def test_does_not_hide_competing_plural(self):
         classification, _ = classify_row(
             self.row(missing_from_saol=["abstinenserar"])
         )
         self.assertEqual(UNCLASSIFIED, classification)
 
-    def test_does_not_generalise_to_unverified_notation(self):
-        classification, _ = classify_row(self.row(notation="+n +er"))
+    def test_does_not_accept_competing_singular_for_n_er(self):
+        classification, _ = classify_row(
+            self.row(
+                notation="+n +er",
+                lemma="autonomi",
+                extra_from_saol=["autonomier", "autonomiers", "autonomierna", "autonomiernas"],
+                missing_from_saol=["autonomien", "autonomiens"],
+            )
+        )
         self.assertEqual(UNCLASSIFIED, classification)
 
     def test_does_not_accept_partial_plural_difference(self):
