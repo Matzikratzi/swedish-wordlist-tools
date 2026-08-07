@@ -29,24 +29,28 @@ class GenerateNounFormsGroupedTests(unittest.TestCase):
         generated, summary = generate_grouped(rows)
         self.assertEqual(1, summary["variant_groups"])
         self.assertEqual({"parallel_branches": 1}, summary["variant_mode_counts"])
-        self.assertEqual(2, summary["variant_rows"])
-        for row in generated:
-            forms = {form["written_form"] for form in row["forms"]}
-            self.assertIn("bankväsen", forms)
-            self.assertIn("bankväsende", forms)
-            self.assertIn("bankväsendet", forms)
-            self.assertIn("bankväsenden", forms)
-            self.assertIn("bankväsendena", forms)
-            self.assertNotIn("bankväsent", forms)
-            self.assertNotIn("bankväsenn", forms)
-            self.assertEqual(["bankväsen", "bankväsende"], row["variant_lemmas"])
-            paradigms = {item["lemma"]: {form["written_form"] for form in item["forms"]} for item in row["variant_paradigms"]}
-            self.assertIn("bankväsen", paradigms["bankväsen"])
-            self.assertNotIn("bankväsende", paradigms["bankväsen"])
-            self.assertIn("bankväsende", paradigms["bankväsende"])
-            self.assertIn("bankväsenden", paradigms["bankväsende"])
+        self.assertEqual(2, summary["variant_source_rows"])
+        self.assertEqual(1, summary["variant_artifact_rows"])
+        self.assertEqual(1, len(generated))
+        row = generated[0]
+        self.assertEqual("5598", row["article_id"])
+        self.assertEqual(["1", "0"], row["source_homonym_numbers"])
+        forms = {form["written_form"] for form in row["forms"]}
+        self.assertIn("bankväsen", forms)
+        self.assertIn("bankväsende", forms)
+        self.assertIn("bankväsendet", forms)
+        self.assertIn("bankväsenden", forms)
+        self.assertIn("bankväsendena", forms)
+        self.assertNotIn("bankväsent", forms)
+        self.assertNotIn("bankväsenn", forms)
+        self.assertEqual(["bankväsen", "bankväsende"], row["variant_lemmas"])
+        paradigms = {item["lemma"]: {form["written_form"] for form in item["forms"]} for item in row["variant_paradigms"]}
+        self.assertIn("bankväsen", paradigms["bankväsen"])
+        self.assertNotIn("bankväsende", paradigms["bankväsen"])
+        self.assertIn("bankväsende", paradigms["bankväsende"])
+        self.assertIn("bankväsenden", paradigms["bankväsende"])
 
-    def test_abrovink_shared_notation_generates_both_lemmas(self) -> None:
+    def test_abrovink_shared_notation_generates_one_article_with_both_lemmas(self) -> None:
         rows = [
             {
                 "normaliserat_ord": "abrovink", "homonr": "1", "upos": "NOUN",
@@ -62,14 +66,14 @@ class GenerateNounFormsGroupedTests(unittest.TestCase):
         generated, summary = generate_grouped(rows)
         self.assertEqual(1, summary["variant_groups"])
         self.assertEqual({"shared_notation": 1}, summary["variant_mode_counts"])
-        for row in generated:
-            forms = {form["written_form"] for form in row["forms"]}
-            self.assertIn("abrovink", forms)
-            self.assertIn("abrovinken", forms)
-            self.assertIn("abrovinker", forms)
-            self.assertIn("abrovinsch", forms)
-            self.assertIn("abrovinschen", forms)
-            self.assertIn("abrovinscher", forms)
+        self.assertEqual(1, len(generated))
+        forms = {form["written_form"] for form in generated[0]["forms"]}
+        self.assertIn("abrovink", forms)
+        self.assertIn("abrovinken", forms)
+        self.assertIn("abrovinker", forms)
+        self.assertIn("abrovinsch", forms)
+        self.assertIn("abrovinschen", forms)
+        self.assertIn("abrovinscher", forms)
 
     def test_unrelated_noun_uses_existing_canonical_path(self) -> None:
         generated, summary = generate_grouped([
