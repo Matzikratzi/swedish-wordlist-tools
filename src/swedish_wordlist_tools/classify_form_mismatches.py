@@ -13,6 +13,7 @@ DEFAULT_TEXT = Path("reports/saol14-form-mismatch-classification.txt")
 TARGET_STATUS = "form_set_mismatch"
 
 SALDO_MISSING_PLURAL = "saldo_missing_plural"
+SALDO_MISSING_DEFINITE_PLURAL = "saldo_missing_definite_plural"
 UNCLASSIFIED = "unclassified"
 
 
@@ -32,22 +33,16 @@ def _relative_forms(lemma: str, values: Iterable[object]) -> tuple[str, ...]:
     return tuple(sorted(_relative_form(lemma, value) for value in values))
 
 
-def _expected_en_er_plural(lemma: str) -> set[str]:
-    return {
-        lemma + "er",
-        lemma + "ers",
-        lemma + "erna",
-        lemma + "ernas",
-    }
+def _suffixed_forms(lemma: str, suffixes: Iterable[str]) -> set[str]:
+    return {lemma + suffix for suffix in suffixes}
 
 
 def classify_row(row: dict[str, Any]) -> tuple[str, str]:
-    """Classify a mismatch only when the source difference is mechanically certain.
+    """Classify only mechanically certain SAOL–SALDO differences.
 
-    `+en +er` explicitly states the plural in SAOL. If the only forms present in
-    the canonical SAOL generation but absent from SALDO are exactly that plural
-    paradigm, SALDO is simply missing the SAOL-attested plural forms. No claim is
-    made about why SALDO omits them.
+    A classification says what differs between the sources; it does not change
+    the canonical SAOL generator and it does not speculate about why SALDO omits
+    a form.
     """
 
     if str(row.get("status", "")) != TARGET_STATUS:
@@ -59,16 +54,28 @@ def classify_row(row: dict[str, Any]) -> tuple[str, str]:
     extra = _casefolded(row.get("extra_from_saol", ()))
     missing = _casefolded(row.get("missing_from_saol", ()))
 
-    if (
-        upos == "NOUN"
-        and notation == "+en +er"
-        and lemma
-        and not missing
-        and extra == _expected_en_er_plural(lemma)
-    ):
+    if upos != "NOUN" or not lemma or missing:
+        return UNCLASSIFIED, "no_verified_general_classification"
+
+    explicit_plural_patterns = {
+        "+en +er": ("er", "ers", "erna", "ernas"),
+        "+en +ar": ("ar", "ars", "arna", "arnas"),
+        "+t +n": ("n", "ns", "na", "nas"),
+    }
+    plural_suffixes = explicit_plural_patterns.get(notation)
+    if plural_suffixes is not None and extra == _suffixed_forms(lemma, plural_suffixes):
         return (
             SALDO_MISSING_PLURAL,
-            "SAOL notation +en +er explicitly supplies plural +er; SALDO lacks exactly the plural paradigm",
+            f"SAOL notation {notation} explicitly supplies a plural paradigm; SALDO lacks exactly that paradigm",
+        )
+
+    if (
+        notation == "+et; pl. +"
+        and extra == _suffixed_forms(lemma, ("en", "ens"))
+    ):
+        return (
+            SALDO_MISSING_DEFINITE_PLURAL,
+            "SAOL notation +et; pl. + has zero plural and canonical definite plural +en; SALDO lacks exactly the definite plural forms",
         )
 
     return UNCLASSIFIED, "no_verified_general_classification"
