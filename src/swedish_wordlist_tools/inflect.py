@@ -19,15 +19,30 @@ EXPLICIT_PATTERN_GROUP = "explicit böjningsform"
 COMMON_PATTERNS: dict[str, tuple[str, ...]] = {
     "+en +er": ("en", "er"),
     "+en +ar": ("en", "ar"),
+    "+et +er": ("et", "er"),
     "+et; pl. +": ("et", ""),
     "+en": ("en",),
     "+t +a": ("t", "a"),
     "+de +t": ("de", "t"),
     "+t +n": ("t", "n"),
     "+n": ("n",),
+    "+n; pl. +": ("n", ""),
     "+et": ("et",),
+    "+t": ("t",),
     "+n +r": ("n", "r"),
     "+n +er": ("n", "er"),
+}
+
+_BRACKET_ANNOTATION_RE = re.compile(r"\[[^\[\]]*\]")
+
+# SAOL sometimes spells out the plural label even when the same paradigm is
+# elsewhere written in compact form. Canonicalize only established equivalent
+# notations after pronunciation brackets have been removed.
+_PATTERN_ALIASES = {
+    "+n; pl. +r": "+n +r",
+    "+n; pl. +er": "+n +er",
+    "+en; pl. +er": "+en +er",
+    "+en; pl. +ar": "+en +ar",
 }
 
 _LABELS = {
@@ -80,7 +95,16 @@ def normalise_pattern(value: Any) -> str | None:
     pattern = str(value).strip()
     if not pattern or pattern == "(null)":
         return None
-    return pattern
+
+    # SAOL's square brackets contain pronunciation and stress guidance. The
+    # spelling/morphology is described outside the brackets, so remove every
+    # complete bracket block before parsing while retaining the original text
+    # in source records and validation reports.
+    pattern = _BRACKET_ANNOTATION_RE.sub(" ", pattern)
+    pattern = re.sub(r"\s+", " ", pattern).strip()
+    pattern = re.sub(r"\s+([;,])", r"\1", pattern)
+    pattern = _PATTERN_ALIASES.get(pattern, pattern)
+    return pattern or None
 
 
 def _is_detached_suffix_row(lemma: str, pattern: str) -> bool:
@@ -205,10 +229,13 @@ def _known_common_msds(upos: str, pattern: str) -> tuple[Msd | None, ...]:
         return {
             "+en +er": (_CI, _SG_DEF_NOM, _PL_INDEF_NOM),
             "+en +ar": (_CI, _SG_DEF_NOM, _PL_INDEF_NOM),
+            "+et +er": (_CI, _SG_DEF_NOM, _PL_INDEF_NOM),
             "+et; pl. +": (_CI, _SG_DEF_NOM, _PL_INDEF_NOM),
             "+en": (_CI, _SG_DEF_NOM),
             "+n": (_CI, _SG_DEF_NOM),
+            "+n; pl. +": (_CI, _SG_DEF_NOM, _PL_INDEF_NOM),
             "+et": (_CI, _SG_DEF_NOM),
+            "+t": (_CI, _SG_DEF_NOM),
             "+n +r": (_CI, _SG_DEF_NOM, _PL_INDEF_NOM),
             "+n +er": (_CI, _SG_DEF_NOM, _PL_INDEF_NOM),
         }.get(pattern, ())
@@ -234,6 +261,7 @@ def _common_word_forms(lemma: str, pattern: str, upos: str) -> tuple[GeneratedWo
 
 def generate_forms(lemma: str, pattern: str | None) -> tuple[str, ...] | None:
     lemma = lemma.strip()
+    pattern = normalise_pattern(pattern)
     if not lemma or pattern is None or _is_detached_suffix_row(lemma, pattern):
         return None
     if pattern in COMMON_PATTERNS:

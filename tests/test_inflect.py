@@ -19,6 +19,22 @@ class InflectTests(unittest.TestCase):
         self.assertEqual(generate_forms("abakus", "+en +er"), ("abakus", "abakusen", "abakuser"))
         self.assertEqual(generate_forms("abbé", "+n +er"), ("abbé", "abbén", "abbéer"))
 
+    def test_strips_bracketed_pronunciation_annotations(self) -> None:
+        self.assertEqual("+n +er", normalise_pattern("+n +er [-o>r-]"))
+        self.assertEqual("+n +r", normalise_pattern("+n [-en]; pl. +r [-er]"))
+        self.assertEqual("+t", normalise_pattern("+t [-et]"))
+        self.assertEqual("+en +er", normalise_pattern("+en [bordå>n]; pl. +er"))
+
+    def test_generates_key_forms_from_bracketed_pronunciation_annotations(self) -> None:
+        self.assertEqual(
+            ("reaktor", "reaktorn", "reaktorer"),
+            generate_forms("reaktor", "+n +er [-o>r-]"),
+        )
+        self.assertEqual(
+            ("baguette", "baguetten", "baguetter"),
+            generate_forms("baguette", "+n [-en]; pl. +r [-er]"),
+        )
+
     def test_generates_adjective_and_verb_forms(self) -> None:
         self.assertEqual(generate_forms("abchazisk", "+t +a"), ("abchazisk", "abchaziskt", "abchaziska"))
         self.assertEqual(generate_forms("abonnera", "+de +t"), ("abonnera", "abonnerade", "abonnerat"))
@@ -115,7 +131,7 @@ class InflectTests(unittest.TestCase):
         self.assertIsNone(normalise_pattern("(null)"))
 
     def test_all_initial_patterns_are_registered(self) -> None:
-        self.assertEqual(len(COMMON_PATTERNS), 11)
+        self.assertEqual(len(COMMON_PATTERNS), 14)
 
     def test_generates_typed_noun_word_forms(self) -> None:
         entry = generate_entry({"normaliserat_ord": "aktie", "text": "+n +r", "upos": "NOUN"})

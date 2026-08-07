@@ -4,12 +4,13 @@ import argparse
 import json
 import unicodedata
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 from .saldo import read_saldo_analyses
 
 DEFAULT_INPUT = Path("data/processed/saol14-saldo-forms.txt")
 DEFAULT_SALDO = Path("data/raw/saldom.xml")
+DEFAULT_ADJECTIVE_FORMS = Path("reports/saol14-adjective-forms.jsonl")
 DEFAULT_OUTPUT = Path("data/processed/saol14-game-words.txt")
 DEFAULT_REPORT = Path("reports/saol14-game-words.json")
 
@@ -29,6 +30,24 @@ def standalone_saldo_forms(path: Path) -> set[str]:
             for form in analysis.word_forms:
                 if str(form.msd).casefold() not in {"ci", "cm", "sms"}:
                     result.add(form.written_form)
+    return result
+
+
+def canonical_adjective_forms(path: Path) -> set[str]:
+    """Read candidates from the canonical generated adjective artifact."""
+
+    result: set[str] = set()
+    if not path.exists():
+        return result
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            row: dict[str, Any] = json.loads(line)
+            for form in row.get("forms", ()):
+                written_form = str(form.get("written_form") or "")
+                if written_form:
+                    result.add(written_form)
     return result
 
 
@@ -79,15 +98,25 @@ def build_game_wordlist(
     saldo_path: Path = DEFAULT_SALDO,
     output_path: Path = DEFAULT_OUTPUT,
     report_path: Path = DEFAULT_REPORT,
+    adjective_forms_path: Path = DEFAULT_ADJECTIVE_FORMS,
 ) -> dict[str, object]:
-    allowed_forms = standalone_saldo_forms(saldo_path)
+    """Build the game list while preserving the historic four positional arguments."""
+
+    saldo_forms = standalone_saldo_forms(saldo_path)
+    adjective_forms = canonical_adjective_forms(adjective_forms_path)
+    allowed_forms = saldo_forms | adjective_forms
+
     source_lines = input_path.read_text(encoding="utf-8").splitlines()
+    source_lines.extend(sorted(adjective_forms, key=str.casefold))
     words, counts = filter_game_words(source_lines, allowed_forms)
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(words) + ("\n" if words else ""), encoding="utf-8")
     report: dict[str, object] = {
         "source": str(input_path),
         "saldo": str(saldo_path),
+        "canonical_adjective_forms": str(adjective_forms_path),
+        "canonical_adjective_form_count": len(adjective_forms),
         "output": str(output_path),
         **counts,
     }
@@ -97,9 +126,19 @@ def build_game_wordlist(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Build a tile-game wordlist from verified SAOL/SALDO forms")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Build a tile-game wordlist from verified SAOL/SALDO forms and the "
+            "canonical SAOL adjective-form artifact"
+        )
+    )
     parser.add_argument("input", nargs="?", type=Path, default=DEFAULT_INPUT)
     parser.add_argument("--saldo", type=Path, default=DEFAULT_SALDO)
+    parser.add_argument(
+        "--adjective-forms",
+        type=Path,
+        default=DEFAULT_ADJECTIVE_FORMS,
+    )
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
     return parser
@@ -107,8 +146,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
-    report = build_game_wordlist(args.input, args.saldo, args.output, args.report)
-    print(f"Verifierade SALDO-former: {report['source_forms']}")
+    report = build_game_wordlist(
+        input_path=args.input,
+        saldo_path=args.saldo,
+        output_path=args.output,
+        report_path=args.report,
+        adjective_forms_path=args.adjective_forms,
+    )
+    print(f"Källformer totalt: {report['source_forms']}")
+    print(f"Kanoniska adjektivformer: {report['canonical_adjective_form_count']}")
     print(f"Bortfiltrerade icke spelbara former: {report['rejected_non_playable_forms']}")
     print(f"Bortfiltrerade sammansättnings-/citatvarianter: {report['rejected_non_standalone_saldo_forms']}")
     print(f"Dubletter efter gemener/normalisering: {report['duplicate_after_normalisation']}")
