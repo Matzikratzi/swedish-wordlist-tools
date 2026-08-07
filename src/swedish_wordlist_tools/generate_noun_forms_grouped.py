@@ -11,7 +11,11 @@ from .compare_sources import _saol_upos
 from .generate_noun_forms import canonical_noun_row
 from .jsonl import read_jsonl
 from .materialize_saol_relations import DEFAULT_ARTICLES, DEFAULT_HEADINGS
-from .noun_article_variants import NounArticleVariantPlan, plan_noun_article_variants
+from .noun_article_variants import (
+    NounArticleVariantPlan,
+    clean_printed_word,
+    plan_noun_article_variants,
+)
 from .noun_paradigm import complete_noun_entry
 from .noun_relational_source import reconstruct_source_rows, relational_integrity_summary
 
@@ -37,13 +41,32 @@ def article_key(row: dict[str, Any]) -> tuple[str, str]:
     )
 
 
-def _form_dict(form: Any) -> dict[str, Any]:
-    return {
+def _form_dict(
+    form: Any,
+    *,
+    article_id: str | None = None,
+    heading: str | None = None,
+    variant_source: str | None = None,
+    variant_mode: str | None = None,
+    variant_lemma: str | None = None,
+) -> dict[str, Any]:
+    result = {
         "written_form": form.written_form,
         "msd": str(form.msd) if form.msd is not None else None,
         "kind": form.kind,
         "source_stage": "noun_interpreter" if form.kind in {"lemma", "interpreted_slot"} else "noun_completion",
     }
+    if article_id is not None:
+        result["article_id"] = article_id
+    if heading is not None:
+        result["heading"] = heading
+    if variant_source is not None:
+        result["variant_source"] = variant_source
+    if variant_mode is not None:
+        result["variant_mode"] = variant_mode
+    if variant_lemma is not None:
+        result["variant_lemma"] = variant_lemma
+    return result
 
 
 def _primary_source_row(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -52,13 +75,21 @@ def _primary_source_row(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return next((row for row in rows if str(row.get("homonr") or "") == "1"), rows[0])
 
 
+def _variant_source(plan: NounArticleVariantPlan, lemma: str) -> str:
+    return "primary" if lemma.casefold() == plan.normalised_lemma.casefold() else "alternative"
+
+
+def _variant_provenance(lemma: str, source: str) -> dict[str, str]:
+    return {"heading": lemma, "variant_lemma": lemma, "variant_source": source}
+
+
 def _article_variant_row(
     source_rows: list[dict[str, Any]],
     plan: NounArticleVariantPlan,
 ) -> dict[str, Any] | None:
     source_row = _primary_source_row(source_rows)
-    merged: list[Any] = []
-    seen: set[tuple[str, str | None]] = set()
+    aid = record_id(source_row)
+    merged: dict[tuple[str, str | None], dict[str, Any]] = {}
     paradigms: list[dict[str, Any]] = []
 
     for variant in plan.variants:
@@ -71,29 +102,61 @@ def _article_variant_row(
         if entry is None:
             return None
 
-        variant_forms = [_form_dict(form) for form in entry.word_forms]
+        source_kind = _variant_source(plan, variant.lemma)
+        provenance = _variant_provenance(variant.lemma, source_kind)
+        variant_forms = [
+            _form_dict(
+                form,
+                article_id=aid,
+                heading=variant.lemma,
+                variant_source=source_kind,
+                variant_mode=plan.mode,
+                variant_lemma=variant.lemma,
+            )
+            for form in entry.word_forms
+        ]
         paradigms.append(
             {
                 "lemma": variant.lemma,
                 "notation": variant.notation,
+                "variant_source": source_kind,
                 "forms": variant_forms,
             }
         )
         for form in entry.word_forms:
             marker = (form.written_form, str(form.msd) if form.msd is not None else None)
-            if marker not in seen:
-                seen.add(marker)
-                merged.append(form)
+            if marker not in merged:
+                row = _form_dict(
+                    form,
+                    article_id=aid,
+                    heading=variant.lemma,
+                    variant_source=source_kind,
+                    variant_mode=plan.mode,
+                    variant_lemma=variant.lemma,
+                )
+                row["variant_sources"] = [provenance]
+                merged[marker] = row
+                continue
+
+            row = merged[marker]
+            existing = row.setdefault("variant_sources", [])
+            if provenance not in existing:
+                existing.append(provenance)
+            if len(existing) > 1:
+                row["variant_source"] = "merged"
+                row["headings"] = [item["heading"] for item in existing]
+                row.pop("heading", None)
+                row.pop("variant_lemma", None)
 
     homonyms = sorted(
         {str(row.get("homonr") or "") for row in source_rows if str(row.get("homonr") or "")},
         key=lambda value: (value != "1", value),
     )
     return {
-        "article_id": record_id(source_row),
+        "article_id": aid,
         "completion_applied": True,
         # Compatibility union. variant_paradigms is the primary structure.
-        "forms": [_form_dict(form) for form in merged],
+        "forms": list(merged.values()),
         "homonym_number": "1" if "1" in homonyms else (homonyms[0] if homonyms else ""),
         "source_homonym_numbers": homonyms,
         "lemma": str(source_row.get("normaliserat_ord") or ""),
@@ -101,7 +164,7 @@ def _article_variant_row(
         "ordkl": str(source_row.get("ordkl") or ""),
         "pattern": str(source_row.get("text") or ""),
         "pattern_group": "article variant paradigms",
-        "record_id": record_id(source_row),
+        "record_id": aid,
         "source": str(source_row.get("source") or ""),
         "stycke": str(source_row.get("stycke") or ""),
         "upos": "NOUN",
@@ -109,6 +172,32 @@ def _article_variant_row(
         "variant_lemmas": [variant.lemma for variant in plan.variants],
         "variant_paradigms": paradigms,
     }
+
+
+def _annotate_single_row(row: dict[str, Any], source_row: dict[str, Any]) -> dict[str, Any]:
+    """Attach the same provenance schema to ordinary one-heading noun forms."""
+
+    aid = record_id(source_row)
+    heading = clean_printed_word(source_row.get("ord")) or str(row.get("lemma") or "")
+    lemma = str(row.get("lemma") or "")
+    provenance = _variant_provenance(heading, "primary")
+    annotated = dict(row)
+    annotated["article_id"] = aid
+    annotated["forms"] = []
+    for form in row.get("forms", []):
+        item = dict(form)
+        item.update(
+            {
+                "article_id": aid,
+                "heading": heading,
+                "variant_source": "primary",
+                "variant_mode": "single",
+                "variant_lemma": lemma,
+                "variant_sources": [provenance],
+            }
+        )
+        annotated["forms"].append(item)
+    return annotated
 
 
 def generate_grouped(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -142,7 +231,7 @@ def generate_grouped(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, 
         for source_row in rows:
             row, _comparison = canonical_noun_row(source_row)
             if row is not None:
-                output.append(row)
+                output.append(_annotate_single_row(row, source_row))
 
     output.sort(key=lambda row: (str(row["lemma"]).casefold(), str(row["homonym_number"]), str(row["record_id"])))
     summary = {
