@@ -25,22 +25,26 @@ def _artifact_index(rows: Iterable[dict[str, Any]]) -> dict[tuple[str, str], lis
 
 
 def _source_details(form: dict[str, Any]) -> list[dict[str, str]]:
-    sources = form.get("variant_sources")
-    if isinstance(sources, list) and sources:
-        return [
-            {
-                "heading": str(item.get("heading") or ""),
-                "variant_lemma": str(item.get("variant_lemma") or ""),
-                "variant_source": str(item.get("variant_source") or ""),
-            }
-            for item in sources
-        ]
+    """Return canonical noun-form provenance from ``generated_from`` only.
+
+    ``variant_source`` and ``variant_sources`` remain in the noun artifact for
+    backwards compatibility, but this analysis deliberately no longer reads
+    them.  Missing ``generated_from`` is therefore visible as missing provenance
+    instead of being silently hidden by a legacy fallback.
+    """
+
+    sources = form.get("generated_from")
+    if not isinstance(sources, list) or not sources:
+        return []
     return [
         {
-            "heading": str(form.get("heading") or ""),
-            "variant_lemma": str(form.get("variant_lemma") or ""),
-            "variant_source": str(form.get("variant_source") or "unknown"),
+            "article_id": str(item.get("article_id") or ""),
+            "heading": str(item.get("heading") or ""),
+            "heading_type": str(item.get("heading_type") or ""),
+            "variant_lemma": str(item.get("variant_lemma") or ""),
+            "variant_mode": str(item.get("variant_mode") or ""),
         }
+        for item in sources
     ]
 
 
@@ -69,19 +73,19 @@ def _reason(
     if match_method == "article_variant_lemmas_same_upos_partial":
         return "partial_variant_saldo_coverage"
 
-    source_kinds = {
-        source.get("variant_source", "")
+    heading_types = {
+        source.get("heading_type", "")
         for sources in extra_provenance.values()
         for source in sources
-        if source.get("variant_source")
+        if source.get("heading_type")
     }
-    if source_kinds and source_kinds <= {"alternative"}:
+    if heading_types and heading_types <= {"alternative"}:
         return "alternative_variant_forms_not_in_saldo"
-    if "merged" in source_kinds or len(source_kinds) > 1:
+    if len(heading_types) > 1:
         return "mixed_variant_form_difference"
-    if source_kinds == {"primary"}:
+    if heading_types == {"primary"}:
         return "primary_variant_form_difference"
-    if missing_forms and not extra_provenance:
+    if missing_forms and not any(extra_provenance.values()):
         return "saldo_has_additional_forms"
     return "other_variant_paradigm_difference"
 
@@ -105,6 +109,7 @@ def build_residuals(
     residuals: list[dict[str, Any]] = []
     resolved_rows = 0
     new_rows = 0
+    forms_missing_generated_from = 0
 
     for (record_id, lemma), rows in sorted(groups.items(), key=lambda item: (item[0][1].casefold(), item[0][0])):
         newly_bad = [
@@ -130,6 +135,8 @@ def build_residuals(
         candidates = artifacts.get((record_id, lemma), [])
         artifact = candidates[0] if candidates else None
         provenance = _extra_form_provenance(artifact, extra)
+        missing_provenance = [form for form, sources in provenance.items() if not sources]
+        forms_missing_generated_from += len(missing_provenance)
         method = str(exemplar.get("after_match_method") or "")
         reason = _reason(
             match_method=method,
@@ -153,6 +160,7 @@ def build_residuals(
                 "extra_from_saol": sorted(extra, key=str.casefold),
                 "missing_from_saol": sorted(missing, key=str.casefold),
                 "extra_form_provenance": provenance,
+                "extra_forms_missing_generated_from": missing_provenance,
                 "reason": reason,
             }
         )
@@ -169,6 +177,9 @@ def build_residuals(
         "net_identity_holds": new_rows - resolved_rows == int(delta_summary.get("net_delta", 0)),
         "reason_counts": dict(sorted(reason_counts.items())),
         "variant_mode_counts": dict(sorted(mode_counts.items())),
+        "provenance_schema": "generated_from",
+        "extra_forms_missing_generated_from": forms_missing_generated_from,
+        "generated_from_complete_for_residual_extras": forms_missing_generated_from == 0,
     }
     return summary, residuals
 
@@ -184,6 +195,9 @@ def render(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
         f"Netto: {summary['net_delta']:+d}",
         f"Nettoidentitet  nya-lösta=netto: {'JA' if summary['net_identity_holds'] else 'NEJ'}",
         f"Nya residualartiklar efter sammanslagning av duplicerade rå-rader: {summary['new_residual_articles']}",
+        f"Provenienskälla: {summary['provenance_schema']}",
+        f"SAOL-extra utan generated_from: {summary['extra_forms_missing_generated_from']}",
+        f"generated_from komplett för residualernas SAOL-extra: {'JA' if summary['generated_from_complete_for_residual_extras'] else 'NEJ'}",
         "",
         "Orsaksgrupper:",
     ]
@@ -207,17 +221,17 @@ def render(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
                 "SALDO-former: " + (", ".join(row["saldo_forms"]) or "–"),
                 "Finns bara i SAOL: " + (", ".join(row["extra_from_saol"]) or "–"),
                 "Finns bara i SALDO: " + (", ".join(row["missing_from_saol"]) or "–"),
-                "Proveniens för SAOL-extra:",
+                "generated_from för SAOL-extra:",
             ]
         )
         if not row["extra_form_provenance"]:
             lines.append("  –")
         for form, sources in row["extra_form_provenance"].items():
             if not sources:
-                lines.append(f"  {form}: okänd")
+                lines.append(f"  {form}: SAKNAS")
                 continue
             rendered_sources = ", ".join(
-                f"{source['heading']} [{source['variant_source']}]"
+                f"{source['heading']} [{source['heading_type']}] article_id={source['article_id']}"
                 for source in sources
             )
             lines.append(f"  {form}: {rendered_sources}")
@@ -249,7 +263,7 @@ def analyze(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Analyze newly introduced residual SAOL/SALDO noun mismatches with form provenance"
+        description="Analyze newly introduced residual SAOL/SALDO noun mismatches using generated_from provenance"
     )
     parser.add_argument("--saol", type=Path, default=DEFAULT_SAOL)
     parser.add_argument("--saldo", type=Path, default=DEFAULT_SALDO_FORMS)
@@ -271,6 +285,8 @@ def main() -> None:
     print(f"Netto: {summary['net_delta']:+d}")
     print(f"Nya residualartiklar: {summary['new_residual_articles']}")
     print(f"Nettoidentitet: {'JA' if summary['net_identity_holds'] else 'NEJ'}")
+    print(f"Proveniens: {summary['provenance_schema']}")
+    print(f"SAOL-extra utan generated_from: {summary['extra_forms_missing_generated_from']}")
     print(f"Text: {args.text}")
     print(f"JSONL: {args.jsonl}")
 
