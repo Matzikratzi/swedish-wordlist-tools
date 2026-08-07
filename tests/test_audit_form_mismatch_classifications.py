@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 
 from swedish_wordlist_tools.audit_form_mismatch_classifications import (
     NOT_APPLICABLE,
     STALE_VALIDATION,
     VERIFIED,
     audit_row,
+    resolve_gamewords_path,
 )
 
 
@@ -78,6 +81,19 @@ class AuditFormMismatchClassificationsTests(unittest.TestCase):
             set(),
         )
         self.assertEqual(NOT_APPLICABLE, audited["classification_audit"])
+
+    def test_finds_unique_gamewords_file_recursively(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            expected = root / "nested" / "exports" / "saol14-gamewords.txt"
+            expected.parent.mkdir(parents=True)
+            expected.write_text("apanage\n", encoding="utf-8")
+            self.assertEqual(expected, resolve_gamewords_path(root=root))
+
+    def test_missing_gamewords_file_has_actionable_error(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            with self.assertRaisesRegex(FileNotFoundError, "find .*saol14-gamewords"):
+                resolve_gamewords_path(root=Path(tempdir))
 
 
 if __name__ == "__main__":
