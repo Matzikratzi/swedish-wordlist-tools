@@ -14,8 +14,10 @@ from .jsonl import read_jsonl
 from .noun_paradigm import complete_noun_entry
 
 DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
+# This command is now the canonical noun-artifact writer. If the artifact already
+# exists, it is read first as the baseline so the impact report remains useful.
 DEFAULT_BASELINE = Path("reports/saol14-noun-forms.jsonl")
-DEFAULT_JSONL = Path("reports/saol14-noun-forms-grouped.jsonl")
+DEFAULT_JSONL = Path("reports/saol14-noun-forms.jsonl")
 DEFAULT_TEXT = Path("reports/saol14-noun-forms-grouped-impact.txt")
 DEFAULT_SUMMARY = Path("reports/saol14-noun-forms-grouped-summary.json")
 
@@ -121,7 +123,7 @@ def generate_grouped(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, 
     output: list[dict[str, Any]] = []
     changed_groups = 0
     changed_rows = 0
-    for rid, rows in groups.items():
+    for _rid, rows in groups.items():
         bases = _proven_branch_bases(rows)
         if bases is not None:
             changed_groups += 1
@@ -205,7 +207,9 @@ def _write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Prototype grouped noun generation for proven ord-variant branches")
+    parser = argparse.ArgumentParser(
+        description="Generate the canonical SAOL noun artifact with proven grouped ord-variant branches"
+    )
     parser.add_argument("saol", nargs="?", type=Path, default=DEFAULT_SAOL)
     parser.add_argument("--baseline", type=Path, default=DEFAULT_BASELINE)
     parser.add_argument("--jsonl", type=Path, default=DEFAULT_JSONL)
@@ -213,18 +217,22 @@ def main() -> None:
     parser.add_argument("--summary", type=Path, default=DEFAULT_SUMMARY)
     args = parser.parse_args()
 
-    rows, summary = generate_grouped(read_jsonl(args.saol))
-    _write_jsonl(args.jsonl, rows)
+    # Read the old canonical artifact before overwriting it. This makes the
+    # command safe when --baseline and --jsonl intentionally point to the same
+    # official path.
     baseline_rows = list(read_jsonl(args.baseline)) if args.baseline.exists() else []
+    rows, summary = generate_grouped(read_jsonl(args.saol))
     impact = compare_to_baseline(rows, baseline_rows) if baseline_rows else []
+
+    _write_jsonl(args.jsonl, rows)
     args.text.parent.mkdir(parents=True, exist_ok=True)
     args.text.write_text(render_impact(summary, impact), encoding="utf-8")
-    summary = dict(summary, changed_against_baseline=len(impact))
+    summary = dict(summary, changed_against_baseline=len(impact), artifact=str(args.jsonl))
     args.summary.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"Påverkade artikelgrupper: {summary['proven_variant_groups']}")
     print(f"Påverkade rader: {summary['proven_variant_rows']}")
     print(f"Ändrade mot baseline: {summary['changed_against_baseline']}")
-    print(f"Artefakt: {args.jsonl}")
+    print(f"Officiell noun-artefakt: {args.jsonl}")
     print(f"Impact: {args.text}")
 
 
