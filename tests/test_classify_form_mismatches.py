@@ -226,6 +226,36 @@ class ClassifyFormMismatchesTests(unittest.TestCase):
         )
         self.assertEqual(UNCLASSIFIED, classification)
 
+    def test_exact_form_set_is_not_emitted_for_classification(self):
+        rows = classify_rows(
+            [
+                self.row(
+                    status="exact_form_set",
+                    notation="+t [-et]; pl. +",
+                    lemma="bandage",
+                    generated_forms=[
+                        "bandage",
+                        "bandagen",
+                        "bandagens",
+                        "bandages",
+                        "bandaget",
+                        "bandagets",
+                    ],
+                    saldo_forms=[
+                        "bandage",
+                        "bandagen",
+                        "bandagens",
+                        "bandages",
+                        "bandaget",
+                        "bandagets",
+                    ],
+                    extra_from_saol=[],
+                    missing_from_saol=[],
+                )
+            ]
+        )
+        self.assertEqual([], rows)
+
     def test_summary_counts_classified_and_unclassified(self):
         rows = classify_rows(
             [
