@@ -10,6 +10,7 @@ DEFAULT_NOUN_FORMS = SAOL14_NOUN_FORMS
 DEFAULT_ADJECTIVE_FORMS = SAOL14_ADJECTIVE_FORMS
 
 ArtifactKey = tuple[str, str, str]
+VariantParadigms = dict[str, set[str]]
 
 
 def record_key(record: dict[str, Any]) -> ArtifactKey:
@@ -45,41 +46,69 @@ def artifact_variant_lemmas(row: dict[str, Any]) -> tuple[str, ...]:
     return (lemma,) if lemma else ()
 
 
-def read_artifact(path: Path) -> dict[ArtifactKey, set[str]]:
-    result: dict[ArtifactKey, set[str]] = {}
+def artifact_variant_paradigms(row: dict[str, Any]) -> VariantParadigms:
+    result: VariantParadigms = {}
+    for paradigm in row.get("variant_paradigms", ()):
+        lemma = str(paradigm.get("lemma") or "").strip()
+        if not lemma:
+            continue
+        result[lemma] = {
+            str(form.get("written_form") or "")
+            for form in paradigm.get("forms", ())
+            if str(form.get("written_form") or "")
+        }
+    if result:
+        return result
+    lemma = str(row.get("lemma") or "").strip()
+    return {lemma: artifact_forms(row)} if lemma else {}
+
+
+def _read_rows(path: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
     with path.open(encoding="utf-8") as handle:
         for number, line in enumerate(handle, start=1):
             if not line.strip():
                 continue
             try:
-                row = json.loads(line)
+                rows.append(json.loads(line))
             except json.JSONDecodeError as error:
                 raise ValueError(f"Ogiltig JSON på rad {number} i {path}") from error
-            key = artifact_row_key(row)
-            forms = artifact_forms(row)
-            previous = result.get(key)
-            if previous is not None and previous != forms:
-                raise ValueError(f"Motstridiga artefaktrader för {key} i {path}")
-            result[key] = forms
+    return rows
+
+
+def read_artifact(path: Path) -> dict[ArtifactKey, set[str]]:
+    result: dict[ArtifactKey, set[str]] = {}
+    for row in _read_rows(path):
+        key = artifact_row_key(row)
+        forms = artifact_forms(row)
+        previous = result.get(key)
+        if previous is not None and previous != forms:
+            raise ValueError(f"Motstridiga artefaktrader för {key} i {path}")
+        result[key] = forms
     return result
 
 
 def read_artifact_variant_lemmas(path: Path) -> dict[ArtifactKey, tuple[str, ...]]:
     result: dict[ArtifactKey, tuple[str, ...]] = {}
-    with path.open(encoding="utf-8") as handle:
-        for number, line in enumerate(handle, start=1):
-            if not line.strip():
-                continue
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError as error:
-                raise ValueError(f"Ogiltig JSON på rad {number} i {path}") from error
-            key = artifact_row_key(row)
-            lemmas = artifact_variant_lemmas(row)
-            previous = result.get(key)
-            if previous is not None and previous != lemmas:
-                raise ValueError(f"Motstridiga variantlemma för {key} i {path}")
-            result[key] = lemmas
+    for row in _read_rows(path):
+        key = artifact_row_key(row)
+        lemmas = artifact_variant_lemmas(row)
+        previous = result.get(key)
+        if previous is not None and previous != lemmas:
+            raise ValueError(f"Motstridiga variantlemma för {key} i {path}")
+        result[key] = lemmas
+    return result
+
+
+def read_artifact_variant_paradigms(path: Path) -> dict[ArtifactKey, VariantParadigms]:
+    result: dict[ArtifactKey, VariantParadigms] = {}
+    for row in _read_rows(path):
+        key = artifact_row_key(row)
+        paradigms = artifact_variant_paradigms(row)
+        previous = result.get(key)
+        if previous is not None and previous != paradigms:
+            raise ValueError(f"Motstridiga variantparadigm för {key} i {path}")
+        result[key] = paradigms
     return result
 
 
@@ -110,3 +139,10 @@ def variant_lemmas_from_artifact(
     variant_lemmas: dict[ArtifactKey, tuple[str, ...]],
 ) -> tuple[str, ...] | None:
     return variant_lemmas.get(record_key(record))
+
+
+def variant_paradigms_from_artifact(
+    record: dict[str, Any],
+    variant_paradigms: dict[ArtifactKey, VariantParadigms],
+) -> VariantParadigms | None:
+    return variant_paradigms.get(record_key(record))
