@@ -37,6 +37,41 @@ class AnalyzeFormMismatchesTests(unittest.TestCase):
         self.assertEqual(["+erna"], group["extra_pattern"])
         self.assertEqual(["+ar"], group["missing_pattern"])
 
+    def test_exact_form_set_never_becomes_a_mismatch(self) -> None:
+        summary = analyse_rows(
+            [
+                {
+                    "status": "exact_form_set",
+                    "lemma": "bandage",
+                    "homonym_number": "1",
+                    "upos": "NOUN",
+                    "notation": "+t [-et]; pl. +",
+                    "match_method": "lemma_same_upos",
+                    "generated_forms": [
+                        "bandage",
+                        "bandagen",
+                        "bandagens",
+                        "bandages",
+                        "bandaget",
+                        "bandagets",
+                    ],
+                    "saldo_forms": [
+                        "bandage",
+                        "bandagen",
+                        "bandagens",
+                        "bandages",
+                        "bandaget",
+                        "bandagets",
+                    ],
+                    "extra_from_saol": [],
+                    "missing_from_saol": [],
+                }
+            ]
+        )
+        self.assertEqual(0, summary["records"])
+        self.assertEqual({}, summary["upos_counts"])
+        self.assertEqual([], summary["groups"])
+
     def test_renders_dimensions_and_examples(self) -> None:
         summary = analyse_rows([
             {
