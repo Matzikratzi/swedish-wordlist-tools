@@ -14,6 +14,7 @@ TARGET_STATUS = "form_set_mismatch"
 
 SALDO_MISSING_PLURAL = "saldo_missing_plural"
 SALDO_MISSING_DEFINITE_PLURAL = "saldo_missing_definite_plural"
+SALDO_MISSING_DEFINITE_SINGULAR = "saldo_missing_definite_singular"
 UNCLASSIFIED = "unclassified"
 
 
@@ -84,6 +85,23 @@ def classify_row(row: dict[str, Any]) -> tuple[str, str]:
         return (
             SALDO_MISSING_DEFINITE_PLURAL,
             f"SAOL notation {notation} has zero plural and canonical definite plural forms; SALDO lacks exactly those definite plural forms",
+        )
+
+    definite_singular_patterns = {
+        "+en +er": ("en", "ens"),
+        "+en": ("en", "ens"),
+        "+et; pl. +": ("et", "ets"),
+        "+en +er _ +n +er": ("n", "ns"),
+        "+et el. +en": ("en", "ens"),
+    }
+    definite_singular_suffixes = definite_singular_patterns.get(notation)
+    if (
+        definite_singular_suffixes is not None
+        and extra == _suffixed_forms(lemma, definite_singular_suffixes)
+    ):
+        return (
+            SALDO_MISSING_DEFINITE_SINGULAR,
+            f"SAOL notation {notation} explicitly supplies the definite singular form; SALDO lacks exactly that form and its genitive",
         )
 
     return UNCLASSIFIED, "no_verified_general_classification"
