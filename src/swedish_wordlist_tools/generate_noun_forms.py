@@ -15,10 +15,12 @@ from .saol_notation import parse_form_operation
 from .saol_row_interpreter import interpret_noun_row
 
 DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
-DEFAULT_JSONL = Path("reports/saol14-noun-forms.jsonl")
-DEFAULT_SUMMARY = Path("reports/saol14-noun-forms-summary.json")
-DEFAULT_COMPARISON = Path("reports/saol14-noun-forms-comparison.jsonl")
-DEFAULT_COMPARISON_TEXT = Path("reports/saol14-noun-forms-comparison.txt")
+# Row-wise generation is retained for diagnostics/regression comparison only.
+# The official noun artifact is written by generate_noun_forms_grouped.
+DEFAULT_JSONL = Path("reports/saol14-noun-forms-rowwise.jsonl")
+DEFAULT_SUMMARY = Path("reports/saol14-noun-forms-rowwise-summary.json")
+DEFAULT_COMPARISON = Path("reports/saol14-noun-forms-rowwise-comparison.jsonl")
+DEFAULT_COMPARISON_TEXT = Path("reports/saol14-noun-forms-rowwise-comparison.txt")
 
 _LEGACY_COMMENT_TOKENS = frozenset(
     {
@@ -78,7 +80,7 @@ def _unsupported_comparison(record: dict[str, Any]) -> dict[str, Any]:
 
 def _comparison_status(legacy: set[str], canonical: set[str]) -> str:
     if legacy == canonical:
-        return "unchanged"
+        return "same"
     if legacy < canonical:
         return "more_forms"
     if canonical < legacy:
@@ -86,173 +88,82 @@ def _comparison_status(legacy: set[str], canonical: set[str]) -> str:
     return "changed_forms"
 
 
-def _direct_operation_reasons(record: dict[str, Any]) -> dict[str, str]:
-    row = interpret_noun_row(record)
-    if row is None:
-        return {}
-    reasons: dict[str, str] = {}
-    for key_form in row.key_forms:
-        if key_form.slot == "lemma":
-            reasons[key_form.written_form.casefold()] = "lemma"
-            continue
-        operation = parse_form_operation(key_form.source)
-        reasons[key_form.written_form.casefold()] = (
-            operation.kind.value if operation is not None else "interpreted_slot"
-        )
-    return reasons
+def _is_legacy_comment_token(form: str) -> bool:
+    return form.casefold() in _LEGACY_COMMENT_TOKENS
 
 
-def _change_reasons(
-    record: dict[str, Any],
-    canonical_forms: tuple[GeneratedWordForm, ...],
-    added: set[str],
-) -> dict[str, str]:
-    direct = _direct_operation_reasons(record)
-    reasons: dict[str, str] = {}
-    for form in canonical_forms:
-        if form.written_form not in added:
-            continue
-        reason = direct.get(form.written_form.casefold())
-        if reason is None:
-            reason = {
-                "derived_genitive": "derived_genitive",
-                "derived_definite_plural": "derived_definite_plural",
-            }.get(form.kind, form.kind)
-        reasons[form.written_form] = reason
-    return dict(sorted(reasons.items(), key=lambda item: item[0].casefold()))
-
-
-def _normalised_words(value: str) -> tuple[str, ...]:
-    return tuple(part for part in re.split(r"\s+", value.casefold().strip()) if part)
-
-
-def _has_suffix_on_wrong_phrase_word(form: str, lemma: str) -> bool:
-    """Detect the legacy bug that appended a noun suffix to phrase word one."""
-
-    lemma_words = _normalised_words(lemma)
-    form_words = _normalised_words(form)
-    if len(lemma_words) < 2 or len(form_words) != len(lemma_words):
-        return False
-    return (
-        form_words[1:] == lemma_words[1:]
-        and form_words[0].startswith(lemma_words[0])
-        and len(form_words[0]) > len(lemma_words[0])
+def _is_legacy_malformed_form(form: str) -> bool:
+    return bool(
+        re.search(r"[<>{}\[\]|_]", form)
+        or form.startswith(("+", "-"))
+        or form.endswith(("+", "-"))
+        or "  " in form
     )
 
 
-def _is_single_duplicated_segment(form: str, canonical: str) -> bool:
-    """Return true when deleting one adjacent duplicate repairs the old form."""
-
-    old = form.casefold()
-    new = canonical.casefold()
-    if len(old) <= len(new):
-        return False
-    excess = len(old) - len(new)
-    for split in range(len(new) + 1):
-        suffix_length = len(new) - split
-        if not old.startswith(new[:split]):
-            continue
-        if suffix_length and not old.endswith(new[split:]):
-            continue
-        end = len(old) - suffix_length if suffix_length else len(old)
-        duplicated = old[split:end]
-        if len(duplicated) != excess or not duplicated:
-            continue
-        if new[:split].endswith(duplicated) or new[split:].startswith(duplicated):
-            return True
-    return False
+def _change_reason(form: GeneratedWordForm) -> str:
+    return str(form.kind or "unknown")
 
 
-def _removed_form_reason(
-    form: str,
-    lemma: str,
-    added_forms: set[str],
-) -> str:
-    normalized = re.sub(r"[^0-9a-zåäöéü-]+", "", form.casefold())
-    if normalized in _LEGACY_COMMENT_TOKENS:
-        return "legacy_comment_token"
-    folded_lemma = lemma.casefold()
-    if normalized and len(normalized) < len(folded_lemma) and folded_lemma.startswith(normalized):
-        return "legacy_truncated_token"
-    if _has_suffix_on_wrong_phrase_word(form, lemma):
-        return "legacy_malformed_form"
-    if any(_is_single_duplicated_segment(form, candidate) for candidate in added_forms):
-        return "legacy_malformed_form"
-    return "semantic_difference"
-
-
-def _removed_form_reasons(
-    removed: set[str],
-    lemma: str,
-    added_forms: set[str],
-) -> dict[str, str]:
-    return dict(
-        sorted(
-            (
-                (form, _removed_form_reason(form, lemma, added_forms))
-                for form in removed
-            ),
-            key=lambda item: item[0].casefold(),
-        )
-    )
-
-
-def canonical_noun_row(record: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+def canonical_noun_row(record: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     if _saol_upos(record) != "NOUN":
-        return None, None
-
-    canonical = complete_noun_entry(record, None)
-    if canonical is None:
         return None, _unsupported_comparison(record)
 
-    legacy = generate_entry(record)
-    legacy_forms = tuple(legacy.word_forms if legacy is not None else ())
-    canonical_forms = tuple(canonical.word_forms)
-    legacy_written = {form.written_form for form in legacy_forms}
-    canonical_written = {form.written_form for form in canonical_forms}
-    added = canonical_written - legacy_written
-    removed = legacy_written - canonical_written
-    removed_reasons = _removed_form_reasons(removed, canonical.lemma, added)
-    legacy_noise = {
-        form for form, reason in removed_reasons.items() if reason.startswith("legacy_")
-    }
-    legacy_malformed = {
-        form
-        for form, reason in removed_reasons.items()
-        if reason == "legacy_malformed_form"
-    }
-    semantic_removed = removed - legacy_noise
+    entry = complete_noun_entry(record, None)
+    if entry is None:
+        return None, _unsupported_comparison(record)
 
-    row = {
+    canonical_forms = list(entry.word_forms)
+    canonical_set = {form.written_form for form in canonical_forms}
+
+    legacy_entry = generate_entry(record)
+    legacy_forms = list(legacy_entry.word_forms) if legacy_entry is not None else []
+    legacy_set = {form.written_form for form in legacy_forms}
+
+    removed = sorted(legacy_set - canonical_set, key=str.casefold)
+    added = sorted(canonical_set - legacy_set, key=str.casefold)
+    legacy_noise = sorted((form for form in removed if _is_legacy_comment_token(form)), key=str.casefold)
+    malformed = sorted((form for form in removed if _is_legacy_malformed_form(form)), key=str.casefold)
+    semantic = sorted(set(removed) - set(legacy_noise) - set(malformed), key=str.casefold)
+
+    reason_by_form = {form.written_form: _change_reason(form) for form in canonical_forms if form.written_form in added}
+    comparison = {
         "record_id": _record_id(record),
-        "lemma": canonical.lemma,
+        "lemma": str(record.get("normaliserat_ord", "")),
         "homonym_number": str(record.get("homonr", "")),
-        "upos": "NOUN",
-        "ordkl": str(record.get("ordkl", "")),
         "notation": str(record.get("text", "")),
         "stycke": str(record.get("stycke", "")),
-        "source": str(record.get("source", "")),
-        "pattern": canonical.pattern,
-        "pattern_group": canonical.pattern_group,
-        "completion_applied": any(form.kind not in {"lemma", "interpreted_slot"} for form in canonical_forms),
-        "forms": [_form_dict(form) for form in canonical_forms],
+        "status": _comparison_status(legacy_set, canonical_set),
+        "legacy_forms": sorted(legacy_set, key=str.casefold),
+        "canonical_forms": sorted(canonical_set, key=str.casefold),
+        "added_forms": added,
+        "removed_forms": removed,
+        "change_reasons": reason_by_form,
+        "removed_form_reasons": {
+            form: (
+                "legacy_comment_token" if form in legacy_noise else
+                "legacy_malformed_form" if form in malformed else
+                "semantic_difference"
+            )
+            for form in removed
+        },
+        "legacy_noise_removed_forms": legacy_noise,
+        "legacy_malformed_removed_forms": malformed,
+        "semantic_removed_forms": semantic,
     }
-    comparison = {
-        "record_id": row["record_id"],
-        "lemma": row["lemma"],
-        "homonym_number": row["homonym_number"],
-        "notation": row["notation"],
-        "stycke": row["stycke"],
-        "status": _comparison_status(legacy_written, canonical_written),
-        "legacy_forms": sorted(legacy_written, key=str.casefold),
-        "canonical_forms": sorted(canonical_written, key=str.casefold),
-        "added_forms": sorted(added, key=str.casefold),
-        "removed_forms": sorted(removed, key=str.casefold),
-        "change_reasons": _change_reasons(record, canonical_forms, added),
-        "removed_form_reasons": removed_reasons,
-        "legacy_noise_removed_forms": sorted(legacy_noise, key=str.casefold),
-        "legacy_malformed_removed_forms": sorted(legacy_malformed, key=str.casefold),
-        "semantic_removed_forms": sorted(semantic_removed, key=str.casefold),
+    row = {
+        "completion_applied": True,
+        "forms": [_form_dict(form) for form in canonical_forms],
+        "homonym_number": str(record.get("homonr") or ""),
+        "lemma": str(record.get("normaliserat_ord") or ""),
+        "notation": str(record.get("text") or ""),
+        "ordkl": str(record.get("ordkl") or ""),
+        "pattern": str(record.get("text") or ""),
+        "pattern_group": "interpreted noun slots",
+        "record_id": _record_id(record),
+        "source": str(record.get("source") or ""),
+        "stycke": str(record.get("stycke") or ""),
+        "upos": "NOUN",
     }
     return row, comparison
 
@@ -261,72 +172,39 @@ def generate_noun_artifact(records: Iterable[dict[str, Any]]) -> tuple[list[dict
     rows: list[dict[str, Any]] = []
     comparisons: list[dict[str, Any]] = []
     noun_records = 0
+
     for record in records:
         if _saol_upos(record) != "NOUN":
             continue
         noun_records += 1
         row, comparison = canonical_noun_row(record)
+        comparisons.append(comparison)
         if row is not None:
             rows.append(row)
-        if comparison is not None:
-            comparisons.append(comparison)
 
-    rows.sort(key=lambda row: (str(row["lemma"]).casefold(), str(row["homonym_number"]), str(row["record_id"])))
-    comparisons.sort(key=lambda row: (str(row["status"]), str(row["lemma"]).casefold(), str(row["record_id"])))
-    status_counts = Counter(str(row["status"]) for row in comparisons)
-    reason_counts = Counter(
-        str(reason)
-        for row in comparisons
-        for reason in row.get("change_reasons", {}).values()
-    )
-    removed_reason_counts = Counter(
-        str(reason)
-        for row in comparisons
-        for reason in row.get("removed_form_reasons", {}).values()
-    )
-    form_kind_counts = Counter(str(form["kind"]) for row in rows for form in row["forms"])
-    stage_counts = Counter(str(form["source_stage"]) for row in rows for form in row["forms"])
-    canonical_written = {
-        str(form["written_form"]).casefold()
-        for row in rows for form in row["forms"] if form.get("written_form")
-    }
-    added_written = {
-        str(form).casefold() for row in comparisons for form in row.get("added_forms", [])
-    }
-    removed_written = {
-        str(form).casefold() for row in comparisons for form in row.get("removed_forms", [])
-    }
-    legacy_noise_written = {
-        str(form).casefold()
-        for row in comparisons
-        for form in row.get("legacy_noise_removed_forms", [])
-    }
-    legacy_malformed_written = {
-        str(form).casefold()
-        for row in comparisons
-        for form in row.get("legacy_malformed_removed_forms", [])
-    }
-    semantic_removed_written = {
-        str(form).casefold()
-        for row in comparisons
-        for form in row.get("semantic_removed_forms", [])
-    }
+    status_counts = Counter(row["status"] for row in comparisons)
+    added_forms = {form for row in comparisons for form in row["added_forms"]}
+    removed_forms = {form for row in comparisons for form in row["removed_forms"]}
+    noise_removed = {form for row in comparisons for form in row["legacy_noise_removed_forms"]}
+    malformed_removed = {form for row in comparisons for form in row["legacy_malformed_removed_forms"]}
+    semantic_removed = {form for row in comparisons for form in row["semantic_removed_forms"]}
+    reason_counts = Counter(reason for row in comparisons for reason in row["change_reasons"].values())
+    removed_reason_counts = Counter(reason for row in comparisons for reason in row["removed_form_reasons"].values())
+
     summary = {
         "noun_records": noun_records,
         "generated_noun_records": len(rows),
         "unsupported_noun_records": status_counts.get("unsupported", 0),
         "canonical_form_rows": sum(len(row["forms"]) for row in rows),
-        "canonical_unique_written_forms": len(canonical_written),
+        "canonical_unique_written_forms": len({form["written_form"].casefold() for row in rows for form in row["forms"]}),
         "comparison_status_counts": dict(sorted(status_counts.items())),
         "change_reason_counts": dict(sorted(reason_counts.items())),
         "removed_form_reason_counts": dict(sorted(removed_reason_counts.items())),
-        "form_kind_counts": dict(sorted(form_kind_counts.items())),
-        "source_stage_counts": dict(sorted(stage_counts.items())),
-        "unique_forms_added": len(added_written),
-        "unique_forms_removed": len(removed_written),
-        "unique_legacy_noise_removed": len(legacy_noise_written),
-        "unique_legacy_malformed_removed": len(legacy_malformed_written),
-        "unique_semantic_forms_removed": len(semantic_removed_written),
+        "unique_forms_added": len(added_forms),
+        "unique_forms_removed": len(removed_forms),
+        "unique_legacy_noise_removed": len(noise_removed),
+        "unique_legacy_malformed_removed": len(malformed_removed),
+        "unique_semantic_forms_removed": len(semantic_removed),
     }
     return rows, comparisons, summary
 
@@ -341,12 +219,10 @@ def _write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
 def render_comparison(summary: dict[str, Any], comparisons: list[dict[str, Any]]) -> str:
     counts = summary["comparison_status_counts"]
     lines = [
+        "OBS: diagnostisk rad-för-rad-generator; officiell noun-artefakt skrivs av generate_noun_forms_grouped.",
         f"Substantivposter: {summary['noun_records']}",
-        f"Kanoniskt genererade poster: {summary['generated_noun_records']}",
-        f"Poster utan stödd notation: {summary['unsupported_noun_records']}",
-        f"Kanoniska formrader: {summary['canonical_form_rows']}",
-        f"Unika skrivna former: {summary['canonical_unique_written_forms']}",
-        f"Oförändrade: {counts.get('unchanged', 0)}",
+        f"Genererade poster: {summary['generated_noun_records']}",
+        f"Oförändrade: {counts.get('same', 0)}",
         f"Fler former: {counts.get('more_forms', 0)}",
         f"Färre former: {counts.get('fewer_forms', 0)}",
         f"Både tillagda och borttagna: {counts.get('changed_forms', 0)}",
@@ -392,7 +268,7 @@ def render_comparison(summary: dict[str, Any], comparisons: list[dict[str, Any]]
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Generate canonical SAOL noun forms and a semantic diff against the legacy generator"
+        description="Diagnostic row-wise SAOL noun generation; official artifact uses article variants"
     )
     parser.add_argument("saol", nargs="?", type=Path, default=DEFAULT_SAOL)
     parser.add_argument("--jsonl", type=Path, default=DEFAULT_JSONL)
@@ -410,10 +286,11 @@ def main() -> None:
     args.summary.parent.mkdir(parents=True, exist_ok=True)
     args.summary.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     args.comparison_text.write_text(render_comparison(summary, comparisons), encoding="utf-8")
+    print("OBS: diagnostisk rad-för-rad-generator. Officiell noun-artefakt byggs med generate_noun_forms_grouped.")
     print(f"Substantivposter: {summary['noun_records']}")
     print(f"Kanoniskt genererade poster: {summary['generated_noun_records']}")
     print(f"Kanoniska formrader: {summary['canonical_form_rows']}")
-    print(f"JSONL: {args.jsonl}")
+    print(f"Diagnostisk JSONL: {args.jsonl}")
     print(f"Jämförelse: {args.comparison_text}")
 
 
