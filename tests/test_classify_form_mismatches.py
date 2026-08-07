@@ -1,6 +1,7 @@
 import unittest
 
 from swedish_wordlist_tools.classify_form_mismatches import (
+    SALDO_ALTERNATIVE_DEFINITE_SINGULAR_MISSING_PLURAL,
     SALDO_MISSING_DEFINITE_PLURAL,
     SALDO_MISSING_DEFINITE_SINGULAR,
     SALDO_MISSING_PLURAL,
@@ -160,20 +161,62 @@ class ClassifyFormMismatchesTests(unittest.TestCase):
         self.assertEqual(SALDO_MISSING_DEFINITE_SINGULAR, classification)
         self.assertIn("definite singular", rationale)
 
-    def test_does_not_hide_competing_plural(self):
-        classification, _ = classify_row(
-            self.row(missing_from_saol=["abstinenserar"])
-        )
-        self.assertEqual(UNCLASSIFIED, classification)
-
-    def test_does_not_accept_competing_singular_for_n_er(self):
-        classification, _ = classify_row(
+    def test_classifies_alternative_definite_singular_with_missing_plural_n_er(self):
+        classification, rationale = classify_row(
             self.row(
                 notation="+n +er",
                 lemma="autonomi",
-                extra_from_saol=["autonomier", "autonomiers", "autonomierna", "autonomiernas"],
+                extra_from_saol=[
+                    "autonomier",
+                    "autonomiers",
+                    "autonomierna",
+                    "autonomiernas",
+                ],
                 missing_from_saol=["autonomien", "autonomiens"],
             )
+        )
+        self.assertEqual(
+            SALDO_ALTERNATIVE_DEFINITE_SINGULAR_MISSING_PLURAL,
+            classification,
+        )
+        self.assertIn("competing definite-singular", rationale)
+
+    def test_classifies_alternative_definite_singular_with_missing_plural_et_er(self):
+        classification, _ = classify_row(
+            self.row(
+                notation="+et +er",
+                lemma="artisteri",
+                extra_from_saol=[
+                    "artisterier",
+                    "artisteriers",
+                    "artisterierna",
+                    "artisteriernas",
+                ],
+                missing_from_saol=["artisterit", "artisterits"],
+            )
+        )
+        self.assertEqual(
+            SALDO_ALTERNATIVE_DEFINITE_SINGULAR_MISSING_PLURAL,
+            classification,
+        )
+
+    def test_classifies_alternative_en_definite_singular_with_missing_plural_et_er(self):
+        classification, _ = classify_row(
+            self.row(
+                notation="+et +er",
+                lemma="tannin",
+                extra_from_saol=["tanniner", "tanniners", "tanninerna", "tanninernas"],
+                missing_from_saol=["tanninen", "tanninens"],
+            )
+        )
+        self.assertEqual(
+            SALDO_ALTERNATIVE_DEFINITE_SINGULAR_MISSING_PLURAL,
+            classification,
+        )
+
+    def test_does_not_hide_unstructured_competing_form(self):
+        classification, _ = classify_row(
+            self.row(missing_from_saol=["abstinenserar"])
         )
         self.assertEqual(UNCLASSIFIED, classification)
 
