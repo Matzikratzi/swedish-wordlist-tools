@@ -41,10 +41,17 @@ def _form_dict(form: Any) -> dict[str, Any]:
     }
 
 
+def _primary_source_row(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Choose the display/provenance row for one materialized SAOL article."""
+
+    return next((row for row in rows if str(row.get("homonr") or "") == "1"), rows[0])
+
+
 def _article_variant_row(
-    source_row: dict[str, Any],
+    source_rows: list[dict[str, Any]],
     plan: NounArticleVariantPlan,
 ) -> dict[str, Any] | None:
+    source_row = _primary_source_row(source_rows)
     merged: list[Any] = []
     seen: set[tuple[str, str | None]] = set()
     paradigms: list[dict[str, Any]] = []
@@ -73,10 +80,17 @@ def _article_variant_row(
                 seen.add(marker)
                 merged.append(form)
 
+    homonyms = sorted(
+        {str(row.get("homonr") or "") for row in source_rows if str(row.get("homonr") or "")},
+        key=lambda value: (value != "1", value),
+    )
     return {
+        "article_id": record_id(source_row),
         "completion_applied": True,
+        # Compatibility union. variant_paradigms is the primary structure.
         "forms": [_form_dict(form) for form in merged],
-        "homonym_number": str(source_row.get("homonr") or ""),
+        "homonym_number": "1" if "1" in homonyms else (homonyms[0] if homonyms else ""),
+        "source_homonym_numbers": homonyms,
         "lemma": str(source_row.get("normaliserat_ord") or ""),
         "notation": str(source_row.get("text") or ""),
         "ordkl": str(source_row.get("ordkl") or ""),
@@ -100,7 +114,8 @@ def generate_grouped(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, 
 
     output: list[dict[str, Any]] = []
     variant_groups = 0
-    variant_rows = 0
+    variant_source_rows = 0
+    variant_artifact_rows = 0
     mode_counts: Counter[str] = Counter()
     unresolved_multiline_groups = 0
 
@@ -109,16 +124,17 @@ def generate_grouped(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, 
         if plan is not None:
             variant_groups += 1
             mode_counts[plan.mode] += 1
+            row = _article_variant_row(rows, plan)
+            if row is not None:
+                output.append(row)
+                variant_source_rows += len(rows)
+                variant_artifact_rows += 1
+                continue
         elif len(rows) > 1:
             unresolved_multiline_groups += 1
 
+        # Unresolved/non-variant groups keep the established row-local path.
         for source_row in rows:
-            if plan is not None:
-                row = _article_variant_row(source_row, plan)
-                if row is not None:
-                    output.append(row)
-                    variant_rows += 1
-                    continue
             row, _comparison = canonical_noun_row(source_row)
             if row is not None:
                 output.append(row)
@@ -129,12 +145,14 @@ def generate_grouped(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, 
         "article_groups": len(groups),
         "generated_rows": len(output),
         "variant_groups": variant_groups,
-        "variant_rows": variant_rows,
+        "variant_source_rows": variant_source_rows,
+        "variant_artifact_rows": variant_artifact_rows,
         "variant_mode_counts": dict(sorted(mode_counts.items())),
         "unresolved_multiline_groups": unresolved_multiline_groups,
-        # Backwards-compatible names used by the first grouped prototype/tests.
+        # Backwards-compatible names used by older reports/tests.
+        "variant_rows": variant_source_rows,
         "proven_variant_groups": variant_groups,
-        "proven_variant_rows": variant_rows,
+        "proven_variant_rows": variant_source_rows,
         "canonical_form_rows": sum(len(row["forms"]) for row in output),
         "canonical_unique_written_forms": len({str(form["written_form"]).casefold() for row in output for form in row["forms"]}),
         "artifact": str(DEFAULT_JSONL),
@@ -143,11 +161,17 @@ def generate_grouped(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, 
     return output, summary
 
 
-def _form_sets(rows: Iterable[dict[str, Any]]) -> dict[tuple[str, str, str], set[str]]:
-    result: dict[tuple[str, str, str], set[str]] = {}
+def _form_sets(rows: Iterable[dict[str, Any]]) -> dict[tuple[str, str], set[str]]:
+    """Compare baselines by article id + lemma, independent of duplicated homonr rows."""
+
+    result: dict[tuple[str, str], set[str]] = {}
     for row in rows:
-        key = (str(row.get("record_id") or ""), str(row.get("homonym_number") or ""), str(row.get("lemma") or ""))
-        result[key] = {str(form.get("written_form") or "") for form in row.get("forms", []) if form.get("written_form")}
+        key = (str(row.get("record_id") or ""), str(row.get("lemma") or ""))
+        result.setdefault(key, set()).update(
+            str(form.get("written_form") or "")
+            for form in row.get("forms", [])
+            if form.get("written_form")
+        )
     return result
 
 
@@ -155,15 +179,14 @@ def compare_to_baseline(new_rows: list[dict[str, Any]], baseline_rows: list[dict
     new = _form_sets(new_rows)
     old = _form_sets(baseline_rows)
     impact: list[dict[str, Any]] = []
-    for key in sorted(set(new) | set(old), key=lambda x: (x[2].casefold(), x[1], x[0])):
+    for key in sorted(set(new) | set(old), key=lambda x: (x[1].casefold(), x[0])):
         before = old.get(key, set())
         after = new.get(key, set())
         if before == after:
             continue
         impact.append({
             "record_id": key[0],
-            "homonym_number": key[1],
-            "lemma": key[2],
+            "lemma": key[1],
             "added": sorted(after - before, key=str.casefold),
             "removed": sorted(before - after, key=str.casefold),
         })
@@ -179,15 +202,16 @@ def render_impact(summary: dict[str, Any], impact: list[dict[str, Any]]) -> str:
         f"Entydiga variantgrupper: {summary['variant_groups']}",
         f"Variantlägen: {summary['variant_mode_counts']}",
         f"Flerradsgrupper ej automatiskt lösta: {summary['unresolved_multiline_groups']}",
-        f"Påverkade rå-/artefaktrader: {summary['variant_rows']}",
+        f"Rå-rader som ingår i variantartiklar: {summary['variant_source_rows']}",
+        f"Materialiserade variantartiklar: {summary['variant_artifact_rows']}",
         f"Poster med ändrad formmängd mot baseline: {len(impact)}",
         f"Unika tillagda former: {len(added)}",
         f"Unika borttagna former: {len(removed)}",
         "",
-        "Ändrade poster:",
+        "Ändrade artiklar:",
     ]
     for row in impact:
-        lines.append(f"  {row['lemma']} (homonr={row['homonym_number']}, record_id={row['record_id']})")
+        lines.append(f"  {row['lemma']} (record_id={row['record_id']})")
         lines.append("    + " + (", ".join(row["added"]) or "–"))
         lines.append("    - " + (", ".join(row["removed"]) or "–"))
     return "\n".join(lines) + "\n"
@@ -211,9 +235,6 @@ def main() -> None:
     parser.add_argument("--summary", type=Path, default=DEFAULT_SUMMARY)
     args = parser.parse_args()
 
-    # Read the old canonical artifact before overwriting it. This makes the
-    # command safe when --baseline and --jsonl intentionally point to the same
-    # official path.
     baseline_rows = list(read_jsonl(args.baseline)) if args.baseline.exists() else []
     rows, summary = generate_grouped(read_jsonl(args.saol))
     impact = compare_to_baseline(rows, baseline_rows) if baseline_rows else []
@@ -226,7 +247,8 @@ def main() -> None:
     print(f"Entydiga variantgrupper: {summary['variant_groups']}")
     print(f"Variantlägen: {summary['variant_mode_counts']}")
     print(f"Flerradsgrupper ej automatiskt lösta: {summary['unresolved_multiline_groups']}")
-    print(f"Påverkade rader: {summary['variant_rows']}")
+    print(f"Rå-rader i variantartiklar: {summary['variant_source_rows']}")
+    print(f"Materialiserade variantartiklar: {summary['variant_artifact_rows']}")
     print(f"Ändrade mot baseline: {summary['changed_against_baseline']}")
     print(f"Officiell noun-artefakt: {args.jsonl}")
     print(f"Impact: {args.text}")
