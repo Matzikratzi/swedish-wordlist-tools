@@ -12,6 +12,7 @@ SAOL14_GAMEWORDS = Path("data/processed/saol14-gamewords.txt")
 SAOL14_NOUN_FORMS = Path("reports/saol14-noun-forms.jsonl")
 SAOL14_ADJECTIVE_FORMS = Path("reports/saol14-adjective-forms.jsonl")
 SAOL14_VERB_FORMS = Path("data/processed/saol14-verb-forms.txt")
+SALDO_FORMS = Path("reports/saldo-forms.jsonl")
 
 
 def absolute_path(path: Path) -> Path:
