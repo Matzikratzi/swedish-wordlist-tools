@@ -7,13 +7,14 @@ import sys
 from pathlib import Path
 from typing import Callable, Sequence
 
+from .artifact_paths import SAOL14_ADJECTIVE_FORMS, SAOL14_GAMEWORDS
 
 DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
-DEFAULT_ADJECTIVES = Path("reports/saol14-adjective-forms.jsonl")
+DEFAULT_ADJECTIVES = SAOL14_ADJECTIVE_FORMS
 DEFAULT_ADJECTIVE_SUMMARY = Path("reports/saol14-adjective-forms-summary.json")
 DEFAULT_INPUT = Path("data/processed/saol14-saldo-forms.txt")
 DEFAULT_SALDO = Path("data/raw/saldom.xml")
-DEFAULT_OUTPUT = Path("data/processed/saol14-game-words.txt")
+DEFAULT_OUTPUT = SAOL14_GAMEWORDS
 DEFAULT_GAME_REPORT = Path("reports/saol14-game-words.json")
 DEFAULT_AUDIT_TEXT = Path("reports/saol14-game-adjective-integration-audit.txt")
 DEFAULT_AUDIT_JSON = Path("reports/saol14-game-adjective-integration-audit.json")
