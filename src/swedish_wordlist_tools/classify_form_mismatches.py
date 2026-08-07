@@ -61,6 +61,9 @@ def classify_row(row: dict[str, Any]) -> tuple[str, str]:
         "+en +er": ("er", "ers", "erna", "ernas"),
         "+en +ar": ("ar", "ars", "arna", "arnas"),
         "+t +n": ("n", "ns", "na", "nas"),
+        "+n +r": ("r", "rs", "rna", "rnas"),
+        "+n +er": ("er", "ers", "erna", "ernas"),
+        "+et +er": ("er", "ers", "erna", "ernas"),
     }
     plural_suffixes = explicit_plural_patterns.get(notation)
     if plural_suffixes is not None and extra == _suffixed_forms(lemma, plural_suffixes):
@@ -69,13 +72,18 @@ def classify_row(row: dict[str, Any]) -> tuple[str, str]:
             f"SAOL notation {notation} explicitly supplies a plural paradigm; SALDO lacks exactly that paradigm",
         )
 
+    definite_zero_plural_patterns = {
+        "+et; pl. +": ("en", "ens"),
+        "+en; pl. +": ("na", "nas"),
+    }
+    definite_plural_suffixes = definite_zero_plural_patterns.get(notation)
     if (
-        notation == "+et; pl. +"
-        and extra == _suffixed_forms(lemma, ("en", "ens"))
+        definite_plural_suffixes is not None
+        and extra == _suffixed_forms(lemma, definite_plural_suffixes)
     ):
         return (
             SALDO_MISSING_DEFINITE_PLURAL,
-            "SAOL notation +et; pl. + has zero plural and canonical definite plural +en; SALDO lacks exactly the definite plural forms",
+            f"SAOL notation {notation} has zero plural and canonical definite plural forms; SALDO lacks exactly those definite plural forms",
         )
 
     return UNCLASSIFIED, "no_verified_general_classification"
