@@ -1,6 +1,7 @@
 import unittest
 
 from swedish_wordlist_tools.classify_form_mismatches import (
+    SALDO_MISSING_DEFINITE_PLURAL,
     SALDO_MISSING_PLURAL,
     UNCLASSIFIED,
     build_summary,
@@ -28,10 +29,43 @@ class ClassifyFormMismatchesTests(unittest.TestCase):
         row.update(overrides)
         return row
 
-    def test_classifies_exact_missing_plural_paradigm(self):
+    def test_classifies_exact_missing_er_plural_paradigm(self):
         classification, rationale = classify_row(self.row())
         self.assertEqual(SALDO_MISSING_PLURAL, classification)
         self.assertIn("+en +er", rationale)
+
+    def test_classifies_exact_missing_ar_plural_paradigm(self):
+        classification, rationale = classify_row(
+            self.row(
+                notation="+en +ar",
+                lemma="amning",
+                extra_from_saol=["amningar", "amningars", "amningarna", "amningarnas"],
+            )
+        )
+        self.assertEqual(SALDO_MISSING_PLURAL, classification)
+        self.assertIn("+en +ar", rationale)
+
+    def test_classifies_exact_missing_n_plural_paradigm(self):
+        classification, rationale = classify_row(
+            self.row(
+                notation="+t +n",
+                lemma="bemötande",
+                extra_from_saol=["bemötanden", "bemötandens", "bemötandena", "bemötandenas"],
+            )
+        )
+        self.assertEqual(SALDO_MISSING_PLURAL, classification)
+        self.assertIn("+t +n", rationale)
+
+    def test_classifies_missing_definite_zero_plural(self):
+        classification, rationale = classify_row(
+            self.row(
+                notation="+et; pl. +",
+                lemma="ansvar",
+                extra_from_saol=["ansvaren", "ansvarens"],
+            )
+        )
+        self.assertEqual(SALDO_MISSING_DEFINITE_PLURAL, classification)
+        self.assertIn("definite plural", rationale)
 
     def test_does_not_hide_competing_plural(self):
         classification, _ = classify_row(
@@ -39,8 +73,8 @@ class ClassifyFormMismatchesTests(unittest.TestCase):
         )
         self.assertEqual(UNCLASSIFIED, classification)
 
-    def test_does_not_generalise_to_other_notation(self):
-        classification, _ = classify_row(self.row(notation="+en +ar"))
+    def test_does_not_generalise_to_unverified_notation(self):
+        classification, _ = classify_row(self.row(notation="+n +er"))
         self.assertEqual(UNCLASSIFIED, classification)
 
     def test_does_not_accept_partial_plural_difference(self):
