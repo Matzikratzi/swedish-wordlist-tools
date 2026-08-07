@@ -11,10 +11,12 @@ from .classify_form_mismatches import DEFAULT_JSONL as DEFAULT_CLASSIFICATIONS, 
 DEFAULT_JSONL = Path("reports/saol14-form-mismatch-classification-audit.jsonl")
 DEFAULT_SUMMARY = Path("reports/saol14-form-mismatch-classification-audit-summary.json")
 DEFAULT_TEXT = Path("reports/saol14-form-mismatch-classification-audit.txt")
+GAMEWORD_BASENAME = "saol14-gamewords.txt"
 GAMEWORD_CANDIDATES = (
     Path("data/processed/saol14-gamewords.txt"),
     Path("saol14-gamewords.txt"),
     Path("data/saol14-gamewords.txt"),
+    Path("reports/saol14-gamewords.txt"),
 )
 
 VERIFIED = "verified"
@@ -22,13 +24,37 @@ STALE_VALIDATION = "stale_validation"
 NOT_APPLICABLE = "not_applicable"
 
 
-def resolve_gamewords_path(explicit: Path | None = None) -> Path:
+def resolve_gamewords_path(explicit: Path | None = None, *, root: Path = Path(".")) -> Path:
+    """Resolve the final gamewords artifact without silently guessing a missing path."""
     if explicit is not None:
-        return explicit
+        if explicit.is_file():
+            return explicit
+        raise FileNotFoundError(f"Angiven gamewords-fil finns inte: {explicit}")
+
     for candidate in GAMEWORD_CANDIDATES:
-        if candidate.exists():
-            return candidate
-    return GAMEWORD_CANDIDATES[0]
+        path = root / candidate
+        if path.is_file():
+            return path
+
+    matches = sorted(
+        (path for path in root.rglob(GAMEWORD_BASENAME) if path.is_file()),
+        key=lambda path: (len(path.parts), str(path)),
+    )
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        listed = "\n  ".join(str(path) for path in matches)
+        raise FileNotFoundError(
+            "Flera saol14-gamewords.txt hittades; ange rätt fil med --gamewords:\n  " + listed
+        )
+
+    searched = "\n  ".join(str(root / candidate) for candidate in GAMEWORD_CANDIDATES)
+    raise FileNotFoundError(
+        "Hittade ingen saol14-gamewords.txt. Kontrollerade:\n  "
+        + searched
+        + "\nSökvägen kan anges med --gamewords PATH. "
+        + "Kör annars: find . -name 'saol14-gamewords.txt' -print"
+    )
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
