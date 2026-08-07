@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable
 
 from .jsonl import read_jsonl
-from .saol_article_headings import materialize_heading_model
+from .saol_article_headings import id_key, is_plain_reference, materialize_heading_model
 
 DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
 DEFAULT_ARTICLES = Path("reports/saol14-articles.jsonl")
@@ -38,6 +38,14 @@ def materialize(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any]]
     headings: list[dict[str, Any]] = []
     references: list[dict[str, Any]] = []
 
+    # Keep the relation model article-based, but preserve every lexical source
+    # row in the heading relation.  This makes the materialisation lossless for
+    # downstream generators: ord/stycke, raw homonr and duplicate source rows
+    # can be reconstructed without reopening the original JSONL.
+    grouped: dict[tuple[str, str], list[tuple[int, dict[str, Any]]]] = defaultdict(list)
+    for source_row_index, row in enumerate(rows):
+        grouped[id_key(row)].append((source_row_index, row))
+
     for article in model["articles"]:
         aid = article_id(article["source_id"], article["subnr"], article["homonym_number"])
         articles.append({
@@ -52,33 +60,59 @@ def materialize(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any]]
             "source": article["source"],
             "source_row_count": article["source_row_count"],
         })
-        for item in article["headings"]:
-            headings.append({
-                "article_id": aid,
-                "heading": item["heading"],
-                "heading_type": item["type"],
-                "lemma": article["normalised_word"],
-                "homonym_number": article["homonym_number"],
-                "source_id": article["source_id"],
-            })
-
-    for ref in model["references"]:
-        references.append({
-            "reference_id": f"{ref['source_id']}:{ref['subnr']}:{ref['source_homonr']}:{ref['heading']}",
-            "source_id": ref["source_id"],
-            "subnr": ref["subnr"],
-            "source_homonym_number": ref["source_homonr"],
-            "source_heading": ref["heading"],
-            "target_lemma": ref["target_normalised_word"],
-            "reference_type": reference_type(ref),
-            "ordkl": ref["ordkl"],
-            "notation": ref["text"],
-            "source": ref["source"],
-        })
 
     article_ids = {row["article_id"] for row in articles}
-    dangling_headings = [row for row in headings if row["article_id"] not in article_ids]
-    source_rows_accounted = sum(row["source_row_count"] for row in articles) + len(references)
+
+    for key, indexed_peers in grouped.items():
+        lexical = [(idx, row) for idx, row in indexed_peers if not is_plain_reference(row)]
+        nonzero_homonyms = sorted({
+            str(row.get("homonr") or "")
+            for _idx, row in lexical
+            if str(row.get("homonr") or "") not in {"", "0"}
+        })
+        zero_anchor = nonzero_homonyms[0] if len(nonzero_homonyms) == 1 else None
+
+        for source_row_index, row in indexed_peers:
+            if is_plain_reference(row):
+                references.append({
+                    "reference_id": f"{key[0]}:{key[1]}:{str(row.get('homonr') or '')}:{str(row.get('ord') or '')}",
+                    "source_id": key[0],
+                    "subnr": key[1],
+                    "source_homonym_number": str(row.get("homonr") or ""),
+                    "source_heading": str(row.get("ord") or row.get("stycke") or row.get("normaliserat_ord") or ""),
+                    "target_lemma": str(row.get("normaliserat_ord") or ""),
+                    "reference_type": reference_type(row),
+                    "ordkl": str(row.get("ordkl") or ""),
+                    "notation": str(row.get("text") or ""),
+                    "source": str(row.get("source") or ""),
+                    "source_row_index": source_row_index,
+                })
+                continue
+
+            raw_homonr = str(row.get("homonr") or "")
+            anchor_homonr = raw_homonr if raw_homonr not in {"", "0"} else zero_anchor
+            aid = article_id(key[0], key[1], anchor_homonr) if anchor_homonr else ""
+            headings.append({
+                "article_id": aid,
+                "heading": str(row.get("ord") or row.get("stycke") or row.get("normaliserat_ord") or ""),
+                "heading_type": "primary" if raw_homonr not in {"", "0"} else "alternate",
+                "lemma": str(row.get("normaliserat_ord") or ""),
+                "homonym_number": str(anchor_homonr or ""),
+                "source_homonym_number": raw_homonr,
+                "source_id": key[0],
+                "subnr": key[1],
+                "stycke": str(row.get("stycke") or ""),
+                "upos": str(row.get("upos") or ""),
+                "ordkl": str(row.get("ordkl") or ""),
+                "notation": str(row.get("text") or ""),
+                "source": str(row.get("source") or ""),
+                "source_row_index": source_row_index,
+            })
+
+    headings.sort(key=lambda row: int(row["source_row_index"]))
+    references.sort(key=lambda row: int(row["source_row_index"]))
+    dangling_headings = [row for row in headings if not row["article_id"] or row["article_id"] not in article_ids]
+    source_rows_accounted = len(headings) + len(references)
     summary = {
         "raw_rows": len(rows),
         "articles": len(articles),
@@ -107,10 +141,10 @@ def render(summary: dict[str, Any]) -> str:
     return "\n".join([
         f"Rå-rader: {summary['raw_rows']}",
         f"Artiklar/homonymer: {summary['articles']}",
-        f"Rubriker: {summary['headings']} (primära {summary['primary_headings']}, alternativa {summary['alternate_headings']})",
+        f"Rubrikrader: {summary['headings']} (primära {summary['primary_headings']}, alternativa {summary['alternate_headings']})",
         f"Hänvisningar: {summary['references']} {summary['reference_types']}",
         f"Unika article_id: {summary['unique_article_ids']}",
-        f"Rubriker utan artikel: {summary['dangling_headings']}",
+        f"Rubrikrader utan artikel: {summary['dangling_headings']}",
         f"Olösta strukturer: {summary['unresolved']}",
         f"Källrader redovisade: {summary['source_rows_accounted']}",
         f"Rå-rader minus redovisade: {summary['raw_rows_minus_accounted']}",
