@@ -2,6 +2,7 @@ import unittest
 
 from swedish_wordlist_tools.classify_form_mismatches import (
     SALDO_MISSING_DEFINITE_PLURAL,
+    SALDO_MISSING_DEFINITE_SINGULAR,
     SALDO_MISSING_PLURAL,
     UNCLASSIFIED,
     build_summary,
@@ -115,6 +116,49 @@ class ClassifyFormMismatchesTests(unittest.TestCase):
         )
         self.assertEqual(SALDO_MISSING_DEFINITE_PLURAL, classification)
         self.assertIn("definite plural", rationale)
+
+    def test_classifies_missing_definite_singular_en(self):
+        classification, rationale = classify_row(
+            self.row(
+                lemma="avgas",
+                extra_from_saol=["avgasen", "avgasens"],
+            )
+        )
+        self.assertEqual(SALDO_MISSING_DEFINITE_SINGULAR, classification)
+        self.assertIn("definite singular", rationale)
+
+    def test_classifies_missing_definite_singular_et(self):
+        classification, rationale = classify_row(
+            self.row(
+                notation="+et; pl. +",
+                lemma="abstinensbesvär",
+                extra_from_saol=["abstinensbesväret", "abstinensbesvärets"],
+            )
+        )
+        self.assertEqual(SALDO_MISSING_DEFINITE_SINGULAR, classification)
+        self.assertIn("definite singular", rationale)
+
+    def test_classifies_missing_alternative_definite_singular_n(self):
+        classification, rationale = classify_row(
+            self.row(
+                notation="+en +er _ +n +er",
+                lemma="kvalitet",
+                extra_from_saol=["kvalitetn", "kvalitetns"],
+            )
+        )
+        self.assertEqual(SALDO_MISSING_DEFINITE_SINGULAR, classification)
+        self.assertIn("definite singular", rationale)
+
+    def test_classifies_missing_alternative_definite_singular_en(self):
+        classification, rationale = classify_row(
+            self.row(
+                notation="+et el. +en",
+                lemma="kamratskap",
+                extra_from_saol=["kamratskapen", "kamratskapens"],
+            )
+        )
+        self.assertEqual(SALDO_MISSING_DEFINITE_SINGULAR, classification)
+        self.assertIn("definite singular", rationale)
 
     def test_does_not_hide_competing_plural(self):
         classification, _ = classify_row(
