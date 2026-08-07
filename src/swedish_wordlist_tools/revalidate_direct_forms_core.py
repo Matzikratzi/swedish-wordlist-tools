@@ -174,6 +174,64 @@ def select_article_variant_match_from_artifacts(
     return select_direct_match_from_artifacts(record, saldo, form_index, generated_forms)
 
 
+def _variant_validation(
+    record: dict[str, Any],
+    saldo: dict[str, list[dict[str, Any]]],
+    form_index: dict[str, list[dict[str, Any]]],
+    variant_paradigms: dict[str, set[str]] | None,
+) -> list[dict[str, Any]]:
+    """Validate each SAOL article-heading paradigm separately against SALDO."""
+
+    if not variant_paradigms or len(variant_paradigms) <= 1:
+        return []
+    upos = _saol_upos(record)
+    if not upos or upos == "X":
+        return []
+
+    primary = _normalise(str(record.get("normaliserat_ord") or "")).casefold()
+    result: list[dict[str, Any]] = []
+    for lemma, forms in variant_paradigms.items():
+        analyses = _same_upos_analyses(lemma, upos, saldo, form_index, forms)
+        saldo_forms = {form for analysis in analyses for form in _analysis_forms(analysis)}
+        status = _form_status(forms, saldo_forms, bool(forms)) if analyses else "variant_missing_in_saldo"
+        result.append(
+            {
+                "lemma": lemma,
+                "heading_type": "primary" if _normalise(lemma).casefold() == primary else "alternative",
+                "status": status,
+                "generated_forms": sorted(forms, key=str.casefold),
+                "saldo_forms": sorted(saldo_forms, key=str.casefold),
+                "extra_from_saol": sorted(forms - saldo_forms, key=str.casefold),
+                "missing_from_saol": sorted(saldo_forms - forms, key=str.casefold),
+            }
+        )
+    return result
+
+
+def _semantic_status(raw_status: str, variant_validation: list[dict[str, Any]]) -> tuple[str, str]:
+    """Separate lexical variant coverage from genuine paradigm disagreement."""
+
+    if raw_status != "form_set_mismatch":
+        return raw_status, raw_status
+    if not variant_validation:
+        return "true_form_mismatch", "non_variant_form_difference"
+
+    primary_rows = [row for row in variant_validation if row["heading_type"] == "primary"]
+    alternative_rows = [row for row in variant_validation if row["heading_type"] == "alternative"]
+    accepted = {"exact_form_set", "exact_form_set_case_difference", "saol_forms_are_subset"}
+    primary_ok = bool(primary_rows) and all(row["status"] in accepted for row in primary_rows)
+    missing_alternatives = [row for row in alternative_rows if row["status"] == "variant_missing_in_saldo"]
+    mismatching_alternatives = [row for row in alternative_rows if row["status"] == "form_set_mismatch"]
+
+    if primary_ok and missing_alternatives:
+        return "variant_coverage_difference", "alternative_heading_missing_in_saldo"
+    if primary_ok and mismatching_alternatives:
+        return "variant_coverage_difference", "alternative_variant_paradigm_difference"
+    if any(row["status"] == "variant_missing_in_saldo" for row in variant_validation):
+        return "variant_coverage_difference", "partial_variant_coverage"
+    return "true_form_mismatch", "variant_structure_does_not_explain_difference"
+
+
 def canonical_validation_row(
     record: dict[str, Any],
     match_method: str,
@@ -182,9 +240,11 @@ def canonical_validation_row(
     generated_forms: set[str],
     generator: str,
     variant_lemmas: tuple[str, ...] = (),
+    variant_validation: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     saldo_forms = {form for analysis in analyses for form in _analysis_forms(analysis)}
     status = _form_status(generated_forms, saldo_forms, bool(generated_forms))
+    semantic_status, semantic_reason = _semantic_status(status, variant_validation or [])
     row = {
         "record_id": str(record.get("id") or record.get("subnr") or record.get("urspr_lopnr") or ""),
         "lemma": str(record.get("normaliserat_ord") or ""),
@@ -204,9 +264,13 @@ def canonical_validation_row(
         "missing_from_saol": sorted(saldo_forms - generated_forms, key=str.casefold),
         "extra_from_saol": sorted(generated_forms - saldo_forms, key=str.casefold),
         "status": status,
+        "semantic_status": semantic_status,
+        "semantic_reason": semantic_reason,
     }
     if len(variant_lemmas) > 1:
         row["saol_variant_lemmas"] = list(variant_lemmas)
+    if variant_validation:
+        row["variant_validation"] = variant_validation
     return row
 
 
@@ -252,6 +316,7 @@ def revalidate_direct_forms(
         if selected is None:
             continue
         method, analyses = selected
+        per_variant = _variant_validation(record, saldo, form_index, paradigms)
 
         rows.append(
             canonical_validation_row(
@@ -261,6 +326,7 @@ def revalidate_direct_forms(
                 generated_forms=generated_forms,
                 generator=generator,
                 variant_lemmas=tuple(paradigms) if paradigms else (),
+                variant_validation=per_variant,
             )
         )
 
@@ -268,6 +334,8 @@ def revalidate_direct_forms(
     write_jsonl(jsonl_path, rows)
 
     status_counts = Counter(str(row["status"]) for row in rows)
+    semantic_status_counts = Counter(str(row["semantic_status"]) for row in rows)
+    semantic_reason_counts = Counter(str(row["semantic_reason"]) for row in rows)
     generator_counts = Counter(str(row["generator"]) for row in rows)
     method_counts = Counter(str(row["match_method"]) for row in rows)
     upos_status_counts: dict[str, Counter[str]] = {}
@@ -284,6 +352,8 @@ def revalidate_direct_forms(
         "match_method_counts": dict(sorted(method_counts.items())),
         "matched_records": len(rows),
         "status_counts": dict(sorted(status_counts.items())),
+        "semantic_status_counts": dict(sorted(semantic_status_counts.items())),
+        "semantic_reason_counts": dict(sorted(semantic_reason_counts.items())),
         "upos_status_counts": {
             upos: dict(sorted(counts.items()))
             for upos, counts in sorted(upos_status_counts.items())
@@ -321,6 +391,9 @@ def main() -> None:
     for key, value in summary["generator_counts"].items():
         print(f"{key}: {value}")
     for key, value in summary["status_counts"].items():
+        print(f"{key}: {value}")
+    print("Semantisk status:")
+    for key, value in summary["semantic_status_counts"].items():
         print(f"{key}: {value}")
     print(f"Detaljer: {summary['jsonl']}")
     print(f"Summering: {args.summary}")
