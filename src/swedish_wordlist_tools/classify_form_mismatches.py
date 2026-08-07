@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -20,6 +20,18 @@ def _casefolded(values: Iterable[object]) -> set[str]:
     return {str(value).casefold() for value in values}
 
 
+def _relative_form(lemma: str, form: object) -> str:
+    lemma_folded = lemma.casefold()
+    form_folded = str(form).casefold()
+    if lemma_folded and form_folded.startswith(lemma_folded):
+        return "+" + form_folded[len(lemma_folded) :]
+    return "=" + form_folded
+
+
+def _relative_forms(lemma: str, values: Iterable[object]) -> tuple[str, ...]:
+    return tuple(sorted(_relative_form(lemma, value) for value in values))
+
+
 def _expected_en_er_plural(lemma: str) -> set[str]:
     return {
         lemma + "er",
@@ -32,9 +44,9 @@ def _expected_en_er_plural(lemma: str) -> set[str]:
 def classify_row(row: dict[str, Any]) -> tuple[str, str]:
     """Classify a mismatch only when the source difference is mechanically certain.
 
-    `+en +er` explicitly states the plural in SAOL.  If the only forms present in
+    `+en +er` explicitly states the plural in SAOL. If the only forms present in
     the canonical SAOL generation but absent from SALDO are exactly that plural
-    paradigm, SALDO is simply missing the SAOL-attested plural forms.  No claim is
+    paradigm, SALDO is simply missing the SAOL-attested plural forms. No claim is
     made about why SALDO omits them.
     """
 
@@ -98,6 +110,51 @@ def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
             handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
 
 
+def _unclassified_groups(rows: list[dict[str, Any]], examples: int = 8) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str, tuple[str, ...], tuple[str, ...]], list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        if row["mismatch_classification"] != UNCLASSIFIED:
+            continue
+        lemma = str(row.get("lemma", ""))
+        key = (
+            str(row.get("upos", "")).upper(),
+            str(row.get("notation", "")),
+            _relative_forms(lemma, row.get("extra_from_saol", ())),
+            _relative_forms(lemma, row.get("missing_from_saol", ())),
+        )
+        grouped[key].append(row)
+
+    groups: list[dict[str, Any]] = []
+    for (upos, notation, extra, missing), members in grouped.items():
+        members.sort(key=lambda row: (str(row.get("lemma", "")).casefold(), str(row.get("homonym_number", ""))))
+        groups.append(
+            {
+                "upos": upos,
+                "notation": notation,
+                "count": len(members),
+                "extra_pattern": list(extra),
+                "missing_pattern": list(missing),
+                "examples": [
+                    {
+                        "lemma": str(row.get("lemma", "")),
+                        "homonym_number": str(row.get("homonym_number", "")),
+                    }
+                    for row in members[:examples]
+                ],
+            }
+        )
+    groups.sort(
+        key=lambda group: (
+            -int(group["count"]),
+            str(group["upos"]),
+            str(group["notation"]),
+            tuple(group["extra_pattern"]),
+            tuple(group["missing_pattern"]),
+        )
+    )
+    return groups
+
+
 def build_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     counts = Counter(str(row["mismatch_classification"]) for row in rows)
     unclassified_upos = Counter(
@@ -113,6 +170,7 @@ def build_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "unclassified_upos_counts": dict(
             sorted(unclassified_upos.items(), key=lambda item: (-item[1], item[0]))
         ),
+        "unclassified_groups": _unclassified_groups(rows),
     }
 
 
@@ -132,6 +190,27 @@ def render_text(summary: dict[str, Any]) -> str:
     else:
         for upos, count in summary["unclassified_upos_counts"].items():
             lines.append(f"{count:5}  {upos}")
+
+    lines.extend(["", "Största oklassificerade strukturer:"])
+    groups = summary.get("unclassified_groups", [])
+    if not groups:
+        lines.append("  (inga)")
+    for index, group in enumerate(groups[:30], start=1):
+        extra = ", ".join(group["extra_pattern"]) or "–"
+        missing = ", ".join(group["missing_pattern"]) or "–"
+        examples = ", ".join(
+            item["lemma"] + (f" ({item['homonym_number']})" if item["homonym_number"] else "")
+            for item in group["examples"]
+        )
+        lines.extend(
+            [
+                "",
+                f"{index}. {group['count']} | {group['upos']} | {group['notation'] or '(tomt)'}",
+                f"   Extra från SAOL-generatorn: {extra}",
+                f"   Saknas från SAOL-generatorn: {missing}",
+                f"   Exempel: {examples}",
+            ]
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -183,6 +262,7 @@ def main() -> None:
     print(f"Oklassificerade: {summary['unclassified_records']}")
     for name, count in summary["classification_counts"].items():
         print(f"{name}: {count}")
+    print(f"Oklassificerade strukturer: {len(summary['unclassified_groups'])}")
     print(f"Text: {summary['text']}")
     print(f"JSONL: {summary['jsonl']}")
 
