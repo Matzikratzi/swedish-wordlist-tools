@@ -109,7 +109,10 @@ def _derive_definite_plural(
     folded_singulars = tuple(form.casefold() for form in singular_definites)
 
     if folded_plural == folded_lemma and any(form.endswith("et") for form in folded_singulars):
-        return lemma + "en"
+        # Zero-plural neuters normally take -en in the definite plural (hus ->
+        # husen), but a lemma already ending in e takes only -n (apanage ->
+        # apanagen).  Appending -en blindly would produce *apanageen.
+        return lemma + ("n" if folded_lemma.endswith("e") else "en")
     if folded_plural.endswith("n") and any(form.endswith("t") for form in folded_singulars):
         return plural + "a"
     if folded_plural.endswith("en"):
