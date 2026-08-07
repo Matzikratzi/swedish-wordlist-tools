@@ -83,6 +83,21 @@ class NounParadigmTests(unittest.TestCase):
             set(entry.forms if entry else ()),
         )
 
+    def test_completes_zero_plural_neuter_after_final_e(self) -> None:
+        entry = self.complete("apanage", "+t [-et]; pl. +")
+        self.assertIsNotNone(entry)
+        self.assertEqual(
+            {"apanage", "apanages", "apanaget", "apanagets", "apanagen", "apanagens"},
+            set(entry.forms if entry else ()),
+        )
+        self.assertNotIn("apanageen", set(entry.forms if entry else ()))
+
+    def test_zero_plural_neuter_without_final_e_still_takes_en(self) -> None:
+        entry = self.complete("ansvar", "+et; pl. +")
+        self.assertIsNotNone(entry)
+        self.assertIn("ansvaren", set(entry.forms if entry else ()))
+        self.assertIn("ansvarens", set(entry.forms if entry else ()))
+
     def test_completes_n_zero_plural_noun(self) -> None:
         entry = self.complete("demo", "+n; pl. +")
         self.assertIsNotNone(entry)
