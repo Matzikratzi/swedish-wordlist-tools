@@ -3,14 +3,17 @@ from __future__ import annotations
 import argparse
 import json
 from collections import Counter, defaultdict
+from itertools import zip_longest
 from pathlib import Path
 from typing import Any, Iterable
 
 from .compare_sources import _saol_upos
 from .generate_noun_forms import canonical_noun_row
 from .jsonl import read_jsonl
+from .materialize_saol_relations import DEFAULT_ARTICLES, DEFAULT_HEADINGS
 from .noun_article_variants import NounArticleVariantPlan, plan_noun_article_variants
 from .noun_paradigm import complete_noun_entry
+from .noun_relational_source import reconstruct_source_rows, relational_integrity_summary
 
 DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
 # This command is the canonical noun-artifact writer. If the artifact already
@@ -19,6 +22,8 @@ DEFAULT_BASELINE = Path("reports/saol14-noun-forms.jsonl")
 DEFAULT_JSONL = Path("reports/saol14-noun-forms.jsonl")
 DEFAULT_TEXT = Path("reports/saol14-noun-forms-grouped-impact.txt")
 DEFAULT_SUMMARY = Path("reports/saol14-noun-forms-grouped-summary.json")
+DEFAULT_RELATIONAL_AUDIT = Path("reports/saol14-noun-relational-source-audit.txt")
+DEFAULT_RELATIONAL_AUDIT_JSON = Path("reports/saol14-noun-relational-source-audit.json")
 
 
 def record_id(row: dict[str, Any]) -> str:
@@ -224,26 +229,139 @@ def _write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
             handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
 
 
+def exact_artifact_differences(
+    relational_rows: list[dict[str, Any]],
+    raw_rows: list[dict[str, Any]],
+    *,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    differences: list[dict[str, Any]] = []
+    missing = object()
+    for index, (relational, raw) in enumerate(zip_longest(relational_rows, raw_rows, fillvalue=missing)):
+        if relational == raw:
+            continue
+        differences.append({
+            "index": index,
+            "relational": None if relational is missing else {
+                "record_id": str(relational.get("record_id") or ""),
+                "lemma": str(relational.get("lemma") or ""),
+                "homonym_number": str(relational.get("homonym_number") or ""),
+            },
+            "raw": None if raw is missing else {
+                "record_id": str(raw.get("record_id") or ""),
+                "lemma": str(raw.get("lemma") or ""),
+                "homonym_number": str(raw.get("homonym_number") or ""),
+            },
+        })
+        if len(differences) >= limit:
+            break
+    return differences
+
+
+def render_relational_audit(audit: dict[str, Any]) -> str:
+    lines = [
+        f"Källa: {audit['source_mode']}",
+        f"Relationsartiklar: {audit['integrity']['articles']}",
+        f"Relationsrubriker: {audit['integrity']['headings']}",
+        f"Rubriker utan artikel: {audit['integrity']['dangling_headings']}",
+        f"Artiklar utan rubrik: {audit['integrity']['articles_without_headings']}",
+        f"Rekonstruerade källrader: {audit['reconstructed_source_rows']}",
+        f"Exakt lika mot råvägen: {'JA' if audit['exact_raw_equivalence'] else 'NEJ'}",
+        f"Relationsgenererade artefaktrader: {audit['relational_artifact_rows']}",
+        f"Rågenererade artefaktrader: {audit['raw_artifact_rows']}",
+        "",
+    ]
+    if audit["differences"]:
+        lines.append("Första skillnaderna:")
+        for item in audit["differences"]:
+            lines.append(f"  index={item['index']} relational={item['relational']} raw={item['raw']}")
+        lines.append("")
+    return "\n".join(lines)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate canonical SAOL noun forms from explicit article/lemma variants"
+        description="Generate canonical SAOL noun forms from the materialized article model"
     )
-    parser.add_argument("saol", nargs="?", type=Path, default=DEFAULT_SAOL)
+    parser.add_argument("saol", nargs="?", type=Path, default=DEFAULT_SAOL, help="raw SAOL used only for equivalence checking or --source-mode raw")
+    parser.add_argument("--source-mode", choices=("relational", "raw"), default="relational")
+    parser.add_argument("--articles", type=Path, default=DEFAULT_ARTICLES)
+    parser.add_argument("--headings", type=Path, default=DEFAULT_HEADINGS)
+    parser.add_argument("--skip-raw-equivalence-check", action="store_true")
     parser.add_argument("--baseline", type=Path, default=DEFAULT_BASELINE)
     parser.add_argument("--jsonl", type=Path, default=DEFAULT_JSONL)
     parser.add_argument("--text", type=Path, default=DEFAULT_TEXT)
     parser.add_argument("--summary", type=Path, default=DEFAULT_SUMMARY)
+    parser.add_argument("--relational-audit", type=Path, default=DEFAULT_RELATIONAL_AUDIT)
+    parser.add_argument("--relational-audit-json", type=Path, default=DEFAULT_RELATIONAL_AUDIT_JSON)
     args = parser.parse_args()
 
     baseline_rows = list(read_jsonl(args.baseline)) if args.baseline.exists() else []
-    rows, summary = generate_grouped(read_jsonl(args.saol))
-    impact = compare_to_baseline(rows, baseline_rows) if baseline_rows else []
 
+    if args.source_mode == "raw":
+        rows, summary = generate_grouped(read_jsonl(args.saol))
+        audit = {
+            "source_mode": "raw",
+            "integrity": {"articles": 0, "headings": 0, "dangling_headings": 0, "articles_without_headings": 0},
+            "reconstructed_source_rows": 0,
+            "exact_raw_equivalence": True,
+            "relational_artifact_rows": len(rows),
+            "raw_artifact_rows": len(rows),
+            "differences": [],
+        }
+    else:
+        if not args.articles.exists() or not args.headings.exists():
+            raise SystemExit(
+                "Relationsartefakterna saknas. Kör först: python -m swedish_wordlist_tools.materialize_saol_relations"
+            )
+        articles = list(read_jsonl(args.articles))
+        headings = list(read_jsonl(args.headings))
+        integrity = relational_integrity_summary(articles, headings)
+        if integrity["dangling_headings"] or integrity["articles_without_headings"]:
+            raise SystemExit(f"Relationsmodellen är inte komplett: {integrity}")
+        reconstructed = reconstruct_source_rows(articles, headings)
+        rows, summary = generate_grouped(reconstructed)
+
+        raw_generated: list[dict[str, Any]] = []
+        differences: list[dict[str, Any]] = []
+        exact = True
+        if not args.skip_raw_equivalence_check:
+            raw_generated, _raw_summary = generate_grouped(read_jsonl(args.saol))
+            differences = exact_artifact_differences(rows, raw_generated)
+            exact = rows == raw_generated
+        audit = {
+            "source_mode": "relational",
+            "integrity": integrity,
+            "reconstructed_source_rows": len(reconstructed),
+            "exact_raw_equivalence": exact,
+            "relational_artifact_rows": len(rows),
+            "raw_artifact_rows": len(raw_generated) if not args.skip_raw_equivalence_check else None,
+            "differences": differences,
+        }
+        args.relational_audit.parent.mkdir(parents=True, exist_ok=True)
+        args.relational_audit.write_text(render_relational_audit(audit), encoding="utf-8")
+        args.relational_audit_json.write_text(json.dumps(audit, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if not exact:
+            raise SystemExit(
+                f"Relationsvägen skiljer sig från råvägen. Officiell noun-artefakt skrevs INTE. Se {args.relational_audit}"
+            )
+
+    impact = compare_to_baseline(rows, baseline_rows) if baseline_rows else []
     _write_jsonl(args.jsonl, rows)
     args.text.parent.mkdir(parents=True, exist_ok=True)
     args.text.write_text(render_impact(summary, impact), encoding="utf-8")
-    summary = dict(summary, changed_against_baseline=len(impact), artifact=str(args.jsonl))
+    summary = dict(
+        summary,
+        changed_against_baseline=len(impact),
+        artifact=str(args.jsonl),
+        source_mode=args.source_mode,
+        exact_raw_equivalence=audit["exact_raw_equivalence"],
+    )
     args.summary.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(f"Källa för noun-generatorn: {args.source_mode}")
+    if args.source_mode == "relational":
+        print(f"Exakt lika mot gamla råvägen: {'JA' if audit['exact_raw_equivalence'] else 'NEJ'}")
+        print(f"Relationsaudit: {args.relational_audit}")
     print(f"Entydiga variantgrupper: {summary['variant_groups']}")
     print(f"Variantlägen: {summary['variant_mode_counts']}")
     print(f"Flerradsgrupper ej automatiskt lösta: {summary['unresolved_multiline_groups']}")
