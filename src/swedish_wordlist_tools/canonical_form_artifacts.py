@@ -29,6 +29,17 @@ def artifact_row_key(row: dict[str, Any]) -> ArtifactKey:
     )
 
 
+def artifact_row_keys(row: dict[str, Any]) -> tuple[ArtifactKey, ...]:
+    """Return every raw-record key represented by one materialized artifact row."""
+
+    record_id = str(row.get("record_id") or "")
+    lemma = str(row.get("lemma") or "").casefold()
+    aliases = [str(value or "") for value in row.get("source_homonym_numbers", ()) if str(value or "")]
+    if not aliases:
+        aliases = [str(row.get("homonym_number") or "")]
+    return tuple(dict.fromkeys((record_id, homonym, lemma) for homonym in aliases))
+
+
 def artifact_forms(row: dict[str, Any]) -> set[str]:
     return {
         str(form.get("written_form") or "")
@@ -82,39 +93,32 @@ def read_artifact_rows(path: Path) -> list[dict[str, Any]]:
     return _read_rows(path)
 
 
+def _store_aliases(result: dict[ArtifactKey, Any], row: dict[str, Any], value: Any, path: Path, label: str) -> None:
+    for key in artifact_row_keys(row):
+        previous = result.get(key)
+        if previous is not None and previous != value:
+            raise ValueError(f"Motstridiga {label} för {key} i {path}")
+        result[key] = value
+
+
 def read_artifact(path: Path) -> dict[ArtifactKey, set[str]]:
     result: dict[ArtifactKey, set[str]] = {}
     for row in _read_rows(path):
-        key = artifact_row_key(row)
-        forms = artifact_forms(row)
-        previous = result.get(key)
-        if previous is not None and previous != forms:
-            raise ValueError(f"Motstridiga artefaktrader för {key} i {path}")
-        result[key] = forms
+        _store_aliases(result, row, artifact_forms(row), path, "artefaktrader")
     return result
 
 
 def read_artifact_variant_lemmas(path: Path) -> dict[ArtifactKey, tuple[str, ...]]:
     result: dict[ArtifactKey, tuple[str, ...]] = {}
     for row in _read_rows(path):
-        key = artifact_row_key(row)
-        lemmas = artifact_variant_lemmas(row)
-        previous = result.get(key)
-        if previous is not None and previous != lemmas:
-            raise ValueError(f"Motstridiga variantlemma för {key} i {path}")
-        result[key] = lemmas
+        _store_aliases(result, row, artifact_variant_lemmas(row), path, "variantlemma")
     return result
 
 
 def read_artifact_variant_paradigms(path: Path) -> dict[ArtifactKey, VariantParadigms]:
     result: dict[ArtifactKey, VariantParadigms] = {}
     for row in _read_rows(path):
-        key = artifact_row_key(row)
-        paradigms = artifact_variant_paradigms(row)
-        previous = result.get(key)
-        if previous is not None and previous != paradigms:
-            raise ValueError(f"Motstridiga variantparadigm för {key} i {path}")
-        result[key] = paradigms
+        _store_aliases(result, row, artifact_variant_paradigms(row), path, "variantparadigm")
     return result
 
 
