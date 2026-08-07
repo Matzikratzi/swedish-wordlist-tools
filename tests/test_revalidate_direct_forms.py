@@ -11,6 +11,7 @@ from swedish_wordlist_tools.canonical_form_artifacts import (
     load_word_class_artifacts,
 )
 from swedish_wordlist_tools.revalidate_direct_forms import (
+    _semantic_status,
     canonical_validation_row,
     select_direct_match_from_artifacts,
 )
@@ -73,6 +74,7 @@ class RevalidateDirectFormsTests(unittest.TestCase):
             generator="canonical_artifact",
         )
         self.assertEqual("exact_form_set", row["status"])
+        self.assertEqual("exact_form_set", row["semantic_status"])
         self.assertEqual("canonical_artifact", row["generator"])
         self.assertEqual([], row["missing_from_saol"])
         self.assertEqual([], row["extra_from_saol"])
@@ -141,6 +143,30 @@ class RevalidateDirectFormsTests(unittest.TestCase):
                 {"apanage", "apanaget", "apanagen"},
                 forms_from_artifacts(record, artifacts),
             )
+
+    def test_missing_alternative_heading_is_variant_coverage_difference(self) -> None:
+        semantic, reason = _semantic_status(
+            "form_set_mismatch",
+            [
+                {
+                    "lemma": "brevbäring",
+                    "heading_type": "primary",
+                    "status": "exact_form_set",
+                },
+                {
+                    "lemma": "brevbärning",
+                    "heading_type": "alternative",
+                    "status": "variant_missing_in_saldo",
+                },
+            ],
+        )
+        self.assertEqual("variant_coverage_difference", semantic)
+        self.assertEqual("alternative_heading_missing_in_saldo", reason)
+
+    def test_non_variant_mismatch_remains_true_form_mismatch(self) -> None:
+        semantic, reason = _semantic_status("form_set_mismatch", [])
+        self.assertEqual("true_form_mismatch", semantic)
+        self.assertEqual("non_variant_form_difference", reason)
 
 
 if __name__ == "__main__":
