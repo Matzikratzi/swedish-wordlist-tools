@@ -36,6 +36,15 @@ def artifact_forms(row: dict[str, Any]) -> set[str]:
     }
 
 
+def artifact_variant_lemmas(row: dict[str, Any]) -> tuple[str, ...]:
+    values = [str(value or "").strip() for value in row.get("variant_lemmas", ())]
+    values = [value for value in values if value]
+    if values:
+        return tuple(values)
+    lemma = str(row.get("lemma") or "").strip()
+    return (lemma,) if lemma else ()
+
+
 def read_artifact(path: Path) -> dict[ArtifactKey, set[str]]:
     result: dict[ArtifactKey, set[str]] = {}
     with path.open(encoding="utf-8") as handle:
@@ -52,6 +61,25 @@ def read_artifact(path: Path) -> dict[ArtifactKey, set[str]]:
             if previous is not None and previous != forms:
                 raise ValueError(f"Motstridiga artefaktrader för {key} i {path}")
             result[key] = forms
+    return result
+
+
+def read_artifact_variant_lemmas(path: Path) -> dict[ArtifactKey, tuple[str, ...]]:
+    result: dict[ArtifactKey, tuple[str, ...]] = {}
+    with path.open(encoding="utf-8") as handle:
+        for number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as error:
+                raise ValueError(f"Ogiltig JSON på rad {number} i {path}") from error
+            key = artifact_row_key(row)
+            lemmas = artifact_variant_lemmas(row)
+            previous = result.get(key)
+            if previous is not None and previous != lemmas:
+                raise ValueError(f"Motstridiga variantlemma för {key} i {path}")
+            result[key] = lemmas
     return result
 
 
@@ -75,3 +103,10 @@ def forms_from_artifacts(
     if index is None:
         return None
     return index.get(record_key(record))
+
+
+def variant_lemmas_from_artifact(
+    record: dict[str, Any],
+    variant_lemmas: dict[ArtifactKey, tuple[str, ...]],
+) -> tuple[str, ...] | None:
+    return variant_lemmas.get(record_key(record))
