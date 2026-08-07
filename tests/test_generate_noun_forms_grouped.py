@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
-from swedish_wordlist_tools.generate_noun_forms_grouped import generate_grouped
+from swedish_wordlist_tools.generate_noun_forms_grouped import (
+    DEFAULT_BASELINE,
+    DEFAULT_JSONL,
+    generate_grouped,
+)
 
 
 class GenerateNounFormsGroupedTests(unittest.TestCase):
@@ -46,6 +51,11 @@ class GenerateNounFormsGroupedTests(unittest.TestCase):
         forms = {form["written_form"] for form in generated[0]["forms"]}
         self.assertIn("bilen", forms)
         self.assertIn("bilar", forms)
+
+    def test_grouped_writer_targets_official_noun_artifact(self) -> None:
+        expected = Path("reports/saol14-noun-forms.jsonl")
+        self.assertEqual(expected, DEFAULT_JSONL)
+        self.assertEqual(expected, DEFAULT_BASELINE)
 
 
 if __name__ == "__main__":
