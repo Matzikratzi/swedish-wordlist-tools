@@ -57,16 +57,26 @@ class AnalyzeVariantResidualMismatchesTests(unittest.TestCase):
                 "forms": [
                     {
                         "written_form": "foo",
-                        "variant_source": "primary",
-                        "variant_sources": [
-                            {"heading": "foo", "variant_lemma": "foo", "variant_source": "primary"}
+                        "generated_from": [
+                            {
+                                "article_id": "10",
+                                "heading": "foo",
+                                "heading_type": "primary",
+                                "variant_lemma": "foo",
+                                "variant_mode": "shared_notation",
+                            }
                         ],
                     },
                     {
                         "written_form": "foe",
-                        "variant_source": "alternative",
-                        "variant_sources": [
-                            {"heading": "foe", "variant_lemma": "foe", "variant_source": "alternative"}
+                        "generated_from": [
+                            {
+                                "article_id": "10",
+                                "heading": "foe",
+                                "heading_type": "alternative",
+                                "variant_lemma": "foe",
+                                "variant_mode": "shared_notation",
+                            }
                         ],
                     },
                 ],
@@ -77,12 +87,17 @@ class AnalyzeVariantResidualMismatchesTests(unittest.TestCase):
         self.assertEqual(1, summary["resolved_legacy_mismatch_rows"])
         self.assertEqual(1, summary["net_delta"])
         self.assertTrue(summary["net_identity_holds"])
+        self.assertEqual("generated_from", summary["provenance_schema"])
+        self.assertEqual(0, summary["extra_forms_missing_generated_from"])
+        self.assertTrue(summary["generated_from_complete_for_residual_extras"])
         self.assertEqual(1, summary["new_residual_articles"])
         self.assertEqual(1, len(rows))
         self.assertEqual(["0", "1"], rows[0]["homonym_numbers"])
         self.assertEqual(2, rows[0]["validation_rows"])
         self.assertEqual("partial_variant_saldo_coverage", rows[0]["reason"])
-        self.assertEqual("alternative", rows[0]["extra_form_provenance"]["foe"][0]["variant_source"])
+        source = rows[0]["extra_form_provenance"]["foe"][0]
+        self.assertEqual("alternative", source["heading_type"])
+        self.assertEqual("10", source["article_id"])
 
     def test_full_match_with_alternative_only_extra_gets_specific_reason(self) -> None:
         delta_summary = {
@@ -116,14 +131,85 @@ class AnalyzeVariantResidualMismatchesTests(unittest.TestCase):
                 "variant_mode": "shared_notation",
                 "variant_lemmas": ["alpha", "alfa"],
                 "forms": [
-                    {"written_form": "alpha", "variant_sources": [{"heading": "alpha", "variant_lemma": "alpha", "variant_source": "primary"}]},
-                    {"written_form": "alfa", "variant_sources": [{"heading": "alfa", "variant_lemma": "alfa", "variant_source": "alternative"}]},
+                    {
+                        "written_form": "alpha",
+                        "generated_from": [
+                            {
+                                "article_id": "30",
+                                "heading": "alpha",
+                                "heading_type": "primary",
+                                "variant_lemma": "alpha",
+                                "variant_mode": "shared_notation",
+                            }
+                        ],
+                    },
+                    {
+                        "written_form": "alfa",
+                        "generated_from": [
+                            {
+                                "article_id": "30",
+                                "heading": "alfa",
+                                "heading_type": "alternative",
+                                "variant_lemma": "alfa",
+                                "variant_mode": "shared_notation",
+                            }
+                        ],
+                    },
                 ],
             }
         ]
         summary, rows = build_residuals(delta_summary, details, noun_rows)
         self.assertTrue(summary["net_identity_holds"])
+        self.assertTrue(summary["generated_from_complete_for_residual_extras"])
         self.assertEqual("alternative_variant_forms_not_in_saldo", rows[0]["reason"])
+
+    def test_does_not_fall_back_to_legacy_variant_sources(self) -> None:
+        delta_summary = {
+            "legacy_form_set_mismatch": 0,
+            "current_form_set_mismatch": 1,
+            "net_delta": 1,
+        }
+        details = [
+            {
+                "stage": "net",
+                "record_id": "40",
+                "homonym_number": "1",
+                "lemma": "beta",
+                "upos": "NOUN",
+                "notation": "+n",
+                "before_status": "exact_form_set",
+                "after_status": "form_set_mismatch",
+                "before_generated_forms": ["beta"],
+                "after_generated_forms": ["beta", "béta"],
+                "before_saldo_forms": ["beta"],
+                "after_saldo_forms": ["beta"],
+                "before_match_method": "lemma_same_upos",
+                "after_match_method": "article_variant_lemmas_same_upos",
+            }
+        ]
+        noun_rows = [
+            {
+                "record_id": "40",
+                "article_id": "40",
+                "lemma": "beta",
+                "variant_mode": "shared_notation",
+                "variant_lemmas": ["beta", "béta"],
+                "forms": [
+                    {"written_form": "beta"},
+                    {
+                        "written_form": "béta",
+                        "variant_sources": [
+                            {"heading": "béta", "variant_lemma": "béta", "variant_source": "alternative"}
+                        ],
+                    },
+                ],
+            }
+        ]
+        summary, rows = build_residuals(delta_summary, details, noun_rows)
+        self.assertEqual(1, summary["extra_forms_missing_generated_from"])
+        self.assertFalse(summary["generated_from_complete_for_residual_extras"])
+        self.assertEqual([], rows[0]["extra_form_provenance"]["béta"])
+        self.assertEqual("other_variant_paradigm_difference", rows[0]["reason"])
 
 
 if __name__ == "__main__":
