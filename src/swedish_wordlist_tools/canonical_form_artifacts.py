@@ -76,6 +76,12 @@ def _read_rows(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def read_artifact_rows(path: Path) -> list[dict[str, Any]]:
+    """Read materialized artifact rows without regenerating any forms."""
+
+    return _read_rows(path)
+
+
 def read_artifact(path: Path) -> dict[ArtifactKey, set[str]]:
     result: dict[ArtifactKey, set[str]] = {}
     for row in _read_rows(path):
