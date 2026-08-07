@@ -10,16 +10,19 @@ from swedish_wordlist_tools.canonical_form_artifacts import (
     forms_from_artifacts,
     load_word_class_artifacts,
 )
-from swedish_wordlist_tools.revalidate_direct_forms import canonical_validation_row
+from swedish_wordlist_tools.revalidate_direct_forms import (
+    canonical_validation_row,
+    select_direct_match_from_artifacts,
+)
 
 
 class RevalidateDirectFormsTests(unittest.TestCase):
-    def analysis(self, *forms: str) -> dict[str, object]:
+    def analysis(self, *forms: str, upos: str = "") -> dict[str, object]:
         return {
             "id": "saldo.1",
             "lemmas": ["test"],
             "forms": list(forms),
-            "upos": "",
+            "upos": upos,
         }
 
     def test_uses_canonical_adjective_generator_for_record_local_fallback(self) -> None:
@@ -73,6 +76,28 @@ class RevalidateDirectFormsTests(unittest.TestCase):
         self.assertEqual("canonical_artifact", row["generator"])
         self.assertEqual([], row["missing_from_saol"])
         self.assertEqual([], row["extra_from_saol"])
+
+    def test_homonym_selection_uses_supplied_artifact_forms(self) -> None:
+        record = {
+            "normaliserat_ord": "test",
+            "upos": "NOUN",
+            "ordkl": "s.",
+        }
+        exact = self.analysis("test", "testen", upos="NOUN")
+        other = self.analysis("test", "tester", upos="NOUN")
+        exact["id"] = "exact"
+        other["id"] = "other"
+        saldo = {"test": [other, exact]}
+        selected = select_direct_match_from_artifacts(
+            record,
+            saldo,
+            {},
+            {"test", "testen"},
+        )
+        self.assertIsNotNone(selected)
+        method, analyses = selected
+        self.assertEqual("lemma_same_upos", method)
+        self.assertEqual(["exact"], [analysis["id"] for analysis in analyses])
 
     def test_artifact_lookup_uses_record_homonym_and_lemma(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
