@@ -15,6 +15,7 @@ from .classify_form_mismatches import (
     write_jsonl,
 )
 from .classify_next_noun_batch import classify_batch_row
+from .classify_null_genitive_batch import classify_null_genitive_row
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -35,6 +36,8 @@ def integrate_rows(rows: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any]]
             continue
 
         classification, rationale = classify_batch_row(row)
+        if classification == UNCLASSIFIED:
+            classification, rationale = classify_null_genitive_row(row)
         if classification == UNCLASSIFIED:
             result.append(dict(row))
             continue
