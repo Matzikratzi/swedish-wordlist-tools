@@ -16,6 +16,7 @@ DEFAULT_TEXT = Path("reports/saol14-next-noun-batch-classification.txt")
 SALDO_S_PLURAL_DEFINITE_PARADIGM = "saldo_s_plural_definite_paradigm"
 SALDO_COMPETING_DEFINITE_SINGULAR_GENDER = "saldo_competing_definite_singular_gender"
 SALDO_COMPETING_DEFINITE_SINGULAR_ALLOMORPH = "saldo_competing_definite_singular_allomorph"
+SALDO_SIMPLE_VASEN_DEFINITE_PLURAL_PARADIGM = "saldo_simple_vasen_definite_plural_paradigm"
 
 
 def _casefolded(values: Iterable[object]) -> set[str]:
@@ -41,6 +42,19 @@ def classify_batch_row(row: dict[str, Any]) -> tuple[str, str]:
         return UNCLASSIFIED, "missing_lemma"
     extra = _casefolded(row.get("extra_from_saol", ()))
     missing = _casefolded(row.get("missing_from_saol", ()))
+
+    # Simple -väsen articles without an alternative -väsende heading: SAOL has
+    # definite plural -väsendena/-väsendenas while SALDO has exactly -väsea/-väseas.
+    if (
+        notation == "+det; pl. +, best. pl. +dena"
+        and lemma.endswith("väsen")
+        and extra == _suffixed(lemma, ("dena", "denas"))
+        and missing == _suffixed(lemma, ("a", "as"))
+    ):
+        return (
+            SALDO_SIMPLE_VASEN_DEFINITE_PLURAL_PARADIGM,
+            "SAOL simple -väsen paradigm has definite plural -väsendena/-väsendenas while SALDO has exactly the competing -väsea/-väseas forms",
+        )
 
     # English-style -s plurals: SAOL and SALDO agree on +s as indefinite
     # plural but use different definite singular/plural continuations.
