@@ -26,6 +26,9 @@ SALDO_COMPETING_PLURAL_MISSING_DEFINITE_SINGULAR = (
 SALDO_COMPETING_GENDER_AND_PLURAL = "saldo_competing_gender_and_plural"
 SALDO_COMPETING_GENDER_AND_FULL_PLURAL = "saldo_competing_gender_and_full_plural"
 SALDO_COMPETING_PLURAL_PARADIGM = "saldo_competing_plural_paradigm"
+SALDO_VASEN_EXTRA_DEFINITE_SINGULAR_MISSING_DEFINITE_PLURAL = (
+    "saldo_vasen_extra_definite_singular_missing_definite_plural"
+)
 UNCLASSIFIED = "unclassified"
 
 
@@ -57,6 +60,49 @@ def _is_paradigm_mismatch(row: dict[str, Any]) -> bool:
     return paradigm == TARGET_STATUS
 
 
+def _variant_rows(row: dict[str, Any]) -> list[dict[str, Any]]:
+    variants = row.get("variant_validation")
+    if not isinstance(variants, list):
+        return []
+    return [item for item in variants if isinstance(item, dict)]
+
+
+def _classify_vasen_primary_difference(
+    row: dict[str, Any], notation: str, lemma: str
+) -> tuple[str, str] | None:
+    if notation != "+det; pl. +, best. pl. +dena _ +t +n" or not lemma.endswith("väsen"):
+        return None
+
+    variants = _variant_rows(row)
+    primary = [
+        variant
+        for variant in variants
+        if str(variant.get("heading_type") or "") == "primary"
+        and str(variant.get("lemma") or "").casefold() == lemma
+    ]
+    alternatives = [
+        variant
+        for variant in variants
+        if str(variant.get("heading_type") or "") == "alternative"
+    ]
+    if len(primary) != 1 or not alternatives:
+        return None
+    if not all(str(variant.get("status") or "") == "variant_missing_in_saldo" for variant in alternatives):
+        return None
+
+    primary_extra = _casefolded(primary[0].get("extra_from_saol", ()))
+    primary_missing = _casefolded(primary[0].get("missing_from_saol", ()))
+    if (
+        primary_extra == _suffixed_forms(lemma, ("dena", "denas"))
+        and primary_missing == _suffixed_forms(lemma, ("et", "ets"))
+    ):
+        return (
+            SALDO_VASEN_EXTRA_DEFINITE_SINGULAR_MISSING_DEFINITE_PLURAL,
+            "SAOL -väsen primary paradigm has definite plural -väsendena/-väsendenas; SALDO lacks exactly those forms and additionally supplies the competing definite-singular pair -väsenet/-väsenets; the -väsende heading is a separate coverage difference",
+        )
+    return None
+
+
 def classify_row(row: dict[str, Any]) -> tuple[str, str]:
     """Classify only mechanically certain SAOL–SALDO paradigm differences.
 
@@ -78,6 +124,10 @@ def classify_row(row: dict[str, Any]) -> tuple[str, str]:
 
     if upos != "NOUN" or not lemma:
         return UNCLASSIFIED, "no_verified_general_classification"
+
+    vasen_classification = _classify_vasen_primary_difference(row, notation, lemma)
+    if vasen_classification is not None:
+        return vasen_classification
 
     explicit_plural_patterns = {
         "+en +er": ("er", "ers", "erna", "ernas"),
