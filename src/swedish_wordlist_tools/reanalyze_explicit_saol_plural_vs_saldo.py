@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable
@@ -11,15 +10,9 @@ DEFAULT_INPUT = Path("reports/saol14-direct-form-validation.jsonl")
 DEFAULT_TEXT = Path("reports/saol14-explicit-plural-vs-saldo-reanalysis.txt")
 DEFAULT_JSON = Path("reports/saol14-explicit-plural-vs-saldo-reanalysis.json")
 
-# The purpose of this audit is deliberately semantic and independent of the old
-# mismatch classes: if the article text explicitly licenses a plural slot, we
-# inspect generated SAOL forms that SALDO lacks.
-_EXPLICIT_PLURAL_RE = re.compile(
-    r"(?:^|[;,_ ]|\bpl\.\s*)"
-    r"(?:\+(?:ar|er|or|r|n|s)|pl\.\s*\+|pl\.\s*[^;,_ ]+)",
-    re.IGNORECASE,
-)
-
+# This audit is deliberately independent of the old mismatch classes.  A noun
+# article licenses plural only when the article notation itself contains a
+# plural instruction.  Bare +en/+et/+n/+t are singular-only.
 PLURAL_SUFFIXES = (
     "ar", "ars", "arna", "arnas",
     "er", "ers", "erna", "ernas",
@@ -38,15 +31,17 @@ def has_explicit_plural(notation: str) -> bool:
     value = notation.strip()
     if not value:
         return False
-    # Common compact noun patterns put the plural directly after definite
-    # singular, e.g. +en +er, +en +ar, +t +n, +n +r.
-    tokens = value.replace(";", " ").replace(",", " ").split()
-    plus_tokens = [token for token in tokens if token.startswith("+")]
-    if len(plus_tokens) >= 2:
-        return True
+
+    # An explicit 'pl.' clause always licenses some plural information.
     if "pl." in value.casefold():
         return True
-    return bool(_EXPLICIT_PLURAL_RE.search(value))
+
+    # Compact SAOL noun notation places definite singular first and plural
+    # second, e.g. +en +er, +en +ar, +t +n, +n +r.  A single operation such
+    # as +n is therefore singular-only and must never be interpreted as plural.
+    tokens = value.replace(";", " ").replace(",", " ").split()
+    plus_tokens = [token for token in tokens if token.startswith("+")]
+    return len(plus_tokens) >= 2
 
 
 def _relative(lemma: str, form: object) -> str:
