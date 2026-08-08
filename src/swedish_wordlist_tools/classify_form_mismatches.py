@@ -24,6 +24,7 @@ SALDO_COMPETING_PLURAL_MISSING_DEFINITE_SINGULAR = (
     "saldo_competing_plural_missing_definite_singular"
 )
 SALDO_COMPETING_GENDER_AND_PLURAL = "saldo_competing_gender_and_plural"
+SALDO_COMPETING_GENDER_AND_FULL_PLURAL = "saldo_competing_gender_and_full_plural"
 SALDO_COMPETING_PLURAL_PARADIGM = "saldo_competing_plural_paradigm"
 UNCLASSIFIED = "unclassified"
 
@@ -147,6 +148,17 @@ def classify_row(row: dict[str, Any]) -> tuple[str, str]:
             SALDO_COMPETING_GENDER_AND_PLURAL,
             "SAOL explicitly has common-gender definite singular plus -ar plural, while SALDO instead has exactly the neuter definite-singular pair",
         )
+
+    if notation == "+et" and extra == _suffixed_forms(lemma, ("et", "ets")):
+        for plural in (
+            ("ar", "ars", "arna", "arnas"),
+            ("er", "ers", "erna", "ernas"),
+        ):
+            if missing == _suffixed_forms(lemma, ("en", "ens", *plural)):
+                return (
+                    SALDO_COMPETING_GENDER_AND_FULL_PLURAL,
+                    "SAOL notation +et supplies exactly the neuter definite-singular pair while SALDO supplies exactly common-gender definite singular plus one complete regular plural paradigm",
+                )
 
     competing_plural_patterns = {
         "+en +er": (
