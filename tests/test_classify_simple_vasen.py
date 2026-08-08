@@ -17,7 +17,7 @@ class SimpleVasenBatchTests(unittest.TestCase):
             "notation": "+det; pl. +, best. pl. +dena",
             "paradigm_status": "form_set_mismatch",
             "extra_from_saol": ["andeväsendena", "andeväsendenas"],
-            "missing_from_saol": ["andeväsena", "andeväsens"],
+            "missing_from_saol": ["andeväsena", "andeväsenas"],
         }
         classification, _ = classify_batch_row(row)
         self.assertEqual(SALDO_SIMPLE_VASEN_DEFINITE_PLURAL_PARADIGM, classification)
@@ -29,7 +29,7 @@ class SimpleVasenBatchTests(unittest.TestCase):
             "notation": "+det; pl. +, best. pl. +dena",
             "paradigm_status": "form_set_mismatch",
             "extra_from_saol": ["andeväsendena"],
-            "missing_from_saol": ["andeväsena", "andeväsens"],
+            "missing_from_saol": ["andeväsena", "andeväsenas"],
         }
         classification, _ = classify_batch_row(row)
         self.assertEqual(UNCLASSIFIED, classification)
