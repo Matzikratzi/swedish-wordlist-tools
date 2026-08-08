@@ -20,6 +20,10 @@ SALDO_MISSING_DEFINITE_SINGULAR = "saldo_missing_definite_singular"
 SALDO_ALTERNATIVE_DEFINITE_SINGULAR_MISSING_PLURAL = (
     "saldo_alternative_definite_singular_missing_plural"
 )
+SALDO_COMPETING_PLURAL_MISSING_DEFINITE_SINGULAR = (
+    "saldo_competing_plural_missing_definite_singular"
+)
+SALDO_COMPETING_GENDER_AND_PLURAL = "saldo_competing_gender_and_plural"
 UNCLASSIFIED = "unclassified"
 
 
@@ -123,6 +127,31 @@ def classify_row(row: dict[str, Any]) -> tuple[str, str]:
         return (
             SALDO_MISSING_DEFINITE_SINGULAR,
             f"SAOL notation {notation} explicitly supplies the definite singular form; SALDO lacks exactly that form and its genitive",
+        )
+
+    # SAOL explicitly gives neuter definite singular and zero plural, while
+    # SALDO instead lacks that definite singular pair and supplies one regular
+    # plural paradigm.  This is a mechanically visible two-way source
+    # disagreement; neither side is declared erroneous.
+    if notation == "+et; pl. +" and extra == _suffixed_forms(lemma, ("et", "ets")):
+        for suffixes in (("ar", "ars", "arna", "arnas"), ("er", "ers", "erna", "ernas")):
+            if missing == _suffixed_forms(lemma, suffixes):
+                return (
+                    SALDO_COMPETING_PLURAL_MISSING_DEFINITE_SINGULAR,
+                    "SAOL explicitly has neuter definite singular and zero plural, while SALDO lacks that definite-singular pair and supplies exactly one regular plural paradigm",
+                )
+
+    # SAOL explicitly gives common-gender +en and an -ar plural, while SALDO
+    # instead has neuter definite singular.  Again this is classified only as
+    # an exact source disagreement.
+    if (
+        notation == "+en +ar"
+        and extra == _suffixed_forms(lemma, ("en", "ens", "ar", "ars", "arna", "arnas"))
+        and missing == _suffixed_forms(lemma, ("et", "ets"))
+    ):
+        return (
+            SALDO_COMPETING_GENDER_AND_PLURAL,
+            "SAOL explicitly has common-gender definite singular plus -ar plural, while SALDO instead has exactly the neuter definite-singular pair",
         )
 
     alternative_definite_pairs = {
