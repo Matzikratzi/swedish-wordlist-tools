@@ -6,60 +6,33 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Iterable
 
-from .classify_form_mismatches import UNCLASSIFIED, classify_row
+from .classify_form_mismatches import (
+    SALDO_COMPETING_GENDER_AND_FULL_PLURAL,
+    UNCLASSIFIED,
+    classify_row,
+)
 
 DEFAULT_INPUT = Path("reports/saol14-direct-form-validation.jsonl")
 DEFAULT_JSONL = Path("reports/saol14-competing-gender-plural-classification.jsonl")
 DEFAULT_SUMMARY = Path("reports/saol14-competing-gender-plural-classification-summary.json")
-
-SALDO_COMPETING_GENDER_AND_FULL_PLURAL = "saldo_competing_gender_and_full_plural"
 
 
 def _casefolded(values: Iterable[object]) -> set[str]:
     return {str(value).casefold() for value in values}
 
 
-def _suffixed_forms(lemma: str, suffixes: Iterable[str]) -> set[str]:
-    return {lemma + suffix for suffix in suffixes}
-
-
 def classify_competing_gender_plural(row: dict[str, Any]) -> tuple[str, str]:
-    """Classify only the exact +et vs +en plus complete regular plural patterns.
+    """Expose the verified +et vs common-gender+full-plural class as an audit.
 
-    This deliberately does not interpret `pl. +`; that notation remains under
-    separate investigation.
+    The main mismatch classifier is the single source of truth.  This helper
+    deliberately returns only its one target class so the standalone audit and
+    the production classification cannot drift apart again.
     """
 
-    base_classification, _ = classify_row(row)
-    if base_classification != UNCLASSIFIED:
-        return UNCLASSIFIED, "already_classified_by_base_classifier"
-
-    if str(row.get("upos", "")).upper() != "NOUN":
-        return UNCLASSIFIED, "not_noun"
-    if str(row.get("notation", "")).strip() != "+et":
-        return UNCLASSIFIED, "not_exact_et_notation"
-
-    lemma = str(row.get("lemma", "")).casefold()
-    if not lemma:
-        return UNCLASSIFIED, "missing_lemma"
-
-    extra = _casefolded(row.get("extra_from_saol", ()))
-    missing = _casefolded(row.get("missing_from_saol", ()))
-    if extra != _suffixed_forms(lemma, ("et", "ets")):
-        return UNCLASSIFIED, "saol_difference_not_exact_neuter_definite_pair"
-
-    for plural in (
-        ("ar", "ars", "arna", "arnas"),
-        ("er", "ers", "erna", "ernas"),
-    ):
-        saldo_paradigm = _suffixed_forms(lemma, ("en", "ens", *plural))
-        if missing == saldo_paradigm:
-            return (
-                SALDO_COMPETING_GENDER_AND_FULL_PLURAL,
-                "SAOL notation +et supplies exactly the neuter definite-singular pair while SALDO supplies exactly common-gender definite singular plus one complete regular plural paradigm",
-            )
-
-    return UNCLASSIFIED, "no_exact_competing_gender_plural_pattern"
+    classification, rationale = classify_row(row)
+    if classification == SALDO_COMPETING_GENDER_AND_FULL_PLURAL:
+        return classification, rationale
+    return UNCLASSIFIED, "not_competing_gender_and_full_plural"
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
