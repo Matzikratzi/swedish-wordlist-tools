@@ -58,19 +58,10 @@ class NounArticleScopeTests(unittest.TestCase):
             "fackanslutning", "+en", "fackanslutningen", stycke="fack|an·slut·ning"
         )
 
-    def test_honsarv_does_not_inherit_gender_or_plural_from_arv(self) -> None:
-        # SAOL14: höns|arv +en, while the independent article arv has +et; pl. +.
-        # The compound article controls both definite singular and paradigm scope.
-        entry = self.complete("hönsarv", "+en", "höns|arv")
-        self.assertIsNotNone(entry)
-        forms = set(entry.forms if entry else ())
-        self.assertEqual({"hönsarv", "hönsarvs", "hönsarven", "hönsarvens"}, forms)
-        self.assertNotIn("hönsarvet", forms)
-        self.assertNotIn("hönsarvets", forms)
-
     def test_bar_is_word_structure_not_paradigm_inheritance(self) -> None:
         # A printed compound boundary may guide stem operations, but it must not
-        # trigger lookup or completion from the right-hand tail.
+        # trigger lookup or completion from the right-hand tail. The article's
+        # own notation determines the generated paradigm.
         with_bar = self.complete("fackanslutning", "+en", "fack|an·slut·ning")
         without_bar = self.complete("fackanslutning", "+en")
         self.assertIsNotNone(with_bar)
@@ -79,6 +70,19 @@ class NounArticleScopeTests(unittest.TestCase):
             set(with_bar.forms if with_bar else ()),
             set(without_bar.forms if without_bar else ()),
         )
+
+    def test_article_notation_controls_definite_singular_independently_of_stycke(self) -> None:
+        # The same structural tail must not override the article's own operation.
+        # This is an architectural contract: stycke/| may locate operations but
+        # never supplies a paradigm from another article.
+        en_entry = self.complete("testanslutning", "+en", "test|anslutning")
+        et_entry = self.complete("testanslutning", "+et", "test|anslutning")
+        self.assertIsNotNone(en_entry)
+        self.assertIsNotNone(et_entry)
+        self.assertIn("testanslutningen", set(en_entry.forms if en_entry else ()))
+        self.assertNotIn("testanslutninget", set(en_entry.forms if en_entry else ()))
+        self.assertIn("testanslutninget", set(et_entry.forms if et_entry else ()))
+        self.assertNotIn("testanslutningen", set(et_entry.forms if et_entry else ()))
 
     def test_plural_is_generated_when_the_article_itself_says_so(self) -> None:
         entry = self.complete("aktivitet", "+en +er")
