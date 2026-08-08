@@ -148,7 +148,12 @@ def _complete_from_slots(entry: GeneratedEntry) -> GeneratedEntry:
         )
 
     plural_definites = list(explicit_plural_definites)
-    if not plural_definites:
+    if not plural_definites and singular_definites:
+        # A bare SAOL notation ``pl. +`` states only that the indefinite plural
+        # is identical to the lemma.  It does not license inventing a definite
+        # plural.  When singular definiteness is supplied (for example
+        # ``+et; pl. +`` or ``+n; pl. +``), the paradigm gives enough structure
+        # to derive the ordinary definite plural as before.
         plural_definites.extend(
             _derive_definite_plural(lemma, singular_definites, plural)
             for plural in plural_indefinites
