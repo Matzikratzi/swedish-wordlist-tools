@@ -39,15 +39,16 @@ class CompetingPluralParadigmTests(unittest.TestCase):
         self.assertEqual(UNCLASSIFIED, classification)
 
     def test_ar_in_saol_er_in_saldo_exact(self):
-        classification, _ = classify_row(
+        classification, rationale = classify_row(
             self.row(
                 notation="+en +ar",
                 lemma="vurm",
                 extra_from_saol=["vurmar", "vurmars", "vurmarna", "vurmarnas"],
-                missing_from_saol=["vurmer", "vurmers", "vurmerna", "vurmersnas"],
+                missing_from_saol=["vurmer", "vurmers", "vurmerna", "vurmernas"],
             )
         )
-        self.assertEqual(UNCLASSIFIED, classification)
+        self.assertEqual(SALDO_COMPETING_PLURAL_PARADIGM, classification)
+        self.assertIn("competing regular plural paradigm", rationale)
 
     def test_partial_difference_is_not_classified(self):
         classification, _ = classify_row(
