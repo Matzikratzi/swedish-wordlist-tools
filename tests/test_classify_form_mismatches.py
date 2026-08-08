@@ -233,28 +233,42 @@ class ClassifyFormMismatchesTests(unittest.TestCase):
                     status="exact_form_set",
                     notation="+t [-et]; pl. +",
                     lemma="bandage",
-                    generated_forms=[
-                        "bandage",
-                        "bandagen",
-                        "bandagens",
-                        "bandages",
-                        "bandaget",
-                        "bandagets",
-                    ],
-                    saldo_forms=[
-                        "bandage",
-                        "bandagen",
-                        "bandagens",
-                        "bandages",
-                        "bandaget",
-                        "bandagets",
-                    ],
+                    generated_forms=["bandage", "bandagen", "bandagens", "bandages", "bandaget", "bandagets"],
+                    saldo_forms=["bandage", "bandagen", "bandagens", "bandages", "bandaget", "bandagets"],
                     extra_from_saol=[],
                     missing_from_saol=[],
                 )
             ]
         )
         self.assertEqual([], rows)
+
+    def test_coverage_only_variant_difference_is_not_classified(self):
+        rows = classify_rows([
+            self.row(
+                lemma="alisarin",
+                variant_validation=[
+                    {"lemma": "alisarin", "heading_type": "primary", "status": "exact_form_set"},
+                    {"lemma": "alizarin", "heading_type": "alternative", "status": "variant_missing_in_saldo"},
+                ],
+                extra_from_saol=["alizarin"],
+                missing_from_saol=[],
+            )
+        ])
+        self.assertEqual([], rows)
+
+    def test_partial_coverage_with_real_paradigm_mismatch_is_classified(self):
+        rows = classify_rows([
+            self.row(
+                lemma="abstinens",
+                variant_validation=[
+                    {"lemma": "abstinens", "heading_type": "primary", "status": "form_set_mismatch"},
+                    {"lemma": "abstinance", "heading_type": "alternative", "status": "variant_missing_in_saldo"},
+                ],
+            )
+        ])
+        self.assertEqual(1, len(rows))
+        self.assertEqual("partial", rows[0]["coverage_status"])
+        self.assertEqual("form_set_mismatch", rows[0]["paradigm_status"])
 
     def test_summary_counts_classified_and_unclassified(self):
         rows = classify_rows(
@@ -272,6 +286,7 @@ class ClassifyFormMismatchesTests(unittest.TestCase):
         self.assertEqual(1, summary["classified_records"])
         self.assertEqual(1, summary["unclassified_records"])
         self.assertEqual({"NOUN": 1}, summary["unclassified_upos_counts"])
+        self.assertEqual("paradigm_status", summary["selection_axis"])
 
     def test_summary_ranks_exact_unclassified_structures(self):
         rows = classify_rows(
