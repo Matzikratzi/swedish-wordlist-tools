@@ -24,6 +24,7 @@ SALDO_COMPETING_PLURAL_MISSING_DEFINITE_SINGULAR = (
     "saldo_competing_plural_missing_definite_singular"
 )
 SALDO_COMPETING_GENDER_AND_PLURAL = "saldo_competing_gender_and_plural"
+SALDO_COMPETING_PLURAL_PARADIGM = "saldo_competing_plural_paradigm"
 UNCLASSIFIED = "unclassified"
 
 
@@ -129,10 +130,6 @@ def classify_row(row: dict[str, Any]) -> tuple[str, str]:
             f"SAOL notation {notation} explicitly supplies the definite singular form; SALDO lacks exactly that form and its genitive",
         )
 
-    # SAOL explicitly gives neuter definite singular and zero plural, while
-    # SALDO instead lacks that definite singular pair and supplies one regular
-    # plural paradigm.  This is a mechanically visible two-way source
-    # disagreement; neither side is declared erroneous.
     if notation == "+et; pl. +" and extra == _suffixed_forms(lemma, ("et", "ets")):
         for suffixes in (("ar", "ars", "arna", "arnas"), ("er", "ers", "erna", "ernas")):
             if missing == _suffixed_forms(lemma, suffixes):
@@ -141,9 +138,6 @@ def classify_row(row: dict[str, Any]) -> tuple[str, str]:
                     "SAOL explicitly has neuter definite singular and zero plural, while SALDO lacks that definite-singular pair and supplies exactly one regular plural paradigm",
                 )
 
-    # SAOL explicitly gives common-gender +en and an -ar plural, while SALDO
-    # instead has neuter definite singular.  Again this is classified only as
-    # an exact source disagreement.
     if (
         notation == "+en +ar"
         and extra == _suffixed_forms(lemma, ("en", "ens", "ar", "ars", "arna", "arnas"))
@@ -153,6 +147,28 @@ def classify_row(row: dict[str, Any]) -> tuple[str, str]:
             SALDO_COMPETING_GENDER_AND_PLURAL,
             "SAOL explicitly has common-gender definite singular plus -ar plural, while SALDO instead has exactly the neuter definite-singular pair",
         )
+
+    competing_plural_patterns = {
+        "+en +er": (
+            ("er", "ers", "erna", "ernas"),
+            ("ar", "ars", "arna", "arnas"),
+        ),
+        "+en +ar": (
+            ("ar", "ars", "arna", "arnas"),
+            ("er", "ers", "erna", "ernas"),
+        ),
+    }
+    competing = competing_plural_patterns.get(notation)
+    if competing is not None:
+        saol_plural, saldo_plural = competing
+        if (
+            extra == _suffixed_forms(lemma, saol_plural)
+            and missing == _suffixed_forms(lemma, saldo_plural)
+        ):
+            return (
+                SALDO_COMPETING_PLURAL_PARADIGM,
+                f"SAOL notation {notation} explicitly supplies one complete regular plural paradigm while SALDO supplies exactly the competing regular plural paradigm",
+            )
 
     alternative_definite_pairs = {
         "+n +er": (("en", "ens"),),
