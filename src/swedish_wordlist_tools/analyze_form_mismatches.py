@@ -6,10 +6,12 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable
 
+from .analyze_form_validation_axes import classify_axes
+
 DEFAULT_INPUT = Path("reports/saol14-direct-form-validation.jsonl")
 DEFAULT_JSON = Path("reports/saol14-form-mismatches-summary.json")
 DEFAULT_TEXT = Path("reports/saol14-form-mismatches.txt")
-TARGET_STATUS = "form_set_mismatch"
+TARGET_PARADIGM_STATUS = "form_set_mismatch"
 
 
 def _suffixes(lemma: str, forms: Iterable[str]) -> tuple[str, ...]:
@@ -24,31 +26,57 @@ def _suffixes(lemma: str, forms: Iterable[str]) -> tuple[str, ...]:
     return tuple(sorted(result))
 
 
+def _axis_values(row: dict[str, Any]) -> tuple[str, str, str]:
+    """Read materialized axes when present, otherwise derive them identically."""
+
+    coverage = str(row.get("coverage_status") or "")
+    paradigm = str(row.get("paradigm_status") or "")
+    reason = str(row.get("paradigm_reason") or "")
+    if coverage and paradigm:
+        return coverage, paradigm, reason
+    return classify_axes(row)
+
+
 def analyse_rows(rows: Iterable[dict[str, Any]], examples: int = 10) -> dict[str, Any]:
-    selected = [row for row in rows if row.get("status") == TARGET_STATUS]
-    upos_counts = Counter(str(row.get("upos", "")) for row in selected)
-    notation_counts = Counter(str(row.get("notation", "")) for row in selected)
-    method_counts = Counter(str(row.get("match_method", "")) for row in selected)
+    materialized: list[tuple[dict[str, Any], str, str, str]] = []
+    for row in rows:
+        coverage, paradigm, reason = _axis_values(row)
+        materialized.append((row, coverage, paradigm, reason))
+
+    selected = [
+        (row, coverage, paradigm, reason)
+        for row, coverage, paradigm, reason in materialized
+        if paradigm == TARGET_PARADIGM_STATUS
+    ]
+    upos_counts = Counter(str(row.get("upos", "")) for row, _, _, _ in selected)
+    notation_counts = Counter(str(row.get("notation", "")) for row, _, _, _ in selected)
+    method_counts = Counter(str(row.get("match_method", "")) for row, _, _, _ in selected)
+    coverage_counts = Counter(coverage for _, coverage, _, _ in selected)
+    reason_counts = Counter(reason for _, _, _, reason in selected)
 
     grouped: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
-    for row in selected:
+    for row, coverage, _paradigm, reason in selected:
         lemma = str(row.get("lemma", ""))
         key = (
             str(row.get("upos", "")),
             str(row.get("notation", "")),
             str(row.get("match_method", "")),
+            coverage,
+            reason,
             _suffixes(lemma, row.get("extra_from_saol", [])),
             _suffixes(lemma, row.get("missing_from_saol", [])),
         )
         grouped[key].append(row)
 
     groups: list[dict[str, Any]] = []
-    for (upos, notation, method, extra, missing), members in grouped.items():
+    for (upos, notation, method, coverage, reason, extra, missing), members in grouped.items():
         members.sort(key=lambda row: (str(row.get("lemma", "")).casefold(), str(row.get("homonym_number", ""))))
         groups.append({
             "upos": upos,
             "notation": notation,
             "match_method": method,
+            "coverage_status": coverage,
+            "paradigm_reason": reason,
             "count": len(members),
             "extra_pattern": list(extra),
             "missing_pattern": list(missing),
@@ -64,13 +92,25 @@ def analyse_rows(rows: Iterable[dict[str, Any]], examples: int = 10) -> dict[str
             ],
         })
 
-    groups.sort(key=lambda group: (-int(group["count"]), str(group["upos"]), str(group["notation"]), str(group["match_method"])))
+    groups.sort(
+        key=lambda group: (
+            -int(group["count"]),
+            str(group["upos"]),
+            str(group["notation"]),
+            str(group["match_method"]),
+            str(group["coverage_status"]),
+            str(group["paradigm_reason"]),
+        )
+    )
     return {
-        "status": TARGET_STATUS,
+        "selection_axis": "paradigm_status",
+        "paradigm_status": TARGET_PARADIGM_STATUS,
         "records": len(selected),
         "upos_counts": dict(sorted(upos_counts.items(), key=lambda item: (-item[1], item[0]))),
         "notation_counts": dict(sorted(notation_counts.items(), key=lambda item: (-item[1], item[0]))),
         "match_method_counts": dict(sorted(method_counts.items(), key=lambda item: (-item[1], item[0]))),
+        "coverage_status_counts": dict(sorted(coverage_counts.items(), key=lambda item: (-item[1], item[0]))),
+        "paradigm_reason_counts": dict(sorted(reason_counts.items(), key=lambda item: (-item[1], item[0]))),
         "groups": groups,
     }
 
@@ -89,11 +129,16 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
 
 
 def render_text(summary: dict[str, Any]) -> str:
-    lines = [f"Poster: {summary['records']}"]
+    lines = [
+        f"Urval: {summary['selection_axis']}={summary['paradigm_status']}",
+        f"Poster: {summary['records']}",
+    ]
     for heading, key in (
         ("Per ordklass:", "upos_counts"),
         ("Per SAOL-notation:", "notation_counts"),
         ("Per matchningsmetod:", "match_method_counts"),
+        ("Per varianttäckning:", "coverage_status_counts"),
+        ("Per paradigmorsak:", "paradigm_reason_counts"),
     ):
         lines.extend(["", heading])
         for value, count in summary[key].items():
@@ -107,7 +152,8 @@ def render_text(summary: dict[str, Any]) -> str:
         )
         lines.extend([
             "",
-            f"{index}. {group['upos']} | {group['notation']} | {group['match_method']} — {group['count']} poster",
+            f"{index}. {group['upos']} | {group['notation']} | {group['match_method']} | "
+            f"coverage={group['coverage_status']} | reason={group['paradigm_reason']} — {group['count']} poster",
             "   Extra från SAOL: " + (", ".join(group["extra_pattern"]) or "–"),
             "   Saknas från SAOL: " + (", ".join(group["missing_pattern"]) or "–"),
             "   Exempel: " + examples,
@@ -126,7 +172,7 @@ def analyse_file(input_path: Path = DEFAULT_INPUT, json_path: Path = DEFAULT_JSO
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Gruppera kvarvarande formmismatch efter ordklass, notation och formmönster")
+    parser = argparse.ArgumentParser(description="Gruppera verkliga paradigmmismatch efter ordklass, notation och formmönster")
     parser.add_argument("input", nargs="?", type=Path, default=DEFAULT_INPUT)
     parser.add_argument("--json", type=Path, default=DEFAULT_JSON)
     parser.add_argument("--text", type=Path, default=DEFAULT_TEXT)
@@ -139,9 +185,12 @@ def main() -> None:
     if args.examples < 1:
         raise SystemExit("--examples måste vara minst 1")
     summary = analyse_file(args.input, args.json, args.text, args.examples)
-    print(f"Kvarvarande formmismatch: {summary['records']}")
+    print(f"Kvarvarande paradigmmismatch: {summary['records']}")
     for upos, count in summary["upos_counts"].items():
         print(f"{upos}: {count}")
+    print("Varianttäckning bland paradigmmismatch:")
+    for coverage, count in summary["coverage_status_counts"].items():
+        print(f"{coverage}: {count}")
     print(f"Grupper: {len(summary['groups'])}")
     print(f"Text: {summary['text']}")
     print(f"JSON: {summary['json']}")
