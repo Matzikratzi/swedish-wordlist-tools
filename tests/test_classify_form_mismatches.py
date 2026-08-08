@@ -2,6 +2,8 @@ import unittest
 
 from swedish_wordlist_tools.classify_form_mismatches import (
     SALDO_ALTERNATIVE_DEFINITE_SINGULAR_MISSING_PLURAL,
+    SALDO_COMPETING_GENDER_AND_PLURAL,
+    SALDO_COMPETING_PLURAL_MISSING_DEFINITE_SINGULAR,
     SALDO_MISSING_DEFINITE_PLURAL,
     SALDO_MISSING_DEFINITE_SINGULAR,
     SALDO_MISSING_PLURAL,
@@ -160,6 +162,53 @@ class ClassifyFormMismatchesTests(unittest.TestCase):
         )
         self.assertEqual(SALDO_MISSING_DEFINITE_SINGULAR, classification)
         self.assertIn("definite singular", rationale)
+
+    def test_classifies_competing_plural_for_zero_plural_neuter(self):
+        classification, rationale = classify_row(
+            self.row(
+                notation="+et; pl. +",
+                lemma="betessläpp",
+                extra_from_saol=["betessläppet", "betessläppets"],
+                missing_from_saol=[
+                    "betessläppar",
+                    "betessläppars",
+                    "betessläpparna",
+                    "betessläpparnas",
+                ],
+            )
+        )
+        self.assertEqual(SALDO_COMPETING_PLURAL_MISSING_DEFINITE_SINGULAR, classification)
+        self.assertIn("zero plural", rationale)
+
+    def test_classifies_competing_gender_and_plural(self):
+        classification, rationale = classify_row(
+            self.row(
+                notation="+en +ar",
+                lemma="brass",
+                extra_from_saol=[
+                    "brassen",
+                    "brassens",
+                    "brassar",
+                    "brassars",
+                    "brassarna",
+                    "brassarnas",
+                ],
+                missing_from_saol=["brasset", "brassets"],
+            )
+        )
+        self.assertEqual(SALDO_COMPETING_GENDER_AND_PLURAL, classification)
+        self.assertIn("common-gender", rationale)
+
+    def test_does_not_classify_partial_competing_plural(self):
+        classification, _ = classify_row(
+            self.row(
+                notation="+et; pl. +",
+                lemma="betessläpp",
+                extra_from_saol=["betessläppet", "betessläppets"],
+                missing_from_saol=["betessläppar", "betessläpparna"],
+            )
+        )
+        self.assertEqual(UNCLASSIFIED, classification)
 
     def test_classifies_alternative_definite_singular_with_missing_plural_n_er(self):
         classification, rationale = classify_row(
