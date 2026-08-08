@@ -26,6 +26,12 @@ def classify_axes(row: dict[str, Any]) -> tuple[str, str, str]:
     Coverage answers whether all materialized SAOL headings are represented in SALDO.
     Paradigm status answers whether the forms of headings that *are* represented agree.
     The two dimensions are deliberately independent.
+
+    For fully covered variant articles, paradigm comparison is article-level: the
+    union of all SAOL variant forms is compared with the union of all matched
+    SALDO forms. Per-heading validation remains diagnostic, but must not turn an
+    article-level exact match into a mismatch merely because shared forms are
+    assigned to a different lemma/heading in SALDO.
     """
 
     variants = list(row.get("variant_validation") or [])
@@ -46,6 +52,20 @@ def classify_axes(row: dict[str, Any]) -> tuple[str, str, str]:
         coverage = "missing"
     else:
         coverage = "partial"
+
+    # When every SAOL heading is represented in SALDO, the correct paradigm
+    # object is the whole article/lexeme. Shared surface forms may legitimately
+    # be attached to a different heading in SALDO than in SAOL. The already
+    # materialized top-level status compares exactly these article unions.
+    if coverage == "full" and raw_status:
+        if raw_status == "exact_form_set":
+            return coverage, raw_status, "article_union_exact"
+        if raw_status == "exact_form_set_case_difference":
+            return coverage, raw_status, "article_union_exact_ignoring_case"
+        if raw_status == "saol_forms_are_subset":
+            return coverage, raw_status, "article_union_saol_subset"
+        if raw_status == "form_set_mismatch":
+            return coverage, raw_status, "article_union_form_difference"
 
     primary_present = [
         v for v in present if str(v.get("heading_type") or "") == "primary"
