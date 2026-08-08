@@ -54,6 +54,48 @@ class AnalyzeFormValidationAxesTests(unittest.TestCase):
         self.assertEqual("form_set_mismatch", paradigm)
         self.assertEqual("non_variant_form_difference", reason)
 
+    def test_full_variant_coverage_uses_exact_article_union(self) -> None:
+        row = {
+            "status": "exact_form_set",
+            "variant_validation": [
+                {
+                    "lemma": "väsen",
+                    "heading_type": "primary",
+                    "status": "form_set_mismatch",
+                },
+                {
+                    "lemma": "väsende",
+                    "heading_type": "alternative",
+                    "status": "exact_form_set",
+                },
+            ],
+        }
+        coverage, paradigm, reason = classify_axes(row)
+        self.assertEqual("full", coverage)
+        self.assertEqual("exact_form_set", paradigm)
+        self.assertEqual("article_union_exact", reason)
+
+    def test_full_variant_coverage_keeps_real_article_union_mismatch(self) -> None:
+        row = {
+            "status": "form_set_mismatch",
+            "variant_validation": [
+                {
+                    "lemma": "partiväsen",
+                    "heading_type": "primary",
+                    "status": "form_set_mismatch",
+                },
+                {
+                    "lemma": "partiväsende",
+                    "heading_type": "alternative",
+                    "status": "exact_form_set",
+                },
+            ],
+        }
+        coverage, paradigm, reason = classify_axes(row)
+        self.assertEqual("full", coverage)
+        self.assertEqual("form_set_mismatch", paradigm)
+        self.assertEqual("article_union_form_difference", reason)
+
 
 if __name__ == "__main__":
     unittest.main()
