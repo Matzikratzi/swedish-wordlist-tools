@@ -17,6 +17,11 @@ SALDO_S_PLURAL_DEFINITE_PARADIGM = "saldo_s_plural_definite_paradigm"
 SALDO_COMPETING_DEFINITE_SINGULAR_GENDER = "saldo_competing_definite_singular_gender"
 SALDO_COMPETING_DEFINITE_SINGULAR_ALLOMORPH = "saldo_competing_definite_singular_allomorph"
 SALDO_SIMPLE_VASEN_DEFINITE_PLURAL_PARADIGM = "saldo_simple_vasen_definite_plural_paradigm"
+SALDO_MISSING_ALTERNATIVE_PLURAL = "saldo_missing_alternative_plural"
+SALDO_MISSING_ZERO_PLURAL_DEFINITE = "saldo_missing_zero_plural_definite"
+SALDO_ZERO_AND_S_PLURAL_DEFINITE_PARADIGM = "saldo_zero_and_s_plural_definite_paradigm"
+SALDO_ZERO_VS_S_PLURAL_DEFINITE_PARADIGM = "saldo_zero_vs_s_plural_definite_paradigm"
+SALDO_MISSING_ALTERNATIVE_NEUTER_DEFINITE_SINGULAR = "saldo_missing_alternative_neuter_definite_singular"
 
 
 def _casefolded(values: Iterable[object]) -> set[str]:
@@ -43,8 +48,7 @@ def classify_batch_row(row: dict[str, Any]) -> tuple[str, str]:
     extra = _casefolded(row.get("extra_from_saol", ()))
     missing = _casefolded(row.get("missing_from_saol", ()))
 
-    # Simple -väsen articles without an alternative -väsende heading: SAOL has
-    # definite plural -väsendena/-väsendenas while SALDO has exactly -väsea/-väseas.
+    # Simple -väsen articles without an alternative -väsende heading.
     if (
         notation == "+det; pl. +, best. pl. +dena"
         and lemma.endswith("väsen")
@@ -72,6 +76,72 @@ def classify_batch_row(row: dict[str, Any]) -> tuple[str, str]:
         return (
             SALDO_S_PLURAL_DEFINITE_PARADIGM,
             "SAOL and SALDO share -s indefinite plural but have exactly competing definite singular/plural continuations: SAOL -sna/-snas versus SALDO -sen/-sens and -sarna/-sarnas",
+        )
+
+    # SAOL allows both zero plural and -s plural; SALDO uses the -s branch but
+    # with different definite continuations.  The extra zero-plural definite
+    # forms are therefore part of the same explicit alternative paradigm.
+    if (
+        notation == "+n; pl. + H +s"
+        and extra == _suffixed(lemma, ("na", "nas", "sna", "snas"))
+        and missing == _suffixed(lemma, ("sen", "sens", "sarna", "sarnas"))
+    ):
+        return (
+            SALDO_ZERO_AND_S_PLURAL_DEFINITE_PARADIGM,
+            "SAOL explicitly allows both zero plural and -s plural and supplies definite forms for both; SALDO follows the -s branch with exactly the competing -sen/-sens and -sarna/-sarnas continuations",
+        )
+
+    # SAOL has zero plural with -na/-nas definite plural, while SALDO instead
+    # has a complete -s definite paradigm.
+    if (
+        notation == "+n; pl. +"
+        and extra == _suffixed(lemma, ("na", "nas"))
+        and missing == _suffixed(lemma, ("sen", "sens", "sarna", "sarnas"))
+    ):
+        return (
+            SALDO_ZERO_VS_S_PLURAL_DEFINITE_PARADIGM,
+            "SAOL explicitly has zero plural with -na/-nas definite plural while SALDO instead supplies exactly the competing -s definite-singular/plural paradigm",
+        )
+
+    # SAOL explicitly supplies an alternative regular plural that SALDO lacks,
+    # while all other generated forms agree.
+    alternative_plural_patterns = {
+        "+et; pl. + el. +er": ("er", "ers", "erna", "ernas"),
+        "+en; pl. +ar el. +er": ("er", "ers", "erna", "ernas"),
+    }
+    alternative_plural = alternative_plural_patterns.get(notation)
+    if alternative_plural is not None and not missing and extra == _suffixed(lemma, alternative_plural):
+        return (
+            SALDO_MISSING_ALTERNATIVE_PLURAL,
+            f"SAOL notation {notation} explicitly supplies an alternative regular plural paradigm that SALDO lacks exactly",
+        )
+
+    # SAOL permits zero plural alongside a regular plural; SALDO covers the
+    # regular branch but lacks only the definite zero-plural forms.
+    if (
+        notation == "+en; pl. + el. +ar"
+        and not missing
+        and extra == _suffixed(lemma, ("na", "nas"))
+    ):
+        return (
+            SALDO_MISSING_ZERO_PLURAL_DEFINITE,
+            "SAOL explicitly permits zero plural alongside -ar plural and supplies -na/-nas for the zero-plural branch; SALDO lacks exactly those definite zero-plural forms",
+        )
+
+    # SAOL has common and neuter definite-singular alternatives while SALDO
+    # covers the common-gender branch and lacks only -et/-ets.
+    alternative_neuter_notations = {
+        "+en el. +et; pl. +ar el. +",
+        "+en el. +et; pl. +er el. +",
+    }
+    if (
+        notation in alternative_neuter_notations
+        and not missing
+        and extra == _suffixed(lemma, ("et", "ets"))
+    ):
+        return (
+            SALDO_MISSING_ALTERNATIVE_NEUTER_DEFINITE_SINGULAR,
+            "SAOL explicitly supplies an alternative neuter definite-singular pair -et/-ets while SALDO covers the other branch and lacks exactly this alternative",
         )
 
     # Exact common-gender/neuter definite-singular swap with no other difference.
