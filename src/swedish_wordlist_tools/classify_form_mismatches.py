@@ -6,6 +6,8 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable
 
+from .analyze_form_validation_axes import classify_axes
+
 DEFAULT_INPUT = Path("reports/saol14-direct-form-validation.jsonl")
 DEFAULT_JSONL = Path("reports/saol14-form-mismatch-classification.jsonl")
 DEFAULT_SUMMARY = Path("reports/saol14-form-mismatch-classification-summary.json")
@@ -41,16 +43,26 @@ def _suffixed_forms(lemma: str, suffixes: Iterable[str]) -> set[str]:
     return {lemma + suffix for suffix in suffixes}
 
 
+def _is_paradigm_mismatch(row: dict[str, Any]) -> bool:
+    materialized = str(row.get("paradigm_status") or "")
+    if materialized:
+        return materialized == TARGET_STATUS
+    _coverage, paradigm, _reason = classify_axes(row)
+    return paradigm == TARGET_STATUS
+
+
 def classify_row(row: dict[str, Any]) -> tuple[str, str]:
-    """Classify only mechanically certain SAOL–SALDO differences.
+    """Classify only mechanically certain SAOL–SALDO paradigm differences.
 
     A classification says what differs between the sources; it does not change
     the canonical SAOL generator and it does not speculate about why either
-    source chose its paradigm.
+    source chose its paradigm. Lexical variant coverage is an independent axis
+    and is deliberately excluded here unless a present variant also has a real
+    paradigm mismatch.
     """
 
-    if str(row.get("status", "")) != TARGET_STATUS:
-        return UNCLASSIFIED, "not_a_form_set_mismatch"
+    if not _is_paradigm_mismatch(row):
+        return UNCLASSIFIED, "not_a_paradigm_form_set_mismatch"
 
     upos = str(row.get("upos", "")).upper()
     notation = str(row.get("notation", "")).strip()
@@ -113,11 +125,6 @@ def classify_row(row: dict[str, Any]) -> tuple[str, str]:
             f"SAOL notation {notation} explicitly supplies the definite singular form; SALDO lacks exactly that form and its genitive",
         )
 
-    # Some sources disagree in two mechanically visible ways at once: SAOL
-    # explicitly supplies a plural paradigm that SALDO lacks, while SALDO has
-    # one competing definite-singular pair that SAOL does not contain.  Keep
-    # this as a source-difference classification rather than treating either
-    # paradigm as a generator error.
     alternative_definite_pairs = {
         "+n +er": (("en", "ens"),),
         "+et +er": (("t", "ts"), ("en", "ens")),
@@ -139,12 +146,16 @@ def classify_row(row: dict[str, Any]) -> tuple[str, str]:
 def classify_rows(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for row in rows:
-        if str(row.get("status", "")) != TARGET_STATUS:
+        if not _is_paradigm_mismatch(row):
             continue
+        coverage, paradigm, reason = classify_axes(row)
         classification, rationale = classify_row(row)
         result.append(
             {
                 **row,
+                "coverage_status": str(row.get("coverage_status") or coverage),
+                "paradigm_status": str(row.get("paradigm_status") or paradigm),
+                "paradigm_reason": str(row.get("paradigm_reason") or reason),
                 "mismatch_classification": classification,
                 "classification_rationale": rationale,
             }
@@ -224,8 +235,14 @@ def build_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         for row in rows
         if row["mismatch_classification"] == UNCLASSIFIED
     )
+    coverage_counts = Counter(str(row.get("coverage_status") or "") for row in rows)
+    reason_counts = Counter(str(row.get("paradigm_reason") or "") for row in rows)
     return {
+        "selection_axis": "paradigm_status",
+        "paradigm_status": TARGET_STATUS,
         "mismatch_records": len(rows),
+        "coverage_status_counts": dict(sorted(coverage_counts.items())),
+        "paradigm_reason_counts": dict(sorted(reason_counts.items())),
         "classification_counts": dict(sorted(counts.items(), key=lambda item: (-item[1], item[0]))),
         "classified_records": len(rows) - counts.get(UNCLASSIFIED, 0),
         "unclassified_records": counts.get(UNCLASSIFIED, 0),
@@ -238,12 +255,19 @@ def build_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 def render_text(summary: dict[str, Any]) -> str:
     lines = [
+        f"Urval: {summary['selection_axis']}={summary['paradigm_status']}",
         f"Mismatchposter: {summary['mismatch_records']}",
         f"Klassificerade: {summary['classified_records']}",
         f"Oklassificerade: {summary['unclassified_records']}",
         "",
-        "Klassningar:",
+        "Varianttäckning bland paradigmmismatch:",
     ]
+    for name, count in summary["coverage_status_counts"].items():
+        lines.append(f"{count:5}  {name}")
+    lines.extend(["", "Paradigmorsaker:"])
+    for name, count in summary["paradigm_reason_counts"].items():
+        lines.append(f"{count:5}  {name}")
+    lines.extend(["", "Klassningar:"])
     for name, count in summary["classification_counts"].items():
         lines.append(f"{count:5}  {name}")
     lines.extend(["", "Oklassificerade per ordklass:"])
@@ -306,7 +330,7 @@ def classify_file(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Klassificera verifierade SAOL–SALDO-formskillnader utan att ändra generatorn"
+        description="Klassificera verifierade SAOL–SALDO-paradigmskillnader utan att blanda in varianttäckning"
     )
     parser.add_argument("input", nargs="?", type=Path, default=DEFAULT_INPUT)
     parser.add_argument("--jsonl", type=Path, default=DEFAULT_JSONL)
@@ -319,7 +343,7 @@ def main() -> None:
         summary_path=args.summary,
         text_path=args.text,
     )
-    print(f"Mismatchposter: {summary['mismatch_records']}")
+    print(f"Paradigmmismatchposter: {summary['mismatch_records']}")
     print(f"Klassificerade: {summary['classified_records']}")
     print(f"Oklassificerade: {summary['unclassified_records']}")
     for name, count in summary["classification_counts"].items():
