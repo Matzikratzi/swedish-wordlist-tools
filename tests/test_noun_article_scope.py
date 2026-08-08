@@ -60,21 +60,24 @@ class NounArticleScopeTests(unittest.TestCase):
 
     def test_honsarv_does_not_inherit_gender_or_plural_from_arv(self) -> None:
         # SAOL14: höns|arv +en, while the independent article arv has +et; pl. +.
-        # The compound article therefore controls both definite singular and
-        # paradigm scope; the right-hand tail is not a morphology inheritance link.
-        self.assert_singular_only("hönsarv", "+en", "hönsarven", stycke="höns|arv")
-        forms = set(self.complete("hönsarv", "+en", "höns|arv").forms)
-        self.assertNotIn("hönsarvet", forms)
-        self.assertNotIn("hönsarven", {"hönsarv" + "en" if False else ""})  # no inherited neuter zero-plural assertion placeholder removed below
-
-    def test_bar_is_word_structure_not_paradigm_inheritance(self) -> None:
-        # The same printed compound boundary must not cause lookup/completion
-        # from the right-hand tail. Only this article's +en instruction applies.
+        # The compound article controls both definite singular and paradigm scope.
         entry = self.complete("hönsarv", "+en", "höns|arv")
         self.assertIsNotNone(entry)
+        forms = set(entry.forms if entry else ())
+        self.assertEqual({"hönsarv", "hönsarvs", "hönsarven", "hönsarvens"}, forms)
+        self.assertNotIn("hönsarvet", forms)
+        self.assertNotIn("hönsarvets", forms)
+
+    def test_bar_is_word_structure_not_paradigm_inheritance(self) -> None:
+        # A printed compound boundary may guide stem operations, but it must not
+        # trigger lookup or completion from the right-hand tail.
+        with_bar = self.complete("fackanslutning", "+en", "fack|an·slut·ning")
+        without_bar = self.complete("fackanslutning", "+en")
+        self.assertIsNotNone(with_bar)
+        self.assertIsNotNone(without_bar)
         self.assertEqual(
-            {"hönsarv", "hönsarvs", "hönsarven", "hönsarvens"},
-            set(entry.forms if entry else ()),
+            set(with_bar.forms if with_bar else ()),
+            set(without_bar.forms if without_bar else ()),
         )
 
     def test_plural_is_generated_when_the_article_itself_says_so(self) -> None:
