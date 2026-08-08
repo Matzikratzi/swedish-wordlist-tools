@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .analyze_singular_agreement_for_scope_extras import candidates as scope_candidates
-from .triage_singular_scope_mismatches import triage_rows
+from .triage_singular_scope_mismatches import classify as classify_scope_mismatch
 
 DEFAULT_INPUT = Path("reports/saol14-direct-form-validation.jsonl")
 DEFAULT_TEXT = Path("reports/saol14-noun-validation-rebaseline.txt")
@@ -27,11 +27,10 @@ def classify(rows: list[dict[str, Any]]) -> dict[str, Any]:
         for row in scope
     }
     mismatches = [row for row in scope if row["singular_status"] == "singular_mismatch"]
-    triaged = triage_rows(mismatches)
-    triage_by_key = {
-        (row["record_id"], row["homonym_number"], row["lemma"]): row
-        for row in triaged
-    }
+    triage_by_key: dict[tuple[str, str, str], str] = {}
+    for row in mismatches:
+        category, _rationale = classify_scope_mismatch(row)
+        triage_by_key[(row["record_id"], row["homonym_number"], row["lemma"])] = category
 
     counts = Counter()
     examples: dict[str, list[str]] = {}
@@ -53,10 +52,9 @@ def classify(rows: list[dict[str, Any]]) -> dict[str, Any]:
             if scoped["singular_status"] == "singular_exact":
                 add("scope_extra_singular_verified", scoped["lemma"])
                 continue
-            triage = triage_by_key.get(key)
-            if triage is not None:
-                bucket = "scope_mismatch_" + str(triage.get("triage") or "other")
-                add(bucket, scoped["lemma"])
+            category = triage_by_key.get(key)
+            if category is not None:
+                add("scope_mismatch_" + category, scoped["lemma"])
                 continue
 
         status = str(row.get("status") or "")
