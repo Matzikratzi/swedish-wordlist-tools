@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .artifact_paths import SAOL14_ADJECTIVE_FORMS, SAOL14_NOUN_FORMS
+from .saol_surface import clean_saol_word
 
 DEFAULT_NOUN_FORMS = SAOL14_NOUN_FORMS
 DEFAULT_ADJECTIVE_FORMS = SAOL14_ADJECTIVE_FORMS
@@ -21,6 +22,25 @@ def record_key(record: dict[str, Any]) -> ArtifactKey:
     )
 
 
+def record_keys(record: dict[str, Any]) -> tuple[ArtifactKey, ...]:
+    """Return lookup keys from most specific written form to normalized lemma.
+
+    SAOL faksimil can have several source rows with the same record id, homonym
+    number and ``normaliserat_ord`` but different explicit ``ord`` forms, e.g.
+    ``disko``/``disco``.  A rebased artifact is keyed by its actual written
+    lemma, so try cleaned ``ord`` first and use ``normaliserat_ord`` only as a
+    fallback for ordinary rows and complex variants such as ``ankare``/``ankar``.
+    """
+
+    base = record_key(record)
+    written = clean_saol_word(record.get("ord"))
+    keys: list[ArtifactKey] = []
+    if written:
+        keys.append((base[0], base[1], written.casefold()))
+    keys.append(base)
+    return tuple(dict.fromkeys(keys))
+
+
 def artifact_row_key(row: dict[str, Any]) -> ArtifactKey:
     return (
         str(row.get("record_id") or ""),
@@ -30,37 +50,20 @@ def artifact_row_key(row: dict[str, Any]) -> ArtifactKey:
 
 
 def artifact_row_keys(row: dict[str, Any]) -> tuple[ArtifactKey, ...]:
-    """Return every raw-record key represented by one materialized artifact row.
+    """Return every homonym alias represented by one materialized artifact row.
 
-    Variant-aware noun generation may rebase an explicit written variant, e.g.
-    source ``normaliserat_ord=akne`` + ``ord=acne`` becomes artifact lemma
-    ``acne``.  Keep the source normalized lemma as an alias so downstream
-    validation can still resolve the original JSONL row by its stable source
-    identity while using the rebased written paradigm.
+    Do not alias a rebased variant back to ``source_normaliserat_ord`` here.
+    Multiple written variants can legitimately share that source identity while
+    carrying different paradigms.  Raw-record lookup resolves the explicit
+    cleaned ``ord`` first via :func:`record_keys`.
     """
 
     record_id = str(row.get("record_id") or "")
     lemma = str(row.get("lemma") or "").casefold()
-    lemma_aliases = [lemma]
-    source_lemma = str(row.get("source_normaliserat_ord") or "").strip().casefold()
-    if source_lemma and source_lemma not in lemma_aliases:
-        lemma_aliases.append(source_lemma)
-
-    homonym_aliases = [
-        str(value or "")
-        for value in row.get("source_homonym_numbers", ())
-        if str(value or "")
-    ]
-    if not homonym_aliases:
-        homonym_aliases = [str(row.get("homonym_number") or "")]
-
-    return tuple(
-        dict.fromkeys(
-            (record_id, homonym, lemma_alias)
-            for homonym in homonym_aliases
-            for lemma_alias in lemma_aliases
-        )
-    )
+    aliases = [str(value or "") for value in row.get("source_homonym_numbers", ()) if str(value or "")]
+    if not aliases:
+        aliases = [str(row.get("homonym_number") or "")]
+    return tuple(dict.fromkeys((record_id, homonym, lemma) for homonym in aliases))
 
 
 def artifact_forms(row: dict[str, Any]) -> set[str]:
@@ -116,43 +119,49 @@ def read_artifact_rows(path: Path) -> list[dict[str, Any]]:
     return _read_rows(path)
 
 
+def _merge_value(previous: Any, value: Any) -> Any:
+    if isinstance(previous, set) and isinstance(value, set):
+        return previous | value
+    if isinstance(previous, tuple) and isinstance(value, tuple):
+        return tuple(dict.fromkeys((*previous, *value)))
+    if isinstance(previous, dict) and isinstance(value, dict):
+        merged = {key: set(forms) for key, forms in previous.items()}
+        for lemma, forms in value.items():
+            merged.setdefault(lemma, set()).update(forms)
+        return merged
+    return value if previous == value else None
+
+
+def _store_aliases(result: dict[ArtifactKey, Any], row: dict[str, Any], value: Any, path: Path, label: str) -> None:
+    for key in artifact_row_keys(row):
+        previous = result.get(key)
+        if previous is None:
+            result[key] = value
+            continue
+        merged = _merge_value(previous, value)
+        if merged is None:
+            raise ValueError(f"Motstridiga {label} för {key} i {path}")
+        result[key] = merged
+
+
 def read_artifact(path: Path) -> dict[ArtifactKey, set[str]]:
-    """Read form sets, unioning sibling variant rows that share a source alias.
-
-    One SAOL source identity can materialize as more than one written paradigm,
-    e.g. a normalized ``disko`` article with explicit ``disko``/``disco``
-    variants.  The raw-record lookup must see the union; the per-variant reader
-    below retains the paradigms separately.
-    """
-
     result: dict[ArtifactKey, set[str]] = {}
     for row in _read_rows(path):
-        value = artifact_forms(row)
-        for key in artifact_row_keys(row):
-            result.setdefault(key, set()).update(value)
+        _store_aliases(result, row, artifact_forms(row), path, "artefaktrader")
     return result
 
 
 def read_artifact_variant_lemmas(path: Path) -> dict[ArtifactKey, tuple[str, ...]]:
-    result_lists: dict[ArtifactKey, list[str]] = {}
+    result: dict[ArtifactKey, tuple[str, ...]] = {}
     for row in _read_rows(path):
-        values = artifact_variant_lemmas(row)
-        for key in artifact_row_keys(row):
-            target = result_lists.setdefault(key, [])
-            for value in values:
-                if value not in target:
-                    target.append(value)
-    return {key: tuple(values) for key, values in result_lists.items()}
+        _store_aliases(result, row, artifact_variant_lemmas(row), path, "variantlemma")
+    return result
 
 
 def read_artifact_variant_paradigms(path: Path) -> dict[ArtifactKey, VariantParadigms]:
     result: dict[ArtifactKey, VariantParadigms] = {}
     for row in _read_rows(path):
-        paradigms = artifact_variant_paradigms(row)
-        for key in artifact_row_keys(row):
-            target = result.setdefault(key, {})
-            for lemma, forms in paradigms.items():
-                target.setdefault(lemma, set()).update(forms)
+        _store_aliases(result, row, artifact_variant_paradigms(row), path, "variantparadigm")
     return result
 
 
@@ -167,6 +176,14 @@ def load_word_class_artifacts(
     }
 
 
+def _lookup_record(record: dict[str, Any], index: dict[ArtifactKey, Any]) -> Any | None:
+    for key in record_keys(record):
+        value = index.get(key)
+        if value is not None:
+            return value
+    return None
+
+
 def forms_from_artifacts(
     record: dict[str, Any],
     artifacts: dict[str, dict[ArtifactKey, set[str]]],
@@ -175,18 +192,18 @@ def forms_from_artifacts(
     index = artifacts.get(upos)
     if index is None:
         return None
-    return index.get(record_key(record))
+    return _lookup_record(record, index)
 
 
 def variant_lemmas_from_artifact(
     record: dict[str, Any],
     variant_lemmas: dict[ArtifactKey, tuple[str, ...]],
 ) -> tuple[str, ...] | None:
-    return variant_lemmas.get(record_key(record))
+    return _lookup_record(record, variant_lemmas)
 
 
 def variant_paradigms_from_artifact(
     record: dict[str, Any],
     variant_paradigms: dict[ArtifactKey, VariantParadigms],
 ) -> VariantParadigms | None:
-    return variant_paradigms.get(record_key(record))
+    return _lookup_record(record, variant_paradigms)
