@@ -40,7 +40,7 @@ class RemainingNounNotationTests(unittest.TestCase):
         self.assertEqual(["okänd"], [row["lemma"] for row in selected])
 
     def test_excludes_source_truncated_rows(self):
-        notation = "+n; pl. kamrar el. +, best. pl. kamrarna el. -ka"
+        notation = "+n; pl. kamrar el. +, best. pl. kamrarna el. kamma"
         self.assertEqual(50, len(notation))
         rows = [
             {
