@@ -38,6 +38,7 @@ def compare_one(saol: dict[str, Any], saldo: dict[str, Any]) -> dict[str, Any]:
     sf = _formset(saol.get("generated_forms"))
     df = _formset(saldo.get("forms"))
     return {
+        "saol_record_id": str(saol.get("record_id") or ""),
         "saol_homonym": _homonym(saol),
         "saol_forms": sorted(sf),
         "saldo_id": str(saldo.get("id") or ""),
@@ -70,6 +71,8 @@ def analyze(validation_rows: list[dict[str, Any]], saol_rows: list[dict[str, Any
         comparisons = [compare_one(s, d) for s in sr for d in dr]
         exact_homs = sorted({c["saol_homonym"] for c in comparisons if c["exact"]})
         subset_homs = sorted({c["saol_homonym"] for c in comparisons if c["saol_subset"]})
+        exact_record_ids = sorted({c["saol_record_id"] for c in comparisons if c["exact"] and c["saol_record_id"]})
+        subset_record_ids = sorted({c["saol_record_id"] for c in comparisons if c["saol_subset"] and c["saol_record_id"]})
         exact_signatures = sorted({tuple(c["saol_forms"]) for c in comparisons if c["exact"]})
         subset_signatures = sorted({tuple(c["saol_forms"]) for c in comparisons if c["saol_subset"]})
         if exact_homs:
@@ -85,6 +88,7 @@ def analyze(validation_rows: list[dict[str, Any]], saol_rows: list[dict[str, Any
         rows.append({
             "lemma": key[0], "saol_count": len(rr), "saldo_count": len(dr), "status": status,
             "exact_saol_homonyms": exact_homs, "subset_saol_homonyms": subset_homs,
+            "exact_saol_record_ids": exact_record_ids, "subset_saol_record_ids": subset_record_ids,
             "exact_saol_form_signatures": [list(v) for v in exact_signatures],
             "subset_saol_form_signatures": [list(v) for v in subset_signatures],
             "best_matches": best,
@@ -101,7 +105,7 @@ def render(summary: dict[str, Any]) -> str:
     for row in summary["rows"]:
         lines.append(f"\n{row['lemma']} | SAOL={row['saol_count']} SALDO={row['saldo_count']} | {row['status']} | exact SAOL-homonymer={row['exact_saol_homonyms'] or '–'} | subset SAOL-homonymer={row['subset_saol_homonyms'] or '–'}")
         for match in row["best_matches"]:
-            lines.append(f"  SAOL {match['saol_homonym']} -> SALDO {match['saldo_id'] or '(id saknas)'} exact={match['exact']} subset={match['saol_subset']} overlap={match['overlap']} SAOL-only={match['saol_only'] or '–'} SALDO-only={match['saldo_only'] or '–'}")
+            lines.append(f"  SAOL {match['saol_homonym']} record={match['saol_record_id'] or '–'} -> SALDO {match['saldo_id'] or '(id saknas)'} exact={match['exact']} subset={match['saol_subset']} overlap={match['overlap']} SAOL-only={match['saol_only'] or '–'} SALDO-only={match['saldo_only'] or '–'}")
     return "\n".join(lines) + "\n"
 
 
