@@ -6,16 +6,36 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
-from .noun_mechanical_validation import is_mechanically_verified_noun_notation
+from .saol_row_interpreter import interpret_noun_row
 
 DEFAULT_INPUT = Path("reports/saol14-direct-form-validation.jsonl")
 DEFAULT_TEXT = Path("reports/saol14-null-noun-ordkl.txt")
 DEFAULT_JSON = Path("reports/saol14-null-noun-ordkl.json")
 
+_NULL_NOTATIONS = frozenset({"", "(null)", "null"})
+
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
     with path.open(encoding="utf-8") as handle:
         return [json.loads(line) for line in handle if line.strip()]
+
+
+def _is_null_notation(value: object) -> bool:
+    if value is None:
+        return True
+    return str(value).strip().casefold() in _NULL_NOTATIONS
+
+
+def _ordkl_interpretable(row: dict[str, Any]) -> bool:
+    interpreted = interpret_noun_row(
+        {
+            "upos": "NOUN",
+            "normaliserat_ord": str(row.get("lemma") or ""),
+            "ordkl": str(row.get("ordkl") or ""),
+            "text": None,
+        }
+    )
+    return interpreted is not None and interpreted.pattern.startswith("(ordkl:")
 
 
 def candidates(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -25,7 +45,7 @@ def candidates(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         if str(row.get("status") or "") != "form_set_mismatch":
             continue
-        if str(row.get("notation") or "").strip():
+        if not _is_null_notation(row.get("notation")):
             continue
 
         result.append(
@@ -34,10 +54,11 @@ def candidates(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "homonym_number": str(row.get("homonym_number") or ""),
                 "record_id": str(row.get("record_id") or ""),
                 "ordkl": str(row.get("ordkl") or "").strip(),
+                "notation": row.get("notation"),
                 "match_method": str(row.get("match_method") or ""),
                 "generated_forms": [str(value) for value in row.get("generated_forms", ())],
                 "saldo_forms": [str(value) for value in row.get("saldo_forms", ())],
-                "mechanically_verified": is_mechanically_verified_noun_notation(row),
+                "ordkl_interpretable": _ordkl_interpretable(row),
             }
         )
     return result
@@ -52,12 +73,12 @@ def build_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "records": len(rows),
         "ordkl_groups": len(groups),
-        "mechanically_verified": sum(bool(row["mechanically_verified"]) for row in rows),
+        "ordkl_interpretable": sum(bool(row["ordkl_interpretable"]) for row in rows),
         "groups": [
             {
                 "ordkl": ordkl,
                 "count": len(members),
-                "mechanically_verified": sum(bool(member["mechanically_verified"]) for member in members),
+                "ordkl_interpretable": sum(bool(member["ordkl_interpretable"]) for member in members),
                 "match_methods": dict(Counter(member["match_method"] for member in members).most_common()),
                 "examples": [
                     {
@@ -66,7 +87,7 @@ def build_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
                         "record_id": member["record_id"],
                         "generated_forms": member["generated_forms"],
                         "saldo_forms": member["saldo_forms"],
-                        "mechanically_verified": member["mechanically_verified"],
+                        "ordkl_interpretable": member["ordkl_interpretable"],
                     }
                     for member in members[:20]
                 ],
@@ -85,7 +106,7 @@ def render(summary: dict[str, Any]) -> str:
         "",
         f"Poster: {summary['records']}",
         f"ordkl-grupper: {summary['ordkl_groups']}",
-        f"Redan mekaniskt verifierade: {summary['mechanically_verified']}",
+        f"Redan tolkbara via ordkl: {summary['ordkl_interpretable']}",
         "",
         "Grupper:",
     ]
@@ -94,7 +115,7 @@ def render(summary: dict[str, Any]) -> str:
         lines.append("")
         lines.append(
             f"{index}. {group['count']} | {ordkl} | "
-            f"mekaniskt verifierade={group['mechanically_verified']}"
+            f"tolkbara via ordkl={group['ordkl_interpretable']}"
         )
         if group["match_methods"]:
             lines.append(
@@ -125,7 +146,7 @@ def main() -> None:
 
     print(f"Poster: {summary['records']}")
     print(f"ordkl-grupper: {summary['ordkl_groups']}")
-    print(f"Redan mekaniskt verifierade: {summary['mechanically_verified']}")
+    print(f"Redan tolkbara via ordkl: {summary['ordkl_interpretable']}")
     print(f"Text: {args.text}")
     print(f"JSON: {args.json}")
 
