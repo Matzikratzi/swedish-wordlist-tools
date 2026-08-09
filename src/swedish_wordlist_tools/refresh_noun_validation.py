@@ -11,6 +11,7 @@ MODULES = (
     "swedish_wordlist_tools.analyze_remaining_noun_notations",
     "swedish_wordlist_tools.analyze_null_noun_ordkl",
     "swedish_wordlist_tools.analyze_ordkl_field",
+    "swedish_wordlist_tools.analyze_surface_lemma_variants",
     "swedish_wordlist_tools.analyze_remaining_noun_provenance",
 )
 
