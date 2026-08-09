@@ -48,7 +48,14 @@ def homonym_coverage_diagnostics(summary: dict[str, Any] | None) -> dict[str, in
 
 def classify(rows: list[dict[str, Any]], homonym_coverage: dict[str, Any] | None = None) -> dict[str, Any]:
     nouns = [row for row in rows if str(row.get("upos") or "").upper() == "NOUN"]
-    scope = scope_candidates(nouns)
+    # Variant-coverage differences describe how SALDO represents an explicitly
+    # licensed SAOL spelling variant. They are not singular-scope disagreements
+    # and must not enter the ordinary parser-mismatch triage population.
+    scope_nouns = [
+        row for row in nouns
+        if str(row.get("semantic_status") or "") != "variant_coverage_difference"
+    ]
+    scope = scope_candidates(scope_nouns)
     by_key = {(row["record_id"], row["homonym_number"], row["lemma"]): row for row in scope}
     mismatches = [row for row in scope if row["singular_status"] == "singular_mismatch"]
     triage_by_key: dict[tuple[str, str, str], str] = {}
@@ -68,6 +75,7 @@ def classify(rows: list[dict[str, Any]], homonym_coverage: dict[str, Any] | None
     for row in nouns:
         lemma = str(row.get("lemma") or "")
         status = str(row.get("status") or "")
+        semantic_status = str(row.get("semantic_status") or "")
 
         # A 50-character SAOL text field is known to be source-truncated. Keep
         # it out of every ordinary mismatch/triage queue even when the safe
@@ -75,6 +83,14 @@ def classify(rows: list[dict[str, Any]], homonym_coverage: dict[str, Any] | None
         # source-data problem, not a parser problem.
         if status == "form_set_mismatch" and is_truncated_inflection_source(row):
             add("source_text_truncated", lemma)
+            continue
+
+        # A materialized SAOL variant may legitimately be absent from SALDO or
+        # represented there by another heading. revalidate_direct_forms has
+        # already checked each variant paradigm separately; keep that lexical
+        # coverage diagnostic out of parser/scope mismatch queues.
+        if semantic_status == "variant_coverage_difference":
+            add("variant_coverage_difference", lemma)
             continue
 
         key = (str(row.get("record_id") or ""), str(row.get("homonym_number") or ""), lemma)
@@ -124,6 +140,8 @@ def render(summary: dict[str, Any]) -> str:
         "Princip: SAOL-artikelns egna slots är auktoritativa. SALDO används som jämförelsekälla.",
         "Enkla, granskade standardparadigm räknas som mekaniskt verifierade från SAOL+SAG;",
         "SALDO-avvikelser för dessa är diagnostik och håller inte kvar posten i konfliktkön.",
+        "Varianttäckningsskillnader ligger separat: varje SAOL-variant har redan validerats",
+        "mot sitt eget lemma och ska inte blandas in i parser-/artikelomfångsmismatchar.",
         "50-teckenstrunkerade text-fält ligger separat som source_text_truncated och",
         "räknas inte som vanliga parser-/formmismatchar.",
         "",
