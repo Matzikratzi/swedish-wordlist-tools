@@ -53,6 +53,27 @@ class NounIrregularDefinitePluralTests(unittest.TestCase):
             self.assertNotIn("testina", forms)
             self.assertNotIn("testien", forms)
 
+    def test_common_gender_zero_plural_with_en_takes_en(self) -> None:
+        # SAOL: pfennig ~en; pl. ~ -> pfennig, best. pl. pfennigen.
+        entry = self.complete("pfennig", "+en; pl. +", "pfennig")
+        self.assertIsNotNone(entry)
+        forms = set(entry.forms if entry else ())
+        self.assertIn("pfennig", forms)
+        self.assertIn("pfennigen", forms)
+        self.assertIn("pfennigens", forms)
+        self.assertNotIn("pfennigarna", forms)
+        self.assertNotIn("pfennigena", forms)
+        self.assertNotIn("pfennig na", forms)
+
+    def test_common_gender_zero_plural_with_n_keeps_na_subtype(self) -> None:
+        entry = self.complete("demo", "+n; pl. +", "demo")
+        self.assertIsNotNone(entry)
+        forms = set(entry.forms if entry else ())
+        self.assertIn("demo", forms)
+        self.assertIn("demon", forms)
+        self.assertIn("demona", forms)
+        self.assertIn("demonas", forms)
+
 
 if __name__ == "__main__":
     unittest.main()
