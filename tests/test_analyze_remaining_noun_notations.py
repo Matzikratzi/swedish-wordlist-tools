@@ -15,6 +15,30 @@ class RemainingNounNotationTests(unittest.TestCase):
         self.assertEqual(1, len(selected))
         self.assertEqual("y", selected[0]["lemma"])
 
+    def test_excludes_null_notation_when_ordkl_carries_paradigm(self):
+        rows = [
+            {
+                "upos": "NOUN",
+                "status": "form_set_mismatch",
+                "lemma": "kröken",
+                "ordkl": "s. best.",
+                "notation": "(null)",
+                "generated_forms": ["kröken", "krökens"],
+                "saldo_forms": ["krök", "kröken"],
+            },
+            {
+                "upos": "NOUN",
+                "status": "form_set_mismatch",
+                "lemma": "okänd",
+                "ordkl": "s.",
+                "notation": "(null)",
+                "generated_forms": ["okänd"],
+                "saldo_forms": ["okänd", "okända"],
+            },
+        ]
+        selected = candidates(rows)
+        self.assertEqual(["okänd"], [row["lemma"] for row in selected])
+
     def test_groups_remaining_by_exact_notation(self):
         rows = candidates([
             {"upos": "NOUN", "status": "form_set_mismatch", "lemma": "a", "notation": "+et el. +en", "generated_forms": ["a", "aet"], "saldo_forms": ["a"]},
