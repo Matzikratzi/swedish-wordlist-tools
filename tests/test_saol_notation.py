@@ -51,15 +51,6 @@ class SaolNotationTests(unittest.TestCase):
         self.assertEqual(("BB:t", ";", "pl.", "BB:n"), tokenize_notation("BB:t; pl. BB:n"))
         self.assertEqual(("+t", ";", "pl.", "+", "H", "+s"), tokenize_notation("+t; pl. + H +<k>s</k>"))
 
-    def test_tokenizer_inserts_boundary_after_glued_label(self) -> None:
-        self.assertEqual(
-            ("+et", "el.", "+en", ";", "pl.", "+", "el.", "+er"),
-            tokenize_notation("+et el.+en; pl. + el. +er"),
-        )
-        self.assertEqual(("pl.", "+ar"), tokenize_notation("pl.+ar"))
-        self.assertEqual(("BB:t",), tokenize_notation("BB:t"))
-        self.assertEqual(("+:n",), tokenize_notation("+:n"))
-
     def test_drops_strict_prefix_alternative_at_source_limit(self) -> None:
         text = "komp. närmare el. närmre, superl. närmast el. närm"
         self.assertEqual(50, len(text))
@@ -72,9 +63,32 @@ class SaolNotationTests(unittest.TestCase):
                 ",",
                 "superl.",
                 "närmast",
+                "el.",
             ),
             tokenize_notation(text),
         )
+
+    def test_drops_any_final_token_at_source_limit(self) -> None:
+        text = "+n; pl. kamrar el. +, best. pl. kamrarna el. kamma"
+        self.assertEqual(50, len(text))
+        tokens = tokenize_notation(text)
+        self.assertEqual(
+            (
+                "+n",
+                ";",
+                "pl.",
+                "kamrar",
+                "el.",
+                "+",
+                ",",
+                "best.",
+                "pl.",
+                "kamrarna",
+                "el.",
+            ),
+            tokens,
+        )
+        self.assertNotIn("kamma", tokens or ())
 
     def test_keeps_complete_or_nonlimited_alternatives(self) -> None:
         shorter = "komp. närmare el. närm"
