@@ -2,6 +2,8 @@ import unittest
 
 from swedish_wordlist_tools.noun_mechanical_validation import (
     is_mechanically_verified_noun_notation,
+    is_mechanically_verified_noun_row,
+    is_null_noun_notation,
 )
 
 
@@ -42,6 +44,40 @@ class NounMechanicalValidationTests(unittest.TestCase):
         ):
             with self.subTest(notation=notation):
                 self.assertFalse(is_mechanically_verified_noun_notation(notation))
+
+    def test_missing_notation_representations(self):
+        for value in (None, "", "(null)", "null", "  (NULL)  "):
+            with self.subTest(value=value):
+                self.assertTrue(is_null_noun_notation(value))
+        self.assertFalse(is_null_noun_notation("+en"))
+
+    def test_ordkl_carriers_are_mechanically_verified_through_interpreter(self):
+        for lemma, ordkl in (
+            ("alter ego", "s. oböjl."),
+            ("kröken", "s. best."),
+            ("fårakläder", "s. pl."),
+        ):
+            with self.subTest(ordkl=ordkl):
+                self.assertTrue(
+                    is_mechanically_verified_noun_row(
+                        {
+                            "lemma": lemma,
+                            "notation": "(null)",
+                            "ordkl": ordkl,
+                        }
+                    )
+                )
+
+    def test_ordkl_is_not_used_when_text_contains_notation(self):
+        self.assertFalse(
+            is_mechanically_verified_noun_row(
+                {
+                    "lemma": "test",
+                    "notation": "+t; pl. +n el. +",
+                    "ordkl": "s. oböjl.",
+                }
+            )
+        )
 
 
 if __name__ == "__main__":
