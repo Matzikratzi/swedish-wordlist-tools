@@ -49,6 +49,42 @@ class NounValidationRebaselineTests(unittest.TestCase):
         summary = classify(rows)
         self.assertEqual(1, summary["counts"]["exact_form_set"])
 
+    def test_only_verified_homonym_moves_out_of_conflict(self):
+        rows = [
+            {
+                "upos": "NOUN", "lemma": "duns", "record_id": "10", "homonym_number": "1",
+                "notation": "+en +ar", "generated_forms": ["duns", "dunsen"],
+                "saldo_forms": ["duns", "dunsen"], "status": "form_set_mismatch",
+            },
+            {
+                "upos": "NOUN", "lemma": "duns", "record_id": "11", "homonym_number": "2",
+                "notation": "+et", "generated_forms": ["duns", "dunset"],
+                "saldo_forms": ["duns", "dunsen"], "status": "form_set_mismatch",
+            },
+        ]
+        coverage = {"rows": [{
+            "lemma": "duns",
+            "exact_saol_homonyms": ["1"],
+            "subset_saol_homonyms": ["1"],
+        }]}
+        summary = classify(rows, homonym_coverage=coverage)
+        self.assertEqual(1, summary["counts"]["homonym_exact_verified"])
+        self.assertEqual(1, summary["counts"]["remaining_form_set_mismatch"])
+
+    def test_subset_homonym_gets_separate_bucket(self):
+        rows = [{
+            "upos": "NOUN", "lemma": "fotografi", "record_id": "12", "homonym_number": "1",
+            "notation": "+t +er", "generated_forms": ["fotografi"],
+            "saldo_forms": ["fotografi", "fotografit"], "status": "form_set_mismatch",
+        }]
+        coverage = {"rows": [{
+            "lemma": "fotografi",
+            "exact_saol_homonyms": [],
+            "subset_saol_homonyms": ["1"],
+        }]}
+        summary = classify(rows, homonym_coverage=coverage)
+        self.assertEqual(1, summary["counts"]["homonym_subset_verified"])
+
 
 if __name__ == "__main__":
     unittest.main()
