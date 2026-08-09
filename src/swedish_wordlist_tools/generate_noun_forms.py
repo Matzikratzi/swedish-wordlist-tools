@@ -237,6 +237,14 @@ def canonical_noun_row(record: dict[str, Any]) -> tuple[dict[str, Any] | None, d
         "completion_applied": any(form.kind not in {"lemma", "interpreted_slot"} for form in canonical_forms),
         "forms": [_form_dict(form) for form in canonical_forms],
     }
+    source_normalized = str(record.get("_saol_source_normaliserat_ord") or "").strip()
+    if source_normalized and source_normalized.casefold() != str(row["lemma"]).casefold():
+        row["source_normaliserat_ord"] = source_normalized
+    if record.get("_saol_variant_mode"):
+        row["variant_mode"] = str(record["_saol_variant_mode"])
+    if record.get("_saol_variant_evidence"):
+        row["variant_evidence"] = str(record["_saol_variant_evidence"])
+
     comparison = {
         "record_id": row["record_id"],
         "lemma": row["lemma"],
