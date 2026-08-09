@@ -21,26 +21,31 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
 
 
 def homonym_coverage_diagnostics(summary: dict[str, Any] | None) -> dict[str, int]:
-    """Summarize unequal-count homonym coverage without reclassifying records.
-
-    A verified sibling homonym is normally already exact/subset in the direct
-    validation.  The conflicting sibling remains a real mismatch.  Therefore
-    this evidence explains *why a lemma is mixed* but must not move mismatch
-    records into verified buckets.
-    """
+    """Summarize unequal-count homonym coverage without reclassifying records."""
     if not summary:
-        return {
-            "lemmas": 0,
-            "exact_sibling": 0,
-            "subset_sibling": 0,
-            "none_verified": 0,
-        }
-    counts = summary.get("status_counts", {})
+        counts: dict[str, int] = {}
+        lemmas = 0
+    else:
+        counts = {str(k): int(v) for k, v in summary.get("status_counts", {}).items()}
+        # Unit tests and lightweight callers may supply only per-lemma rows.
+        if not counts:
+            counter = Counter(str(row.get("status") or "") for row in summary.get("rows", ()))
+            counts = {key: value for key, value in counter.items() if key}
+        lemmas = int(summary.get("lemmas", len(summary.get("rows", ()))))
+
+    exact = int(counts.get("at_least_one_saol_homonym_exactly_verified", 0))
+    subset = int(counts.get("at_least_one_saol_homonym_subset_verified", 0))
+    none = int(counts.get("no_saol_homonym_verified", 0))
     return {
-        "lemmas": int(summary.get("lemmas", 0)),
-        "exact_sibling": int(counts.get("at_least_one_saol_homonym_exactly_verified", 0)),
-        "subset_sibling": int(counts.get("at_least_one_saol_homonym_subset_verified", 0)),
-        "none_verified": int(counts.get("no_saol_homonym_verified", 0)),
+        # Canonical diagnostic names, matching the coverage audit.
+        "at_least_one_saol_homonym_exactly_verified": exact,
+        "at_least_one_saol_homonym_subset_verified": subset,
+        "no_saol_homonym_verified": none,
+        "lemmas": lemmas,
+        # Short report aliases kept for readable rendering/backwards compatibility.
+        "exact_sibling": exact,
+        "subset_sibling": subset,
+        "none_verified": none,
     }
 
 
@@ -106,12 +111,13 @@ def classify(
         "scope_population": len(scope),
         "scope_singular_exact": sum(1 for row in scope if row["singular_status"] == "singular_exact"),
         "scope_singular_mismatch": len(mismatches),
+        "homonym_diagnostics": homonym_diag,
         "unequal_homonym_coverage": homonym_diag,
     }
 
 
 def render(summary: dict[str, Any]) -> str:
-    hom = summary["unequal_homonym_coverage"]
+    hom = summary["homonym_diagnostics"]
     lines = [
         "SAOL14 NOUN: ny valideringsbaslinje",
         "",
