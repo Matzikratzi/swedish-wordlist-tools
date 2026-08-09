@@ -69,7 +69,7 @@ class NounValidationRebaselineTests(unittest.TestCase):
         }]}
         summary = classify(rows, homonym_coverage=coverage)
         self.assertEqual(1, summary["counts"]["homonym_exact_verified"])
-        self.assertEqual(1, summary["counts"]["remaining_form_set_mismatch"])
+        self.assertEqual(1, summary["counts"]["scope_mismatch_competing_definite_singular"])
 
     def test_subset_homonym_gets_separate_bucket(self):
         rows = [{
