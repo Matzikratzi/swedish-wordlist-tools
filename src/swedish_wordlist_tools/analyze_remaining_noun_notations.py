@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .noun_mechanical_validation import is_mechanically_verified_noun_row
+from .saol_source_policy import is_truncated_inflection_source
 
 DEFAULT_INPUT = Path("reports/saol14-direct-form-validation.jsonl")
 DEFAULT_TEXT = Path("reports/saol14-remaining-noun-notations.txt")
@@ -32,6 +33,8 @@ def candidates(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if str(row.get("upos") or "").upper() != "NOUN":
             continue
         if str(row.get("status") or "") != "form_set_mismatch":
+            continue
+        if is_truncated_inflection_source(row):
             continue
         if is_mechanically_verified_noun_row(row):
             continue
@@ -90,7 +93,8 @@ def build_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def render(summary: dict[str, Any]) -> str:
     lines = [
         "SAOL14 NOUN: kvarvarande mismatch grupperade efter rå notation", "",
-        "Mekaniskt verifierade SAOL-paradigm är bortfiltrerade, oavsett om", "informationen kommer från text eller ordkl. SALDO visas endast som", "diagnostik för den återstående kön.", "",
+        "Mekaniskt verifierade SAOL-paradigm är bortfiltrerade, oavsett om", "informationen kommer från text eller ordkl. SALDO visas endast som", "diagnostik för den återstående kön.",
+        "50-teckenstrunkerade text-fält är också bortfiltrerade: de är ett", "separat källdataproblem och ska inte styra parserutvecklingen.", "",
         f"Poster: {summary['records']}", f"Notationer: {summary['notation_groups']}", "", "Största notationer:",
     ]
     for index, group in enumerate(summary["groups"][:80], start=1):
