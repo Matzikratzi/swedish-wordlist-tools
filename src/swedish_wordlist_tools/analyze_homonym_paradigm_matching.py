@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .jsonl import read_jsonl
-from .saldo_form_artifact import DEFAULT_SALDO_FORMS, read_saldo_forms
+from .saldo_form_artifact import DEFAULT_SALDO_FORMS, is_saldo_word_form, read_saldo_forms
 
 DEFAULT_VALIDATION = Path("reports/saol14-direct-form-validation.jsonl")
 DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
@@ -20,36 +20,10 @@ def _key(value: object) -> str:
     return str(value or "").strip().casefold()
 
 
-def _is_saldo_nonword_form(value: object) -> bool:
-    """True for SALDO forms that are morphological/compound stems, not words.
-
-    Examples in the current artifact include ``fot-``, ``fots-``, ``g-et`` and
-    ``led:er``.  These are useful inside SALDO but must not make an otherwise
-    matching SAOL inflection paradigm disagree.  A trailing hyphen is the most
-    common representation; colon/hyphen morphology is also excluded when it
-    differs from an ordinary written form.
-    """
-    form = str(value or "").strip()
-    if not form:
-        return True
-    if form.endswith("-"):
-        return True
-    if ":" in form:
-        return True
-    # Internal hyphen immediately before a grammatical ending, e.g. g-et.
-    # Ordinary lexical hyphens such as cd-rom are retained because they do not
-    # match this short stem+ending pattern mechanically.
-    if "-" in form:
-        left, right = form.rsplit("-", 1)
-        if left and right in {"s", "n", "ns", "na", "nas", "t", "ts", "et", "ets", "en", "ens", "er", "ers", "erna", "ernas"}:
-            return True
-    return False
-
-
 def _formset(values: object, *, saldo: bool = False) -> set[str]:
     result = set()
     for value in values or ():
-        if saldo and _is_saldo_nonword_form(value):
+        if saldo and not is_saldo_word_form(value):
             continue
         text = str(value)
         if text:
@@ -183,7 +157,17 @@ def analyze(validation_rows: list[dict[str, Any]], saol_rows: list[dict[str, Any
 
 
 def render(summary: dict[str, Any]) -> str:
-    lines = ["SAOL14/SALDO: global paradigmmatchning av homonymer", "", "SALDO:s bindestrecks-/morfologiformer filtreras bort före paradigmjämförelse.", "", f"Konfliktlemman: {summary['conflict_lemmas']}", f"Jämförbara homonymlemman: {summary['lemmas']}", "", "Exkluderade:"]
+    lines = [
+        "SAOL14/SALDO: global paradigmmatchning av homonymer",
+        "",
+        "SALDO-former som slutar på '-' filtreras bort före paradigmjämförelse.",
+        "Övriga former (inklusive kolon och interna bindestreck) behålls.",
+        "",
+        f"Konfliktlemman: {summary['conflict_lemmas']}",
+        f"Jämförbara homonymlemman: {summary['lemmas']}",
+        "",
+        "Exkluderade:",
+    ]
     for name, count in summary["excluded"].items():
         lines.append(f"{count:5}  {name}")
         for example in summary["excluded_examples"].get(name, ()):
