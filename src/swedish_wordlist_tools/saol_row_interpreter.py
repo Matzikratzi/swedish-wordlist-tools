@@ -5,7 +5,6 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Any
 
-from .inflect import normalise_pattern
 from .saol_notation import (
     FormOperation,
     FormOperationKind,
@@ -15,6 +14,7 @@ from .saol_notation import (
     parse_form_operations,
     split_alternative_branches,
 )
+from .saol_source_policy import inflection_text
 
 
 @dataclass(frozen=True)
@@ -252,9 +252,12 @@ def interpret_noun_row(record: dict[str, Any]) -> InterpretedRow | None:
     if str(record.get("upos", "")).upper() != "NOUN":
         return None
     lemma = str(record.get("normaliserat_ord", "")).strip()
-    pattern = normalise_pattern(record.get("text"))
+    pattern = inflection_text(record)
     if not lemma:
         return None
+    # ordkl is a fallback carrier only when primary SAOL text is absent.  When
+    # text exists, even a formatted/truncated ordkl copy must not influence the
+    # inflection parse.
     if pattern is None:
         return _interpret_missing_pattern(record, lemma)
 
