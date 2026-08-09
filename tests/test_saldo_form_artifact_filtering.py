@@ -21,14 +21,21 @@ class SaldoFormArtifactFilteringTests(unittest.TestCase):
     def test_reader_filters_old_artifacts_defensively(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "saldo.jsonl"
-            path.write_text(json.dumps({
-                "id": "x",
-                "upos": "NOUN",
-                "lemmas": ["fot"],
-                "forms": ["fot", "foten", "fot-", "fots-", "g:et"],
-            }, ensure_ascii=False) + "\n", encoding="utf-8")
+            path.write_text(
+                json.dumps(
+                    {
+                        "id": "x",
+                        "upos": "NOUN",
+                        "lemmas": ["fot"],
+                        "forms": ["fot", "foten", "fot-", "fots-", "g:et"],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
             saldo = read_saldo_forms(path)
-            forms = next(iter(saldo["fot"]))["forms"] if False else saldo["fot"][0]["forms"]
+            forms = saldo["fot"][0]["forms"]
             self.assertEqual({"fot", "foten", "g:et"}, forms)
             index = build_form_index(saldo)
             self.assertNotIn("fot-", index)
