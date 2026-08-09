@@ -39,6 +39,25 @@ class RemainingNounNotationTests(unittest.TestCase):
         selected = candidates(rows)
         self.assertEqual(["okänd"], [row["lemma"] for row in selected])
 
+    def test_excludes_source_truncated_rows(self):
+        notation = "+n; pl. kamrar el. +, best. pl. kamrarna el. -ka"
+        self.assertEqual(50, len(notation))
+        rows = [
+            {
+                "upos": "NOUN", "status": "form_set_mismatch",
+                "lemma": "auktionskammare", "notation": notation,
+                "generated_forms": ["auktionskammare", "auktionskammaren"],
+                "saldo_forms": ["auktionskammare"],
+            },
+            {
+                "upos": "NOUN", "status": "form_set_mismatch",
+                "lemma": "hel", "notation": "+et el. +en",
+                "generated_forms": ["hel", "helet"], "saldo_forms": ["hel"],
+            },
+        ]
+        selected = candidates(rows)
+        self.assertEqual(["hel"], [row["lemma"] for row in selected])
+
     def test_groups_remaining_by_exact_notation(self):
         rows = candidates([
             {"upos": "NOUN", "status": "form_set_mismatch", "lemma": "a", "notation": "+et el. +en", "generated_forms": ["a", "aet"], "saldo_forms": ["a"]},
