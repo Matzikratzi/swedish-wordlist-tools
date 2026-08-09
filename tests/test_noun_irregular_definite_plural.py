@@ -17,7 +17,7 @@ class NounIrregularDefinitePluralTests(unittest.TestCase):
         }
         return complete_noun_entry(record, generate_entry(record))
 
-    def test_irregular_s_plural_takes_en(self) -> None:
+    def test_sixth_declension_stem_change_takes_en(self) -> None:
         entry = self.complete("bladlus", "+en -löss", "blad|lus")
         self.assertIsNotNone(entry)
         forms = set(entry.forms if entry else ())
@@ -26,7 +26,7 @@ class NounIrregularDefinitePluralTests(unittest.TestCase):
         self.assertIn("bladlössens", forms)
         self.assertNotIn("bladlössna", forms)
 
-    def test_latin_a_plural_is_already_definite(self) -> None:
+    def test_latin_a_plural_takes_no_definiteness_suffix(self) -> None:
         entry = self.complete(
             "doktorsexamen",
             "best. +; pl. -examina",
@@ -37,6 +37,21 @@ class NounIrregularDefinitePluralTests(unittest.TestCase):
         self.assertIn("doktorsexamina", forms)
         self.assertIn("doktorsexaminas", forms)
         self.assertNotIn("doktorsexaminana", forms)
+
+    def test_generic_s_plural_does_not_invent_definite_plural(self) -> None:
+        entry = self.complete("gringo", "+n; pl. +s", "gringo")
+        self.assertIsNotNone(entry)
+        forms = set(entry.forms if entry else ())
+        self.assertIn("gringos", forms)
+        self.assertNotIn("gringosen", forms)
+        self.assertNotIn("gringosna", forms)
+
+    def test_latin_i_plural_takes_no_definiteness_suffix(self) -> None:
+        entry = self.complete("testum", "+et -testi", "testum")
+        if entry is not None:
+            forms = set(entry.forms)
+            self.assertNotIn("testina", forms)
+            self.assertNotIn("testien", forms)
 
 
 if __name__ == "__main__":
