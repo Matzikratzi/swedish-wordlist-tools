@@ -203,9 +203,6 @@ def _interpret_missing_pattern(record: dict[str, Any], lemma: str) -> Interprete
     if re.search(r"\bs\.\s*pl\.", ordkl):
         key_forms.append(KeyForm("pl_indef", lemma, "ordkl:s. pl."))
         return InterpretedRow(lemma, "(ordkl: pl.)", tuple(key_forms))
-    # SAOL uses both "s. best." and the shorter "best." for nouns whose
-    # headword itself is the only singular definite form, e.g. kröken in
-    # "spola kröken". Do not confuse this with "best. pl.".
     if re.search(r"(?:\bs\.\s*)?\bbest\.(?!\s*pl\.)", ordkl):
         key_forms.append(KeyForm("sg_def", lemma, "ordkl:best."))
         return InterpretedRow(lemma, "(ordkl: best.)", tuple(key_forms))
@@ -218,12 +215,7 @@ def _colon_stem(value: str) -> str | None:
 
 
 def _branch_lemma_variant(lemma: str, tokens: tuple[str, ...]) -> tuple[str, str] | None:
-    """Derive a branch's alternative base spelling from its first colon form.
-
-    ``ID:t`` implies base form ``ID``. For a hyphen compound, ``+ID:t`` on
-    ``användar-id`` implies ``användar-ID``. The rule only changes spelling
-    case of the full lemma or its final hyphen component.
-    """
+    """Derive a branch's alternative base spelling from its first colon form."""
 
     for token in tokens:
         operations = parse_form_operations(token)
@@ -248,6 +240,25 @@ def _branch_lemma_variant(lemma: str, tokens: tuple[str, ...]) -> tuple[str, str
     return None
 
 
+def _explicit_branch_bases(
+    record: dict[str, Any], lemma: str, branch_count: int
+) -> tuple[str, ...]:
+    """Return the base lemma for each ``_`` branch when sibling evidence binds one.
+
+    Variant preprocessing may attach ``_saol_alternative_lemma`` when the same
+    normalized/written pair occurs both as a real NOUN row and as an ``(hv)``
+    row.  For a two-branch notation this is strong evidence that branch one is
+    based on the normalized headword and branch two on that explicit written
+    alternative.  Single-branch rows such as ``ankare``/``ankar`` are deliberately
+    untouched: their alternative can be phrase-bound rather than a full paradigm.
+    """
+
+    alternative = str(record.get("_saol_alternative_lemma") or "").strip()
+    if branch_count == 2 and alternative and alternative.casefold() != lemma.casefold():
+        return (lemma, alternative)
+    return tuple(lemma for _ in range(branch_count))
+
+
 def interpret_noun_row(record: dict[str, Any]) -> InterpretedRow | None:
     if str(record.get("upos", "")).upper() != "NOUN":
         return None
@@ -255,9 +266,6 @@ def interpret_noun_row(record: dict[str, Any]) -> InterpretedRow | None:
     pattern = inflection_text(record)
     if not lemma:
         return None
-    # ordkl is a fallback carrier only when primary SAOL text is absent.  When
-    # text exists, even a formatted/truncated ordkl copy must not influence the
-    # inflection parse.
     if pattern is None:
         return _interpret_missing_pattern(record, lemma)
 
@@ -266,10 +274,18 @@ def interpret_noun_row(record: dict[str, Any]) -> InterpretedRow | None:
     if not branches:
         return None
 
+    branch_bases = _explicit_branch_bases(record, lemma, len(branches))
     key_forms: list[KeyForm] = [KeyForm("lemma", lemma, "lemma")]
     seen: set[tuple[str, str]] = {("lemma", lemma)}
-    for branch in branches:
-        lemma_variant = _branch_lemma_variant(lemma, branch.tokens)
+    for branch_index, branch in enumerate(branches):
+        branch_base = branch_bases[branch_index]
+        if branch_base.casefold() != lemma.casefold():
+            marker = ("lemma", branch_base)
+            if marker not in seen:
+                seen.add(marker)
+                key_forms.append(KeyForm("lemma", branch_base, "explicit_variant_branch"))
+
+        lemma_variant = _branch_lemma_variant(branch_base, branch.tokens)
         if lemma_variant is not None:
             written_form, source = lemma_variant
             marker = ("lemma", written_form)
@@ -287,7 +303,7 @@ def interpret_noun_row(record: dict[str, Any]) -> InterpretedRow | None:
             return None
         for assigned in slot_operations:
             written_form = apply_form_operation_to_noun(
-                record, lemma, assigned.operation
+                record, branch_base, assigned.operation
             )
             if written_form is None:
                 return None
