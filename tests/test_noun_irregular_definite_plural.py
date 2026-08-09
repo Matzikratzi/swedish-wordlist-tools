@@ -26,15 +26,6 @@ class NounIrregularDefinitePluralTests(unittest.TestCase):
         self.assertIn("bladlössens", forms)
         self.assertNotIn("bladlössna", forms)
 
-    def test_irregular_n_plural_takes_en_for_common_gender(self) -> None:
-        entry = self.complete("man", "+nen -män", "man")
-        # The exact source notation for man is not the point of this regression;
-        # if the row interpreter rejects it, the lower-level rule is covered by
-        # the integration cases elsewhere.  Keep this test conditional.
-        if entry is not None:
-            forms = set(entry.forms)
-            self.assertNotIn("männa", forms)
-
     def test_latin_a_plural_is_already_definite(self) -> None:
         entry = self.complete(
             "doktorsexamen",
