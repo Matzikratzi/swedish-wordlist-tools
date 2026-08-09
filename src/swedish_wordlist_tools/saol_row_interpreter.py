@@ -203,8 +203,11 @@ def _interpret_missing_pattern(record: dict[str, Any], lemma: str) -> Interprete
     if re.search(r"\bs\.\s*pl\.", ordkl):
         key_forms.append(KeyForm("pl_indef", lemma, "ordkl:s. pl."))
         return InterpretedRow(lemma, "(ordkl: pl.)", tuple(key_forms))
-    if re.search(r"\bs\.\s*best\.", ordkl):
-        key_forms.append(KeyForm("sg_def", lemma, "ordkl:s. best."))
+    # SAOL uses both "s. best." and the shorter "best." for nouns whose
+    # headword itself is the only singular definite form, e.g. kröken in
+    # "spola kröken". Do not confuse this with "best. pl.".
+    if re.search(r"(?:\bs\.\s*)?\bbest\.(?!\s*pl\.)", ordkl):
+        key_forms.append(KeyForm("sg_def", lemma, "ordkl:best."))
         return InterpretedRow(lemma, "(ordkl: best.)", tuple(key_forms))
     return None
 
