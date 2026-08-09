@@ -20,60 +20,46 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
         return [json.loads(line) for line in handle if line.strip()]
 
 
-def _lemma_key(value: object) -> str:
-    return str(value or "").strip().casefold()
+def homonym_coverage_diagnostics(summary: dict[str, Any] | None) -> dict[str, int]:
+    """Summarize unequal-count homonym coverage without reclassifying records.
 
-
-def _form_signature(values: object) -> tuple[str, ...]:
-    return tuple(sorted({str(v).casefold() for v in (values or ()) if str(v)}))
-
-
-def homonym_coverage_indexes(summary: dict[str, Any] | None) -> tuple[
-    dict[str, str],
-    dict[tuple[str, str], str],
-    dict[tuple[str, tuple[str, ...]], str],
-]:
-    by_record: dict[str, str] = {}
-    by_homonym: dict[tuple[str, str], str] = {}
-    by_forms: dict[tuple[str, tuple[str, ...]], str] = {}
+    A verified sibling homonym is normally already exact/subset in the direct
+    validation.  The conflicting sibling remains a real mismatch.  Therefore
+    this evidence explains *why a lemma is mixed* but must not move mismatch
+    records into verified buckets.
+    """
     if not summary:
-        return by_record, by_homonym, by_forms
-    for row in summary.get("rows", ()):
-        lemma = _lemma_key(row.get("lemma"))
-        exact = {str(value) for value in row.get("exact_saol_homonyms", ())}
-        subset = {str(value) for value in row.get("subset_saol_homonyms", ())}
-        for record_id in row.get("exact_saol_record_ids", ()):
-            if str(record_id):
-                by_record[str(record_id)] = "homonym_exact_verified"
-        for record_id in row.get("subset_saol_record_ids", ()):
-            rid = str(record_id)
-            if rid and rid not in by_record:
-                by_record[rid] = "homonym_subset_verified"
-        for homonym in exact:
-            by_homonym[(lemma, homonym)] = "homonym_exact_verified"
-        for homonym in subset - exact:
-            by_homonym[(lemma, homonym)] = "homonym_subset_verified"
-        exact_form_keys = {_form_signature(forms) for forms in row.get("exact_saol_form_signatures", ())}
-        for forms in row.get("exact_saol_form_signatures", ()):
-            by_forms[(lemma, _form_signature(forms))] = "homonym_exact_verified"
-        for forms in row.get("subset_saol_form_signatures", ()):
-            sig = _form_signature(forms)
-            if sig not in exact_form_keys:
-                by_forms[(lemma, sig)] = "homonym_subset_verified"
-    return by_record, by_homonym, by_forms
+        return {
+            "lemmas": 0,
+            "exact_sibling": 0,
+            "subset_sibling": 0,
+            "none_verified": 0,
+        }
+    counts = summary.get("status_counts", {})
+    return {
+        "lemmas": int(summary.get("lemmas", 0)),
+        "exact_sibling": int(counts.get("at_least_one_saol_homonym_exactly_verified", 0)),
+        "subset_sibling": int(counts.get("at_least_one_saol_homonym_subset_verified", 0)),
+        "none_verified": int(counts.get("no_saol_homonym_verified", 0)),
+    }
 
 
-def classify(rows: list[dict[str, Any]], homonym_coverage: dict[str, Any] | None = None) -> dict[str, Any]:
+def classify(
+    rows: list[dict[str, Any]],
+    homonym_coverage: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     nouns = [row for row in rows if str(row.get("upos") or "").upper() == "NOUN"]
     scope = scope_candidates(nouns)
-    by_key = {(row["record_id"], row["homonym_number"], row["lemma"]): row for row in scope}
+    by_key = {
+        (row["record_id"], row["homonym_number"], row["lemma"]): row
+        for row in scope
+    }
     mismatches = [row for row in scope if row["singular_status"] == "singular_mismatch"]
     triage_by_key: dict[tuple[str, str, str], str] = {}
     for row in mismatches:
         category, _rationale = classify_scope_mismatch(row)
         triage_by_key[(row["record_id"], row["homonym_number"], row["lemma"])] = category
 
-    homonym_by_record, homonym_by_key, homonym_by_forms = homonym_coverage_indexes(homonym_coverage)
     counts = Counter()
     examples: dict[str, list[str]] = {}
 
@@ -85,20 +71,8 @@ def classify(rows: list[dict[str, Any]], homonym_coverage: dict[str, Any] | None
 
     for row in nouns:
         lemma = str(row.get("lemma") or "")
-        lemma_key = _lemma_key(lemma)
         homonym = str(row.get("homonym_number") or "")
         record_id = str(row.get("record_id") or "")
-        status = str(row.get("status") or "")
-
-        homonym_status = homonym_by_record.get(record_id)
-        if homonym_status is None:
-            homonym_status = homonym_by_key.get((lemma_key, homonym))
-        if homonym_status is None:
-            homonym_status = homonym_by_forms.get((lemma_key, _form_signature(row.get("generated_forms"))))
-        if homonym_status is not None and status == "form_set_mismatch":
-            add(homonym_status, lemma)
-            continue
-
         key = (record_id, homonym, lemma)
         scoped = by_key.get(key)
         if scoped is not None:
@@ -110,6 +84,7 @@ def classify(rows: list[dict[str, Any]], homonym_coverage: dict[str, Any] | None
                 add("scope_mismatch_" + category, scoped["lemma"])
                 continue
 
+        status = str(row.get("status") or "")
         if status == "exact_form_set":
             add("exact_form_set", lemma)
         elif status == "exact_form_set_case_difference":
@@ -123,6 +98,7 @@ def classify(rows: list[dict[str, Any]], homonym_coverage: dict[str, Any] | None
         else:
             add("other_status", lemma)
 
+    homonym_diag = homonym_coverage_diagnostics(homonym_coverage)
     return {
         "noun_records": len(nouns),
         "counts": dict(counts.most_common()),
@@ -130,27 +106,31 @@ def classify(rows: list[dict[str, Any]], homonym_coverage: dict[str, Any] | None
         "scope_population": len(scope),
         "scope_singular_exact": sum(1 for row in scope if row["singular_status"] == "singular_exact"),
         "scope_singular_mismatch": len(mismatches),
-        "homonym_coverage_records": sum(count for name, count in counts.items() if name in {"homonym_exact_verified", "homonym_subset_verified"}),
-        "homonym_coverage_record_count": len(homonym_by_record),
-        "homonym_coverage_key_count": len(homonym_by_key),
-        "homonym_coverage_signature_count": len(homonym_by_forms),
+        "unequal_homonym_coverage": homonym_diag,
     }
 
 
 def render(summary: dict[str, Any]) -> str:
+    hom = summary["unequal_homonym_coverage"]
     lines = [
-        "SAOL14 NOUN: ny valideringsbaslinje", "",
+        "SAOL14 NOUN: ny valideringsbaslinje",
+        "",
         "Princip: SAOL-artikelns egna slots är auktoritativa. SALDO används som jämförelsekälla.",
         "Singular-only-artiklar där hela SAOL-singularet finns i SALDO räknas som starkt verifierade",
         "även om SALDO dessutom innehåller plural utanför artikelomfånget.",
-        "För lemma med olika antal SAOL-/SALDO-homonymer räknas varje SAOL-homonym separat:",
-        "endast den homonym vars eget paradigm är exakt verifierat eller subset-verifierat flyttas ur konfliktkön.", "",
+        "",
         f"NOUN-poster: {summary['noun_records']}",
         f"Artikelomfångspopulation: {summary['scope_population']}",
         f"  singular exakt: {summary['scope_singular_exact']}",
         f"  singular mismatch: {summary['scope_singular_mismatch']}",
-        f"Homonymposter verifierade trots olika analysantal: {summary['homonym_coverage_records']}",
-        f"Coverage-nycklar: record_id={summary['homonym_coverage_record_count']}, homonym={summary['homonym_coverage_key_count']}, formsignatur={summary['homonym_coverage_signature_count']}", "",
+        "",
+        "Homonymdiagnostik när SAOL/SALDO har olika antal analyser:",
+        f"  lemma: {hom['lemmas']}",
+        f"  minst en exakt verifierad systerhomonym: {hom['exact_sibling']}",
+        f"  minst en subset-verifierad systerhomonym: {hom['subset_sibling']}",
+        f"  ingen SAOL-homonym verifierad: {hom['none_verified']}",
+        "  Obs: verifierad systerhomonym omklassar inte den avvikande homonymen.",
+        "",
         "Ny toppnivåfördelning:",
     ]
     for name, count in summary["counts"].items():
@@ -168,7 +148,11 @@ def main() -> None:
     parser.add_argument("--text", type=Path, default=DEFAULT_TEXT)
     parser.add_argument("--json", type=Path, default=DEFAULT_JSON)
     args = parser.parse_args()
-    homonym_coverage = json.loads(args.homonym_coverage.read_text(encoding="utf-8")) if args.homonym_coverage.exists() else None
+    homonym_coverage = (
+        json.loads(args.homonym_coverage.read_text(encoding="utf-8"))
+        if args.homonym_coverage.exists()
+        else None
+    )
     summary = classify(read_jsonl(args.input), homonym_coverage=homonym_coverage)
     args.text.parent.mkdir(parents=True, exist_ok=True)
     args.text.write_text(render(summary), encoding="utf-8")
