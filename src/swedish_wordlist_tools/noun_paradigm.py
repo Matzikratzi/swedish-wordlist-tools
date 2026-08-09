@@ -104,19 +104,36 @@ def _derive_definite_plural(
     singular_definites: tuple[str, ...],
     plural: str,
 ) -> str:
+    """Derive definite plural from a SAOL-licensed indefinite plural.
+
+    This is deliberately morphological, not lexical: the article has already
+    licensed ``plural``.  We only supply the ordinary definite-plural ending.
+
+    Productive plural endings in -r take -na (hundar -> hundarna, idéer ->
+    idéerna).  Neuter -n plurals take -a (alibin -> alibina).  Other explicit
+    irregular plurals ending in -n or -s take -en (män -> männen, bladlöss ->
+    bladlössen).  Latin/Greek-style plurals ending in -a are already also the
+    definite plural in SAOL entries such as doktorsexamina.  Zero-plural
+    neuters are handled first because their definite plural is -en/-n.
+    """
     folded_plural = plural.casefold()
     folded_lemma = lemma.casefold()
     folded_singulars = tuple(form.casefold() for form in singular_definites)
+    neuter = any(form.endswith("t") for form in folded_singulars)
 
-    if folded_plural == folded_lemma and any(form.endswith("et") for form in folded_singulars):
+    if folded_plural == folded_lemma and neuter:
         # Zero-plural neuters normally take -en in the definite plural (hus ->
         # husen), but a lemma already ending in e takes only -n (apanage ->
         # apanagen).  Appending -en blindly would produce *apanageen.
         return lemma + ("n" if folded_lemma.endswith("e") else "en")
-    if folded_plural.endswith("n") and any(form.endswith("t") for form in folded_singulars):
+    if folded_plural.endswith("n") and neuter:
         return plural + "a"
-    if folded_plural.endswith("en"):
-        return plural + "a"
+    if folded_plural.endswith("r"):
+        return plural + "na"
+    if folded_plural.endswith("a"):
+        return plural
+    if folded_plural.endswith(("n", "s")):
+        return plural + "en"
     return plural + "na"
 
 
