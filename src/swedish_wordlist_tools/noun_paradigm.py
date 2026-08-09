@@ -9,6 +9,7 @@ from .msd import parse_msd
 from .noun_source_errors import noun_lemma_only_source_error
 from .saol_notation import FormOperationKind, parse_form_operation
 from .saol_row_interpreter import InterpretedRow, interpret_noun_row
+from .saol_surface import surface_lemma
 
 _CI = parse_msd("ci")
 _SG_INDEF_GEN = parse_msd("sg indef gen")
@@ -62,7 +63,7 @@ def _entry_from_interpreted_row(row: InterpretedRow) -> GeneratedEntry:
 def _lemma_only_entry(record: dict[str, Any], reason: str) -> GeneratedEntry | None:
     """Preserve only the headword when source data makes forms unreliable."""
 
-    lemma = str(record.get("normaliserat_ord", "")).strip()
+    lemma = surface_lemma(record)
     if not lemma:
         return None
     return GeneratedEntry(
@@ -104,27 +105,12 @@ def _derive_definite_plural(
     singular_definites: tuple[str, ...],
     plural: str,
 ) -> str | None:
-    """Derive definite plural where SAOL + SAG make the result mechanical.
-
-    Reference: Svenska Akademiens grammatik (SAG), vol. 2, Substantiv §51 and
-    §68. SAOL licenses the plural slot; SAG supplies only the general
-    definiteness operation.
-
-    Important for zero plural: the singular definite morphology distinguishes
-    subtypes that would otherwise look identical from the plural spelling alone.
-    ``+en; pl. +`` behaves like ``pfennig -> pfennig -> pfennigen`` / ``spann ->
-    spann -> spannen``, while ``+n; pl. +`` behaves like ``demo -> demo -> demona``.
-    """
+    """Derive definite plural where SAOL + SAG make the result mechanical."""
     folded_plural = plural.casefold()
     folded_lemma = lemma.casefold()
     folded_singulars = tuple(form.casefold() for form in singular_definites)
     neuter = any(form.endswith("t") for form in folded_singulars)
 
-    # Sixth declension, zero plural.  SAOL's singular definite operation tells
-    # us which productive subtype is intended:
-    #   +et/+t ... pl. +  -> hus/husen, apanage/apanagen
-    #   +en ... pl. +     -> spann/spannen, pfennig/pfennigen
-    #   +n ... pl. +      -> demo/demona
     if folded_plural == folded_lemma:
         if neuter:
             return lemma + ("n" if folded_lemma.endswith("e") else "en")
@@ -134,35 +120,20 @@ def _derive_definite_plural(
             return plural + "na"
         return None
 
-    # First–fourth declension productive plural endings all end in -r and take
-    # -na: hundar -> hundarna, idéer -> idéerna, skor -> skorna.
     if folded_plural.endswith("r"):
         return plural + "na"
 
-    # Fifth declension -n takes -a.  The compact SAOL material includes both
-    # ordinary neuter -n plurals (alibin -> alibina) and explicitly supplied
-    # plurals in -en such as anmodanden -> anmodandena. Final -en is therefore
-    # a sufficient mechanical signal here; other -n plurals require neuter
-    # singular morphology.
     if folded_plural.endswith("en"):
         return plural + "a"
     if folded_plural.endswith("n") and neuter:
         return plural + "a"
 
-    # Latin/Greek plural forms in -a/-i take no further definiteness suffix in
-    # the relevant SAG pattern: tentamina, fora etc.
     if folded_plural.endswith(("a", "i")):
         return plural
 
-    # Stem-changing sixth-declension plurals have no plural suffix even though
-    # their stem differs from the singular: gäss, löss, möss, män. They take
-    # -en in definite plural.
     if folded_plural.endswith(("gäss", "löss", "möss", "män")):
         return plural + "en"
 
-    # A generic written -s plural is deliberately not completed. SAG §68:4
-    # gives -en for one-syllable stems but variation/avoidance elsewhere; final
-    # orthographic -s alone is insufficient evidence.
     if folded_plural.endswith("s"):
         return None
 
@@ -228,7 +199,6 @@ def _has_unmarked_replacement(row: InterpretedRow) -> bool:
 
 
 def _replacement_is_explicit_plural_use(record: dict[str, Any]) -> bool:
-    """Return whether prose explicitly licenses a supplied plural replacement."""
     return _EXPLICIT_PLURAL_USE_RE.search(str(record.get("text", ""))) is not None
 
 
@@ -248,18 +218,28 @@ def complete_noun_entry(
     if str(record.get("upos", "")).upper() != "NOUN":
         return entry
 
-    source_error = noun_lemma_only_source_error(record)
-    if source_error is not None:
-        return _lemma_only_entry(record, source_error)
+    # ``normaliserat_ord`` is a comparison/normalization carrier and can merge
+    # explicit spelling variants.  Inflect the actual written ``ord`` form for
+    # this row instead, after removing only presentation separators such as
+    # middle dots and compound bars.  Example: normalized ``akne`` + ord
+    # ``acne`` must produce acne/acnen/acnes/acnens, not another akne paradigm.
+    working_record = dict(record)
+    lemma = surface_lemma(record)
+    if lemma:
+        working_record["normaliserat_ord"] = lemma
 
-    row = interpret_noun_row(record)
+    source_error = noun_lemma_only_source_error(working_record)
+    if source_error is not None:
+        return _lemma_only_entry(working_record, source_error)
+
+    row = interpret_noun_row(working_record)
     if row is None:
         return None
 
     if (
         _has_unmarked_replacement(row)
-        and not _has_usable_compound_bar(record, row.lemma)
-        and not _replacement_is_explicit_plural_use(record)
+        and not _has_usable_compound_bar(working_record, row.lemma)
+        and not _replacement_is_explicit_plural_use(working_record)
     ):
         return None
 
