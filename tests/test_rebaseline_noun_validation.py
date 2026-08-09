@@ -14,7 +14,7 @@ class NounValidationRebaselineTests(unittest.TestCase):
             "generated_forms": ["kyrkofrid", "kyrkofrids", "kyrkofriden", "kyrkofridens"],
             "saldo_forms": [
                 "kyrkofrid", "kyrkofrids", "kyrkofriden", "kyrkofridens",
-                "kyrkofrider", "kyrkofriders", "kyrkofriderna", "kyrkofridernas",
+                "kyrkofrider", "kyrkofriderna",
             ],
             "status": "saol_forms_are_subset",
         }]
@@ -49,7 +49,7 @@ class NounValidationRebaselineTests(unittest.TestCase):
         summary = classify(rows)
         self.assertEqual(1, summary["counts"]["exact_form_set"])
 
-    def test_verified_sibling_homonym_does_not_reclassify_conflict(self):
+    def test_verified_sibling_homonym_is_diagnostic_only(self):
         rows = [
             {
                 "upos": "NOUN", "lemma": "duns", "record_id": "10", "homonym_number": "1",
@@ -58,32 +58,44 @@ class NounValidationRebaselineTests(unittest.TestCase):
             },
             {
                 "upos": "NOUN", "lemma": "duns", "record_id": "11", "homonym_number": "2",
-                "notation": "+et", "generated_forms": ["duns", "dunset"],
-                "saldo_forms": ["duns", "dunsen"], "status": "form_set_mismatch",
+                "notation": "+et", "generated_forms": ["duns", "duns", "dunset", "dunsets"],
+                "saldo_forms": ["duns", "dunsen", "dunsens"], "status": "form_set_mismatch",
             },
         ]
-        coverage = {
-            "lemmas": 1,
-            "status_counts": {"at_least_one_saol_homonym_exactly_verified": 1},
-        }
+        coverage = {"rows": [{
+            "lemma": "duns",
+            "status": "at_least_one_saol_homonym_exactly_verified",
+            "exact_saol_homonyms": ["1"],
+            "subset_saol_homonyms": ["1"],
+        }]}
         summary = classify(rows, homonym_coverage=coverage)
         self.assertEqual(1, summary["counts"]["exact_form_set"])
         self.assertEqual(1, summary["counts"]["scope_mismatch_competing_definite_singular"])
-        self.assertEqual(1, summary["unequal_homonym_coverage"]["exact_sibling"])
+        self.assertEqual(1, summary["homonym_diagnostics"]["at_least_one_saol_homonym_exactly_verified"])
 
     def test_subset_sibling_is_diagnostic_only(self):
-        rows = [{
-            "upos": "NOUN", "lemma": "fotografi", "record_id": "12", "homonym_number": "2",
-            "notation": "+n", "generated_forms": ["fotografi", "fotografin"],
-            "saldo_forms": ["fotografi", "fotografit"], "status": "form_set_mismatch",
-        }]
-        coverage = {
-            "lemmas": 1,
-            "status_counts": {"at_least_one_saol_homonym_subset_verified": 1},
-        }
+        rows = [
+            {
+                "upos": "NOUN", "lemma": "fotografi", "record_id": "12", "homonym_number": "1",
+                "notation": "+t +er", "generated_forms": ["fotografi"],
+                "saldo_forms": ["fotografi", "fotografit"], "status": "saol_forms_are_subset",
+            },
+            {
+                "upos": "NOUN", "lemma": "fotografi", "record_id": "13", "homonym_number": "2",
+                "notation": "+n", "generated_forms": ["fotografi", "fotografin", "fotografins"],
+                "saldo_forms": ["fotografi", "fotografit", "fotografits"], "status": "form_set_mismatch",
+            },
+        ]
+        coverage = {"rows": [{
+            "lemma": "fotografi",
+            "status": "at_least_one_saol_homonym_subset_verified",
+            "exact_saol_homonyms": [],
+            "subset_saol_homonyms": ["1"],
+        }]}
         summary = classify(rows, homonym_coverage=coverage)
+        self.assertEqual(1, summary["counts"]["other_saol_subset"])
         self.assertEqual(1, summary["counts"]["scope_mismatch_competing_definite_singular"])
-        self.assertEqual(1, summary["unequal_homonym_coverage"]["subset_sibling"])
+        self.assertEqual(1, summary["homonym_diagnostics"]["at_least_one_saol_homonym_subset_verified"])
 
 
 if __name__ == "__main__":
