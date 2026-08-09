@@ -74,7 +74,7 @@ class NounValidationRebaselineTests(unittest.TestCase):
         self.assertNotIn("remaining_form_set_mismatch", summary["counts"])
 
     def test_truncated_source_is_separate_from_parser_mismatch(self):
-        notation = "+n; pl. kamrar el. +, best. pl. kamrarna el. -ka"
+        notation = "+n; pl. kamrar el. +, best. pl. kamrarna el. kamma"
         self.assertEqual(50, len(notation))
         rows = [{
             "upos": "NOUN", "lemma": "auktionskammare", "record_id": "41", "homonym_number": "1",
@@ -146,6 +146,7 @@ class NounValidationRebaselineTests(unittest.TestCase):
         summary = classify(rows, homonym_coverage=coverage)
         self.assertEqual(1, summary["counts"]["other_saol_subset"])
         self.assertEqual(1, summary["counts"]["scope_mismatch_competing_definite_singular"])
+        self.assertEqual(1, summary["homonym_diagnostics"]["at_least_one_saol_homonym_subset_verified"])
 
 
 if __name__ == "__main__":
