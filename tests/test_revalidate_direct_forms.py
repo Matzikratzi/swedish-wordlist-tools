@@ -13,6 +13,7 @@ from swedish_wordlist_tools.canonical_form_artifacts import (
 from swedish_wordlist_tools.revalidate_direct_forms import (
     _semantic_status,
     canonical_validation_row,
+    select_article_variant_match_from_artifacts,
     select_direct_match_from_artifacts,
 )
 
@@ -100,6 +101,63 @@ class RevalidateDirectFormsTests(unittest.TestCase):
         method, analyses = selected
         self.assertEqual("lemma_same_upos", method)
         self.assertEqual(["exact"], [analysis["id"] for analysis in analyses])
+
+    def test_single_rebased_variant_matches_written_lemma_not_normalized_carrier(self) -> None:
+        record = {
+            "normaliserat_ord": "akne",
+            "ord": "acne",
+            "upos": "NOUN",
+        }
+        acne = {
+            "id": "acne.nn.1",
+            "lemmas": ["acne"],
+            "forms": ["acne", "acnes", "acnen", "acnens"],
+            "upos": "NOUN",
+        }
+        akne = {
+            "id": "akne.nn.1",
+            "lemmas": ["akne"],
+            "forms": ["akne", "aknes", "aknen", "aknens"],
+            "upos": "NOUN",
+        }
+        saldo = {"acne": [acne], "akne": [akne]}
+        generated = {"acne", "acnes", "acnen", "acnens"}
+        selected = select_article_variant_match_from_artifacts(
+            record,
+            saldo,
+            {},
+            generated,
+            {"acne": generated},
+        )
+        self.assertIsNotNone(selected)
+        method, analyses = selected
+        self.assertEqual("single_article_variant_lemma_same_upos", method)
+        self.assertEqual(["acne.nn.1"], [analysis["id"] for analysis in analyses])
+
+    def test_single_primary_paradigm_keeps_normal_direct_lookup(self) -> None:
+        record = {
+            "normaliserat_ord": "akne",
+            "ord": "akne",
+            "upos": "NOUN",
+        }
+        akne = {
+            "id": "akne.nn.1",
+            "lemmas": ["akne"],
+            "forms": ["akne", "aknen"],
+            "upos": "NOUN",
+        }
+        saldo = {"akne": [akne]}
+        selected = select_article_variant_match_from_artifacts(
+            record,
+            saldo,
+            {},
+            {"akne", "aknen"},
+            {"akne": {"akne", "aknen"}},
+        )
+        self.assertIsNotNone(selected)
+        method, analyses = selected
+        self.assertEqual("lemma_same_upos", method)
+        self.assertEqual(["akne.nn.1"], [analysis["id"] for analysis in analyses])
 
     def test_artifact_lookup_uses_record_homonym_and_lemma(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
