@@ -23,17 +23,15 @@ class NounMechanicalValidationTests(unittest.TestCase):
             "+n -sidor",
             "+en -rötter",
             "+n -ändar",
+            "+n; pl. -ändar",
+            "+en; pl. -rötter",
         ):
             with self.subTest(notation=notation):
                 self.assertTrue(is_mechanically_verified_noun_notation(notation))
 
     def test_explicit_used_plural_is_mechanical(self):
-        self.assertTrue(
-            is_mechanically_verified_noun_notation("best. +; i: pl. används: -verkningar")
-        )
-        self.assertTrue(
-            is_mechanically_verified_noun_notation("best. +; i: pl. används: -ansökningar")
-        )
+        self.assertTrue(is_mechanically_verified_noun_notation("best. +; i: pl. används: -verkningar"))
+        self.assertTrue(is_mechanically_verified_noun_notation("best. +; i: pl. används: -ansökningar"))
 
     def test_branching_or_compound_notation_stays_unverified(self):
         for notation in (
@@ -60,22 +58,14 @@ class NounMechanicalValidationTests(unittest.TestCase):
             with self.subTest(ordkl=ordkl):
                 self.assertTrue(
                     is_mechanically_verified_noun_row(
-                        {
-                            "lemma": lemma,
-                            "notation": "(null)",
-                            "ordkl": ordkl,
-                        }
+                        {"lemma": lemma, "notation": "(null)", "ordkl": ordkl}
                     )
                 )
 
     def test_ordkl_is_not_used_when_text_contains_notation(self):
         self.assertFalse(
             is_mechanically_verified_noun_row(
-                {
-                    "lemma": "test",
-                    "notation": "+t; pl. +n el. +",
-                    "ordkl": "s. oböjl.",
-                }
+                {"lemma": "test", "notation": "+t; pl. +n el. +", "ordkl": "s. oböjl."}
             )
         )
 
