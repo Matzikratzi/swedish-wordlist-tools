@@ -4,11 +4,13 @@ import argparse
 import html
 import json
 import re
+import ssl
 import time
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
+from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from .jsonl import read_jsonl
@@ -124,10 +126,35 @@ def match_row(row: dict[str, Any], pages: Iterable[RunebergPage]) -> dict[str, A
     return {"status": "not_found", "confidence": "none", "runeberg_page": None, "context": ""}
 
 
+def _ssl_context() -> ssl.SSLContext:
+    """Return a verified HTTPS context, preferring certifi's CA bundle.
+
+    Python.org macOS installations do not always inherit the Keychain CA roots.
+    certifi gives urllib a portable verified trust store without disabling TLS
+    certificate verification.
+    """
+
+    try:
+        import certifi
+    except ImportError:
+        return ssl.create_default_context()
+    return ssl.create_default_context(cafile=certifi.where())
+
+
 def _fetch(url: str) -> str:
     request = Request(url, headers={"User-Agent": "swedish-wordlist-tools/1.0 Runeberg recovery"})
-    with urlopen(request, timeout=30) as response:
-        return response.read().decode("utf-8", errors="replace")
+    try:
+        with urlopen(request, timeout=30, context=_ssl_context()) as response:
+            return response.read().decode("utf-8", errors="replace")
+    except URLError as error:
+        reason = getattr(error, "reason", None)
+        if isinstance(reason, ssl.SSLCertVerificationError):
+            raise RuntimeError(
+                "HTTPS-certifikatet kunde inte verifieras. Installera certifi i din venv "
+                "med `python -m pip install certifi` och kör igen. TLS-verifiering stängs "
+                "inte av av recoveryn."
+            ) from error
+        raise
 
 
 def load_pages(cache_dir: Path, *, start: int = PAGE_START, end: int = PAGE_END, delay: float = 0.05) -> list[RunebergPage]:
