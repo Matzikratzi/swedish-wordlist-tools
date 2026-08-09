@@ -9,6 +9,16 @@ class SaolSurfaceVariantTests(unittest.TestCase):
         self.assertEqual("aknebehandling", clean_saol_word("akne|be·handl·ing"))
         self.assertEqual("ackvisitör", clean_saol_word("ac·kvis·it·ör"))
 
+    def test_preserves_real_spaces_and_hyphens(self):
+        self.assertEqual(
+            "a conto-betalning",
+            clean_saol_word("a conto-be·taln·ing"),
+        )
+        self.assertEqual(
+            "a conto-betalning",
+            clean_saol_word("a conto-|be·taln·ing"),
+        )
+
     def test_ord_wins_over_normalized_lemma_for_written_variant(self):
         record = {
             "normaliserat_ord": "akne",
