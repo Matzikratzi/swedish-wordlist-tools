@@ -221,6 +221,20 @@ class SaolRowInterpreterTests(unittest.TestCase):
         self.assertEqual("baguetten", row.form("sg_def") if row else None)
         self.assertEqual("baguetter", row.form("pl_indef") if row else None)
 
+    def test_never_materializes_final_token_at_source_limit(self) -> None:
+        pattern = "+n; pl. kamrar el. +, best. pl. kamrarna el. kamma"
+        self.assertEqual(50, len(pattern))
+        row = interpret_noun_row(self.record("kammare", pattern))
+        self.assertIsNotNone(row)
+        self.assertNotIn(
+            "kamma",
+            {form.source for form in (row.key_forms if row else ())},
+        )
+        self.assertNotIn(
+            "kamma",
+            {form.written_form for form in (row.key_forms if row else ())},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
