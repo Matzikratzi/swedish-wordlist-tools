@@ -61,6 +61,18 @@ class NounValidationRebaselineTests(unittest.TestCase):
         self.assertEqual(1, summary["counts"]["mechanically_verified_from_saol"])
         self.assertNotIn("remaining_form_set_mismatch", summary["counts"])
 
+    def test_null_text_ordkl_paradigm_is_mechanically_verified(self):
+        rows = [{
+            "upos": "NOUN", "lemma": "kröken", "record_id": "40", "homonym_number": "1",
+            "notation": "(null)", "ordkl": "s. best.",
+            "generated_forms": ["kröken", "krökens"],
+            "saldo_forms": ["krök", "kröken", "krökar", "krökarna"],
+            "status": "form_set_mismatch",
+        }]
+        summary = classify(rows)
+        self.assertEqual(1, summary["counts"]["mechanically_verified_from_saol"])
+        self.assertNotIn("remaining_form_set_mismatch", summary["counts"])
+
     def test_alternative_zero_plural_notation_stays_diagnostic(self):
         rows = [{
             "upos": "NOUN", "lemma": "alfa", "record_id": "5", "homonym_number": "1",
