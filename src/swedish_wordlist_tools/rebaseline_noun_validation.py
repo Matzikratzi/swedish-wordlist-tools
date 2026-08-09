@@ -10,6 +10,7 @@ from .analyze_singular_agreement_for_scope_extras import candidates as scope_can
 from .triage_singular_scope_mismatches import classify as classify_scope_mismatch
 
 DEFAULT_INPUT = Path("reports/saol14-direct-form-validation.jsonl")
+DEFAULT_HOMONYM_COVERAGE = Path("reports/saol14-unequal-homonym-paradigm-coverage.json")
 DEFAULT_TEXT = Path("reports/saol14-noun-validation-rebaseline.txt")
 DEFAULT_JSON = Path("reports/saol14-noun-validation-rebaseline.json")
 
@@ -19,7 +20,26 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
         return [json.loads(line) for line in handle if line.strip()]
 
 
-def classify(rows: list[dict[str, Any]]) -> dict[str, Any]:
+def homonym_coverage_index(summary: dict[str, Any] | None) -> dict[tuple[str, str], str]:
+    """Return per-SAOL-homonym verification status for unequal-count lemmas."""
+    result: dict[tuple[str, str], str] = {}
+    if not summary:
+        return result
+    for row in summary.get("rows", ()):
+        lemma = str(row.get("lemma") or "")
+        exact = {str(value) for value in row.get("exact_saol_homonyms", ())}
+        subset = {str(value) for value in row.get("subset_saol_homonyms", ())}
+        for homonym in exact:
+            result[(lemma, homonym)] = "homonym_exact_verified"
+        for homonym in subset - exact:
+            result[(lemma, homonym)] = "homonym_subset_verified"
+    return result
+
+
+def classify(
+    rows: list[dict[str, Any]],
+    homonym_coverage: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     nouns = [row for row in rows if str(row.get("upos") or "").upper() == "NOUN"]
     scope = scope_candidates(nouns)
     by_key = {
@@ -32,6 +52,7 @@ def classify(rows: list[dict[str, Any]]) -> dict[str, Any]:
         category, _rationale = classify_scope_mismatch(row)
         triage_by_key[(row["record_id"], row["homonym_number"], row["lemma"])] = category
 
+    homonym_by_key = homonym_coverage_index(homonym_coverage)
     counts = Counter()
     examples: dict[str, list[str]] = {}
 
@@ -57,19 +78,26 @@ def classify(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 add("scope_mismatch_" + category, scoped["lemma"])
                 continue
 
+        lemma = str(row.get("lemma") or "")
+        homonym = str(row.get("homonym_number") or "")
+        homonym_status = homonym_by_key.get((lemma, homonym))
+        if homonym_status is not None and str(row.get("status") or "") == "form_set_mismatch":
+            add(homonym_status, lemma)
+            continue
+
         status = str(row.get("status") or "")
         if status == "exact_form_set":
-            add("exact_form_set", str(row.get("lemma") or ""))
+            add("exact_form_set", lemma)
         elif status == "exact_form_set_case_difference":
-            add("exact_form_set_case_difference", str(row.get("lemma") or ""))
+            add("exact_form_set_case_difference", lemma)
         elif status == "saol_forms_are_subset":
-            add("other_saol_subset", str(row.get("lemma") or ""))
+            add("other_saol_subset", lemma)
         elif status == "saol_pattern_unsupported":
-            add("unsupported", str(row.get("lemma") or ""))
+            add("unsupported", lemma)
         elif status == "form_set_mismatch":
-            add("remaining_form_set_mismatch", str(row.get("lemma") or ""))
+            add("remaining_form_set_mismatch", lemma)
         else:
-            add("other_status", str(row.get("lemma") or ""))
+            add("other_status", lemma)
 
     return {
         "noun_records": len(nouns),
@@ -78,6 +106,9 @@ def classify(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "scope_population": len(scope),
         "scope_singular_exact": sum(1 for row in scope if row["singular_status"] == "singular_exact"),
         "scope_singular_mismatch": len(mismatches),
+        "homonym_coverage_records": sum(
+            count for name, count in counts.items() if name in {"homonym_exact_verified", "homonym_subset_verified"}
+        ),
     }
 
 
@@ -88,11 +119,14 @@ def render(summary: dict[str, Any]) -> str:
         "Princip: SAOL-artikelns egna slots är auktoritativa. SALDO används som jämförelsekälla.",
         "Singular-only-artiklar där hela SAOL-singularet finns i SALDO räknas som starkt verifierade",
         "även om SALDO dessutom innehåller plural utanför artikelomfånget.",
+        "För lemma med olika antal SAOL-/SALDO-homonymer räknas varje SAOL-homonym separat:",
+        "endast den homonym vars eget paradigm är exakt verifierat eller subset-verifierat flyttas ur konfliktkön.",
         "",
         f"NOUN-poster: {summary['noun_records']}",
         f"Artikelomfångspopulation: {summary['scope_population']}",
         f"  singular exakt: {summary['scope_singular_exact']}",
         f"  singular mismatch: {summary['scope_singular_mismatch']}",
+        f"Homonymposter verifierade trots olika analysantal: {summary['homonym_coverage_records']}",
         "",
         "Ny toppnivåfördelning:",
     ]
@@ -108,10 +142,14 @@ def render(summary: dict[str, Any]) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", nargs="?", type=Path, default=DEFAULT_INPUT)
+    parser.add_argument("--homonym-coverage", type=Path, default=DEFAULT_HOMONYM_COVERAGE)
     parser.add_argument("--text", type=Path, default=DEFAULT_TEXT)
     parser.add_argument("--json", type=Path, default=DEFAULT_JSON)
     args = parser.parse_args()
-    summary = classify(read_jsonl(args.input))
+    homonym_coverage = None
+    if args.homonym_coverage.exists():
+        homonym_coverage = json.loads(args.homonym_coverage.read_text(encoding="utf-8"))
+    summary = classify(read_jsonl(args.input), homonym_coverage=homonym_coverage)
     args.text.parent.mkdir(parents=True, exist_ok=True)
     args.text.write_text(render(summary), encoding="utf-8")
     args.json.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
