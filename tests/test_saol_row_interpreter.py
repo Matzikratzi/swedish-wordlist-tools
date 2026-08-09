@@ -207,6 +207,35 @@ class SaolRowInterpreterTests(unittest.TestCase):
         self.assertIsNotNone(definite)
         self.assertEqual("allsvenskan", definite.form("sg_def") if definite else None)
 
+    def test_text_has_precedence_over_formatted_ordkl_copy(self) -> None:
+        row = interpret_noun_row(
+            self.record(
+                "hund",
+                "+en +ar",
+                ordkl="s. <i>+et; pl. +, best...</i>",
+            )
+        )
+        self.assertIsNotNone(row)
+        self.assertEqual("hunden", row.form("sg_def") if row else None)
+        self.assertEqual("hundar", row.form("pl_indef") if row else None)
+        self.assertNotIn(
+            "hundet",
+            {form.written_form for form in (row.key_forms if row else ())},
+        )
+
+    def test_ordkl_inflection_fallback_requires_missing_text(self) -> None:
+        with_text = interpret_noun_row(
+            self.record("kröken", "+en", ordkl="s. best.")
+        )
+        self.assertIsNotNone(with_text)
+        self.assertEqual("krökenen", with_text.form("sg_def") if with_text else None)
+
+        without_text = interpret_noun_row(
+            self.record("kröken", "(null)", ordkl="s. best.")
+        )
+        self.assertIsNotNone(without_text)
+        self.assertEqual("kröken", without_text.form("sg_def") if without_text else None)
+
     def test_keeps_explicit_form_after_comment(self) -> None:
         row = interpret_noun_row(
             self.record("herr", "+n; i: vissa: uttryck: gen. herrans")
