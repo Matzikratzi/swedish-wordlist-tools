@@ -39,6 +39,7 @@ def compare_one(saol: dict[str, Any], saldo: dict[str, Any]) -> dict[str, Any]:
     df = _formset(saldo.get("forms"))
     return {
         "saol_homonym": _homonym(saol),
+        "saol_forms": sorted(sf),
         "saldo_id": str(saldo.get("id") or ""),
         "exact": sf == df,
         "saol_subset": sf <= df,
@@ -53,28 +54,24 @@ def analyze(validation_rows: list[dict[str, Any]], saol_rows: list[dict[str, Any
     raw = _rows_by_lemma(saol_rows)
     saldo = _saldo_by_lemma(saldo_path)
     conflict_keys = {
-        (_lemma(row), "NOUN")
-        for row in validation_rows
+        (_lemma(row), "NOUN") for row in validation_rows
         if str(row.get("upos") or "").upper() == "NOUN"
-        and str(row.get("status") or "") == "form_set_mismatch"
-        and _lemma(row)
+        and str(row.get("status") or "") == "form_set_mismatch" and _lemma(row)
     }
-
-    rows: list[dict[str, Any]] = []
+    rows = []
     pattern_counts: Counter[str] = Counter()
     status_counts: Counter[str] = Counter()
-
     for key in sorted(conflict_keys):
         sr = generated.get(key, ())
         rr = raw.get(key, ())
         dr = saldo.get(key, ())
         if len(rr) <= 1 or len(sr) != len(rr) or len(dr) == len(rr):
             continue
-
         comparisons = [compare_one(s, d) for s in sr for d in dr]
         exact_homs = sorted({c["saol_homonym"] for c in comparisons if c["exact"]})
         subset_homs = sorted({c["saol_homonym"] for c in comparisons if c["saol_subset"]})
-
+        exact_signatures = sorted({tuple(c["saol_forms"]) for c in comparisons if c["exact"]})
+        subset_signatures = sorted({tuple(c["saol_forms"]) for c in comparisons if c["saol_subset"]})
         if exact_homs:
             status = "at_least_one_saol_homonym_exactly_verified"
         elif subset_homs:
@@ -82,59 +79,29 @@ def analyze(validation_rows: list[dict[str, Any]], saol_rows: list[dict[str, Any
         else:
             status = "no_saol_homonym_verified"
         status_counts[status] += 1
-
         pattern = f"SAOL={len(rr)} SALDO={len(dr)}"
         pattern_counts[pattern] += 1
-
-        best = sorted(
-            comparisons,
-            key=lambda c: (c["exact"], c["saol_subset"], c["overlap"], -len(c["saol_only"]), -len(c["saldo_only"])),
-            reverse=True,
-        )[: min(6, len(comparisons))]
+        best = sorted(comparisons, key=lambda c: (c["exact"], c["saol_subset"], c["overlap"], -len(c["saol_only"]), -len(c["saldo_only"])), reverse=True)[: min(6, len(comparisons))]
         rows.append({
-            "lemma": key[0],
-            "saol_count": len(rr),
-            "saldo_count": len(dr),
-            "status": status,
-            "exact_saol_homonyms": exact_homs,
-            "subset_saol_homonyms": subset_homs,
+            "lemma": key[0], "saol_count": len(rr), "saldo_count": len(dr), "status": status,
+            "exact_saol_homonyms": exact_homs, "subset_saol_homonyms": subset_homs,
+            "exact_saol_form_signatures": [list(v) for v in exact_signatures],
+            "subset_saol_form_signatures": [list(v) for v in subset_signatures],
             "best_matches": best,
         })
-
-    return {
-        "lemmas": len(rows),
-        "count_patterns": dict(pattern_counts.most_common()),
-        "status_counts": dict(status_counts.most_common()),
-        "rows": rows,
-    }
+    return {"lemmas": len(rows), "count_patterns": dict(pattern_counts.most_common()), "status_counts": dict(status_counts.most_common()), "rows": rows}
 
 
 def render(summary: dict[str, Any]) -> str:
-    lines = [
-        "SAOL14/SALDO: homonymtäckning när antalet analyser skiljer sig",
-        "",
-        f"Lemman: {summary['lemmas']}",
-        "",
-        "Antalsmönster:",
-    ]
-    for pattern, count in summary["count_patterns"].items():
-        lines.append(f"{count:5}  {pattern}")
+    lines = ["SAOL14/SALDO: homonymtäckning när antalet analyser skiljer sig", "", f"Lemman: {summary['lemmas']}", "", "Antalsmönster:"]
+    for pattern, count in summary["count_patterns"].items(): lines.append(f"{count:5}  {pattern}")
     lines.extend(["", "Verifieringsstatus:"])
-    for status, count in summary["status_counts"].items():
-        lines.append(f"{count:5}  {status}")
+    for status, count in summary["status_counts"].items(): lines.append(f"{count:5}  {status}")
     lines.extend(["", "Detaljer:"])
     for row in summary["rows"]:
-        lines.append(
-            f"\n{row['lemma']} | SAOL={row['saol_count']} SALDO={row['saldo_count']} | {row['status']} "
-            f"| exact SAOL-homonymer={row['exact_saol_homonyms'] or '–'} "
-            f"| subset SAOL-homonymer={row['subset_saol_homonyms'] or '–'}"
-        )
+        lines.append(f"\n{row['lemma']} | SAOL={row['saol_count']} SALDO={row['saldo_count']} | {row['status']} | exact SAOL-homonymer={row['exact_saol_homonyms'] or '–'} | subset SAOL-homonymer={row['subset_saol_homonyms'] or '–'}")
         for match in row["best_matches"]:
-            lines.append(
-                f"  SAOL {match['saol_homonym']} -> SALDO {match['saldo_id'] or '(id saknas)'} "
-                f"exact={match['exact']} subset={match['saol_subset']} overlap={match['overlap']} "
-                f"SAOL-only={match['saol_only'] or '–'} SALDO-only={match['saldo_only'] or '–'}"
-            )
+            lines.append(f"  SAOL {match['saol_homonym']} -> SALDO {match['saldo_id'] or '(id saknas)'} exact={match['exact']} subset={match['saol_subset']} overlap={match['overlap']} SAOL-only={match['saol_only'] or '–'} SALDO-only={match['saldo_only'] or '–'}")
     return "\n".join(lines) + "\n"
 
 
@@ -146,17 +113,13 @@ def main() -> None:
     parser.add_argument("--text", type=Path, default=DEFAULT_TEXT)
     parser.add_argument("--json", type=Path, default=DEFAULT_JSON)
     args = parser.parse_args()
-
     summary = analyze(list(read_jsonl(args.validation)), list(read_jsonl(args.saol)), args.saldo)
     args.text.parent.mkdir(parents=True, exist_ok=True)
     args.text.write_text(render(summary), encoding="utf-8")
     args.json.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
     print(f"Lemman: {summary['lemmas']}")
-    for pattern, count in summary["count_patterns"].items():
-        print(f"{pattern}: {count}")
-    for status, count in summary["status_counts"].items():
-        print(f"{status}: {count}")
+    for pattern, count in summary["count_patterns"].items(): print(f"{pattern}: {count}")
+    for status, count in summary["status_counts"].items(): print(f"{status}: {count}")
     print(f"Text: {args.text}")
     print(f"JSON: {args.json}")
 
