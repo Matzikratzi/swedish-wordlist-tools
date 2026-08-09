@@ -107,33 +107,32 @@ def _derive_definite_plural(
     """Derive definite plural where SAOL + SAG make the result mechanical.
 
     Reference: Svenska Akademiens grammatik (SAG), vol. 2, Substantiv §51 and
-    §68.  SAOL licenses the plural slot; SAG supplies only the general
+    §68. SAOL licenses the plural slot; SAG supplies only the general
     definiteness operation.
 
-    Rules represented here:
-
-    * productive plural endings in ``-r`` take ``-na``;
-    * fifth-declension plural in ``-n`` takes ``-a``;
-    * sixth-declension zero plural takes ``-en``/``-na`` according to the
-      ordinary subtype represented by the available singular morphology;
-    * stem-changing sixth-declension plurals such as ``gäss/löss/möss/män``
-      take ``-en``;
-    * Latin/Greek plural in ``-a``/``-i`` takes no extra definiteness suffix;
-    * written ``-s`` plural has no single safe rule and is therefore left
-      without a derived definite plural unless SAOL supplies that slot.
+    Important for zero plural: the singular definite morphology distinguishes
+    subtypes that would otherwise look identical from the plural spelling alone.
+    ``+en; pl. +`` behaves like ``pfennig -> pfennig -> pfennigen`` / ``spann ->
+    spann -> spannen``, while ``+n; pl. +`` behaves like ``demo -> demo -> demona``.
     """
     folded_plural = plural.casefold()
     folded_lemma = lemma.casefold()
     folded_singulars = tuple(form.casefold() for form in singular_definites)
     neuter = any(form.endswith("t") for form in folded_singulars)
 
-    # Sixth declension, zero plural.  Neuters take -en (or only -n after final
-    # e): hus -> husen, apanage -> apanagen.  Common-gender zero plural takes
-    # -na in the productive subtype represented by e.g. demo -> demona.
+    # Sixth declension, zero plural.  SAOL's singular definite operation tells
+    # us which productive subtype is intended:
+    #   +et/+t ... pl. +  -> hus/husen, apanage/apanagen
+    #   +en ... pl. +     -> spann/spannen, pfennig/pfennigen
+    #   +n ... pl. +      -> demo/demona
     if folded_plural == folded_lemma:
         if neuter:
             return lemma + ("n" if folded_lemma.endswith("e") else "en")
-        return plural + "na"
+        if any(form == folded_lemma + "en" for form in folded_singulars):
+            return plural + "en"
+        if any(form == folded_lemma + "n" for form in folded_singulars):
+            return plural + "na"
+        return None
 
     # First–fourth declension productive plural endings all end in -r and take
     # -na: hundar -> hundarna, idéer -> idéerna, skor -> skorna.
@@ -142,7 +141,7 @@ def _derive_definite_plural(
 
     # Fifth declension -n takes -a.  The compact SAOL material includes both
     # ordinary neuter -n plurals (alibin -> alibina) and explicitly supplied
-    # plurals in -en such as anmodanden -> anmodandena.  Final -en is therefore
+    # plurals in -en such as anmodanden -> anmodandena. Final -en is therefore
     # a sufficient mechanical signal here; other -n plurals require neuter
     # singular morphology.
     if folded_plural.endswith("en"):
@@ -156,12 +155,12 @@ def _derive_definite_plural(
         return plural
 
     # Stem-changing sixth-declension plurals have no plural suffix even though
-    # their stem differs from the singular: gäss, löss, möss, män.  They take
+    # their stem differs from the singular: gäss, löss, möss, män. They take
     # -en in definite plural.
     if folded_plural.endswith(("gäss", "löss", "möss", "män")):
         return plural + "en"
 
-    # A generic written -s plural is deliberately not completed.  SAG §68:4
+    # A generic written -s plural is deliberately not completed. SAG §68:4
     # gives -en for one-syllable stems but variation/avoidance elsewhere; final
     # orthographic -s alone is insufficient evidence.
     if folded_plural.endswith("s"):
