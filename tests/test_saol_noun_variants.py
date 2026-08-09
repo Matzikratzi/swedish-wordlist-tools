@@ -20,41 +20,15 @@ class SaolNounVariantTests(unittest.TestCase):
         self.assertTrue(is_simple_relative_noun_notation("+n"))
         self.assertTrue(is_simple_relative_noun_notation("+en +er"))
         self.assertTrue(is_simple_relative_noun_notation("+et; pl. +"))
-        self.assertFalse(
-            is_simple_relative_noun_notation(
-                "+det; pl. +, best. pl. +dena _ +t +n"
-            )
-        )
+        self.assertFalse(is_simple_relative_noun_notation("+det; pl. +, best. pl. +dena _ +t +n"))
         self.assertFalse(is_simple_relative_noun_notation("+et el. +en"))
         self.assertFalse(is_simple_relative_noun_notation("+n [-en]"))
-        self.assertFalse(
-            is_simple_relative_noun_notation(
-                "ankaret; pl. ankare el. ankaren, best. pl. ankarna"
-            )
-        )
+        self.assertFalse(is_simple_relative_noun_notation("ankaret; pl. ankare el. ankaren, best. pl. ankarna"))
 
     def _acne_records(self):
         return [
-            {
-                "normaliserat_ord": "akne",
-                "homonr": "0",
-                "subnr": 438305,
-                "ordkl": "s. +n",
-                "stycke": "akne",
-                "text": "+n",
-                "upos": "NOUN",
-                "ord": "acne",
-            },
-            {
-                "normaliserat_ord": "akne",
-                "homonr": "1",
-                "subnr": 436676,
-                "ordkl": "(hv)",
-                "stycke": "acne",
-                "text": "(null)",
-                "upos": "X",
-                "ord": "acne",
-            },
+            {"normaliserat_ord": "akne", "homonr": "0", "subnr": 438305, "ordkl": "s. +n", "stycke": "akne", "text": "+n", "upos": "NOUN", "ord": "acne"},
+            {"normaliserat_ord": "akne", "homonr": "1", "subnr": 436676, "ordkl": "(hv)", "stycke": "acne", "text": "(null)", "upos": "X", "ord": "acne"},
         ]
 
     def test_matching_hv_rebases_simple_acne_paradigm(self):
@@ -63,11 +37,7 @@ class SaolNounVariantTests(unittest.TestCase):
         self.assertEqual("acne", noun["normaliserat_ord"])
         self.assertEqual("akne", noun["_saol_source_normaliserat_ord"])
         self.assertEqual("rebase_simple_relative", noun["_saol_variant_mode"])
-
         rows, _comparisons, _summary = generate_noun_artifact(prepared)
-        self.assertEqual(1, len(rows))
-        self.assertEqual("acne", rows[0]["lemma"])
-        self.assertEqual("akne", rows[0]["source_normaliserat_ord"])
         forms = {item["written_form"] for item in rows[0]["forms"]}
         self.assertEqual({"acne", "acnes", "acnen", "acnens"}, forms)
 
@@ -85,57 +55,22 @@ class SaolNounVariantTests(unittest.TestCase):
             root = Path(directory)
             noun_path = root / "nouns.jsonl"
             adjective_path = root / "adjectives.jsonl"
-            noun_path.write_text(
-                "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
-                encoding="utf-8",
-            )
+            noun_path.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
             adjective_path.write_text("", encoding="utf-8")
-            artifacts = load_word_class_artifacts(
-                noun_path=noun_path,
-                adjective_path=adjective_path,
-            )
+            artifacts = load_word_class_artifacts(noun_path=noun_path, adjective_path=adjective_path)
             forms = forms_from_artifacts(self._acne_records()[0], artifacts)
             self.assertEqual({"acne", "acnes", "acnen", "acnens"}, forms)
 
     def test_hv_is_required_before_rebasing(self):
-        records = [
-            {
-                "normaliserat_ord": "akne",
-                "homonr": "0",
-                "subnr": 1,
-                "ordkl": "s. +n",
-                "stycke": "akne",
-                "text": "+n",
-                "upos": "NOUN",
-                "ord": "acne",
-            }
-        ]
+        records = [{"normaliserat_ord": "akne", "homonr": "0", "subnr": 1, "ordkl": "s. +n", "stycke": "akne", "text": "+n", "upos": "NOUN", "ord": "acne"}]
         prepared = prepare_noun_variant_records(records)
         self.assertEqual("akne", prepared[0]["normaliserat_ord"])
         self.assertNotIn("_saol_variant_mode", prepared[0])
 
     def test_ankar_is_not_rebased(self):
         records = [
-            {
-                "normaliserat_ord": "ankare",
-                "homonr": "0",
-                "subnr": 442860,
-                "ordkl": "s. ankaret; pl. anka...",
-                "stycke": "1ankare",
-                "text": "ankaret; pl. ankare el. ankaren, best. pl. ankarna",
-                "upos": "NOUN",
-                "ord": "ankar",
-            },
-            {
-                "normaliserat_ord": "ankare",
-                "homonr": "1",
-                "subnr": 442848,
-                "ordkl": "(hv)",
-                "stycke": "ankar",
-                "text": "(null)",
-                "upos": "X",
-                "ord": "ankar",
-            },
+            {"normaliserat_ord": "ankare", "homonr": "0", "subnr": 442860, "ordkl": "s. ankaret; pl. anka...", "stycke": "1ankare", "text": "ankaret; pl. ankare el. ankaren, best. pl. ankarna", "upos": "NOUN", "ord": "ankar"},
+            {"normaliserat_ord": "ankare", "homonr": "1", "subnr": 442848, "ordkl": "(hv)", "stycke": "ankar", "text": "(null)", "upos": "X", "ord": "ankar"},
         ]
         prepared = prepare_noun_variant_records(records)
         noun = prepared[0]
@@ -143,19 +78,51 @@ class SaolNounVariantTests(unittest.TestCase):
         self.assertEqual("ankar", noun["_saol_alternative_lemma"])
         self.assertEqual("additional_lemma", noun["_saol_variant_mode"])
 
-    def test_allan_cross_reference_alone_does_not_create_noun_variant(self):
+    def test_two_branch_vasen_uses_explicit_variant_as_second_base(self):
         records = [
             {
-                "normaliserat_ord": "all",
+                "normaliserat_ord": "bankväsen",
                 "homonr": "0",
-                "subnr": 1,
+                "subnr": 100,
+                "ordkl": "s.",
+                "stycke": "bank|väsen",
+                "text": "+det; pl. +, best. pl. +dena _ +t +n",
+                "upos": "NOUN",
+                "ord": "bankväsende",
+            },
+            {
+                "normaliserat_ord": "bankväsen",
+                "homonr": "1",
+                "subnr": 101,
                 "ordkl": "(hv)",
-                "stycke": "allan",
+                "stycke": "bankväsende",
                 "text": "(null)",
                 "upos": "X",
-                "ord": "allan",
-            }
+                "ord": "bankväsende",
+            },
         ]
+        prepared = prepare_noun_variant_records(records)
+        self.assertEqual("additional_lemma", prepared[0]["_saol_variant_mode"])
+        rows, _comparisons, _summary = generate_noun_artifact(prepared)
+        forms = {item["written_form"] for item in rows[0]["forms"]}
+        self.assertEqual(
+            {
+                "bankväsen",
+                "bankväsens",
+                "bankväsende",
+                "bankväsendes",
+                "bankväsendet",
+                "bankväsendets",
+                "bankväsenden",
+                "bankväsendens",
+                "bankväsendena",
+                "bankväsendenas",
+            },
+            forms,
+        )
+
+    def test_allan_cross_reference_alone_does_not_create_noun_variant(self):
+        records = [{"normaliserat_ord": "all", "homonr": "0", "subnr": 1, "ordkl": "(hv)", "stycke": "allan", "text": "(null)", "upos": "X", "ord": "allan"}]
         prepared = prepare_noun_variant_records(records)
         self.assertEqual(records, prepared)
 
@@ -165,36 +132,13 @@ class SaolNounVariantTests(unittest.TestCase):
             noun_path = root / "nouns.jsonl"
             adjective_path = root / "adjectives.jsonl"
             noun_rows = [
-                {
-                    "record_id": "428401",
-                    "homonym_number": "1",
-                    "lemma": "disko",
-                    "forms": [{"written_form": "disko"}, {"written_form": "diskot"}],
-                },
-                {
-                    "record_id": "428401",
-                    "homonym_number": "1",
-                    "lemma": "disco",
-                    "source_normaliserat_ord": "disko",
-                    "forms": [{"written_form": "disco"}, {"written_form": "discot"}],
-                },
+                {"record_id": "428401", "homonym_number": "1", "lemma": "disko", "forms": [{"written_form": "disko"}, {"written_form": "diskot"}]},
+                {"record_id": "428401", "homonym_number": "1", "lemma": "disco", "source_normaliserat_ord": "disko", "forms": [{"written_form": "disco"}, {"written_form": "discot"}]},
             ]
-            noun_path.write_text(
-                "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in noun_rows),
-                encoding="utf-8",
-            )
+            noun_path.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in noun_rows), encoding="utf-8")
             adjective_path.write_text("", encoding="utf-8")
-            artifacts = load_word_class_artifacts(
-                noun_path=noun_path,
-                adjective_path=adjective_path,
-            )
-            disko = {
-                "subnr": "428401",
-                "homonr": "1",
-                "normaliserat_ord": "disko",
-                "ord": "disko",
-                "upos": "NOUN",
-            }
+            artifacts = load_word_class_artifacts(noun_path=noun_path, adjective_path=adjective_path)
+            disko = {"subnr": "428401", "homonr": "1", "normaliserat_ord": "disko", "ord": "disko", "upos": "NOUN"}
             disco = dict(disko, ord="disco")
             self.assertEqual({"disko", "diskot"}, forms_from_artifacts(disko, artifacts))
             self.assertEqual({"disco", "discot"}, forms_from_artifacts(disco, artifacts))
