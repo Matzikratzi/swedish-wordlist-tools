@@ -13,6 +13,7 @@ class RefreshNounValidationTests(unittest.TestCase):
                 "swedish_wordlist_tools.revalidate_direct_forms",
                 "swedish_wordlist_tools.rebaseline_noun_validation",
                 "swedish_wordlist_tools.analyze_remaining_noun_notations",
+                "swedish_wordlist_tools.analyze_remaining_noun_provenance",
             ),
             MODULES,
         )
