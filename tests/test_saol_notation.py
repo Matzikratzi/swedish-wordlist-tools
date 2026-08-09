@@ -63,12 +63,11 @@ class SaolNotationTests(unittest.TestCase):
                 ",",
                 "superl.",
                 "närmast",
-                "el.",
             ),
             tokenize_notation(text),
         )
 
-    def test_drops_any_final_token_at_source_limit(self) -> None:
+    def test_drops_any_final_token_and_dangling_alternative_at_source_limit(self) -> None:
         text = "+n; pl. kamrar el. +, best. pl. kamrarna el. kamma"
         self.assertEqual(50, len(text))
         tokens = tokenize_notation(text)
@@ -84,7 +83,6 @@ class SaolNotationTests(unittest.TestCase):
                 "best.",
                 "pl.",
                 "kamrarna",
-                "el.",
             ),
             tokens,
         )
