@@ -8,6 +8,7 @@ from typing import Any
 
 from .analyze_singular_agreement_for_scope_extras import candidates as scope_candidates
 from .noun_mechanical_validation import is_mechanically_verified_noun_row
+from .saol_source_policy import is_truncated_inflection_source
 from .triage_singular_scope_mismatches import classify as classify_scope_mismatch
 
 DEFAULT_INPUT = Path("reports/saol14-direct-form-validation.jsonl")
@@ -66,6 +67,16 @@ def classify(rows: list[dict[str, Any]], homonym_coverage: dict[str, Any] | None
 
     for row in nouns:
         lemma = str(row.get("lemma") or "")
+        status = str(row.get("status") or "")
+
+        # A 50-character SAOL text field is known to be source-truncated. Keep
+        # it out of every ordinary mismatch/triage queue even when the safe
+        # prefix was sufficient to generate some forms. The missing tail is a
+        # source-data problem, not a parser problem.
+        if status == "form_set_mismatch" and is_truncated_inflection_source(row):
+            add("source_text_truncated", lemma)
+            continue
+
         key = (str(row.get("record_id") or ""), str(row.get("homonym_number") or ""), lemma)
         scoped = by_key.get(key)
         if scoped is not None:
@@ -77,7 +88,6 @@ def classify(rows: list[dict[str, Any]], homonym_coverage: dict[str, Any] | None
                 add("scope_mismatch_" + category, scoped["lemma"])
                 continue
 
-        status = str(row.get("status") or "")
         if status == "exact_form_set":
             add("exact_form_set", lemma)
         elif status == "exact_form_set_case_difference":
@@ -114,6 +124,8 @@ def render(summary: dict[str, Any]) -> str:
         "Princip: SAOL-artikelns egna slots är auktoritativa. SALDO används som jämförelsekälla.",
         "Enkla, granskade standardparadigm räknas som mekaniskt verifierade från SAOL+SAG;",
         "SALDO-avvikelser för dessa är diagnostik och håller inte kvar posten i konfliktkön.",
+        "50-teckenstrunkerade text-fält ligger separat som source_text_truncated och",
+        "räknas inte som vanliga parser-/formmismatchar.",
         "",
         f"NOUN-poster: {summary['noun_records']}",
         f"Artikelomfångspopulation: {summary['scope_population']}",
