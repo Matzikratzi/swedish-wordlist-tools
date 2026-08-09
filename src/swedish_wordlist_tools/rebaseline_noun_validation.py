@@ -14,6 +14,11 @@ DEFAULT_HOMONYM_COVERAGE = Path("reports/saol14-unequal-homonym-paradigm-coverag
 DEFAULT_TEXT = Path("reports/saol14-noun-validation-rebaseline.txt")
 DEFAULT_JSON = Path("reports/saol14-noun-validation-rebaseline.json")
 
+# These articles explicitly license singular definiteness and zero plural. Once
+# noun_paradigm has mechanically completed the corresponding definite plural and
+# genitives, SALDO absence is not evidence against the SAOL paradigm.
+MECHANICAL_ZERO_PLURAL_NOTATIONS = {"+et; pl. +", "+en; pl. +", "+n; pl. +", "+t; pl. +"}
+
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
     with path.open(encoding="utf-8") as handle:
@@ -27,7 +32,6 @@ def homonym_coverage_diagnostics(summary: dict[str, Any] | None) -> dict[str, in
         lemmas = 0
     else:
         counts = {str(k): int(v) for k, v in summary.get("status_counts", {}).items()}
-        # Unit tests and lightweight callers may supply only per-lemma rows.
         if not counts:
             counter = Counter(str(row.get("status") or "") for row in summary.get("rows", ()))
             counts = {key: value for key, value in counter.items() if key}
@@ -37,16 +41,24 @@ def homonym_coverage_diagnostics(summary: dict[str, Any] | None) -> dict[str, in
     subset = int(counts.get("at_least_one_saol_homonym_subset_verified", 0))
     none = int(counts.get("no_saol_homonym_verified", 0))
     return {
-        # Canonical diagnostic names, matching the coverage audit.
         "at_least_one_saol_homonym_exactly_verified": exact,
         "at_least_one_saol_homonym_subset_verified": subset,
         "no_saol_homonym_verified": none,
         "lemmas": lemmas,
-        # Short report aliases kept for readable rendering/backwards compatibility.
         "exact_sibling": exact,
         "subset_sibling": subset,
         "none_verified": none,
     }
+
+
+def _mechanically_verified_zero_plural(row: dict[str, Any]) -> bool:
+    """True when the SAOL article itself fully licenses a zero-plural paradigm.
+
+    This is deliberately narrow: only the simple canonical zero-plural
+    notations are accepted here. Alternative/compound notations stay in the
+    diagnostic queue until their mechanics have been audited separately.
+    """
+    return str(row.get("notation") or "").strip() in MECHANICAL_ZERO_PLURAL_NOTATIONS
 
 
 def classify(
@@ -98,6 +110,8 @@ def classify(
             add("other_saol_subset", lemma)
         elif status == "saol_pattern_unsupported":
             add("unsupported", lemma)
+        elif status == "form_set_mismatch" and _mechanically_verified_zero_plural(row):
+            add("mechanically_verified_from_saol", lemma)
         elif status == "form_set_mismatch":
             add("remaining_form_set_mismatch", lemma)
         else:
@@ -124,6 +138,8 @@ def render(summary: dict[str, Any]) -> str:
         "Princip: SAOL-artikelns egna slots är auktoritativa. SALDO används som jämförelsekälla.",
         "Singular-only-artiklar där hela SAOL-singularet finns i SALDO räknas som starkt verifierade",
         "även om SALDO dessutom innehåller plural utanför artikelomfånget.",
+        "Enkla nollpluralartiklar (+et/+en/+n/+t; pl. +) räknas som mekaniskt verifierade",
+        "från SAOL-notationen själv; SALDO-avsaknad av härledda bestämda/genitivformer är diagnostisk.",
         "",
         f"NOUN-poster: {summary['noun_records']}",
         f"Artikelomfångspopulation: {summary['scope_population']}",
