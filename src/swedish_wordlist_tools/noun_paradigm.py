@@ -103,38 +103,73 @@ def _derive_definite_plural(
     lemma: str,
     singular_definites: tuple[str, ...],
     plural: str,
-) -> str:
-    """Derive definite plural from a SAOL-licensed indefinite plural.
+) -> str | None:
+    """Derive a definite plural only where the morphology is mechanically licensed.
 
-    This is deliberately morphological, not lexical: the article has already
-    licensed ``plural``.  We only supply the ordinary definite-plural ending.
+    Reference: Svenska Akademiens grammatik (SAG), vol. 2, Substantiv §68,
+    especially pp. 101–103 in the printed pagination (PDF pp. 104–107), together
+    with §51 for the sixth declension.
 
-    Productive plural endings in -r take -na (hundar -> hundarna, idéer ->
-    idéerna).  Neuter -n plurals take -a (alibin -> alibina).  Other explicit
-    irregular plurals ending in -n or -s take -en (män -> männen, bladlöss ->
-    bladlössen).  Latin/Greek-style plurals ending in -a are already also the
-    definite plural in SAOL entries such as doktorsexamina.  Zero-plural
-    neuters are handled first because their definite plural is -en/-n.
+    Relevant rules used here:
+
+    * ordinary plural suffixes ending in ``-r`` take definite ``-na``;
+    * fifth-declension plural ``-n`` takes definite ``-a``;
+    * sixth-declension zero plural normally takes ``-en`` in the cases relevant
+      here, including the stem-changing plurals ``gäss, löss, möss, män``;
+    * Latin/Greek plurals in ``-a`` and ``-i`` take no definiteness suffix;
+    * ``-s`` plural does *not* have one safe general definite-plural rule. SAG
+      licenses ``-en`` for one-syllable stems and describes avoidance/variation
+      elsewhere.  Since SAOL's compact notation does not encode syllable count
+      or a definite form here, we do not invent one unless SAOL supplied the
+      definite-plural slot explicitly.
+
+    This function therefore returns ``None`` where SAG does not give us enough
+    information to derive a unique form mechanically from the article data.
     """
     folded_plural = plural.casefold()
     folded_lemma = lemma.casefold()
     folded_singulars = tuple(form.casefold() for form in singular_definites)
     neuter = any(form.endswith("t") for form in folded_singulars)
 
-    if folded_plural == folded_lemma and neuter:
-        # Zero-plural neuters normally take -en in the definite plural (hus ->
-        # husen), but a lemma already ending in e takes only -n (apanage ->
-        # apanagen).  Appending -en blindly would produce *apanageen.
-        return lemma + ("n" if folded_lemma.endswith("e") else "en")
-    if folded_plural.endswith("n") and neuter:
-        return plural + "a"
+    # Sixth declension, zero plural.  For ordinary neuters this is e.g.
+    # hus -> husen.  Lemmas ending in e take only -n: apanage -> apanagen.
+    if folded_plural == folded_lemma:
+        if neuter:
+            return lemma + ("n" if folded_lemma.endswith("e") else "en")
+        # Utrum zero-plural has several subtypes in SAG §68:3.  Derive only the
+        # very robust irregular-stem cases elsewhere below; otherwise require
+        # an explicit SAOL definite-plural slot.
+        return None
+
+    # First–fourth declension productive plural endings all end in -r and take
+    # -na in definite plural: hundar -> hundarna, idéer -> idéerna, skor -> skorna.
     if folded_plural.endswith("r"):
         return plural + "na"
-    if folded_plural.endswith("a"):
+
+    # Fifth declension -n takes -a: alibin -> alibina, hjärtan -> hjärtana.
+    # Here neuter singular definiteness is our mechanical signal that an explicit
+    # plural in -n belongs to this pattern rather than to a sixth-declension stem.
+    if folded_plural.endswith("n") and neuter:
+        return plural + "a"
+
+    # Latin/Greek plural forms in -a/-i are used unchanged where definite plural
+    # would otherwise be expected (SAG §68:5): tentamina, fora etc.
+    if folded_plural.endswith(("a", "i")):
         return plural
-    if folded_plural.endswith(("n", "s")):
+
+    # Stem-changing sixth-declension plurals (SAG §51, §68:3c) have no plural
+    # suffix even though the plural stem differs from the singular: gäss, löss,
+    # möss, män.  They take -en in definite plural.
+    if folded_plural.endswith(("gäss", "löss", "möss", "män")):
         return plural + "en"
-    return plural + "na"
+
+    # A generic written -s plural is deliberately *not* completed here.  SAG
+    # §68:4 gives -en for one-syllable stems but variation/avoidance elsewhere;
+    # deriving from orthographic final -s alone would overgenerate.
+    if folded_plural.endswith("s"):
+        return None
+
+    return None
 
 
 def _complete_from_slots(entry: GeneratedEntry) -> GeneratedEntry:
@@ -166,15 +201,13 @@ def _complete_from_slots(entry: GeneratedEntry) -> GeneratedEntry:
 
     plural_definites = list(explicit_plural_definites)
     if not plural_definites and singular_definites:
-        # A bare SAOL notation ``pl. +`` states only that the indefinite plural
-        # is identical to the lemma.  It does not license inventing a definite
-        # plural.  When singular definiteness is supplied (for example
-        # ``+et; pl. +`` or ``+n; pl. +``), the paradigm gives enough structure
-        # to derive the ordinary definite plural as before.
-        plural_definites.extend(
-            _derive_definite_plural(lemma, singular_definites, plural)
-            for plural in plural_indefinites
-        )
+        # Derive only where SAG gives a unique mechanical form.  If it does not,
+        # keep the SAOL-licensed indefinite plural but leave the definite slot
+        # absent rather than guessing.
+        for plural in plural_indefinites:
+            derived = _derive_definite_plural(lemma, singular_definites, plural)
+            if derived is not None:
+                plural_definites.append(derived)
 
     for plural_definite in plural_definites:
         additions.extend(
