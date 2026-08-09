@@ -1,6 +1,14 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
-from swedish_wordlist_tools.canonical_form_artifacts import artifact_row_keys
+from swedish_wordlist_tools.canonical_form_artifacts import (
+    artifact_row_keys,
+    read_artifact,
+    read_artifact_variant_lemmas,
+    read_artifact_variant_paradigms,
+)
 from swedish_wordlist_tools.generate_noun_forms import generate_noun_artifact
 from swedish_wordlist_tools.saol_noun_variants import (
     is_simple_relative_noun_notation,
@@ -70,6 +78,49 @@ class SaolNounVariantTests(unittest.TestCase):
         keys = set(artifact_row_keys(rows[0]))
         self.assertIn(("438305", "0", "acne"), keys)
         self.assertIn(("438305", "0", "akne"), keys)
+
+    def test_variant_alias_collisions_merge_forms_and_keep_paradigms_separate(self):
+        rows = [
+            {
+                "record_id": "428401",
+                "homonym_number": "1",
+                "lemma": "disko",
+                "forms": [
+                    {"written_form": "disko"},
+                    {"written_form": "diskot"},
+                ],
+            },
+            {
+                "record_id": "428401",
+                "homonym_number": "1",
+                "lemma": "disco",
+                "source_normaliserat_ord": "disko",
+                "forms": [
+                    {"written_form": "disco"},
+                    {"written_form": "discot"},
+                ],
+            },
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "noun-forms.jsonl"
+            path.write_text(
+                "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+            forms = read_artifact(path)
+            lemmas = read_artifact_variant_lemmas(path)
+            paradigms = read_artifact_variant_paradigms(path)
+
+        key = ("428401", "1", "disko")
+        self.assertEqual({"disko", "diskot", "disco", "discot"}, forms[key])
+        self.assertEqual(("disko", "disco"), lemmas[key])
+        self.assertEqual(
+            {
+                "disko": {"disko", "diskot"},
+                "disco": {"disco", "discot"},
+            },
+            paradigms[key],
+        )
 
     def test_hv_is_required_before_rebasing(self):
         records = [
