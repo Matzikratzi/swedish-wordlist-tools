@@ -116,32 +116,43 @@ def read_artifact_rows(path: Path) -> list[dict[str, Any]]:
     return _read_rows(path)
 
 
-def _store_aliases(result: dict[ArtifactKey, Any], row: dict[str, Any], value: Any, path: Path, label: str) -> None:
-    for key in artifact_row_keys(row):
-        previous = result.get(key)
-        if previous is not None and previous != value:
-            raise ValueError(f"Motstridiga {label} för {key} i {path}")
-        result[key] = value
-
-
 def read_artifact(path: Path) -> dict[ArtifactKey, set[str]]:
+    """Read form sets, unioning sibling variant rows that share a source alias.
+
+    One SAOL source identity can materialize as more than one written paradigm,
+    e.g. a normalized ``disko`` article with explicit ``disko``/``disco``
+    variants.  The raw-record lookup must see the union; the per-variant reader
+    below retains the paradigms separately.
+    """
+
     result: dict[ArtifactKey, set[str]] = {}
     for row in _read_rows(path):
-        _store_aliases(result, row, artifact_forms(row), path, "artefaktrader")
+        value = artifact_forms(row)
+        for key in artifact_row_keys(row):
+            result.setdefault(key, set()).update(value)
     return result
 
 
 def read_artifact_variant_lemmas(path: Path) -> dict[ArtifactKey, tuple[str, ...]]:
-    result: dict[ArtifactKey, tuple[str, ...]] = {}
+    result_lists: dict[ArtifactKey, list[str]] = {}
     for row in _read_rows(path):
-        _store_aliases(result, row, artifact_variant_lemmas(row), path, "variantlemma")
-    return result
+        values = artifact_variant_lemmas(row)
+        for key in artifact_row_keys(row):
+            target = result_lists.setdefault(key, [])
+            for value in values:
+                if value not in target:
+                    target.append(value)
+    return {key: tuple(values) for key, values in result_lists.items()}
 
 
 def read_artifact_variant_paradigms(path: Path) -> dict[ArtifactKey, VariantParadigms]:
     result: dict[ArtifactKey, VariantParadigms] = {}
     for row in _read_rows(path):
-        _store_aliases(result, row, artifact_variant_paradigms(row), path, "variantparadigm")
+        paradigms = artifact_variant_paradigms(row)
+        for key in artifact_row_keys(row):
+            target = result.setdefault(key, {})
+            for lemma, forms in paradigms.items():
+                target.setdefault(lemma, set()).update(forms)
     return result
 
 
