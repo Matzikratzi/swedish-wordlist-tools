@@ -172,7 +172,10 @@ def main() -> None:
     parser.add_argument("--text", type=Path, default=DEFAULT_TEXT)
     parser.add_argument("--json", type=Path, default=DEFAULT_JSON)
     args = parser.parse_args()
-    summary = analyze(read_jsonl(args.validation), read_jsonl(args.saol), args.saldo)
+    # read_jsonl yields iterators; this analysis traverses both inputs more than once.
+    validation_rows = list(read_jsonl(args.validation))
+    saol_rows = list(read_jsonl(args.saol))
+    summary = analyze(validation_rows, saol_rows, args.saldo)
     args.text.parent.mkdir(parents=True, exist_ok=True)
     args.text.write_text(render(summary), encoding="utf-8")
     args.json.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
