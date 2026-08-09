@@ -38,10 +38,12 @@ def classify(row: dict[str, Any]) -> str:
     extra = [_relative(lemma, v) for v in row.get("extra_from_saol", ())]
     missing = [_relative(lemma, v) for v in row.get("missing_from_saol", ())]
 
-    if _scope_singular_mismatch(row):
-        return "singular_scope_conflict"
+    # Orthographic/variant evidence is more specific than the broad
+    # singular-scope shape and must therefore win when both apply.
     if any(value.startswith("=") for value in extra + missing):
         return "variant_or_orthography_conflict"
+    if _scope_singular_mismatch(row):
+        return "singular_scope_conflict"
     if extra and not missing:
         return "saol_only_forms_missing_in_saldo"
     if extra and missing:
