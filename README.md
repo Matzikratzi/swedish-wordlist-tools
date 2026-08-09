@@ -56,6 +56,7 @@ För en oberoende implementation, börja här:
 1. `docs/saol14-clean-room-generator.md` – implementationskontrakt för en generator som inte använder externa lexikala facit.
 2. `docs/saol14-faksimil-format.md` – råformat, artikel/rubrik/referensmodell och kända strukturella slutsatser.
 3. `docs/saol14-paradigm-scope.md` – den självbärande artikelregeln och varför plural/paradigm inte får ärvas från högersvansen.
+4. `docs/saol14-noun-sag-reference.md` – SAG-regler som används för mekanisk komplettering av redan SAOL-licensierade NOUN-slots.
 
 Clean-room-specifikationen är idag tillräckligt frusen för relationsmaterialisering och NOUN. Adjektiv och verb har fungerande kod och tester, men deras fullständiga ordklassspecifika slotkontrakt är ännu inte dokumenterade lika komplett.
 
@@ -75,11 +76,33 @@ reports/saol14-adjective-forms.jsonl
 
 Validerings- och auditrapporter under `reports/` är diagnostik. De är inte en del av den auktoritativa genereringsregeln.
 
+### Bygg alltid om NOUN-artefakten före validering
+
+`revalidate_direct_forms` läser den redan materialiserade filen
+`reports/saol14-noun-forms.jsonl`; kommandot regenererar inte NOUN-formerna.
+Efter en ändring i NOUN-generatorn ska därför artefakten byggas om först.
+
+Det säkra standardkommandot är:
+
+```bash
+python -m swedish_wordlist_tools.refresh_noun_validation
+```
+
+Det kör i ordning:
+
+1. `generate_noun_forms`
+2. `revalidate_direct_forms`
+3. `rebaseline_noun_validation`
+4. `analyze_remaining_noun_notations`
+
+På så sätt kan en gammal NOUN-artefakt inte av misstag användas som bevis för att en ny generatorregel saknar effekt.
+
 ## Nuvarande arbetssätt
 
 1. Tolka SAOL-strukturen mekaniskt.
 2. Generera det artikeln själv licensierar.
 3. Bevara proveniens och unsupported-fall.
-4. Jämför först därefter mot externa resurser för att hitta källskillnader, homonymproblem eller parserfel.
+4. Bygg om den kanoniska ordklassartefakten efter generatorändringar.
+5. Jämför först därefter mot externa resurser för att hitta källskillnader, homonymproblem eller parserfel.
 
 Målet är att en konkurrerande implementation ska kunna generera från SAOL 14 utan att optimera mot projektets egen output eller mot SALDO.
