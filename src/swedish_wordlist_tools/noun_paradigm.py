@@ -9,7 +9,6 @@ from .msd import parse_msd
 from .noun_source_errors import noun_lemma_only_source_error
 from .saol_notation import FormOperationKind, parse_form_operation
 from .saol_row_interpreter import InterpretedRow, interpret_noun_row
-from .saol_surface import surface_lemma
 
 _CI = parse_msd("ci")
 _SG_INDEF_GEN = parse_msd("sg indef gen")
@@ -61,9 +60,9 @@ def _entry_from_interpreted_row(row: InterpretedRow) -> GeneratedEntry:
 
 
 def _lemma_only_entry(record: dict[str, Any], reason: str) -> GeneratedEntry | None:
-    """Preserve only the headword when source data makes forms unreliable."""
+    """Preserve only the normalized headword when source data makes forms unreliable."""
 
-    lemma = surface_lemma(record)
+    lemma = str(record.get("normaliserat_ord", "")).strip()
     if not lemma:
         return None
     return GeneratedEntry(
@@ -214,32 +213,29 @@ def complete_noun_entry(
     record: dict[str, Any],
     entry: GeneratedEntry | None,
 ) -> GeneratedEntry | None:
-    """Build a noun paradigm from SAOL operations mapped to noun slots."""
+    """Build a noun paradigm from SAOL operations mapped to noun slots.
+
+    ``ord`` is deliberately not used as a general lemma carrier here.  It can
+    represent a spelling variant, but also a phrase-bound alternative form or a
+    cross-reference/example occurrence (for example ``ankar`` under ``ankare``).
+    Until those row types are classified structurally, ``normaliserat_ord`` is
+    the conservative base for paradigm generation.
+    """
     if str(record.get("upos", "")).upper() != "NOUN":
         return entry
 
-    # ``normaliserat_ord`` is a comparison/normalization carrier and can merge
-    # explicit spelling variants.  Inflect the actual written ``ord`` form for
-    # this row instead, after removing only presentation separators such as
-    # middle dots and compound bars.  Example: normalized ``akne`` + ord
-    # ``acne`` must produce acne/acnen/acnes/acnens, not another akne paradigm.
-    working_record = dict(record)
-    lemma = surface_lemma(record)
-    if lemma:
-        working_record["normaliserat_ord"] = lemma
-
-    source_error = noun_lemma_only_source_error(working_record)
+    source_error = noun_lemma_only_source_error(record)
     if source_error is not None:
-        return _lemma_only_entry(working_record, source_error)
+        return _lemma_only_entry(record, source_error)
 
-    row = interpret_noun_row(working_record)
+    row = interpret_noun_row(record)
     if row is None:
         return None
 
     if (
         _has_unmarked_replacement(row)
-        and not _has_usable_compound_bar(working_record, row.lemma)
-        and not _replacement_is_explicit_plural_use(working_record)
+        and not _has_usable_compound_bar(record, row.lemma)
+        and not _replacement_is_explicit_plural_use(record)
     ):
         return None
 
