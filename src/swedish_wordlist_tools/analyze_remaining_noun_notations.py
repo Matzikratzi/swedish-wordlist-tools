@@ -6,7 +6,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
-from .noun_mechanical_validation import is_mechanically_verified_noun_notation
+from .noun_mechanical_validation import is_mechanically_verified_noun_row
 
 DEFAULT_INPUT = Path("reports/saol14-direct-form-validation.jsonl")
 DEFAULT_TEXT = Path("reports/saol14-remaining-noun-notations.txt")
@@ -33,7 +33,7 @@ def candidates(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         if str(row.get("status") or "") != "form_set_mismatch":
             continue
-        if is_mechanically_verified_noun_notation(row):
+        if is_mechanically_verified_noun_row(row):
             continue
         lemma = str(row.get("lemma") or "")
         generated = [str(v) for v in row.get("generated_forms", ())]
@@ -90,7 +90,7 @@ def build_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def render(summary: dict[str, Any]) -> str:
     lines = [
         "SAOL14 NOUN: kvarvarande mismatch grupperade efter rå notation", "",
-        "Mekaniskt verifierade standardparadigm är bortfiltrerade. SALDO visas endast", "som diagnostik för den återstående kön.", "",
+        "Mekaniskt verifierade SAOL-paradigm är bortfiltrerade, oavsett om", "informationen kommer från text eller ordkl. SALDO visas endast som", "diagnostik för den återstående kön.", "",
         f"Poster: {summary['records']}", f"Notationer: {summary['notation_groups']}", "", "Största notationer:",
     ]
     for index, group in enumerate(summary["groups"][:80], start=1):
