@@ -140,15 +140,20 @@ def _derive_definite_plural(
 
 
 def _complete_from_slots(entry: GeneratedEntry) -> GeneratedEntry:
-    lemma = (_forms_for_msd(entry, "ci") or (entry.lemma,))[0]
+    lemmas = _forms_for_msd(entry, "ci") or (entry.lemma,)
+    primary_lemma = lemmas[0]
     singular_definites = _forms_for_msd(entry, "sg def nom")
     plural_indefinites = _forms_for_msd(entry, "pl indef nom")
     explicit_plural_definites = _forms_for_msd(entry, "pl def nom")
 
-    additions: list[GeneratedWordForm] = [
-        GeneratedWordForm(lemma, _CI, "lemma"),
-        GeneratedWordForm(_genitive(lemma), _SG_INDEF_GEN, "derived_genitive"),
-    ]
+    additions: list[GeneratedWordForm] = []
+    for lemma in lemmas:
+        additions.extend(
+            (
+                GeneratedWordForm(lemma, _CI, "lemma"),
+                GeneratedWordForm(_genitive(lemma), _SG_INDEF_GEN, "derived_genitive"),
+            )
+        )
 
     for singular in singular_definites:
         additions.extend(
@@ -169,7 +174,7 @@ def _complete_from_slots(entry: GeneratedEntry) -> GeneratedEntry:
     plural_definites = list(explicit_plural_definites)
     if not plural_definites and singular_definites:
         for plural in plural_indefinites:
-            derived = _derive_definite_plural(lemma, singular_definites, plural)
+            derived = _derive_definite_plural(primary_lemma, singular_definites, plural)
             if derived is not None:
                 plural_definites.append(derived)
 
