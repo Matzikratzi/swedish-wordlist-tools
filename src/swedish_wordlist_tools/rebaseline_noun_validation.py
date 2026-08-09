@@ -21,34 +21,46 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
 
 
 def _lemma_key(value: object) -> str:
-    return str(value or "").casefold()
+    return str(value or "").strip().casefold()
 
 
 def _form_signature(values: object) -> tuple[str, ...]:
     return tuple(sorted({str(v).casefold() for v in (values or ()) if str(v)}))
 
 
-def homonym_coverage_indexes(summary: dict[str, Any] | None) -> tuple[dict[tuple[str, str], str], dict[tuple[str, tuple[str, ...]], str]]:
+def homonym_coverage_indexes(summary: dict[str, Any] | None) -> tuple[
+    dict[str, str],
+    dict[tuple[str, str], str],
+    dict[tuple[str, tuple[str, ...]], str],
+]:
+    by_record: dict[str, str] = {}
     by_homonym: dict[tuple[str, str], str] = {}
     by_forms: dict[tuple[str, tuple[str, ...]], str] = {}
     if not summary:
-        return by_homonym, by_forms
+        return by_record, by_homonym, by_forms
     for row in summary.get("rows", ()):
         lemma = _lemma_key(row.get("lemma"))
         exact = {str(value) for value in row.get("exact_saol_homonyms", ())}
         subset = {str(value) for value in row.get("subset_saol_homonyms", ())}
+        for record_id in row.get("exact_saol_record_ids", ()):
+            if str(record_id):
+                by_record[str(record_id)] = "homonym_exact_verified"
+        for record_id in row.get("subset_saol_record_ids", ()):
+            rid = str(record_id)
+            if rid and rid not in by_record:
+                by_record[rid] = "homonym_subset_verified"
         for homonym in exact:
             by_homonym[(lemma, homonym)] = "homonym_exact_verified"
         for homonym in subset - exact:
             by_homonym[(lemma, homonym)] = "homonym_subset_verified"
+        exact_form_keys = {_form_signature(forms) for forms in row.get("exact_saol_form_signatures", ())}
         for forms in row.get("exact_saol_form_signatures", ()):
             by_forms[(lemma, _form_signature(forms))] = "homonym_exact_verified"
-        exact_form_keys = {_form_signature(forms) for forms in row.get("exact_saol_form_signatures", ())}
         for forms in row.get("subset_saol_form_signatures", ()):
             sig = _form_signature(forms)
             if sig not in exact_form_keys:
                 by_forms[(lemma, sig)] = "homonym_subset_verified"
-    return by_homonym, by_forms
+    return by_record, by_homonym, by_forms
 
 
 def classify(rows: list[dict[str, Any]], homonym_coverage: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -61,7 +73,7 @@ def classify(rows: list[dict[str, Any]], homonym_coverage: dict[str, Any] | None
         category, _rationale = classify_scope_mismatch(row)
         triage_by_key[(row["record_id"], row["homonym_number"], row["lemma"])] = category
 
-    homonym_by_key, homonym_by_forms = homonym_coverage_indexes(homonym_coverage)
+    homonym_by_record, homonym_by_key, homonym_by_forms = homonym_coverage_indexes(homonym_coverage)
     counts = Counter()
     examples: dict[str, list[str]] = {}
 
@@ -75,16 +87,19 @@ def classify(rows: list[dict[str, Any]], homonym_coverage: dict[str, Any] | None
         lemma = str(row.get("lemma") or "")
         lemma_key = _lemma_key(lemma)
         homonym = str(row.get("homonym_number") or "")
+        record_id = str(row.get("record_id") or "")
         status = str(row.get("status") or "")
 
-        homonym_status = homonym_by_key.get((lemma_key, homonym))
+        homonym_status = homonym_by_record.get(record_id)
+        if homonym_status is None:
+            homonym_status = homonym_by_key.get((lemma_key, homonym))
         if homonym_status is None:
             homonym_status = homonym_by_forms.get((lemma_key, _form_signature(row.get("generated_forms"))))
         if homonym_status is not None and status == "form_set_mismatch":
             add(homonym_status, lemma)
             continue
 
-        key = (str(row.get("record_id") or ""), homonym, lemma)
+        key = (record_id, homonym, lemma)
         scoped = by_key.get(key)
         if scoped is not None:
             if scoped["singular_status"] == "singular_exact":
@@ -116,6 +131,7 @@ def classify(rows: list[dict[str, Any]], homonym_coverage: dict[str, Any] | None
         "scope_singular_exact": sum(1 for row in scope if row["singular_status"] == "singular_exact"),
         "scope_singular_mismatch": len(mismatches),
         "homonym_coverage_records": sum(count for name, count in counts.items() if name in {"homonym_exact_verified", "homonym_subset_verified"}),
+        "homonym_coverage_record_count": len(homonym_by_record),
         "homonym_coverage_key_count": len(homonym_by_key),
         "homonym_coverage_signature_count": len(homonym_by_forms),
     }
@@ -134,12 +150,14 @@ def render(summary: dict[str, Any]) -> str:
         f"  singular exakt: {summary['scope_singular_exact']}",
         f"  singular mismatch: {summary['scope_singular_mismatch']}",
         f"Homonymposter verifierade trots olika analysantal: {summary['homonym_coverage_records']}",
-        f"Coverage-nycklar: homonym={summary['homonym_coverage_key_count']}, formsignatur={summary['homonym_coverage_signature_count']}", "",
+        f"Coverage-nycklar: record_id={summary['homonym_coverage_record_count']}, homonym={summary['homonym_coverage_key_count']}, formsignatur={summary['homonym_coverage_signature_count']}", "",
         "Ny toppnivåfördelning:",
     ]
-    for name, count in summary["counts"].items(): lines.append(f"{count:6}  {name}")
+    for name, count in summary["counts"].items():
+        lines.append(f"{count:6}  {name}")
     lines.extend(["", "Exempel:"])
-    for name, items in summary["examples"].items(): lines.append(f"  {name}: {', '.join(items)}")
+    for name, items in summary["examples"].items():
+        lines.append(f"  {name}: {', '.join(items)}")
     return "\n".join(lines) + "\n"
 
 
@@ -156,7 +174,8 @@ def main() -> None:
     args.text.write_text(render(summary), encoding="utf-8")
     args.json.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"NOUN-poster: {summary['noun_records']}")
-    for name, count in summary["counts"].items(): print(f"{name}: {count}")
+    for name, count in summary["counts"].items():
+        print(f"{name}: {count}")
     print(f"Text: {args.text}")
     print(f"JSON: {args.json}")
 
