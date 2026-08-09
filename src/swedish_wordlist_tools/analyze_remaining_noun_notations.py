@@ -34,6 +34,8 @@ def candidates(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         if str(row.get("status") or "") != "form_set_mismatch":
             continue
+        if str(row.get("semantic_status") or "") == "variant_coverage_difference":
+            continue
         if is_truncated_inflection_source(row):
             continue
         if is_mechanically_verified_noun_row(row):
@@ -94,6 +96,7 @@ def render(summary: dict[str, Any]) -> str:
     lines = [
         "SAOL14 NOUN: kvarvarande mismatch grupperade efter rå notation", "",
         "Mekaniskt verifierade SAOL-paradigm är bortfiltrerade, oavsett om", "informationen kommer från text eller ordkl. SALDO visas endast som", "diagnostik för den återstående kön.",
+        "Varianttäckningsskillnader är också bortfiltrerade: de beskriver SALDO:s", "täckning av ett separat SAOL-variantlemma, inte ett parserfel.",
         "50-teckenstrunkerade text-fält är också bortfiltrerade: de är ett", "separat källdataproblem och ska inte styra parserutvecklingen.", "",
         f"Poster: {summary['records']}", f"Notationer: {summary['notation_groups']}", "", "Största notationer:",
     ]
