@@ -24,13 +24,21 @@ def _formset(values: object) -> set[str]:
     return {str(value).casefold() for value in (values or ()) if str(value)}
 
 
-def _saol_rows_by_lemma(rows: list[dict[str, Any]]) -> dict[tuple[str, str], list[dict[str, Any]]]:
+def _lemma(row: dict[str, Any]) -> str:
+    return _key(row.get("lemma") or row.get("normaliserat_ord"))
+
+
+def _homonym(row: dict[str, Any]) -> str:
+    return str(row.get("homonym_number") or row.get("homonr") or "")
+
+
+def _rows_by_lemma(rows: list[dict[str, Any]]) -> dict[tuple[str, str], list[dict[str, Any]]]:
     result: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     seen: set[tuple[str, str, str]] = set()
     for row in rows:
-        lemma = _key(row.get("lemma") or row.get("normaliserat_ord"))
+        lemma = _lemma(row)
         upos = str(row.get("upos") or "").upper()
-        hom = str(row.get("homonym_number") or row.get("homonr") or "")
+        hom = _homonym(row)
         if not lemma or not upos or hom in {"", "0"}:
             continue
         marker = (lemma, upos, hom)
@@ -43,40 +51,35 @@ def _saol_rows_by_lemma(rows: list[dict[str, Any]]) -> dict[tuple[str, str], lis
 def _saldo_by_lemma(path: Path) -> dict[tuple[str, str], list[dict[str, Any]]]:
     grouped = read_saldo_forms(path)
     result: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
-    seen: set[tuple[str, str, tuple[str, ...], tuple[str, ...]]] = set()
+    seen: set[tuple[str, str, str, tuple[str, ...]]] = set()
     for analyses in grouped.values():
         for analysis in analyses:
             upos = str(analysis.get("upos") or "").upper()
             forms = tuple(sorted(_formset(analysis.get("forms"))))
-            lemmas = tuple(sorted(_key(v) for v in analysis.get("lemmas", ()) if _key(v)))
             aid = str(analysis.get("id") or "")
-            for lemma in lemmas:
-                marker = (lemma, upos, forms, lemmas)
-                if marker not in seen:
+            for lemma_value in analysis.get("lemmas", ()):
+                lemma = _key(lemma_value)
+                marker = (lemma, upos, aid, forms)
+                if lemma and marker not in seen:
                     seen.add(marker)
                     result[(lemma, upos)].append(analysis)
     return result
 
 
-def pair_score(saol: dict[str, Any], saldo: dict[str, Any]) -> tuple[int, int, int, int]:
+def pair_score(saol: dict[str, Any], saldo: dict[str, Any]) -> tuple[int, int, int]:
     sf = _formset(saol.get("generated_forms"))
     df = _formset(saldo.get("forms"))
-    overlap = len(sf & df)
-    exact = int(sf == df)
-    symmetric_difference = len(sf ^ df)
-    # Lexicographic score: exact paradigms first, then maximum overlap,
-    # then minimum disagreement; final component rewards coverage proportionally.
-    return exact, overlap, -symmetric_difference, -(len(sf) + len(df) - 2 * overlap)
+    return int(sf == df), len(sf & df), -len(sf ^ df)
 
 
 def best_assignment(saol_rows: list[dict[str, Any]], saldo_rows: list[dict[str, Any]]) -> dict[str, Any]:
     if len(saol_rows) != len(saldo_rows) or len(saol_rows) < 2:
         raise ValueError("best_assignment requires equal multiple analysis counts")
-    best: tuple[tuple[int, int, int, int], tuple[int, ...]] | None = None
+    best = None
     tied = 0
     for perm in itertools.permutations(range(len(saldo_rows))):
         scores = [pair_score(saol_rows[i], saldo_rows[j]) for i, j in enumerate(perm)]
-        total = tuple(sum(score[k] for score in scores) for k in range(4))
+        total = tuple(sum(score[k] for score in scores) for k in range(3))
         if best is None or total > best[0]:
             best = (total, perm)
             tied = 1
@@ -89,7 +92,7 @@ def best_assignment(saol_rows: list[dict[str, Any]], saldo_rows: list[dict[str, 
         sf = _formset(saol_rows[i].get("generated_forms"))
         df = _formset(saldo_rows[j].get("forms"))
         pairs.append({
-            "saol_homonym": str(saol_rows[i].get("homonym_number") or saol_rows[i].get("homonr") or ""),
+            "saol_homonym": _homonym(saol_rows[i]),
             "saldo_id": str(saldo_rows[j].get("id") or ""),
             "exact": sf == df,
             "overlap": len(sf & df),
@@ -100,23 +103,34 @@ def best_assignment(saol_rows: list[dict[str, Any]], saldo_rows: list[dict[str, 
 
 
 def analyze(validation_rows: list[dict[str, Any]], saol_rows: list[dict[str, Any]], saldo_path: Path) -> dict[str, Any]:
-    # Validation rows carry the generator's actual form set, so use them as the
-    # SAOL paradigms; raw SAOL is used to establish dictionary homonym counts.
-    generated = _saol_rows_by_lemma(validation_rows)
-    raw = _saol_rows_by_lemma(saol_rows)
+    generated = _rows_by_lemma(validation_rows)
+    raw = _rows_by_lemma(saol_rows)
     saldo = _saldo_by_lemma(saldo_path)
     conflict_keys = {
-        (_key(row.get("lemma")), "NOUN")
-        for row in validation_rows
-        if str(row.get("upos") or "").upper() == "NOUN" and str(row.get("status") or "") == "form_set_mismatch"
+        (_lemma(row), "NOUN") for row in validation_rows
+        if str(row.get("upos") or "").upper() == "NOUN"
+        and str(row.get("status") or "") == "form_set_mismatch" and _lemma(row)
     }
     rows = []
     counts = Counter()
+    excluded = Counter()
+    examples: dict[str, list[str]] = defaultdict(list)
     for key in sorted(conflict_keys):
         raw_count = len(raw.get(key, ()))
         sr = generated.get(key, ())
         dr = saldo.get(key, ())
-        if raw_count <= 1 or raw_count != len(dr) or len(sr) != raw_count:
+        if raw_count <= 1:
+            reason = "saol_not_multiple"
+        elif len(sr) != raw_count:
+            reason = "validation_count_differs_from_saol"
+        elif len(dr) != raw_count:
+            reason = "saldo_count_differs_from_saol"
+        else:
+            reason = ""
+        if reason:
+            excluded[reason] += 1
+            if len(examples[reason]) < 20:
+                examples[reason].append(f"{key[0]} (SAOL={raw_count}, validation={len(sr)}, SALDO={len(dr)})")
             continue
         assignment = best_assignment(sr, dr)
         exact_pairs = sum(int(pair["exact"]) for pair in assignment["pairs"])
@@ -130,22 +144,23 @@ def analyze(validation_rows: list[dict[str, Any]], saol_rows: list[dict[str, Any
             status = "ambiguous_best"
         counts[status] += 1
         rows.append({"lemma": key[0], "homonym_count": raw_count, "status": status, **assignment})
-    return {"lemmas": len(rows), "counts": dict(counts.most_common()), "rows": rows}
+    return {"conflict_lemmas": len(conflict_keys), "lemmas": len(rows), "counts": dict(counts.most_common()), "excluded": dict(excluded.most_common()), "excluded_examples": dict(examples), "rows": rows}
 
 
 def render(summary: dict[str, Any]) -> str:
-    lines = ["SAOL14/SALDO: global paradigmmatchning av homonymer", "", f"Lemman: {summary['lemmas']}", "", "Resultat:"]
+    lines = ["SAOL14/SALDO: global paradigmmatchning av homonymer", "", f"Konfliktlemman: {summary['conflict_lemmas']}", f"Jämförbara homonymlemman: {summary['lemmas']}", "", "Exkluderade:"]
+    for name, count in summary["excluded"].items():
+        lines.append(f"{count:5}  {name}")
+        for example in summary["excluded_examples"].get(name, ()):
+            lines.append(f"       {example}")
+    lines.extend(["", "Resultat:"])
     for name, count in summary["counts"].items():
         lines.append(f"{count:5}  {name}")
     lines.extend(["", "Matchningar:"])
     for row in summary["rows"]:
         lines.append(f"\n{row['lemma']} | homonymer={row['homonym_count']} | {row['status']} | bästa lösningar={row['tie_count']}")
         for pair in row["pairs"]:
-            lines.append(
-                f"  SAOL {pair['saol_homonym']} -> SALDO {pair['saldo_id'] or '(id saknas)'} "
-                f"| exact={pair['exact']} overlap={pair['overlap']} "
-                f"| SAOL-only={pair['saol_only'] or '–'} | SALDO-only={pair['saldo_only'] or '–'}"
-            )
+            lines.append(f"  SAOL {pair['saol_homonym']} -> SALDO {pair['saldo_id'] or '(id saknas)'} | exact={pair['exact']} overlap={pair['overlap']} | SAOL-only={pair['saol_only'] or '–'} | SALDO-only={pair['saldo_only'] or '–'}")
     return "\n".join(lines) + "\n"
 
 
@@ -161,9 +176,10 @@ def main() -> None:
     args.text.parent.mkdir(parents=True, exist_ok=True)
     args.text.write_text(render(summary), encoding="utf-8")
     args.json.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(f"Lemman: {summary['lemmas']}")
-    for name, count in summary["counts"].items():
-        print(f"{name}: {count}")
+    print(f"Konfliktlemman: {summary['conflict_lemmas']}")
+    print(f"Jämförbara homonymlemman: {summary['lemmas']}")
+    for name, count in summary["excluded"].items(): print(f"excluded {name}: {count}")
+    for name, count in summary["counts"].items(): print(f"{name}: {count}")
     print(f"Text: {args.text}")
     print(f"JSON: {args.json}")
 
