@@ -49,6 +49,30 @@ class NounValidationRebaselineTests(unittest.TestCase):
         summary = classify(rows)
         self.assertEqual(1, summary["counts"]["exact_form_set"])
 
+    def test_simple_zero_plural_mismatch_is_mechanically_verified(self):
+        rows = [{
+            "upos": "NOUN", "lemma": "ansvar", "record_id": "4", "homonym_number": "1",
+            "notation": "+et; pl. +",
+            "generated_forms": ["ansvar", "ansvars", "ansvaret", "ansvarets", "ansvaren", "ansvarens"],
+            "saldo_forms": ["ansvar", "ansvars", "ansvaret", "ansvarets"],
+            "status": "form_set_mismatch",
+        }]
+        summary = classify(rows)
+        self.assertEqual(1, summary["counts"]["mechanically_verified_from_saol"])
+        self.assertNotIn("remaining_form_set_mismatch", summary["counts"])
+
+    def test_alternative_zero_plural_notation_stays_diagnostic(self):
+        rows = [{
+            "upos": "NOUN", "lemma": "alfa", "record_id": "5", "homonym_number": "1",
+            "notation": "+t; pl. +n el. +",
+            "generated_forms": ["alfa", "alfat", "alfan", "alfaen"],
+            "saldo_forms": ["alfa", "alfat", "alfan"],
+            "status": "form_set_mismatch",
+        }]
+        summary = classify(rows)
+        self.assertEqual(1, summary["counts"]["remaining_form_set_mismatch"])
+        self.assertNotIn("mechanically_verified_from_saol", summary["counts"])
+
     def test_verified_sibling_homonym_is_diagnostic_only(self):
         rows = [
             {
