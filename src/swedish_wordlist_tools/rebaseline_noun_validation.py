@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .analyze_singular_agreement_for_scope_extras import candidates as scope_candidates
-from .noun_mechanical_validation import is_mechanically_verified_noun_notation
+from .noun_mechanical_validation import is_mechanically_verified_noun_row
 from .triage_singular_scope_mismatches import classify as classify_scope_mismatch
 
 DEFAULT_INPUT = Path("reports/saol14-direct-form-validation.jsonl")
@@ -86,7 +86,7 @@ def classify(rows: list[dict[str, Any]], homonym_coverage: dict[str, Any] | None
             add("other_saol_subset", lemma)
         elif status == "saol_pattern_unsupported":
             add("unsupported", lemma)
-        elif status == "form_set_mismatch" and is_mechanically_verified_noun_notation(row):
+        elif status == "form_set_mismatch" and is_mechanically_verified_noun_row(row):
             add("mechanically_verified_from_saol", lemma)
         elif status == "form_set_mismatch":
             add("remaining_form_set_mismatch", lemma)
