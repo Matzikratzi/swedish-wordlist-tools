@@ -1,5 +1,6 @@
 import unittest
 
+from swedish_wordlist_tools.canonical_form_artifacts import artifact_row_keys
 from swedish_wordlist_tools.generate_noun_forms import generate_noun_artifact
 from swedish_wordlist_tools.saol_noun_variants import (
     is_simple_relative_noun_notation,
@@ -25,8 +26,8 @@ class SaolNounVariantTests(unittest.TestCase):
             )
         )
 
-    def test_matching_hv_rebases_simple_acne_paradigm(self):
-        records = [
+    def _acne_records(self):
+        return [
             {
                 "normaliserat_ord": "akne",
                 "homonr": "0",
@@ -48,15 +49,27 @@ class SaolNounVariantTests(unittest.TestCase):
                 "ord": "acne",
             },
         ]
-        prepared = prepare_noun_variant_records(records)
+
+    def test_matching_hv_rebases_simple_acne_paradigm(self):
+        prepared = prepare_noun_variant_records(self._acne_records())
         noun = prepared[0]
         self.assertEqual("acne", noun["normaliserat_ord"])
+        self.assertEqual("akne", noun["_saol_source_normaliserat_ord"])
         self.assertEqual("rebase_simple_relative", noun["_saol_variant_mode"])
 
         rows, _comparisons, _summary = generate_noun_artifact(prepared)
         self.assertEqual(1, len(rows))
+        self.assertEqual("acne", rows[0]["lemma"])
+        self.assertEqual("akne", rows[0]["source_normaliserat_ord"])
         forms = {item["written_form"] for item in rows[0]["forms"]}
         self.assertEqual({"acne", "acnes", "acnen", "acnens"}, forms)
+
+    def test_rebased_artifact_is_indexable_by_original_source_lemma(self):
+        prepared = prepare_noun_variant_records(self._acne_records())
+        rows, _comparisons, _summary = generate_noun_artifact(prepared)
+        keys = set(artifact_row_keys(rows[0]))
+        self.assertIn(("438305", "0", "acne"), keys)
+        self.assertIn(("438305", "0", "akne"), keys)
 
     def test_hv_is_required_before_rebasing(self):
         records = [
