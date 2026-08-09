@@ -57,24 +57,24 @@ _SOURCE_TEXT_LIMIT = 50
 
 
 def _drop_untrusted_final_token(text: str) -> str:
-    """Drop the final token whenever SAOL ``text`` hits the export limit.
+    """Drop the incomplete tail whenever SAOL ``text`` hits the export limit.
 
-    A 50-character field is known to be potentially truncated.  The last
-    whitespace-delimited token is therefore not evidence, even if it happens
-    to look like a complete form.  Earlier completed tokens and labels remain
-    usable.  For example::
-
-        +n; pl. kamrar el. +, best. pl. kamrarna el. kamma
-
-    is reduced to the prefix ending in ``el.``; ``kamma`` must never reach the
-    form parser.  Runeberg/OCR recovery can later supply the missing tail.
+    A 50-character field is potentially truncated. The final whitespace-delimited
+    token is therefore not evidence, even if it happens to look complete. If the
+    token was introduced by a final ``el.``, that marker is incomplete too and is
+    discarded with the token. Earlier completed tokens and labels remain usable.
     """
 
     if len(text) != _SOURCE_TEXT_LIMIT:
         return text
     stripped = text.rstrip()
     prefix, separator, _last = stripped.rpartition(" ")
-    return prefix.rstrip() if separator else ""
+    if not separator:
+        return ""
+    prefix = prefix.rstrip()
+    if prefix.casefold().endswith(" el."):
+        prefix = prefix[:-4].rstrip()
+    return prefix
 
 
 def _clean_notation_spelling(text: str) -> str:
