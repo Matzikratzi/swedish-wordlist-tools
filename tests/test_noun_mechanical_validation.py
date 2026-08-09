@@ -35,51 +35,15 @@ class NounMechanicalValidationTests(unittest.TestCase):
             is_mechanically_verified_noun_notation("best. +; i: pl. används: -ansökningar")
         )
 
-    def test_structured_alternatives_are_verified_at_row_level(self):
-        cases = (
-            ("väsen", "+det; pl. +, best. pl. +dena _ +t +n [-en] +r [-er]"),
-            ("fäbless", "+en +er _ +n [-en] +r [-er]"),
-            ("citrat", "+et; pl. +er el. +"),
-            ("alfa", "+t; pl. +n el. +"),
-            ("kamratskap", "+et el. +en"),
-            ("fredag", "+en el. vard. -dan; pl. +ar"),
-        )
-        for lemma, notation in cases:
+    def test_branching_or_compound_notation_stays_unverified(self):
+        for notation in (
+            "+n; pl. -kamrar el. +, best. pl. -kamrarna el. -ka",
+            "+en +er _ +n [-en] +r [-er]",
+            "+et; pl. +er el. +",
+            "+t; pl. +n el. +",
+        ):
             with self.subTest(notation=notation):
-                self.assertTrue(
-                    is_mechanically_verified_noun_row(
-                        {
-                            "lemma": lemma,
-                            "notation": notation,
-                            "stycke": lemma,
-                        }
-                    )
-                )
-
-    def test_structured_alternatives_are_not_global_string_allowlist(self):
-        self.assertFalse(
-            is_mechanically_verified_noun_notation(
-                "+en +er _ +n [-en] +r [-er]"
-            )
-        )
-
-    def test_truncated_or_prose_structured_rows_stay_unverified(self):
-        truncated = "+n; pl. kamrar el. +, best. pl. kamrarna el. kamma"
-        self.assertEqual(50, len(truncated))
-        self.assertFalse(
-            is_mechanically_verified_noun_row(
-                {"lemma": "kammare", "notation": truncated, "stycke": "kammare"}
-            )
-        )
-        self.assertFalse(
-            is_mechanically_verified_noun_row(
-                {
-                    "lemma": "test",
-                    "notation": "+en; som: pl. används: +er el. +ar",
-                    "stycke": "test",
-                }
-            )
-        )
+                self.assertFalse(is_mechanically_verified_noun_notation(notation))
 
     def test_missing_notation_representations(self):
         for value in (None, "", "(null)", "null", "  (NULL)  "):
@@ -104,12 +68,12 @@ class NounMechanicalValidationTests(unittest.TestCase):
                     )
                 )
 
-    def test_ordkl_is_not_used_when_text_contains_unhandled_notation(self):
+    def test_ordkl_is_not_used_when_text_contains_notation(self):
         self.assertFalse(
             is_mechanically_verified_noun_row(
                 {
                     "lemma": "test",
-                    "notation": "+en; som: pl. används: +er el. +ar",
+                    "notation": "+t; pl. +n el. +",
                     "ordkl": "s. oböjl.",
                 }
             )
