@@ -20,8 +20,41 @@ def _key(value: object) -> str:
     return str(value or "").strip().casefold()
 
 
-def _formset(values: object) -> set[str]:
-    return {str(value).casefold() for value in (values or ()) if str(value)}
+def _is_saldo_nonword_form(value: object) -> bool:
+    """True for SALDO forms that are morphological/compound stems, not words.
+
+    Examples in the current artifact include ``fot-``, ``fots-``, ``g-et`` and
+    ``led:er``.  These are useful inside SALDO but must not make an otherwise
+    matching SAOL inflection paradigm disagree.  A trailing hyphen is the most
+    common representation; colon/hyphen morphology is also excluded when it
+    differs from an ordinary written form.
+    """
+    form = str(value or "").strip()
+    if not form:
+        return True
+    if form.endswith("-"):
+        return True
+    if ":" in form:
+        return True
+    # Internal hyphen immediately before a grammatical ending, e.g. g-et.
+    # Ordinary lexical hyphens such as cd-rom are retained because they do not
+    # match this short stem+ending pattern mechanically.
+    if "-" in form:
+        left, right = form.rsplit("-", 1)
+        if left and right in {"s", "n", "ns", "na", "nas", "t", "ts", "et", "ets", "en", "ens", "er", "ers", "erna", "ernas"}:
+            return True
+    return False
+
+
+def _formset(values: object, *, saldo: bool = False) -> set[str]:
+    result = set()
+    for value in values or ():
+        if saldo and _is_saldo_nonword_form(value):
+            continue
+        text = str(value)
+        if text:
+            result.add(text.casefold())
+    return result
 
 
 def _lemma(row: dict[str, Any]) -> str:
@@ -55,20 +88,22 @@ def _saldo_by_lemma(path: Path) -> dict[tuple[str, str], list[dict[str, Any]]]:
     for analyses in grouped.values():
         for analysis in analyses:
             upos = str(analysis.get("upos") or "").upper()
-            forms = tuple(sorted(_formset(analysis.get("forms"))))
+            forms = tuple(sorted(_formset(analysis.get("forms"), saldo=True)))
             aid = str(analysis.get("id") or "")
             for lemma_value in analysis.get("lemmas", ()):
                 lemma = _key(lemma_value)
                 marker = (lemma, upos, aid, forms)
                 if lemma and marker not in seen:
                     seen.add(marker)
-                    result[(lemma, upos)].append(analysis)
+                    copied = dict(analysis)
+                    copied["forms"] = set(forms)
+                    result[(lemma, upos)].append(copied)
     return result
 
 
 def pair_score(saol: dict[str, Any], saldo: dict[str, Any]) -> tuple[int, int, int]:
     sf = _formset(saol.get("generated_forms"))
-    df = _formset(saldo.get("forms"))
+    df = _formset(saldo.get("forms"), saldo=True)
     return int(sf == df), len(sf & df), -len(sf ^ df)
 
 
@@ -90,7 +125,7 @@ def best_assignment(saol_rows: list[dict[str, Any]], saldo_rows: list[dict[str, 
     pairs = []
     for i, j in enumerate(perm):
         sf = _formset(saol_rows[i].get("generated_forms"))
-        df = _formset(saldo_rows[j].get("forms"))
+        df = _formset(saldo_rows[j].get("forms"), saldo=True)
         pairs.append({
             "saol_homonym": _homonym(saol_rows[i]),
             "saldo_id": str(saldo_rows[j].get("id") or ""),
@@ -148,7 +183,7 @@ def analyze(validation_rows: list[dict[str, Any]], saol_rows: list[dict[str, Any
 
 
 def render(summary: dict[str, Any]) -> str:
-    lines = ["SAOL14/SALDO: global paradigmmatchning av homonymer", "", f"Konfliktlemman: {summary['conflict_lemmas']}", f"Jämförbara homonymlemman: {summary['lemmas']}", "", "Exkluderade:"]
+    lines = ["SAOL14/SALDO: global paradigmmatchning av homonymer", "", "SALDO:s bindestrecks-/morfologiformer filtreras bort före paradigmjämförelse.", "", f"Konfliktlemman: {summary['conflict_lemmas']}", f"Jämförbara homonymlemman: {summary['lemmas']}", "", "Exkluderade:"]
     for name, count in summary["excluded"].items():
         lines.append(f"{count:5}  {name}")
         for example in summary["excluded_examples"].get(name, ()):
@@ -172,7 +207,6 @@ def main() -> None:
     parser.add_argument("--text", type=Path, default=DEFAULT_TEXT)
     parser.add_argument("--json", type=Path, default=DEFAULT_JSON)
     args = parser.parse_args()
-    # read_jsonl yields iterators; this analysis traverses both inputs more than once.
     validation_rows = list(read_jsonl(args.validation))
     saol_rows = list(read_jsonl(args.saol))
     summary = analyze(validation_rows, saol_rows, args.saldo)
