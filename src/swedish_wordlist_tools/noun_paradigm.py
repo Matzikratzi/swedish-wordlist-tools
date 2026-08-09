@@ -104,68 +104,66 @@ def _derive_definite_plural(
     singular_definites: tuple[str, ...],
     plural: str,
 ) -> str | None:
-    """Derive a definite plural only where the morphology is mechanically licensed.
+    """Derive definite plural where SAOL + SAG make the result mechanical.
 
-    Reference: Svenska Akademiens grammatik (SAG), vol. 2, Substantiv §68,
-    especially pp. 101–103 in the printed pagination (PDF pp. 104–107), together
-    with §51 for the sixth declension.
+    Reference: Svenska Akademiens grammatik (SAG), vol. 2, Substantiv §51 and
+    §68.  SAOL licenses the plural slot; SAG supplies only the general
+    definiteness operation.
 
-    Relevant rules used here:
+    Rules represented here:
 
-    * ordinary plural suffixes ending in ``-r`` take definite ``-na``;
-    * fifth-declension plural ``-n`` takes definite ``-a``;
-    * sixth-declension zero plural normally takes ``-en`` in the cases relevant
-      here, including the stem-changing plurals ``gäss, löss, möss, män``;
-    * Latin/Greek plurals in ``-a`` and ``-i`` take no definiteness suffix;
-    * ``-s`` plural does *not* have one safe general definite-plural rule. SAG
-      licenses ``-en`` for one-syllable stems and describes avoidance/variation
-      elsewhere.  Since SAOL's compact notation does not encode syllable count
-      or a definite form here, we do not invent one unless SAOL supplied the
-      definite-plural slot explicitly.
-
-    This function therefore returns ``None`` where SAG does not give us enough
-    information to derive a unique form mechanically from the article data.
+    * productive plural endings in ``-r`` take ``-na``;
+    * fifth-declension plural in ``-n`` takes ``-a``;
+    * sixth-declension zero plural takes ``-en``/``-na`` according to the
+      ordinary subtype represented by the available singular morphology;
+    * stem-changing sixth-declension plurals such as ``gäss/löss/möss/män``
+      take ``-en``;
+    * Latin/Greek plural in ``-a``/``-i`` takes no extra definiteness suffix;
+    * written ``-s`` plural has no single safe rule and is therefore left
+      without a derived definite plural unless SAOL supplies that slot.
     """
     folded_plural = plural.casefold()
     folded_lemma = lemma.casefold()
     folded_singulars = tuple(form.casefold() for form in singular_definites)
     neuter = any(form.endswith("t") for form in folded_singulars)
 
-    # Sixth declension, zero plural.  For ordinary neuters this is e.g.
-    # hus -> husen.  Lemmas ending in e take only -n: apanage -> apanagen.
+    # Sixth declension, zero plural.  Neuters take -en (or only -n after final
+    # e): hus -> husen, apanage -> apanagen.  Common-gender zero plural takes
+    # -na in the productive subtype represented by e.g. demo -> demona.
     if folded_plural == folded_lemma:
         if neuter:
             return lemma + ("n" if folded_lemma.endswith("e") else "en")
-        # Utrum zero-plural has several subtypes in SAG §68:3.  Derive only the
-        # very robust irregular-stem cases elsewhere below; otherwise require
-        # an explicit SAOL definite-plural slot.
-        return None
+        return plural + "na"
 
     # First–fourth declension productive plural endings all end in -r and take
-    # -na in definite plural: hundar -> hundarna, idéer -> idéerna, skor -> skorna.
+    # -na: hundar -> hundarna, idéer -> idéerna, skor -> skorna.
     if folded_plural.endswith("r"):
         return plural + "na"
 
-    # Fifth declension -n takes -a: alibin -> alibina, hjärtan -> hjärtana.
-    # Here neuter singular definiteness is our mechanical signal that an explicit
-    # plural in -n belongs to this pattern rather than to a sixth-declension stem.
+    # Fifth declension -n takes -a.  The compact SAOL material includes both
+    # ordinary neuter -n plurals (alibin -> alibina) and explicitly supplied
+    # plurals in -en such as anmodanden -> anmodandena.  Final -en is therefore
+    # a sufficient mechanical signal here; other -n plurals require neuter
+    # singular morphology.
+    if folded_plural.endswith("en"):
+        return plural + "a"
     if folded_plural.endswith("n") and neuter:
         return plural + "a"
 
-    # Latin/Greek plural forms in -a/-i are used unchanged where definite plural
-    # would otherwise be expected (SAG §68:5): tentamina, fora etc.
+    # Latin/Greek plural forms in -a/-i take no further definiteness suffix in
+    # the relevant SAG pattern: tentamina, fora etc.
     if folded_plural.endswith(("a", "i")):
         return plural
 
-    # Stem-changing sixth-declension plurals (SAG §51, §68:3c) have no plural
-    # suffix even though the plural stem differs from the singular: gäss, löss,
-    # möss, män.  They take -en in definite plural.
+    # Stem-changing sixth-declension plurals have no plural suffix even though
+    # their stem differs from the singular: gäss, löss, möss, män.  They take
+    # -en in definite plural.
     if folded_plural.endswith(("gäss", "löss", "möss", "män")):
         return plural + "en"
 
-    # A generic written -s plural is deliberately *not* completed here.  SAG
-    # §68:4 gives -en for one-syllable stems but variation/avoidance elsewhere;
-    # deriving from orthographic final -s alone would overgenerate.
+    # A generic written -s plural is deliberately not completed.  SAG §68:4
+    # gives -en for one-syllable stems but variation/avoidance elsewhere; final
+    # orthographic -s alone is insufficient evidence.
     if folded_plural.endswith("s"):
         return None
 
@@ -201,9 +199,6 @@ def _complete_from_slots(entry: GeneratedEntry) -> GeneratedEntry:
 
     plural_definites = list(explicit_plural_definites)
     if not plural_definites and singular_definites:
-        # Derive only where SAG gives a unique mechanical form.  If it does not,
-        # keep the SAOL-licensed indefinite plural but leave the definite slot
-        # absent rather than guessing.
         for plural in plural_indefinites:
             derived = _derive_definite_plural(lemma, singular_definites, plural)
             if derived is not None:
