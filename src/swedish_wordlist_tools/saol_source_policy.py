@@ -4,6 +4,28 @@ from typing import Any
 
 from .inflect import normalise_pattern
 
+SOURCE_TEXT_LIMIT = 50
+
+
+def raw_inflection_text(record: dict[str, Any]) -> str:
+    """Return the raw SAOL ``text`` carrier as stored in the export."""
+
+    value = record.get("text")
+    if value is None:
+        value = record.get("notation")
+    return "" if value is None else str(value)
+
+
+def is_truncated_inflection_source(record: dict[str, Any]) -> bool:
+    """Return true when SAOL ``text`` hits the known 50-character export cap.
+
+    Such rows may still contain useful completed notation before the final
+    fragment, but they must not be mixed into the ordinary queue of rows whose
+    complete source notation is available.
+    """
+
+    return len(raw_inflection_text(record)) == SOURCE_TEXT_LIMIT
+
 
 def inflection_text(record: dict[str, Any]) -> str | None:
     """Return SAOL's primary inflection text, or ``None`` when it is absent.
