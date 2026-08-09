@@ -85,6 +85,11 @@ def _simulate_group(rows: list[dict[str, Any]]) -> set[str] | None:
     for branch, base in zip(branches, bases):
         branch_record = dict(record)
         branch_record["normaliserat_ord"] = base
+        # Canonical noun generation now takes its written surface lemma from
+        # ``ord`` when present.  Keep the synthetic branch record internally
+        # consistent so the alternative base is not overwritten by the main
+        # headword's original ``ord`` value.
+        branch_record["ord"] = base
         branch_record["text"] = branch.text
         # The original stycke describes the main headword.  For the alternative
         # base this target pattern uses only append/unchanged operations, so no
