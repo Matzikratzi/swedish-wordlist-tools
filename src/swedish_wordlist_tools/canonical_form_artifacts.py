@@ -30,14 +30,37 @@ def artifact_row_key(row: dict[str, Any]) -> ArtifactKey:
 
 
 def artifact_row_keys(row: dict[str, Any]) -> tuple[ArtifactKey, ...]:
-    """Return every raw-record key represented by one materialized artifact row."""
+    """Return every raw-record key represented by one materialized artifact row.
+
+    Variant-aware noun generation may rebase an explicit written variant, e.g.
+    source ``normaliserat_ord=akne`` + ``ord=acne`` becomes artifact lemma
+    ``acne``.  Keep the source normalized lemma as an alias so downstream
+    validation can still resolve the original JSONL row by its stable source
+    identity while using the rebased written paradigm.
+    """
 
     record_id = str(row.get("record_id") or "")
     lemma = str(row.get("lemma") or "").casefold()
-    aliases = [str(value or "") for value in row.get("source_homonym_numbers", ()) if str(value or "")]
-    if not aliases:
-        aliases = [str(row.get("homonym_number") or "")]
-    return tuple(dict.fromkeys((record_id, homonym, lemma) for homonym in aliases))
+    lemma_aliases = [lemma]
+    source_lemma = str(row.get("source_normaliserat_ord") or "").strip().casefold()
+    if source_lemma and source_lemma not in lemma_aliases:
+        lemma_aliases.append(source_lemma)
+
+    homonym_aliases = [
+        str(value or "")
+        for value in row.get("source_homonym_numbers", ())
+        if str(value or "")
+    ]
+    if not homonym_aliases:
+        homonym_aliases = [str(row.get("homonym_number") or "")]
+
+    return tuple(
+        dict.fromkeys(
+            (record_id, homonym, lemma_alias)
+            for homonym in homonym_aliases
+            for lemma_alias in lemma_aliases
+        )
+    )
 
 
 def artifact_forms(row: dict[str, Any]) -> set[str]:
