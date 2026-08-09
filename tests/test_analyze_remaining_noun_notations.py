@@ -58,6 +58,25 @@ class RemainingNounNotationTests(unittest.TestCase):
         selected = candidates(rows)
         self.assertEqual(["hel"], [row["lemma"] for row in selected])
 
+    def test_excludes_variant_coverage_differences(self):
+        rows = [
+            {
+                "upos": "NOUN", "status": "form_set_mismatch",
+                "semantic_status": "variant_coverage_difference",
+                "lemma": "akne", "notation": "+n",
+                "generated_forms": ["acne", "acnen"],
+                "saldo_forms": ["akne", "aknen"],
+            },
+            {
+                "upos": "NOUN", "status": "form_set_mismatch",
+                "semantic_status": "true_form_mismatch",
+                "lemma": "hel", "notation": "+et el. +en",
+                "generated_forms": ["hel", "helet"], "saldo_forms": ["hel"],
+            },
+        ]
+        selected = candidates(rows)
+        self.assertEqual(["hel"], [row["lemma"] for row in selected])
+
     def test_groups_remaining_by_exact_notation(self):
         rows = candidates([
             {"upos": "NOUN", "status": "form_set_mismatch", "lemma": "a", "notation": "+et el. +en", "generated_forms": ["a", "aet"], "saldo_forms": ["a"]},
