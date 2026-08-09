@@ -88,6 +88,22 @@ class NounValidationRebaselineTests(unittest.TestCase):
         self.assertNotIn("remaining_form_set_mismatch", summary["counts"])
         self.assertFalse(any(key.startswith("scope_mismatch_") for key in summary["counts"]))
 
+    def test_variant_coverage_difference_is_separate_from_parser_and_scope_mismatch(self):
+        rows = [{
+            "upos": "NOUN", "lemma": "akne", "record_id": "42", "homonym_number": "0",
+            "notation": "+n",
+            "generated_forms": ["acne", "acnes", "acnen", "acnens"],
+            "saldo_forms": ["akne", "aknes", "aknen", "aknens"],
+            "status": "form_set_mismatch",
+            "semantic_status": "variant_coverage_difference",
+            "semantic_reason": "alternative_heading_missing_in_saldo",
+        }]
+        summary = classify(rows)
+        self.assertEqual(1, summary["counts"]["variant_coverage_difference"])
+        self.assertNotIn("remaining_form_set_mismatch", summary["counts"])
+        self.assertFalse(any(key.startswith("scope_mismatch_") for key in summary["counts"]))
+        self.assertEqual(0, summary["scope_population"])
+
     def test_alternative_zero_plural_notation_stays_diagnostic(self):
         rows = [{
             "upos": "NOUN", "lemma": "alfa", "record_id": "5", "homonym_number": "1",
