@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .canonical_form_artifacts import artifact_row_keys, read_artifact_rows
+from .noun_mechanical_validation import is_mechanically_verified_noun_notation
 
 DEFAULT_VALIDATION = Path("reports/saol14-direct-form-validation.jsonl")
 DEFAULT_NOUN_FORMS = Path("reports/saol14-noun-forms.jsonl")
@@ -20,11 +21,7 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
 
 
 def _validation_key(row: dict[str, Any]) -> tuple[str, str, str]:
-    return (
-        str(row.get("record_id") or ""),
-        str(row.get("homonym_number") or ""),
-        str(row.get("lemma") or "").casefold(),
-    )
+    return (str(row.get("record_id") or ""), str(row.get("homonym_number") or ""), str(row.get("lemma") or "").casefold())
 
 
 def _artifact_form_kinds(rows: Iterable[dict[str, Any]]) -> dict[tuple[str, str, str], dict[str, set[str]]]:
@@ -54,10 +51,7 @@ def _bucket(kinds: set[str]) -> str:
     return "unmapped"
 
 
-def analyze(
-    validation_rows: Iterable[dict[str, Any]],
-    artifact_rows: Iterable[dict[str, Any]],
-) -> dict[str, Any]:
+def analyze(validation_rows: Iterable[dict[str, Any]], artifact_rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
     form_kinds = _artifact_form_kinds(artifact_rows)
     rows: list[dict[str, Any]] = []
     bucket_counts: Counter[str] = Counter()
@@ -69,6 +63,8 @@ def analyze(
         if str(row.get("upos") or "").upper() != "NOUN":
             continue
         if str(row.get("status") or "") != "form_set_mismatch":
+            continue
+        if is_mechanically_verified_noun_notation(row):
             continue
 
         extras = [str(value) for value in row.get("extra_from_saol", ()) if str(value)]
@@ -114,23 +110,15 @@ def analyze(
 
 def render(summary: dict[str, Any]) -> str:
     lines = [
-        "SAOL14 NOUN: provenance för kvarvarande form_set_mismatch",
-        "",
-        "Syfte: skilj mismatch som består av direkt SAOL-licensierade former från mismatch",
-        "som innehåller former härledda av noun completion. SALDO används endast för att välja",
-        "mismatchpopulationen; proveniensklassningen kommer från den kanoniska NOUN-artefakten.",
-        "",
-        f"Poster: {summary['records']}",
-        "",
-        "Hinkar:",
+        "SAOL14 NOUN: provenance för kvarvarande form_set_mismatch", "",
+        "Mekaniskt verifierade standardparadigm är bortfiltrerade. Återstående poster", "är den faktiska kön för fortsatt generatoraudit; SALDO är endast diagnostik.", "",
+        f"Poster: {summary['records']}", "", "Hinkar:",
     ]
     for bucket, count in summary["bucket_counts"].items():
         lines.append(f"{count:6}  {bucket}")
-
     lines.extend(["", "Extra SAOL-former per generator-kind:"])
     for kind, count in summary["extra_form_kind_counts"].items():
         lines.append(f"{count:6}  {kind}")
-
     for bucket in ("derived_only", "mixed_direct_and_derived", "direct_saol_slots_only", "unmapped"):
         top = summary["top_notations_by_bucket"].get(bucket, [])
         if not top:
@@ -142,15 +130,9 @@ def render(summary: dict[str, Any]) -> str:
         if examples:
             lines.append("  Exempel:")
             for row in examples[:12]:
-                extra = ", ".join(
-                    f"{item['form']}[{'+'.join(item['kinds']) or '?'}]"
-                    for item in row["extra_from_saol"]
-                ) or "-"
+                extra = ", ".join(f"{item['form']}[{'+'.join(item['kinds']) or '?'}]" for item in row["extra_from_saol"]) or "-"
                 missing = ", ".join(row["missing_from_saol"]) or "-"
-                lines.append(
-                    f"    {row['lemma']} ({row['homonym_number']}) | {row['notation']} | "
-                    f"SAOL-extra: {extra} | SALDO-extra: {missing}"
-                )
+                lines.append(f"    {row['lemma']} ({row['homonym_number']}) | {row['notation']} | SAOL-extra: {extra} | SALDO-extra: {missing}")
     return "\n".join(lines) + "\n"
 
 
@@ -161,7 +143,6 @@ def main() -> None:
     parser.add_argument("--text", type=Path, default=DEFAULT_TEXT)
     parser.add_argument("--json", type=Path, default=DEFAULT_JSON)
     args = parser.parse_args()
-
     summary = analyze(_read_jsonl(args.validation), read_artifact_rows(args.noun_forms))
     args.text.parent.mkdir(parents=True, exist_ok=True)
     args.text.write_text(render(summary), encoding="utf-8")
