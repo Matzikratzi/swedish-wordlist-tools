@@ -5,9 +5,8 @@ from pathlib import Path
 
 from swedish_wordlist_tools.canonical_form_artifacts import (
     artifact_row_keys,
-    read_artifact,
-    read_artifact_variant_lemmas,
-    read_artifact_variant_paradigms,
+    forms_from_artifacts,
+    load_word_class_artifacts,
 )
 from swedish_wordlist_tools.generate_noun_forms import generate_noun_artifact
 from swedish_wordlist_tools.saol_noun_variants import (
@@ -72,55 +71,31 @@ class SaolNounVariantTests(unittest.TestCase):
         forms = {item["written_form"] for item in rows[0]["forms"]}
         self.assertEqual({"acne", "acnes", "acnen", "acnens"}, forms)
 
-    def test_rebased_artifact_is_indexable_by_original_source_lemma(self):
+    def test_rebased_artifact_keeps_written_key_not_normalized_alias(self):
         prepared = prepare_noun_variant_records(self._acne_records())
         rows, _comparisons, _summary = generate_noun_artifact(prepared)
         keys = set(artifact_row_keys(rows[0]))
         self.assertIn(("438305", "0", "acne"), keys)
-        self.assertIn(("438305", "0", "akne"), keys)
+        self.assertNotIn(("438305", "0", "akne"), keys)
 
-    def test_variant_alias_collisions_merge_forms_and_keep_paradigms_separate(self):
-        rows = [
-            {
-                "record_id": "428401",
-                "homonym_number": "1",
-                "lemma": "disko",
-                "forms": [
-                    {"written_form": "disko"},
-                    {"written_form": "diskot"},
-                ],
-            },
-            {
-                "record_id": "428401",
-                "homonym_number": "1",
-                "lemma": "disco",
-                "source_normaliserat_ord": "disko",
-                "forms": [
-                    {"written_form": "disco"},
-                    {"written_form": "discot"},
-                ],
-            },
-        ]
+    def test_raw_variant_row_finds_its_written_artifact(self):
+        prepared = prepare_noun_variant_records(self._acne_records())
+        rows, _comparisons, _summary = generate_noun_artifact(prepared)
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "noun-forms.jsonl"
-            path.write_text(
+            root = Path(directory)
+            noun_path = root / "nouns.jsonl"
+            adjective_path = root / "adjectives.jsonl"
+            noun_path.write_text(
                 "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
                 encoding="utf-8",
             )
-            forms = read_artifact(path)
-            lemmas = read_artifact_variant_lemmas(path)
-            paradigms = read_artifact_variant_paradigms(path)
-
-        key = ("428401", "1", "disko")
-        self.assertEqual({"disko", "diskot", "disco", "discot"}, forms[key])
-        self.assertEqual(("disko", "disco"), lemmas[key])
-        self.assertEqual(
-            {
-                "disko": {"disko", "diskot"},
-                "disco": {"disco", "discot"},
-            },
-            paradigms[key],
-        )
+            adjective_path.write_text("", encoding="utf-8")
+            artifacts = load_word_class_artifacts(
+                noun_path=noun_path,
+                adjective_path=adjective_path,
+            )
+            forms = forms_from_artifacts(self._acne_records()[0], artifacts)
+            self.assertEqual({"acne", "acnes", "acnen", "acnens"}, forms)
 
     def test_hv_is_required_before_rebasing(self):
         records = [
@@ -183,6 +158,46 @@ class SaolNounVariantTests(unittest.TestCase):
         ]
         prepared = prepare_noun_variant_records(records)
         self.assertEqual(records, prepared)
+
+    def test_disko_and_disco_keep_separate_written_paradigms(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            noun_path = root / "nouns.jsonl"
+            adjective_path = root / "adjectives.jsonl"
+            noun_rows = [
+                {
+                    "record_id": "428401",
+                    "homonym_number": "1",
+                    "lemma": "disko",
+                    "forms": [{"written_form": "disko"}, {"written_form": "diskot"}],
+                },
+                {
+                    "record_id": "428401",
+                    "homonym_number": "1",
+                    "lemma": "disco",
+                    "source_normaliserat_ord": "disko",
+                    "forms": [{"written_form": "disco"}, {"written_form": "discot"}],
+                },
+            ]
+            noun_path.write_text(
+                "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in noun_rows),
+                encoding="utf-8",
+            )
+            adjective_path.write_text("", encoding="utf-8")
+            artifacts = load_word_class_artifacts(
+                noun_path=noun_path,
+                adjective_path=adjective_path,
+            )
+            disko = {
+                "subnr": "428401",
+                "homonr": "1",
+                "normaliserat_ord": "disko",
+                "ord": "disko",
+                "upos": "NOUN",
+            }
+            disco = dict(disko, ord="disco")
+            self.assertEqual({"disko", "diskot"}, forms_from_artifacts(disko, artifacts))
+            self.assertEqual({"disco", "discot"}, forms_from_artifacts(disco, artifacts))
 
 
 if __name__ == "__main__":
