@@ -145,13 +145,29 @@ def select_article_variant_match_from_artifacts(
     generated_forms: set[str],
     variant_paradigms: dict[str, set[str]] | None,
 ) -> tuple[str, list[dict[str, Any]]] | None:
-    """Match each materialized SAOL lemma variant against SALDO separately."""
+    """Match each materialized SAOL lemma variant against SALDO separately.
 
-    if not variant_paradigms or len(variant_paradigms) <= 1:
+    A rebased written variant can be the only materialized paradigm for one raw
+    JSONL row, e.g. source normaliserat_ord=akne + ord=acne.  That single
+    paradigm must still be looked up as ``acne`` rather than falling back to
+    the normalized carrier ``akne``.
+    """
+
+    if not variant_paradigms:
         return select_direct_match_from_artifacts(record, saldo, form_index, generated_forms)
 
     upos = _saol_upos(record)
     if not upos or upos == "X":
+        return select_direct_match_from_artifacts(record, saldo, form_index, generated_forms)
+
+    primary = _normalise(str(record.get("normaliserat_ord") or "")).casefold()
+    if len(variant_paradigms) == 1:
+        lemma, forms = next(iter(variant_paradigms.items()))
+        if _normalise(lemma).casefold() == primary:
+            return select_direct_match_from_artifacts(record, saldo, form_index, generated_forms)
+        analyses = _same_upos_analyses(lemma, upos, saldo, form_index, forms)
+        if analyses:
+            return "single_article_variant_lemma_same_upos", analyses
         return select_direct_match_from_artifacts(record, saldo, form_index, generated_forms)
 
     selected: list[dict[str, Any]] = []
@@ -180,9 +196,9 @@ def _variant_validation(
     form_index: dict[str, list[dict[str, Any]]],
     variant_paradigms: dict[str, set[str]] | None,
 ) -> list[dict[str, Any]]:
-    """Validate each SAOL article-heading paradigm separately against SALDO."""
+    """Validate each materialized SAOL variant separately against SALDO."""
 
-    if not variant_paradigms or len(variant_paradigms) <= 1:
+    if not variant_paradigms:
         return []
     upos = _saol_upos(record)
     if not upos or upos == "X":
@@ -267,7 +283,7 @@ def canonical_validation_row(
         "semantic_status": semantic_status,
         "semantic_reason": semantic_reason,
     }
-    if len(variant_lemmas) > 1:
+    if variant_lemmas:
         row["saol_variant_lemmas"] = list(variant_lemmas)
     if variant_validation:
         row["variant_validation"] = variant_validation
@@ -365,18 +381,19 @@ def revalidate_direct_forms(
     return summary
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Compare materialized SAOL and SALDO artifacts, including noun article variants"
-    )
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("saol", nargs="?", type=Path, default=DEFAULT_SAOL)
     parser.add_argument("--saldo-forms", type=Path, default=DEFAULT_SALDO_FORMS)
-    parser.add_argument("--noun-forms", type=Path, default=DEFAULT_NOUN_FORMS)
-    parser.add_argument("--adjective-forms", type=Path, default=DEFAULT_ADJECTIVE_FORMS)
     parser.add_argument("--jsonl", type=Path, default=DEFAULT_JSONL)
     parser.add_argument("--summary", type=Path, default=DEFAULT_SUMMARY)
-    args = parser.parse_args()
+    parser.add_argument("--noun-forms", type=Path, default=DEFAULT_NOUN_FORMS)
+    parser.add_argument("--adjective-forms", type=Path, default=DEFAULT_ADJECTIVE_FORMS)
+    return parser
 
+
+def main() -> None:
+    args = build_parser().parse_args()
     summary = revalidate_direct_forms(
         args.saol,
         args.saldo_forms,
@@ -388,16 +405,12 @@ def main() -> None:
     print(f"Direktmatchade poster: {summary['matched_records']}")
     print(f"Jämförelse: {summary['comparison']}")
     print(f"SALDO-artefakt: {summary['saldo_forms']}")
-    for key, value in summary["generator_counts"].items():
-        print(f"{key}: {value}")
-    for key, value in summary["status_counts"].items():
-        print(f"{key}: {value}")
+    for name, count in summary["generator_counts"].items():
+        print(f"{name}: {count}")
+    for name, count in summary["status_counts"].items():
+        print(f"{name}: {count}")
     print("Semantisk status:")
-    for key, value in summary["semantic_status_counts"].items():
-        print(f"{key}: {value}")
+    for name, count in summary["semantic_status_counts"].items():
+        print(f"{name}: {count}")
     print(f"Detaljer: {summary['jsonl']}")
     print(f"Summering: {args.summary}")
-
-
-if __name__ == "__main__":
-    main()
