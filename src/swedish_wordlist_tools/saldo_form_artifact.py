@@ -13,6 +13,24 @@ DEFAULT_SALDO_XML = Path("data/raw/saldom.xml")
 DEFAULT_SALDO_FORMS = SALDO_FORMS
 
 
+def is_saldo_word_form(value: object) -> bool:
+    """Return whether a SALDO form is an ordinary word form for our comparisons.
+
+    SALDO contains compound/morphology forms ending in ``-`` (for example
+    ``fot-`` and ``fots-``).  They are not standalone word forms and must never
+    enter the canonical form artifact, indices, or SAOL/SALDO paradigm checks.
+
+    No other punctuation is filtered here: forms containing colon or an
+    internal hyphen remain unless a separate rule is established for them.
+    """
+    text = str(value or "").strip()
+    return bool(text) and not text.endswith("-")
+
+
+def _clean_forms(values: Iterable[object]) -> set[str]:
+    return {str(value) for value in values if is_saldo_word_form(value)}
+
+
 def _unique_analyses(grouped: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
     seen: set[int] = set()
     result: list[dict[str, Any]] = []
@@ -31,14 +49,21 @@ def export_saldo_forms(
     output: Path = DEFAULT_SALDO_FORMS,
 ) -> dict[str, Any]:
     grouped = read_saldo(saldo_xml)
+    analyses = _unique_analyses(grouped)
+    filtered_forms = sum(
+        1
+        for analysis in analyses
+        for value in analysis.get("forms", ())
+        if str(value) and not is_saldo_word_form(value)
+    )
     rows = [
         {
             "id": str(analysis.get("id") or ""),
             "upos": str(analysis.get("upos") or "").upper(),
             "lemmas": sorted({str(value) for value in analysis.get("lemmas", ()) if str(value)}, key=str.casefold),
-            "forms": sorted({str(value) for value in analysis.get("forms", ()) if str(value)}, key=str.casefold),
+            "forms": sorted(_clean_forms(analysis.get("forms", ())), key=str.casefold),
         }
-        for analysis in _unique_analyses(grouped)
+        for analysis in analyses
     ]
     rows.sort(
         key=lambda row: (
@@ -56,6 +81,7 @@ def export_saldo_forms(
         "artifact": str(output),
         "analyses": len(rows),
         "unique_forms": len({form for row in rows for form in row["forms"]}),
+        "filtered_trailing_hyphen_forms": filtered_forms,
     }
 
 
@@ -73,7 +99,8 @@ def read_saldo_forms(path: Path = DEFAULT_SALDO_FORMS) -> dict[str, list[dict[st
                 "id": str(row.get("id") or ""),
                 "upos": str(row.get("upos") or "").upper(),
                 "lemmas": set(str(value) for value in row.get("lemmas", ()) if str(value)),
-                "forms": set(str(value) for value in row.get("forms", ()) if str(value)),
+                # Defensive filtering also makes older pre-regeneration artifacts safe.
+                "forms": _clean_forms(row.get("forms", ())),
             }
             for lemma in analysis["lemmas"]:
                 grouped[_key(lemma)].append(analysis)
@@ -89,6 +116,8 @@ def build_form_index(
         for analysis in analyses:
             identity = id(analysis)
             for form in analysis["forms"]:
+                if not is_saldo_word_form(form):
+                    continue
                 key = _key(str(form))
                 marker = (key, identity)
                 if marker in seen:
@@ -106,6 +135,7 @@ def main() -> None:
     summary = export_saldo_forms(args.saldo, args.output)
     print(f"SALDO-analyser: {summary['analyses']}")
     print(f"Unika former: {summary['unique_forms']}")
+    print(f"Bortfiltrerade former som slutar på -: {summary['filtered_trailing_hyphen_forms']}")
     print(f"Källa: {summary['source']}")
     print(f"Artefakt: {summary['artifact']}")
 
