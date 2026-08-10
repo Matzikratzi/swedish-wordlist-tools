@@ -48,6 +48,24 @@ class SaolSlotInterpreterTests(unittest.TestCase):
         # accepting those requires a word-class/source-context safety gate.
         self.assertIsNone(interpret_single_slot_sequence("neutrum plural", grammar))
 
+    def test_optional_token_variants_share_one_slot(self) -> None:
+        grammar = SlotGrammar(
+            label_slots={"pl.": "plural"},
+            implicit_slot=implicit_positive,
+            require_marker=True,
+        )
+        operations = interpret_single_slot_sequence("+(e)n; pl. +er", grammar)
+        self.assertIsNotNone(operations)
+        assert operations is not None
+        self.assertEqual(
+            ("neuter", "neuter", "plural"),
+            tuple(item.slot for item in operations),
+        )
+        self.assertEqual(
+            ("n", "en", "er"),
+            tuple(item.operation.value for item in operations),
+        )
+
     def test_independent_branches(self) -> None:
         grammar = SlotGrammar(label_slots={}, implicit_slot=implicit_positive)
         branches = interpret_slot_branches("fasetterat +e _ facetterat +e", grammar)
