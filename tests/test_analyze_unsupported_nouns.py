@@ -14,6 +14,15 @@ class AnalyzeUnsupportedNounsTests(unittest.TestCase):
         ]
         self.assertEqual(["a"], [row["lemma"] for row in select(rows)])
 
+    def test_excludes_truncated_unsupported_source_rows(self) -> None:
+        notation = "+n [då>$en el. då>djen]; pl. +r [då>$er el. då>dje"
+        self.assertEqual(50, len(notation))
+        rows = [
+            {"upos": "NOUN", "status": "saol_pattern_unsupported", "lemma": "doge", "notation": notation},
+            {"upos": "NOUN", "status": "saol_pattern_unsupported", "lemma": "annan", "notation": "okänd"},
+        ]
+        self.assertEqual(["annan"], [row["lemma"] for row in select(rows)])
+
     def test_groups_by_exact_notation(self) -> None:
         rows = [
             {
