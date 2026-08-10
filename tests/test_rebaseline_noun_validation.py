@@ -21,7 +21,7 @@ class NounValidationRebaselineTests(unittest.TestCase):
         summary = classify(rows)
         self.assertEqual(1, summary["counts"]["scope_extra_singular_verified"])
 
-    def test_competing_definite_singular_gets_scope_bucket(self):
+    def test_competing_definite_singular_is_mechanically_verified_from_saol(self):
         rows = [{
             "upos": "NOUN",
             "lemma": "grafen",
@@ -33,7 +33,8 @@ class NounValidationRebaselineTests(unittest.TestCase):
             "status": "form_set_mismatch",
         }]
         summary = classify(rows)
-        self.assertEqual(1, summary["counts"]["scope_mismatch_competing_definite_singular"])
+        self.assertEqual(1, summary["counts"]["mechanically_verified_from_saol"])
+        self.assertFalse(any(key.startswith("scope_mismatch_") for key in summary["counts"]))
 
     def test_other_exact_noun_keeps_old_status_bucket(self):
         rows = [{
@@ -56,6 +57,22 @@ class NounValidationRebaselineTests(unittest.TestCase):
             "generated_forms": ["ansvar", "ansvars", "ansvaret", "ansvarets", "ansvaren", "ansvarens"],
             "saldo_forms": ["ansvar", "ansvars", "ansvaret", "ansvarets"],
             "status": "form_set_mismatch",
+        }]
+        summary = classify(rows)
+        self.assertEqual(1, summary["counts"]["mechanically_verified_from_saol"])
+        self.assertNotIn("remaining_form_set_mismatch", summary["counts"])
+
+    def test_materialized_alternative_branches_are_mechanically_verified(self):
+        rows = [{
+            "upos": "NOUN", "lemma": "bankväsen", "record_id": "6", "homonym_number": "1",
+            "notation": "+det; pl. +, best. pl. +dena _ +t +n",
+            "generated_forms": ["bankväsen", "bankväsende", "bankväsendet", "bankväsenden"],
+            "saldo_forms": ["bankväsen", "bankväsendet"],
+            "status": "form_set_mismatch",
+            "variant_validation": [
+                {"lemma": "bankväsen", "generated_forms": ["bankväsen", "bankväsendet"]},
+                {"lemma": "bankväsende", "generated_forms": ["bankväsende", "bankväsendet", "bankväsenden"]},
+            ],
         }]
         summary = classify(rows)
         self.assertEqual(1, summary["counts"]["mechanically_verified_from_saol"])
@@ -137,7 +154,7 @@ class NounValidationRebaselineTests(unittest.TestCase):
         }]}
         summary = classify(rows, homonym_coverage=coverage)
         self.assertEqual(1, summary["counts"]["exact_form_set"])
-        self.assertEqual(1, summary["counts"]["scope_mismatch_competing_definite_singular"])
+        self.assertEqual(1, summary["counts"]["mechanically_verified_from_saol"])
         self.assertEqual(1, summary["homonym_diagnostics"]["at_least_one_saol_homonym_exactly_verified"])
 
     def test_subset_sibling_is_diagnostic_only(self):
@@ -161,7 +178,7 @@ class NounValidationRebaselineTests(unittest.TestCase):
         }]}
         summary = classify(rows, homonym_coverage=coverage)
         self.assertEqual(1, summary["counts"]["other_saol_subset"])
-        self.assertEqual(1, summary["counts"]["scope_mismatch_competing_definite_singular"])
+        self.assertEqual(1, summary["counts"]["mechanically_verified_from_saol"])
         self.assertEqual(1, summary["homonym_diagnostics"]["at_least_one_saol_homonym_subset_verified"])
 
 
