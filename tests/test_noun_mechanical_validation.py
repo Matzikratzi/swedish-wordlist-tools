@@ -50,6 +50,26 @@ class NounMechanicalValidationTests(unittest.TestCase):
             with self.subTest(notation=notation):
                 self.assertTrue(is_mechanically_verified_noun_notation(notation))
 
+    def test_fully_explicit_inflection_carriers_are_generic(self):
+        for notation in (
+            "bobben bobbar",
+            "deliriet delirier",
+            "gangliet ganglier",
+            "gerundiet gerundier",
+            "gerundivet gerundiver",
+            "göpnen göpnar",
+            "muttret",
+            "neutret neutrer",
+            "periheliet perihelier",
+            "purgatoriet purgatorier",
+            "vabben",
+            "visslet",
+            "dreglet _ dräglet",
+            "sjabblet _ schabblet",
+        ):
+            with self.subTest(notation=notation):
+                self.assertTrue(is_mechanically_verified_noun_notation(notation))
+
     def test_uninflected_branch_is_mechanical_branch_semantics(self):
         for notation in (
             "+n furstar _ oböjl.",
