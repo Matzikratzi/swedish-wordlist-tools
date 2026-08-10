@@ -89,6 +89,15 @@ class AdjectiveRowInterpreterTests(unittest.TestCase):
                 self.assertEqual(expected, slots.written_forms())
                 self.assertEqual("structural_labelled_comparison_slots", slots.rule)
 
+    def test_unlabelled_alternatives_reuse_same_slot(self) -> None:
+        slots = self.parse("bemälde", "bemälda el. bemälta")
+        self.assertEqual(("bemälde", "bemälda", "bemälta"), slots.written_forms())
+        self.assertEqual("structural_same_slot_alternatives", slots.rule)
+        self.assertEqual(
+            ("definite_or_plural", "definite_or_plural"),
+            (slots.forms[1].slot, slots.forms[2].slot),
+        )
+
     def test_usage_restrictions_are_metadata_not_paradigms(self) -> None:
         adenoid = self.parse("adenoid", "n. sing. obest. obrukl., adenoida")
         self.assertEqual(("adenoid", "adenoida"), adenoid.written_forms())
