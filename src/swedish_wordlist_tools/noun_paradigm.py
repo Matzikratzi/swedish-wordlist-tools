@@ -8,7 +8,7 @@ from .inflect import GeneratedEntry, GeneratedWordForm
 from .msd import parse_msd
 from .noun_source_errors import noun_lemma_only_source_error
 from .saol_notation import FormOperationKind, parse_form_operation
-from .saol_row_interpreter import InterpretedRow, interpret_noun_row
+from .saol_row_interpreter import InterpretedRow, compound_parts, interpret_noun_row
 
 _CI = parse_msd("ci")
 _SG_INDEF_GEN = parse_msd("sg indef gen")
@@ -30,9 +30,6 @@ _EXPLICIT_PLURAL_USE_RE = re.compile(
     r"\bpl\.\s*(?:anv\.|används:)\s*",
     re.IGNORECASE,
 )
-_SUP_ELEMENT_RE = re.compile(r"<sup\b[^>]*>.*?</sup>", re.IGNORECASE | re.DOTALL)
-_HTML_TAG_RE = re.compile(r"<[^>]*>")
-_LEADING_HOMONYM_RE = re.compile(r"^\d+(?=\D)")
 
 
 def _genitive(form: str) -> str:
@@ -195,30 +192,17 @@ def _replacement_is_explicit_plural_use(record: dict[str, Any]) -> bool:
     return _EXPLICIT_PLURAL_USE_RE.search(str(record.get("text", ""))) is not None
 
 
-def _normalized_bar_carrier(value: object) -> str:
-    text = str(value or "")
-    text = _SUP_ELEMENT_RE.sub("", text)
-    text = _HTML_TAG_RE.sub("", text)
-    text = text.replace("\u00ad", "").replace("·", "").replace("|", "").strip()
-    return _LEADING_HOMONYM_RE.sub("", text)
-
-
 def _has_usable_compound_bar(record: dict[str, Any], lemma: str) -> bool:
     """Whether SAOL structurally identifies a replaceable final component.
 
-    ``stycke`` is preferred, but the faksimil export sometimes places the
-    lodstreck only in ``ord`` while ``stycke`` is the plain display spelling.
-    ``ord`` is accepted only when its cleaned carrier equals the normalized lemma,
-    so this is structural evidence rather than a general alternate-lemma rule.
+    The shared interpreter resolves both ``stycke`` and ``ord`` boundaries and
+    validates them against ``normaliserat_ord``, including normal Swedish
+    triple-consonant spelling at the boundary (``hall|ländska`` →
+    ``halländska``). Distinct spellings such as ``acne`` are not accepted here;
+    they require explicit variant evidence elsewhere.
     """
 
-    for field in ("stycke", "ord"):
-        value = str(record.get(field, ""))
-        if "|" not in value:
-            continue
-        if _normalized_bar_carrier(value).casefold() == lemma.casefold():
-            return True
-    return False
+    return compound_parts(record, lemma) is not None
 
 
 def complete_noun_entry(
