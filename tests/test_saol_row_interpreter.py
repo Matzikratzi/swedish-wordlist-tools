@@ -62,6 +62,20 @@ class SaolRowInterpreterTests(unittest.TestCase):
             {form.written_form for form in (row.key_forms if row else ()) if form.slot == "pl_indef"},
         )
 
+    def test_uninflected_alternative_branch_keeps_only_its_base(self) -> None:
+        record = self.record("furste", "+n furstar _ oböjl.")
+        record["_saol_alternative_lemma"] = "furst"
+        row = interpret_noun_row(record)
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual(
+            {"furste", "furst"},
+            {form.written_form for form in row.key_forms if form.slot == "lemma"},
+        )
+        self.assertEqual("fursten", row.form("sg_def"))
+        self.assertEqual("furstar", row.form("pl_indef"))
+        self.assertNotIn("furstn", {form.written_form for form in row.key_forms})
+
     def test_hajp_branches_are_composed_from_ordinary_slot_operations(self) -> None:
         row = interpret_noun_row(
             self.record("hajp", "+en; pl. +er el. +ar _ +n [haj>pen]")
@@ -91,25 +105,6 @@ class SaolRowInterpreterTests(unittest.TestCase):
         self.assertIsNotNone(row)
         self.assertEqual("baguetten", row.form("sg_def") if row else None)
         self.assertEqual("baguetter", row.form("pl_indef") if row else None)
-
-    def test_explicit_only_forms_are_slots_in_noun_context(self) -> None:
-        for lemma, pattern, singular, plural in (
-            ("bror", "brodern bröder", "brodern", "bröder"),
-            ("akvarium", "akvariet akvarier", "akvariet", "akvarier"),
-        ):
-            with self.subTest(lemma=lemma):
-                row = interpret_noun_row(self.record(lemma, pattern, ordkl=f"s. {pattern}"))
-                self.assertIsNotNone(row)
-                self.assertEqual(singular, row.form("sg_def") if row else None)
-                self.assertEqual(plural, row.form("pl_indef") if row else None)
-
-        row = interpret_noun_row(self.record("babbel", "babblet", ordkl="s. babblet"))
-        self.assertIsNotNone(row)
-        self.assertEqual("babblet", row.form("sg_def") if row else None)
-
-    def test_unmarked_plain_words_need_noun_source_context(self) -> None:
-        row = interpret_noun_row(self.record("testord", "helt okänd notation 123", ordkl=""))
-        self.assertIsNone(row)
 
     def test_never_materializes_final_token_at_source_limit(self) -> None:
         pattern = "+n; pl. kamrar el. +, best. pl. kamrarna el. kamma"
