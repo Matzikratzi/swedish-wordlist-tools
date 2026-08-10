@@ -78,8 +78,8 @@ class SaolNotationTests(unittest.TestCase):
         self.assertIsNotNone(assigned)
         assert assigned is not None
         self.assertEqual(
-            (("sg_def", "+n"), ("pl_indef", "+"), ("pl_indef", "+s")),
-            tuple((item.slot, item.token) for item in assigned),
+            (("sg_def", "+n", None), ("pl_indef", "+", None), ("pl_indef", "+s", "h")),
+            tuple((item.slot, item.token, item.alternative_marker) for item in assigned),
         )
 
     def test_ibl_marks_an_alternative_in_the_same_slot(self) -> None:
@@ -95,8 +95,8 @@ class SaolNotationTests(unittest.TestCase):
         self.assertIsNotNone(assigned)
         assert assigned is not None
         self.assertEqual(
-            (("sg_def", "+n"), ("pl_indef", "+"), ("pl_indef", "-metrar")),
-            tuple((item.slot, item.token) for item in assigned),
+            (("sg_def", "+n", None), ("pl_indef", "+", None), ("pl_indef", "-metrar", "ibl.")),
+            tuple((item.slot, item.token, item.alternative_marker) for item in assigned),
         )
 
     def test_complete_notation_is_only_branching_plus_independent_slot_operations(self) -> None:
@@ -110,12 +110,12 @@ class SaolNotationTests(unittest.TestCase):
         assert branches is not None
         self.assertEqual(2, len(branches))
         self.assertEqual(
-            (("sg_def", "+en"), ("pl_indef", "+er"), ("pl_indef", "+ar")),
-            tuple((item.slot, item.token) for item in branches[0].operations),
+            (("sg_def", "+en", None), ("pl_indef", "+er", None), ("pl_indef", "+ar", "el.")),
+            tuple((item.slot, item.token, item.alternative_marker) for item in branches[0].operations),
         )
         self.assertEqual(
-            (("sg_def", "+n"),),
-            tuple((item.slot, item.token) for item in branches[1].operations),
+            (("sg_def", "+n", None),),
+            tuple((item.slot, item.token, item.alternative_marker) for item in branches[1].operations),
         )
 
     def test_drops_strict_prefix_alternative_at_source_limit(self) -> None:
