@@ -61,11 +61,10 @@ def is_null_noun_notation(value: object) -> bool:
 def _is_fully_relative_slot_notation(notation: str) -> bool:
     """Return true when every materialized slot form is relative to the lemma.
 
-    ``el.`` and ``H`` are both alternative markers at this layer.  The shared
+    ``el.`` and ``H`` are both alternative markers at this layer. The shared
     notation parser assigns the operation after either marker to the same slot
-    as the preceding form.  We therefore need no noun-specific H rule: if both
-    alternatives are ordinary append/unchanged operations, SAOL has stated the
-    complete alternative mechanically.
+    as the preceding form. If all forms are append/unchanged operations, SAOL
+    has stated the alternatives mechanically.
     """
 
     if "_" in notation:
@@ -87,12 +86,29 @@ def _is_fully_relative_slot_notation(notation: str) -> bool:
     )
 
 
-def _is_fully_relative_branch_notation(notation: str) -> bool:
+def _is_materialized_branch_notation(notation: str) -> bool:
+    """Verify underscore branches made only of direct, non-heuristic forms.
+
+    Explicitly written forms are as strong evidence as ``+`` suffix operations:
+    SAOL states the spelling directly. Tail replacement operations stay outside
+    this family because their realization still depends on choosing the correct
+    amount of the lemma tail to replace.
+
+    ``el.``/``H`` inside an underscore branch remain diagnostic for now so this
+    rule only widens the already-understood branch model by one primitive:
+    EXPLICIT.
+    """
+
     if "_" not in notation or "el." in notation.casefold() or re.search(r"(?:^|\s)H(?:\s|$)", notation):
         return False
     branches = split_alternative_branches(notation)
     if len(branches) < 2:
         return False
+    safe_kinds = {
+        FormOperationKind.UNCHANGED,
+        FormOperationKind.APPEND,
+        FormOperationKind.EXPLICIT,
+    }
     for branch in branches:
         assigned = assign_labeled_slots(
             branch.tokens,
@@ -102,10 +118,7 @@ def _is_fully_relative_branch_notation(notation: str) -> bool:
         )
         if not assigned:
             return False
-        if any(
-            item.operation.kind not in {FormOperationKind.UNCHANGED, FormOperationKind.APPEND}
-            for item in assigned
-        ):
+        if any(item.operation.kind not in safe_kinds for item in assigned):
             return False
     return True
 
@@ -124,7 +137,7 @@ def is_mechanically_verified_noun_notation(row_or_notation: dict[str, Any] | str
         return True
     if _is_fully_relative_slot_notation(notation):
         return True
-    return _is_fully_relative_branch_notation(notation)
+    return _is_materialized_branch_notation(notation)
 
 
 def is_mechanically_verified_noun_row(row: dict[str, Any]) -> bool:
