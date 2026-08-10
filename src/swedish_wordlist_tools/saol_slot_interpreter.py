@@ -5,6 +5,7 @@ from typing import Callable, Mapping
 
 from .saol_notation import (
     FormOperation,
+    FormOperationKind,
     SlotBranch,
     SlotOperation,
     parse_form_operations,
@@ -74,6 +75,13 @@ def assign_slots_with_grammar(
         operations = parse_form_operations(token)
         if operations is None:
             return None
+        # Relative SAOL operations are notation in their own right.  A sequence
+        # such as ``+en +ar`` or ``+n -hackor`` therefore needs no label or
+        # punctuation marker to be structurally valid.  Fully written EXPLICIT
+        # forms remain unmarked so a word class can apply its own source-context
+        # safety gate before accepting plain lexical text as inflection.
+        if any(operation.kind is not FormOperationKind.EXPLICIT for operation in operations):
+            saw_marker = True
         for operation in operations:
             slot = selected_slot
             if slot is None:
