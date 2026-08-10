@@ -92,6 +92,25 @@ class SaolRowInterpreterTests(unittest.TestCase):
         self.assertEqual("baguetten", row.form("sg_def") if row else None)
         self.assertEqual("baguetter", row.form("pl_indef") if row else None)
 
+    def test_explicit_only_forms_are_slots_in_noun_context(self) -> None:
+        for lemma, pattern, singular, plural in (
+            ("bror", "brodern bröder", "brodern", "bröder"),
+            ("akvarium", "akvariet akvarier", "akvariet", "akvarier"),
+        ):
+            with self.subTest(lemma=lemma):
+                row = interpret_noun_row(self.record(lemma, pattern, ordkl=f"s. {pattern}"))
+                self.assertIsNotNone(row)
+                self.assertEqual(singular, row.form("sg_def") if row else None)
+                self.assertEqual(plural, row.form("pl_indef") if row else None)
+
+        row = interpret_noun_row(self.record("babbel", "babblet", ordkl="s. babblet"))
+        self.assertIsNotNone(row)
+        self.assertEqual("babblet", row.form("sg_def") if row else None)
+
+    def test_unmarked_plain_words_need_noun_source_context(self) -> None:
+        row = interpret_noun_row(self.record("testord", "helt okänd notation 123", ordkl=""))
+        self.assertIsNone(row)
+
     def test_never_materializes_final_token_at_source_limit(self) -> None:
         pattern = "+n; pl. kamrar el. +, best. pl. kamrarna el. kamma"
         self.assertEqual(50, len(pattern))
