@@ -9,6 +9,7 @@ from .msd import parse_msd
 from .noun_source_errors import noun_lemma_only_source_error
 from .saol_notation import FormOperationKind, parse_form_operation
 from .saol_row_interpreter import InterpretedRow, compound_parts, interpret_noun_row
+from .saol_source_policy import is_truncated_inflection_source
 
 _CI = parse_msd("ci")
 _SG_INDEF_GEN = parse_msd("sg indef gen")
@@ -129,7 +130,11 @@ def _derive_definite_plural(
     return None
 
 
-def _complete_from_slots(entry: GeneratedEntry) -> GeneratedEntry:
+def _complete_from_slots(
+    entry: GeneratedEntry,
+    *,
+    derive_missing_plural_definite: bool = True,
+) -> GeneratedEntry:
     lemmas = _forms_for_msd(entry, "ci") or (entry.lemma,)
     primary_lemma = lemmas[0]
     singular_definites = _forms_for_msd(entry, "sg def nom")
@@ -162,7 +167,7 @@ def _complete_from_slots(entry: GeneratedEntry) -> GeneratedEntry:
         )
 
     plural_definites = list(explicit_plural_definites)
-    if not plural_definites and singular_definites:
+    if derive_missing_plural_definite and not plural_definites and singular_definites:
         for plural in plural_indefinites:
             derived = _derive_definite_plural(primary_lemma, singular_definites, plural)
             if derived is not None:
@@ -193,15 +198,6 @@ def _replacement_is_explicit_plural_use(record: dict[str, Any]) -> bool:
 
 
 def _has_usable_compound_bar(record: dict[str, Any], lemma: str) -> bool:
-    """Whether SAOL structurally identifies a replaceable final component.
-
-    The shared interpreter resolves both ``stycke`` and ``ord`` boundaries and
-    validates them against ``normaliserat_ord``, including normal Swedish
-    triple-consonant spelling at the boundary (``hall|ländska`` →
-    ``halländska``). Distinct spellings such as ``acne`` are not accepted here;
-    they require explicit variant evidence elsewhere.
-    """
-
     return compound_parts(record, lemma) is not None
 
 
@@ -228,4 +224,7 @@ def complete_noun_entry(
         return None
 
     interpreted = _entry_from_interpreted_row(row)
-    return _complete_from_slots(interpreted)
+    return _complete_from_slots(
+        interpreted,
+        derive_missing_plural_definite=not is_truncated_inflection_source(record),
+    )
