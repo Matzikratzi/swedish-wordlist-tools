@@ -3,14 +3,14 @@ import unittest
 from swedish_wordlist_tools.analyze_remaining_noun_notations import build_summary, candidates
 
 
-LEXICAL_DIAGNOSTIC = "+en el. vard. -dan; pl. +ar"
+DIAGNOSTIC_NOTATION = "+n; pl. + H +s"
 
 
 class RemainingNounNotationTests(unittest.TestCase):
     def test_excludes_mechanically_verified_standard_paradigms(self):
         rows = [
             {"upos": "NOUN", "status": "form_set_mismatch", "lemma": "x", "notation": "+en +er", "generated_forms": ["x", "xen", "xer"], "saldo_forms": ["x", "xen"]},
-            {"upos": "NOUN", "status": "form_set_mismatch", "lemma": "y", "notation": LEXICAL_DIAGNOSTIC, "generated_forms": ["y", "yen"], "saldo_forms": ["y"]},
+            {"upos": "NOUN", "status": "form_set_mismatch", "lemma": "y", "notation": DIAGNOSTIC_NOTATION, "generated_forms": ["y", "yn"], "saldo_forms": ["y"]},
             {"upos": "NOUN", "status": "exact_form_set", "lemma": "z", "notation": "+en", "generated_forms": ["z"], "saldo_forms": ["z"]},
             {"upos": "ADJ", "status": "form_set_mismatch", "lemma": "fin", "notation": "+t +a", "generated_forms": [], "saldo_forms": []},
         ]
@@ -54,8 +54,8 @@ class RemainingNounNotationTests(unittest.TestCase):
             },
             {
                 "upos": "NOUN", "status": "form_set_mismatch",
-                "lemma": "hel", "notation": LEXICAL_DIAGNOSTIC,
-                "generated_forms": ["hel", "helen"], "saldo_forms": ["hel"],
+                "lemma": "hel", "notation": DIAGNOSTIC_NOTATION,
+                "generated_forms": ["hel", "heln"], "saldo_forms": ["hel"],
             },
         ]
         selected = candidates(rows)
@@ -73,8 +73,8 @@ class RemainingNounNotationTests(unittest.TestCase):
             {
                 "upos": "NOUN", "status": "form_set_mismatch",
                 "semantic_status": "true_form_mismatch",
-                "lemma": "hel", "notation": LEXICAL_DIAGNOSTIC,
-                "generated_forms": ["hel", "helen"], "saldo_forms": ["hel"],
+                "lemma": "hel", "notation": DIAGNOSTIC_NOTATION,
+                "generated_forms": ["hel", "heln"], "saldo_forms": ["hel"],
             },
         ]
         selected = candidates(rows)
@@ -82,14 +82,14 @@ class RemainingNounNotationTests(unittest.TestCase):
 
     def test_groups_remaining_by_exact_notation(self):
         rows = candidates([
-            {"upos": "NOUN", "status": "form_set_mismatch", "lemma": "a", "notation": LEXICAL_DIAGNOSTIC, "generated_forms": ["a", "aen"], "saldo_forms": ["a"]},
-            {"upos": "NOUN", "status": "form_set_mismatch", "lemma": "b", "notation": LEXICAL_DIAGNOSTIC, "generated_forms": ["b", "ben"], "saldo_forms": ["b"]},
+            {"upos": "NOUN", "status": "form_set_mismatch", "lemma": "a", "notation": DIAGNOSTIC_NOTATION, "generated_forms": ["a", "an"], "saldo_forms": ["a"]},
+            {"upos": "NOUN", "status": "form_set_mismatch", "lemma": "b", "notation": DIAGNOSTIC_NOTATION, "generated_forms": ["b", "bn"], "saldo_forms": ["b"]},
             {"upos": "NOUN", "status": "form_set_mismatch", "lemma": "c", "notation": "+et", "generated_forms": ["c", "cet"], "saldo_forms": ["c"]},
         ])
         summary = build_summary(rows)
         self.assertEqual(2, summary["records"])
         self.assertEqual(1, summary["notation_groups"])
-        self.assertEqual(LEXICAL_DIAGNOSTIC, summary["groups"][0]["notation"])
+        self.assertEqual(DIAGNOSTIC_NOTATION, summary["groups"][0]["notation"])
         self.assertEqual(2, summary["groups"][0]["count"])
 
 
