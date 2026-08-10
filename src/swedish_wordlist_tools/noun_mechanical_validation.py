@@ -6,6 +6,7 @@ from typing import Any
 from .saol_notation import (
     FormOperationKind,
     assign_labeled_slots,
+    is_direct_form_operation,
     split_alternative_branches,
     tokenize_notation,
 )
@@ -59,15 +60,16 @@ def is_null_noun_notation(value: object) -> bool:
 
 
 def _is_materialized_slot_notation(notation: str) -> bool:
-    """Verify one-branch noun notation made from directly stated operations.
+    """Verify one-branch noun notation using shared form primitives.
 
-    Explicit forms are ordinary SAOL slot values, not special cases. Thus
-    ``+n askor``, ``+n auror`` and any analogous notation are accepted through
-    the shared tokenizer/slot assignment rather than via word-specific rules.
+    The operation kind decides evidential strength, not the word class or the
+    spelling of the form.  Thus ``+n askor`` is the same structural case as an
+    explicitly written irregular verb form such as ``sprang`` or ``kan``: the
+    token is EXPLICIT and directly states the written form for its slot.
 
     ``ibl.`` means "ibland" and licenses the following alternative in the same
     slot. A replacement operation is accepted in that constrained context; other
-    tail replacements remain subject to the older replacement-specific checks.
+    tail replacements remain subject to replacement-specific checks.
     """
 
     if "_" in notation:
@@ -84,29 +86,22 @@ def _is_materialized_slot_notation(notation: str) -> bool:
     if not assigned:
         return False
 
-    safe_kinds = {
-        FormOperationKind.UNCHANGED,
-        FormOperationKind.APPEND,
-        FormOperationKind.EXPLICIT,
-    }
-    if "ibl." in notation.casefold():
-        safe_kinds.add(FormOperationKind.REPLACE_TAIL)
-    return all(item.operation.kind in safe_kinds for item in assigned)
+    allow_replacement = "ibl." in notation.casefold()
+    return all(
+        is_direct_form_operation(item.operation)
+        or (allow_replacement and item.operation.kind is FormOperationKind.REPLACE_TAIL)
+        for item in assigned
+    )
 
 
 def _is_materialized_branch_notation(notation: str) -> bool:
-    """Verify underscore branches made only of direct, non-heuristic forms."""
+    """Verify underscore branches made only of directly stated form operations."""
 
     if "_" not in notation or "el." in notation.casefold() or re.search(r"(?:^|\s)H(?:\s|$)", notation):
         return False
     branches = split_alternative_branches(notation)
     if len(branches) < 2:
         return False
-    safe_kinds = {
-        FormOperationKind.UNCHANGED,
-        FormOperationKind.APPEND,
-        FormOperationKind.EXPLICIT,
-    }
     for branch in branches:
         assigned = assign_labeled_slots(
             branch.tokens,
@@ -116,7 +111,7 @@ def _is_materialized_branch_notation(notation: str) -> bool:
         )
         if not assigned:
             return False
-        if any(item.operation.kind not in safe_kinds for item in assigned):
+        if any(not is_direct_form_operation(item.operation) for item in assigned):
             return False
     return True
 
