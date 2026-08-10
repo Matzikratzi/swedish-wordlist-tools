@@ -3,7 +3,7 @@ import unittest
 from swedish_wordlist_tools.analyze_remaining_noun_notations import build_summary, candidates
 
 
-DIAGNOSTIC_NOTATION = "+n; pl. + H +s"
+DIAGNOSTIC_NOTATION = "+en +ar _ +n -grepar"
 
 
 class RemainingNounNotationTests(unittest.TestCase):
