@@ -98,7 +98,7 @@ class NounMechanicalValidationTests(unittest.TestCase):
             with self.subTest(notation=notation):
                 self.assertTrue(is_mechanically_verified_noun_notation(notation))
 
-    def test_fully_relative_underscore_branches_are_mechanical(self):
+    def test_underscore_branches_can_contain_their_own_alternatives(self):
         for notation in (
             "+det; pl. +, best. pl. +dena _ +t +n",
             "+en +er _ +n [-en] +r [-er]",
@@ -106,6 +106,10 @@ class NounMechanicalValidationTests(unittest.TestCase):
             "+en +er _ +n +r",
             "+en _ +n [-en]",
             "+et; pl. + _ +t +n",
+            "+en; pl. +er el. +ar _ +n [haj>pen]",
+            "+en; pl. +er el. +or _ +n ärtor",
+            "id:t el. id:n; pl. id:n _ ID:t el. ID:n; pl. ID:n",
+            "pm:et el. pm:en; pl. + _ PM:et el. PM:en; pl. +",
         ):
             with self.subTest(notation=notation):
                 self.assertTrue(is_mechanically_verified_noun_notation(notation))
