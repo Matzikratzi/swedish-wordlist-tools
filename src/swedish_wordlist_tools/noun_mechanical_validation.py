@@ -13,21 +13,16 @@ from .saol_row_interpreter import interpret_noun_row
 
 MECHANICALLY_VERIFIED_NOUN_NOTATIONS = frozenset(
     {
-        # Singular-only articles. SAOL explicitly licenses the singular slot;
-        # ordinary genitive completion is mechanical. A broader or competing
-        # SALDO paradigm is diagnostic, not evidence against the SAOL forms.
         "+en",
         "+et",
         "+n",
         "+t",
-        # Regular productive paradigms.
         "+en +er",
         "+en +ar",
         "+et +er",
         "+n +er",
         "+n +r",
         "+t +n",
-        # Simple zero-plural paradigms.
         "+et; pl. +",
         "+en; pl. +",
         "+n; pl. +",
@@ -35,10 +30,17 @@ MECHANICALLY_VERIFIED_NOUN_NOTATIONS = frozenset(
     }
 )
 
-_EXPLICIT_PLURAL = re.compile(
-    r"^\+(?:en|n|et|t)(?:\s*;\s*pl\.)?\s+-[^\s;,]+$"
-)
+_EXPLICIT_PLURAL = re.compile(r"^\+(?:en|n|et|t)(?:\s*;\s*pl\.)?\s+-[^\s;,]+$")
 _USED_IN_PLURAL = re.compile(r"^best\. \+; i: pl\. används: -[^\s;,]+$")
+_VARDAGLIG_REPLACEMENT = re.compile(
+    r"^\+(?:en|et|n|t)\s+el\.\s+vard\.\s+-[^\s;,]+;\s*pl\.\s+\+[^\s;,_]+$",
+    re.IGNORECASE,
+)
+_LABELED_REPLACEMENT_PARADIGM = re.compile(
+    r"^-[^\s;,]+;\s*pl\.\s+\+,\s*best\.\s*pl\.\s+-[^\s;,]+$",
+    re.IGNORECASE,
+)
+_TWO_REPLACEMENT_PARADIGM = re.compile(r"^-[^\s;,]+\s+-[^\s;,]+$")
 _NULL_NOTATIONS = frozenset({"", "(null)", "null"})
 
 
@@ -57,16 +59,6 @@ def is_null_noun_notation(value: object) -> bool:
 
 
 def _is_fully_relative_slot_notation(notation: str) -> bool:
-    """Return true when SAOL states every form as a relative operation.
-
-    This covers both ordinary ``el.`` alternatives and zero-plural/labelled
-    variants.  SALDO may contain only one of the alternatives; that is a source
-    coverage difference, not uncertainty in what SAOL says.
-
-    Keep lexical explicit forms, tail replacements and H-marked paradigms out of
-    this family: those deserve separate structural handling/diagnostics.
-    """
-
     if "_" in notation or re.search(r"(?:^|\s)H(?:\s|$)", notation):
         return False
     tokens = tokenize_notation(notation)
@@ -87,15 +79,6 @@ def _is_fully_relative_slot_notation(notation: str) -> bool:
 
 
 def _is_fully_relative_branch_notation(notation: str) -> bool:
-    """Verify ``_`` alternatives whose grammatical information is all relative.
-
-    ``_`` itself merely separates complete SAOL paradigm branches. Such a row
-    is mechanically safe when every branch can be assigned to noun slots and
-    every actual form operation is either unchanged or an append operation.
-    Explicit words, tail replacements, ``el.`` inside a branch and H-marked
-    forms remain outside this family.
-    """
-
     if "_" not in notation or "el." in notation.casefold() or re.search(r"(?:^|\s)H(?:\s|$)", notation):
         return False
     branches = split_alternative_branches(notation)
@@ -123,6 +106,12 @@ def is_mechanically_verified_noun_notation(row_or_notation: dict[str, Any] | str
     if notation in MECHANICALLY_VERIFIED_NOUN_NOTATIONS:
         return True
     if _EXPLICIT_PLURAL.fullmatch(notation) or _USED_IN_PLURAL.fullmatch(notation):
+        return True
+    if _VARDAGLIG_REPLACEMENT.fullmatch(notation):
+        return True
+    if _LABELED_REPLACEMENT_PARADIGM.fullmatch(notation):
+        return True
+    if _TWO_REPLACEMENT_PARADIGM.fullmatch(notation):
         return True
     if _is_fully_relative_slot_notation(notation):
         return True
