@@ -50,6 +50,15 @@ class NounMechanicalValidationTests(unittest.TestCase):
             with self.subTest(notation=notation):
                 self.assertTrue(is_mechanically_verified_noun_notation(notation))
 
+    def test_uninflected_branch_is_mechanical_branch_semantics(self):
+        for notation in (
+            "+n furstar _ oböjl.",
+            "+n; pl. +, best. pl. kejsarna _ oböjl.",
+            "oböjl.",
+        ):
+            with self.subTest(notation=notation):
+                self.assertTrue(is_mechanically_verified_noun_notation(notation))
+
     def test_ibl_marks_fully_valid_alternative(self):
         for notation in (
             "+n; pl. + ibl. -metrar",
