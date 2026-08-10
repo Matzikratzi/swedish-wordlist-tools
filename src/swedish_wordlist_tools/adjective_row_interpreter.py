@@ -14,6 +14,7 @@ from .saol_notation import (
     apply_form_operation,
     normalize_notation,
     parse_form_operations,
+    split_alternative_branches,
     tokenize_notation,
 )
 
@@ -233,11 +234,98 @@ def interpret_labelled_positive_adjective_slots(
     )
 
 
+def _common_from_neuter_for_e_plural(neuter: str) -> str | None:
+    """Invert the productive ``-ad -> -at`` positive relation when evidenced.
+
+    This is word-class morphology, not a paradigm-specific spelling rule. It is
+    used only when a branch explicitly supplies its neuter form and then ``+e``;
+    the latter must be applied to that branch's common form rather than to the
+    article's primary lemma.
+    """
+
+    if not neuter.endswith("at"):
+        return None
+    return neuter[:-2] + "ad"
+
+
+def interpret_parallel_positive_adjective_slots(
+    record: dict[str, Any],
+) -> AdjectiveSlots | None:
+    """Interpret independent ``_`` branches made of positive form operations.
+
+    Each branch is tokenized separately. For the current conservative layer a
+    branch contains exactly two operations: neuter and definite/plural. No whole
+    two-branch regex is recognized. If ``+e`` follows an explicit/replaced
+    ``-at`` neuter, the branch common form is recovered by ordinary adjective
+    morphology so the suffix is applied to the branch rather than the primary
+    lemma. More exotic branch evidence falls back to the legacy interpreter.
+    """
+
+    lemma = _value(record, "normaliserat_ord").casefold()
+    raw_text = _value(record, "text")
+    if not lemma or " " in lemma or not lemma.isalpha() or " _ " not in f" {raw_text} ":
+        return None
+
+    branches = split_alternative_branches(raw_text)
+    if len(branches) < 2:
+        return None
+
+    forms: list[AdjectiveForm] = [AdjectiveForm(lemma, "common_singular")]
+    for branch in branches:
+        tokens = tuple(token for token in branch.tokens if token not in {",", ";"})
+        if len(tokens) != 2:
+            return None
+        neuter_operation = _single_operation(tokens[0])
+        plural_operation = _single_operation(tokens[1])
+        if neuter_operation is None or plural_operation is None:
+            return None
+
+        neuter = _apply_positive_operation(lemma, neuter_operation, neuter=True)
+        if neuter is None:
+            return None
+
+        branch_common: str | None = None
+        if (
+            plural_operation.kind is FormOperationKind.APPEND
+            and plural_operation.value.casefold() == "e"
+            and neuter_operation.kind
+            in {FormOperationKind.EXPLICIT, FormOperationKind.REPLACE_TAIL}
+        ):
+            branch_common = _common_from_neuter_for_e_plural(neuter)
+            if branch_common is None:
+                return None
+
+        plural_base = branch_common or lemma
+        definite = _apply_positive_operation(
+            plural_base,
+            plural_operation,
+            neuter=False,
+        )
+        if definite is None:
+            return None
+
+        if branch_common is not None:
+            forms.append(AdjectiveForm(branch_common, "common_singular"))
+        forms.extend(
+            (
+                AdjectiveForm(neuter, "neuter_singular"),
+                AdjectiveForm(definite, "definite_or_plural"),
+            )
+        )
+
+    return AdjectiveSlots(
+        lemma=lemma,
+        forms=_dedupe_forms(forms),
+        rule="structural_parallel_positive_branches",
+    )
+
+
 def interpret_adjective_row(record: dict[str, Any]) -> AdjectiveSlots | None:
     """Prefer structural clean-room interpretation, then the legacy coverage path."""
 
     return (
         interpret_unlabelled_positive_adjective_slots(record)
         or interpret_labelled_positive_adjective_slots(record)
+        or interpret_parallel_positive_adjective_slots(record)
         or interpret_simple_adjective_slots(record)
     )
