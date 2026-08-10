@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .saol_notation import FormOperationKind, assign_labeled_slots, split_alternative_branches
 from .saol_row_interpreter import interpret_noun_row
 
 MECHANICALLY_VERIFIED_NOUN_NOTATIONS = frozenset(
@@ -29,16 +30,10 @@ MECHANICALLY_VERIFIED_NOUN_NOTATIONS = frozenset(
     }
 )
 
-# SAOL may state a lexical plural replacement either directly after the
-# singular form or with an explicit ``pl.`` label. In both cases the lexical
-# information comes wholly from SAOL; completion only adds ordinary definite
-# plural and genitive mechanically.
 _EXPLICIT_PLURAL = re.compile(
     r"^\+(?:en|n|et|t)(?:\s*;\s*pl\.)?\s+-[^\s;,]+$"
 )
-
 _USED_IN_PLURAL = re.compile(r"^best\. \+; i: pl\. används: -[^\s;,]+$")
-
 _NULL_NOTATIONS = frozenset({"", "(null)", "null"})
 
 
@@ -56,56 +51,54 @@ def is_null_noun_notation(value: object) -> bool:
     return str(value).strip().casefold() in _NULL_NOTATIONS
 
 
-def is_mechanically_verified_noun_notation(row_or_notation: dict[str, Any] | str) -> bool:
-    """Return true only for audited SAOL noun notation families.
+def _is_fully_relative_branch_notation(notation: str) -> bool:
+    """Verify ``_`` alternatives whose grammatical information is all relative.
 
-    Alternative branches (``el.``, ``_``), bracket operations and compound
-    slot expressions are not accepted here merely from their spelling. Branch
-    rows can instead be verified structurally by
-    ``is_mechanically_verified_noun_row`` after materialization has proved the
-    separate variant paradigms.
+    ``_`` itself merely separates complete SAOL paradigm branches.  Such a row
+    is mechanically safe when every branch can be assigned to noun slots and
+    every actual form operation is either unchanged or an append operation.
+    There is then no lexical guess: SAOL states every branch, while the noun
+    interpreter supplies the branch base (including an hv-bound alternative
+    spelling where the article has one).
+
+    Explicit words, tail replacements, ``el.`` alternatives and H-marked forms
+    remain outside this family and stay diagnostic.
     """
+
+    if "_" not in notation or "el." in notation.casefold() or re.search(r"(?:^|\s)H(?:\s|$)", notation):
+        return False
+    branches = split_alternative_branches(notation)
+    if len(branches) < 2:
+        return False
+    for branch in branches:
+        assigned = assign_labeled_slots(
+            branch.tokens,
+            singular_slot="sg_def",
+            plural_slot="pl_indef",
+            definite_plural_slot="pl_def",
+        )
+        if not assigned:
+            return False
+        if any(
+            item.operation.kind not in {FormOperationKind.UNCHANGED, FormOperationKind.APPEND}
+            for item in assigned
+        ):
+            return False
+    return True
+
+
+def is_mechanically_verified_noun_notation(row_or_notation: dict[str, Any] | str) -> bool:
     notation = normalized_notation(row_or_notation)
     if notation in MECHANICALLY_VERIFIED_NOUN_NOTATIONS:
         return True
-    return bool(_EXPLICIT_PLURAL.fullmatch(notation) or _USED_IN_PLURAL.fullmatch(notation))
-
-
-def _has_materialized_alternative_branches(row: dict[str, Any]) -> bool:
-    """Return true when an ``_`` notation has separately materialized variants.
-
-    The validation artifact records one entry per variant lemma. Requiring at
-    least two non-empty variant paradigms means we do not infer branch bases
-    merely from the underscore syntax: the branch binding has already been
-    established structurally during SAOL generation (for example
-    ``bankväsen`` / ``bankväsende``).
-    """
-
-    notation = normalized_notation(row)
-    if " _ " not in f" {notation} ":
-        return False
-    variants = row.get("variant_validation")
-    if not isinstance(variants, list) or len(variants) < 2:
-        return False
-    lemmas: set[str] = set()
-    for variant in variants:
-        if not isinstance(variant, dict):
-            return False
-        lemma = str(variant.get("lemma") or "").strip().casefold()
-        forms = variant.get("generated_forms")
-        if not lemma or not isinstance(forms, list) or not forms:
-            return False
-        lemmas.add(lemma)
-    return len(lemmas) >= 2
+    if _EXPLICIT_PLURAL.fullmatch(notation) or _USED_IN_PLURAL.fullmatch(notation):
+        return True
+    return _is_fully_relative_branch_notation(notation)
 
 
 def is_mechanically_verified_noun_row(row: dict[str, Any]) -> bool:
     if is_mechanically_verified_noun_notation(row):
         return True
-
-    if _has_materialized_alternative_branches(row):
-        return True
-
     if not is_null_noun_notation(row.get("notation")):
         return False
 
