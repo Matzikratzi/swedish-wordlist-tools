@@ -80,7 +80,7 @@ def prepare_noun_variant_records(records: Iterable[dict[str, Any]]) -> list[dict
 
     * a matching ``(hv)`` row confirms a written alternative;
     * a ``homonr=0`` NOUN row can share exact article identity (same record id,
-      normalized lemma and notation) with the primary NOUN row. For a
+      normalized lemma and notation) with a primary NOUN row. For a
       single-branch article, that row is the materialized variant paradigm and
       may be rebased directly on its own ``ord``;
     * duplicate NOUN rows for a two-branch article expose distinct ``ord``
@@ -137,9 +137,13 @@ def prepare_noun_variant_records(records: Iterable[dict[str, Any]]) -> list[dict
 
         identity = _record_identity(record)
         article_rows = noun_rows_by_article.get(identity, [])
+        # Exact article identity already fixes normalized lemma and notation.
+        # A non-zero sibling is therefore enough to prove that a homonr=0 row
+        # belongs to the same printed article; do not require its ``ord`` value
+        # to equal normaliserat_ord because headings can carry a homonym digit
+        # (e.g. ``1ankare``).
         article_has_primary_row = any(
             str(sibling.get("homonr") or "") != "0"
-            and clean_saol_word(sibling.get("ord")).casefold() == normalized.casefold()
             for sibling in article_rows
         )
         same_article_zero_variant = (
@@ -164,9 +168,6 @@ def prepare_noun_variant_records(records: Iterable[dict[str, Any]]) -> list[dict
 
         article_alternatives = set(hv_by_normalized.get(normalized.casefold(), set())) if normalized else set()
 
-        # Duplicate two-branch NOUN rows can themselves encode the printed
-        # heading variants. Require exact article identity and exactly one
-        # non-primary spelling before using that spelling as branch-two base.
         sibling_spellings = noun_written_by_two_branch_article.get(identity, set())
         sibling_alternatives = {
             spelling
