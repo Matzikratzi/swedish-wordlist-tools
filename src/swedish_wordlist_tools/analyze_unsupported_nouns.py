@@ -6,6 +6,8 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
+from .saol_source_policy import is_truncated_inflection_source
+
 DEFAULT_INPUT = Path("reports/saol14-direct-form-validation.jsonl")
 DEFAULT_TEXT = Path("reports/saol14-unsupported-nouns.txt")
 DEFAULT_JSON = Path("reports/saol14-unsupported-nouns.json")
@@ -22,6 +24,7 @@ def select(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         for row in rows
         if str(row.get("upos") or "").upper() == "NOUN"
         and str(row.get("status") or "") == "saol_pattern_unsupported"
+        and not is_truncated_inflection_source(row)
     ]
 
 
@@ -73,7 +76,8 @@ def render(summary: dict[str, Any]) -> str:
         "",
         "Detta är separat från form_set_mismatch. Rapporten visar vilka NOUN-rader",
         "som ännu inte har ett tolkbart/materialiserat SAOL-paradigm i valideringen.",
-        "Ingen SALDO-avvikelse används för att skapa grupperna.",
+        "50-teckenstrunkerade källrader ligger i source_text_truncated och tas inte",
+        "med här. Ingen SALDO-avvikelse används för att skapa grupperna.",
         "",
         f"Poster: {summary['records']}",
         f"Notationer: {summary['notations']}",
