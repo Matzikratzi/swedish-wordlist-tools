@@ -48,9 +48,6 @@ def homonym_coverage_diagnostics(summary: dict[str, Any] | None) -> dict[str, in
 
 def classify(rows: list[dict[str, Any]], homonym_coverage: dict[str, Any] | None = None) -> dict[str, Any]:
     nouns = [row for row in rows if str(row.get("upos") or "").upper() == "NOUN"]
-    # Variant-coverage differences describe how SALDO represents an explicitly
-    # licensed SAOL spelling variant. They are not singular-scope disagreements
-    # and must not enter the ordinary parser-mismatch triage population.
     scope_nouns = [
         row for row in nouns
         if str(row.get("semantic_status") or "") != "variant_coverage_difference"
@@ -77,20 +74,20 @@ def classify(rows: list[dict[str, Any]], homonym_coverage: dict[str, Any] | None
         status = str(row.get("status") or "")
         semantic_status = str(row.get("semantic_status") or "")
 
-        # A 50-character SAOL text field is known to be source-truncated. Keep
-        # it out of every ordinary mismatch/triage queue even when the safe
-        # prefix was sufficient to generate some forms. The missing tail is a
-        # source-data problem, not a parser problem.
         if status == "form_set_mismatch" and is_truncated_inflection_source(row):
             add("source_text_truncated", lemma)
             continue
 
-        # A materialized SAOL variant may legitimately be absent from SALDO or
-        # represented there by another heading. revalidate_direct_forms has
-        # already checked each variant paradigm separately; keep that lexical
-        # coverage diagnostic out of parser/scope mismatch queues.
         if semantic_status == "variant_coverage_difference":
             add("variant_coverage_difference", lemma)
+            continue
+
+        # Once SAOL itself fully licenses a parsed paradigm, SALDO is only a
+        # comparison source. Keep such rows out of singular-scope triage even
+        # when SALDO chooses another gender, a broader paradigm, or omits one
+        # of SAOL's explicitly materialized alternative branches.
+        if status == "form_set_mismatch" and is_mechanically_verified_noun_row(row):
+            add("mechanically_verified_from_saol", lemma)
             continue
 
         key = (str(row.get("record_id") or ""), str(row.get("homonym_number") or ""), lemma)
@@ -112,8 +109,6 @@ def classify(rows: list[dict[str, Any]], homonym_coverage: dict[str, Any] | None
             add("other_saol_subset", lemma)
         elif status == "saol_pattern_unsupported":
             add("unsupported", lemma)
-        elif status == "form_set_mismatch" and is_mechanically_verified_noun_row(row):
-            add("mechanically_verified_from_saol", lemma)
         elif status == "form_set_mismatch":
             add("remaining_form_set_mismatch", lemma)
         else:
@@ -138,7 +133,7 @@ def render(summary: dict[str, Any]) -> str:
         "SAOL14 NOUN: ny valideringsbaslinje",
         "",
         "Princip: SAOL-artikelns egna slots är auktoritativa. SALDO används som jämförelsekälla.",
-        "Enkla, granskade standardparadigm räknas som mekaniskt verifierade från SAOL+SAG;",
+        "Mekaniskt verifierade SAOL-paradigm prioriteras före SALDO-baserad scope-triage;",
         "SALDO-avvikelser för dessa är diagnostik och håller inte kvar posten i konfliktkön.",
         "Varianttäckningsskillnader ligger separat: varje SAOL-variant har redan validerats",
         "mot sitt eget lemma och ska inte blandas in i parser-/artikelomfångsmismatchar.",
