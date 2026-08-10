@@ -33,6 +33,21 @@ class SaolSlotInterpreterTests(unittest.TestCase):
         )
         self.assertEqual("el.", operations[-1].alternative_marker)
 
+    def test_relative_operations_are_notation_markers_themselves(self) -> None:
+        grammar = SlotGrammar(
+            label_slots={},
+            implicit_slot=implicit_positive,
+            require_marker=True,
+        )
+        operations = interpret_single_slot_sequence("+t +a", grammar)
+        self.assertIsNotNone(operations)
+        assert operations is not None
+        self.assertEqual(("neuter", "plural"), tuple(item.slot for item in operations))
+
+        # Plain explicit lexical forms have no structural marker on their own;
+        # accepting those requires a word-class/source-context safety gate.
+        self.assertIsNone(interpret_single_slot_sequence("neutrum plural", grammar))
+
     def test_independent_branches(self) -> None:
         grammar = SlotGrammar(label_slots={}, implicit_slot=implicit_positive)
         branches = interpret_slot_branches("fasetterat +e _ facetterat +e", grammar)
