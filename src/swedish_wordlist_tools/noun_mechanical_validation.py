@@ -43,9 +43,23 @@ def is_null_noun_notation(value: object) -> bool:
     return str(value).strip().casefold() in _NULL_NOTATIONS
 
 
+def _without_uninflected_branches(notation: str) -> tuple[str, bool]:
+    """Remove branch-level ``oböjl.`` markers before slot verification."""
+
+    branches = [part.strip() for part in re.split(r"\s+_\s+", notation) if part.strip()]
+    if not branches:
+        return notation, False
+    kept = [part for part in branches if part.casefold() != "oböjl."]
+    saw_uninflected = len(kept) != len(branches)
+    return " _ ".join(kept), saw_uninflected
+
+
 def _parsed_noun_branches(notation: str):
+    ordinary, saw_uninflected = _without_uninflected_branches(notation)
+    if not ordinary:
+        return () if saw_uninflected else None
     return assign_notation_branches(
-        notation,
+        ordinary,
         singular_slot="sg_def",
         plural_slot="pl_indef",
         definite_plural_slot="pl_def",
@@ -53,14 +67,7 @@ def _parsed_noun_branches(notation: str):
 
 
 def _is_direct_or_marker_licensed(item: SlotOperation) -> bool:
-    """Whether this independent token is mechanically licensed by SAOL.
-
-    Direct operations state their result immediately. ``ibl.`` (ibland) is a
-    semantic marker saying that the following alternative is also fully valid;
-    therefore an otherwise base-dependent REPLACE_TAIL operation introduced by
-    ``ibl.`` is licensed at the notation level without recognizing the complete
-    paradigm that contains it.
-    """
+    """Whether this independent token is mechanically licensed by SAOL."""
 
     if is_direct_form_operation(item.operation):
         return True
@@ -71,15 +78,17 @@ def _is_direct_or_marker_licensed(item: SlotOperation) -> bool:
 
 
 def _is_directly_materialized_notation(notation: str) -> bool:
-    """True when every independent form token is mechanically licensed.
+    """True when every independent form token/branch is mechanically licensed."""
 
-    There are deliberately no noun-paradigm patterns here. ``+en``, ``+er``, an
-    explicit ``ärtor``, colon forms, ``el.``, ``H``, ``ibl.`` and ``_`` are all
-    handled by the common notation parser. Verification only examines the
-    resulting primitive operations plus per-token marker metadata.
-    """
-
-    branches = _parsed_noun_branches(notation)
+    ordinary, saw_uninflected = _without_uninflected_branches(notation)
+    if not ordinary:
+        return saw_uninflected
+    branches = assign_notation_branches(
+        ordinary,
+        singular_slot="sg_def",
+        plural_slot="pl_indef",
+        definite_plural_slot="pl_def",
+    )
     if not branches:
         return False
     return all(
@@ -95,7 +104,7 @@ def _artifact_materializes_replacements(row: dict[str, Any]) -> bool:
     if str(row.get("generator") or "") != "canonical_artifact":
         return False
     branches = _parsed_noun_branches(normalized_notation(row))
-    if not branches:
+    if branches is None:
         return False
 
     saw_replacement = False
@@ -114,7 +123,8 @@ def is_mechanically_verified_noun_notation(row_or_notation: dict[str, Any] | str
         return True
 
     # Transitional source-aware REPLACE_TAIL cases. Everything else above is
-    # already reduced to independent slot operations rather than paradigm regexes.
+    # already reduced to independent slot/branch operations rather than
+    # paradigm regexes.
     return bool(
         _EXPLICIT_PLURAL_REPLACEMENT.fullmatch(notation)
         or _USED_IN_PLURAL_REPLACEMENT.fullmatch(notation)
