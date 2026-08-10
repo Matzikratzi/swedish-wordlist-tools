@@ -14,6 +14,7 @@ from .saol_notation import (
     parse_form_operations,
     split_alternative_branches,
 )
+from .saol_slot_interpreter import SlotGrammar, assign_slots_with_grammar
 from .saol_source_policy import inflection_text
 
 
@@ -267,16 +268,75 @@ def _explicit_branch_bases(record: dict[str, Any], lemma: str, branch_count: int
     return tuple(lemma for _ in range(branch_count))
 
 
-def _assign_noun_slots(record: dict[str, Any], tokens: tuple[str, ...]):
-    """Assign ordinary notation, or an explicit-only sequence in noun context.
+def _noun_shared_implicit_slot(index: int, last_slot: str | None, _operation: FormOperation) -> str | None:
+    """Preserve noun slot progression for explicitly labelled shared parsing."""
 
-    ``assign_labeled_slots`` deliberately rejects an unmarked sequence of plain
-    words because it cannot know whether it is notation or prose. Here we do
-    know the source field is a noun inflection carrier when ``ordkl`` identifies
-    a substantive. In that narrow context, fully written forms such as
-    ``brodern bröder`` are allowed and still become independent EXPLICIT
-    operations. A synthetic/prose string without noun context stays rejected.
+    if index == 0:
+        return "sg_def"
+    if last_slot in {"pl_indef", "pl_def"}:
+        return last_slot
+    return "pl_indef"
+
+
+_NOUN_LABELLED_SLOT_GRAMMAR = SlotGrammar(
+    label_slots={
+        "pl.": "pl_indef",
+        "best.": "sg_def",
+        "best.pl.": "pl_def",
+    },
+    implicit_slot=_noun_shared_implicit_slot,
+    alternative_markers=frozenset({"el.", "h", "ibl."}),
+    require_marker=True,
+)
+
+
+def _coalesce_noun_slot_labels(tokens: tuple[str, ...]) -> tuple[str, ...]:
+    """Treat ``best. pl.`` as one noun slot label before generic assignment."""
+
+    result: list[str] = []
+    index = 0
+    while index < len(tokens):
+        if (
+            tokens[index].casefold() == "best."
+            and index + 1 < len(tokens)
+            and tokens[index + 1].casefold() == "pl."
+        ):
+            result.append("best.pl.")
+            index += 2
+            continue
+        result.append(tokens[index])
+        index += 1
+    return tuple(result)
+
+
+def _has_noun_slot_label(tokens: tuple[str, ...]) -> bool:
+    lowered = tuple(token.casefold() for token in tokens)
+    return "pl." in lowered or "best." in lowered
+
+
+def _assign_labelled_noun_slots_shared(tokens: tuple[str, ...]):
+    """Use the shared engine only for branches with explicit noun slot labels."""
+
+    if not _has_noun_slot_label(tokens):
+        return None
+    return assign_slots_with_grammar(
+        _coalesce_noun_slot_labels(tokens),
+        _NOUN_LABELLED_SLOT_GRAMMAR,
+    )
+
+
+def _assign_noun_slots(record: dict[str, Any], tokens: tuple[str, ...]):
+    """Assign noun notation while migrating syntax families to the shared engine.
+
+    Labelled noun branches first use the word-class-neutral slot engine. Any
+    branch it cannot prove equivalent falls back to the established noun
+    interpreter. Unlabelled ``+``/``-`` sequences and explicit-only sequences
+    intentionally remain on the established path in this migration step.
     """
+
+    shared = _assign_labelled_noun_slots_shared(tokens)
+    if shared is not None:
+        return shared
 
     assigned = assign_labeled_slots(
         tokens,
