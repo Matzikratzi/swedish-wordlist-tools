@@ -61,14 +61,60 @@ class AdjectiveRowInterpreterTests(unittest.TestCase):
                 self.assertEqual(expected, slots.written_forms())
                 self.assertEqual("structural_labelled_positive_slots", slots.rule)
 
-    def test_parallel_and_comparison_structures_still_fall_back(self) -> None:
-        parallel = self.parse("ledsen", "ledset ledsna _ lesset lessna")
-        self.assertEqual(
-            ("ledsen", "ledset", "ledsna", "lesset", "lessna"),
-            parallel.written_forms(),
+    def test_positive_parallel_branches_are_independent(self) -> None:
+        cases = (
+            (
+                "fasetterad",
+                "fasetterat +e _ facetterat +e",
+                (
+                    "fasetterad",
+                    "fasetterat",
+                    "fasetterade",
+                    "facetterad",
+                    "facetterat",
+                    "facetterade",
+                ),
+            ),
+            (
+                "hårdflörtad",
+                "-flörtat +e _ -flirtat +e",
+                (
+                    "hårdflörtad",
+                    "hårdflörtat",
+                    "hårdflörtade",
+                    "hårdflirtad",
+                    "hårdflirtat",
+                    "hårdflirtade",
+                ),
+            ),
+            (
+                "ledsen",
+                "ledset ledsna _ lesset lessna",
+                ("ledsen", "ledset", "ledsna", "lesset", "lessna"),
+            ),
         )
-        self.assertNotEqual("structural_labelled_positive_slots", parallel.rule)
+        for lemma, notation, expected in cases:
+            with self.subTest(notation=notation):
+                slots = self.parse(lemma, notation)
+                self.assertEqual(expected, slots.written_forms())
+                self.assertEqual("structural_parallel_positive_branches", slots.rule)
 
+    def test_more_exotic_parallel_variant_still_falls_back(self) -> None:
+        slots = self.parse("sjangdobel", "+t sjangdobla _ +t schangdobla")
+        self.assertEqual(
+            (
+                "sjangdobel",
+                "sjangdobelt",
+                "sjangdobla",
+                "schangdobel",
+                "schangdobelt",
+                "schangdobla",
+            ),
+            slots.written_forms(),
+        )
+        self.assertNotEqual("structural_parallel_positive_branches", slots.rule)
+
+    def test_comparison_still_falls_back(self) -> None:
         comparison = self.parse("ringa", "komp. +re, superl. +st")
         self.assertEqual(("ringa", "ringare", "ringast"), comparison.written_forms())
         self.assertNotEqual("structural_labelled_positive_slots", comparison.rule)
