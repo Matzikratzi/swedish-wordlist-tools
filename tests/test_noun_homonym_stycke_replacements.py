@@ -100,13 +100,13 @@ class NounHomonymStyckeReplacementTests(unittest.TestCase):
 
     def test_same_structure_is_not_suffix_specific(self) -> None:
         examples = (
-            ("frilista", "+n -listor", "1fri|lista", "frilistor"),
-            ("halländska", "+n -ländskor", "halländska", "halländskor"),
-            ("flåhacka", "+n -hackor", "1flå|hacka", "flåhackor"),
+            ("frilista", "+n -listor", "1fri|lista", "", "frilistor"),
+            ("halländska", "+n -ländskor", "halländska", "hall|ländska", "halländskor"),
+            ("flåhacka", "+n -hackor", "1flå|hacka", "", "flåhackor"),
         )
-        for lemma, text, stycke, plural in examples:
+        for lemma, text, stycke, ord_value, plural in examples:
             with self.subTest(lemma=lemma):
-                self.assertIn(plural, self._forms(lemma, text, stycke))
+                self.assertIn(plural, self._forms(lemma, text, stycke, ord_value))
 
 
 if __name__ == "__main__":
