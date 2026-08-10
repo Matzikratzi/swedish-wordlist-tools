@@ -14,8 +14,12 @@ from .saol_notation import (
     apply_form_operation,
     normalize_notation,
     parse_form_operations,
-    split_alternative_branches,
     tokenize_notation,
+)
+from .saol_slot_interpreter import (
+    SlotGrammar,
+    interpret_single_slot_sequence,
+    interpret_slot_branches,
 )
 
 
@@ -66,17 +70,7 @@ def _single_operation(token: str) -> FormOperation | None:
 def interpret_unlabelled_positive_adjective_slots(
     record: dict[str, Any],
 ) -> AdjectiveSlots | None:
-    """Interpret one/two unlabelled positive ADJ form operations structurally.
-
-    This deliberately knows nothing about particular suffix strings. A two-form
-    sequence assigns the first independent operation to neuter singular and the
-    second to definite/plural. A single explicit word is an additional
-    definite/plural form, while a single relative operation fills neuter.
-
-    Labels, comparison, usage restrictions and ``_`` branches are left to the
-    broader adjective interpreter for now. That makes this a conservative first
-    clean-room layer: anything it cannot prove falls back unchanged.
-    """
+    """Interpret one/two unlabelled positive ADJ form operations structurally."""
 
     lemma = _value(record, "normaliserat_ord").casefold()
     raw_text = _value(record, "text")
@@ -130,102 +124,60 @@ def interpret_unlabelled_positive_adjective_slots(
     )
 
 
+def _labelled_positive_implicit_slot(
+    index: int,
+    last_slot: str | None,
+    _operation: FormOperation,
+) -> str | None:
+    if index == 0:
+        return "neuter_singular"
+    if last_slot == "neuter_singular":
+        return "definite_or_plural"
+    return None
+
+
+_ADJECTIVE_POSITIVE_LABEL_GRAMMAR = SlotGrammar(
+    label_slots={
+        "n.": "neuter_singular",
+        "neutr.": "neuter_singular",
+        "pl.": "definite_or_plural",
+        "best.": "definite_or_plural",
+        "mask.": "masculine_definite",
+    },
+    implicit_slot=_labelled_positive_implicit_slot,
+    alternative_markers=frozenset({"el."}),
+    transparent_markers=frozenset({"och:"}),
+    require_marker=True,
+)
+
+
 def interpret_labelled_positive_adjective_slots(
     record: dict[str, Any],
 ) -> AdjectiveSlots | None:
-    """Interpret positive ADJ labels independently from form operations.
-
-    Labels only select slots. ``el.`` makes the next operation another realization
-    of the preceding slot. An initial unlabelled operation before a label is the
-    neuter form, so e.g. ``-blått, best. och: pl. + el. +a`` is interpreted as
-    four independent instructions rather than as one paradigm-shaped regex.
-
-    Comparison labels, usage restrictions and ``_`` branches remain outside this
-    layer for now.
-    """
+    """Interpret positive ADJ labels with the shared word-class-neutral engine."""
 
     lemma = _value(record, "normaliserat_ord").casefold()
     raw_text = _value(record, "text")
     if not lemma or " " in lemma or not lemma.isalpha() or not raw_text:
         return None
 
-    text = normalize_notation(raw_text)
-    if " _ " in f" {text} ":
+    operations = interpret_single_slot_sequence(
+        raw_text,
+        _ADJECTIVE_POSITIVE_LABEL_GRAMMAR,
+    )
+    if operations is None:
         return None
-    tokens = tokenize_notation(text)
-    if tokens is None:
-        return None
-
-    slot_labels = {
-        "n.": "neuter_singular",
-        "neutr.": "neuter_singular",
-        "pl.": "definite_or_plural",
-        "best.": "definite_or_plural",
-        "mask.": "masculine_definite",
-    }
-    forbidden = {
-        "komp.",
-        "superl.",
-        "h",
-        "ibl.",
-    }
 
     forms: list[AdjectiveForm] = [AdjectiveForm(lemma, "common_singular")]
-    selected_slot: str | None = None
-    previous_slot: str | None = None
-    saw_label = False
-    saw_operation = False
-
-    for token in tokens:
-        lower = token.casefold()
-        if token in {",", ";"}:
-            continue
-        if lower in forbidden:
-            return None
-        if lower == "och:":
-            if not saw_label:
-                return None
-            continue
-        if lower == "el.":
-            if previous_slot is None:
-                return None
-            selected_slot = previous_slot
-            saw_label = True
-            continue
-        if lower.endswith(":"):
-            return None
-        if lower in slot_labels:
-            selected_slot = slot_labels[lower]
-            saw_label = True
-            continue
-
-        operation = _single_operation(token)
-        if operation is None:
-            return None
-
-        if selected_slot is not None:
-            slot = selected_slot
-            selected_slot = None
-        elif not saw_operation:
-            slot = "neuter_singular"
-        elif previous_slot == "neuter_singular":
-            slot = "definite_or_plural"
-        else:
-            return None
-
+    for item in operations:
         value = _apply_positive_operation(
             lemma,
-            operation,
-            neuter=slot == "neuter_singular",
+            item.operation,
+            neuter=item.slot == "neuter_singular",
         )
         if value is None:
             return None
-        forms.append(AdjectiveForm(value, slot))
-        previous_slot = slot
-        saw_operation = True
-
-    if selected_slot is not None or not saw_label or not saw_operation:
-        return None
+        forms.append(AdjectiveForm(value, item.slot))
 
     return AdjectiveSlots(
         lemma=lemma,
@@ -235,55 +187,66 @@ def interpret_labelled_positive_adjective_slots(
 
 
 def _common_from_neuter_for_e_plural(neuter: str) -> str | None:
-    """Invert the productive ``-ad -> -at`` positive relation when evidenced.
-
-    This is word-class morphology, not a paradigm-specific spelling rule. It is
-    used only when a branch explicitly supplies its neuter form and then ``+e``;
-    the latter must be applied to that branch's common form rather than to the
-    article's primary lemma.
-    """
+    """Invert the productive ``-ad -> -at`` positive relation when evidenced."""
 
     if not neuter.endswith("at"):
         return None
     return neuter[:-2] + "ad"
 
 
+def _parallel_positive_implicit_slot(
+    index: int,
+    _last_slot: str | None,
+    _operation: FormOperation,
+) -> str | None:
+    if index == 0:
+        return "neuter_singular"
+    if index == 1:
+        return "definite_or_plural"
+    return None
+
+
+_ADJECTIVE_PARALLEL_POSITIVE_GRAMMAR = SlotGrammar(
+    label_slots={},
+    implicit_slot=_parallel_positive_implicit_slot,
+)
+
+
 def interpret_parallel_positive_adjective_slots(
     record: dict[str, Any],
 ) -> AdjectiveSlots | None:
-    """Interpret independent ``_`` branches made of positive form operations.
-
-    Each branch is tokenized separately. For the current conservative layer a
-    branch contains exactly two operations: neuter and definite/plural. No whole
-    two-branch regex is recognized. If ``+e`` follows an explicit/replaced
-    ``-at`` neuter, the branch common form is recovered by ordinary adjective
-    morphology so the suffix is applied to the branch rather than the primary
-    lemma. More exotic branch evidence falls back to the legacy interpreter.
-    """
+    """Interpret independent ``_`` branches through the shared branch engine."""
 
     lemma = _value(record, "normaliserat_ord").casefold()
     raw_text = _value(record, "text")
     if not lemma or " " in lemma or not lemma.isalpha() or " _ " not in f" {raw_text} ":
         return None
 
-    branches = split_alternative_branches(raw_text)
-    if len(branches) < 2:
+    branches = interpret_slot_branches(
+        raw_text,
+        _ADJECTIVE_PARALLEL_POSITIVE_GRAMMAR,
+    )
+    if branches is None or len(branches) < 2:
         return None
 
     forms: list[AdjectiveForm] = [AdjectiveForm(lemma, "common_singular")]
     for branch in branches:
-        tokens = tuple(token for token in branch.tokens if token not in {",", ";"})
-        if len(tokens) != 2:
+        if len(branch.operations) != 2:
             return None
-        neuter_operation = _single_operation(tokens[0])
-        plural_operation = _single_operation(tokens[1])
-        if neuter_operation is None or plural_operation is None:
+        neuter_item, plural_item = branch.operations
+        if (
+            neuter_item.slot != "neuter_singular"
+            or plural_item.slot != "definite_or_plural"
+        ):
             return None
 
-        # A relative neuter operation followed by a fully explicit second form
-        # may introduce a different variant lemma (e.g. +t schangdobla). The
-        # current structural layer has no independent evidence for that branch
-        # lemma, so it must not attach the explicit form to the primary lemma.
+        neuter_operation = neuter_item.operation
+        plural_operation = plural_item.operation
+
+        # Relative neuter + explicit variant form may introduce a different
+        # branch lemma (e.g. +t schangdobla). Without independent evidence for
+        # that lemma this layer must fall back rather than attach it to the
+        # primary article lemma.
         if (
             neuter_operation.kind in {FormOperationKind.APPEND, FormOperationKind.UNCHANGED}
             and plural_operation.kind is FormOperationKind.EXPLICIT
