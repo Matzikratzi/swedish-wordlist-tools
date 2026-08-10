@@ -77,6 +77,21 @@ class AdjectiveRowInterpreterTests(unittest.TestCase):
                 self.assertEqual(expected, slots.written_forms())
                 self.assertEqual("structural_labelled_comparison_slots", slots.rule)
 
+    def test_usage_restrictions_are_metadata_not_paradigms(self) -> None:
+        adenoid = self.parse("adenoid", "n. sing. obest. obrukl., adenoida")
+        self.assertEqual(("adenoid", "adenoida"), adenoid.written_forms())
+        self.assertEqual("structural_usage_restrictions", adenoid.rule)
+        self.assertEqual(("neuter_singular", "uncommon"), (adenoid.restrictions[0].scope, adenoid.restrictions[0].label))
+
+        fadd = self.parse("fadd", "n. sing. obest. undviks:, fadda")
+        self.assertEqual(("fadd", "fadda"), fadd.written_forms())
+        self.assertEqual("avoided", fadd.restrictions[0].label)
+
+        beige = self.parse("beige", "mest: oböjl., best. och: pl. ibl. beigea")
+        self.assertEqual(("beige", "beigea"), beige.written_forms())
+        self.assertEqual(("mostly_uninflected", "occasional"), tuple(item.label for item in beige.restrictions))
+        self.assertEqual(("beigea",), beige.restrictions[1].forms)
+
     def test_positive_parallel_branches_are_independent(self) -> None:
         cases = (
             (
