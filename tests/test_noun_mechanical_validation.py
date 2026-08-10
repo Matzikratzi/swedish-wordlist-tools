@@ -66,6 +66,16 @@ class NounMechanicalValidationTests(unittest.TestCase):
             with self.subTest(notation=notation):
                 self.assertTrue(is_mechanically_verified_noun_notation(notation))
 
+    def test_fully_relative_h_alternatives_are_mechanical(self):
+        for notation in (
+            "+n; pl. + H +s",
+            "+en; pl. +ar H +s",
+            "+en; pl. +er H +s",
+            "+et H +en",
+        ):
+            with self.subTest(notation=notation):
+                self.assertTrue(is_mechanically_verified_noun_notation(notation))
+
     def test_fully_relative_underscore_branches_are_mechanical(self):
         for notation in (
             "+det; pl. +, best. pl. +dena _ +t +n",
@@ -78,12 +88,12 @@ class NounMechanicalValidationTests(unittest.TestCase):
             with self.subTest(notation=notation):
                 self.assertTrue(is_mechanically_verified_noun_notation(notation))
 
-    def test_h_or_unbounded_lexical_branching_stays_diagnostic(self):
+    def test_unbounded_lexical_branching_stays_diagnostic(self):
         for notation in (
             "+n; pl. -kamrar el. +, best. pl. -kamrarna el. -ka",
-            "+n; pl. + H +s",
             "+en _ ankaret",
             "+en _ -rötter",
+            "+n; pl. + H gamlaformer",
         ):
             with self.subTest(notation=notation):
                 self.assertFalse(is_mechanically_verified_noun_notation(notation))
@@ -110,7 +120,7 @@ class NounMechanicalValidationTests(unittest.TestCase):
     def test_ordkl_is_not_used_when_text_contains_unverified_notation(self):
         self.assertFalse(
             is_mechanically_verified_noun_row(
-                {"lemma": "test", "notation": "+n; pl. + H +s", "ordkl": "s. oböjl."}
+                {"lemma": "test", "notation": "+n; pl. + H gamlaformer", "ordkl": "s. oböjl."}
             )
         )
 
