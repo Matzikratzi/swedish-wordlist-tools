@@ -121,7 +121,7 @@ class NounValidationRebaselineTests(unittest.TestCase):
         self.assertFalse(any(key.startswith("scope_mismatch_") for key in summary["counts"]))
         self.assertEqual(0, summary["scope_population"])
 
-    def test_alternative_zero_plural_notation_stays_diagnostic(self):
+    def test_relative_el_zero_plural_notation_is_mechanically_verified(self):
         rows = [{
             "upos": "NOUN", "lemma": "alfa", "record_id": "5", "homonym_number": "1",
             "notation": "+t; pl. +n el. +",
@@ -130,8 +130,8 @@ class NounValidationRebaselineTests(unittest.TestCase):
             "status": "form_set_mismatch",
         }]
         summary = classify(rows)
-        self.assertEqual(1, summary["counts"]["remaining_form_set_mismatch"])
-        self.assertNotIn("mechanically_verified_from_saol", summary["counts"])
+        self.assertEqual(1, summary["counts"]["mechanically_verified_from_saol"])
+        self.assertNotIn("remaining_form_set_mismatch", summary["counts"])
 
     def test_verified_sibling_homonym_is_diagnostic_only(self):
         rows = [
