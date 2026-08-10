@@ -30,6 +30,9 @@ _EXPLICIT_PLURAL_USE_RE = re.compile(
     r"\bpl\.\s*(?:anv\.|används:)\s*",
     re.IGNORECASE,
 )
+_SUP_ELEMENT_RE = re.compile(r"<sup\b[^>]*>.*?</sup>", re.IGNORECASE | re.DOTALL)
+_HTML_TAG_RE = re.compile(r"<[^>]*>")
+_LEADING_HOMONYM_RE = re.compile(r"^\d+(?=\D)")
 
 
 def _genitive(form: str) -> str:
@@ -206,12 +209,27 @@ def _replacement_is_explicit_plural_use(record: dict[str, Any]) -> bool:
     return _EXPLICIT_PLURAL_USE_RE.search(str(record.get("text", ""))) is not None
 
 
+def _normalized_stycke_carrier(value: object) -> str:
+    """Normalize SAOL display markup before comparing stycke with the lemma.
+
+    Homonym numbers are typography, not part of the word. In faksimil JSON they
+    occur both as ``<sup>1</sup>`` and as a plain leading digit (``1flå|hacka``).
+    Removing them here lets the existing lodstreck bind ``-replacement`` to the
+    compound head without teaching the parser anything about ``-hackor`` etc.
+    """
+
+    text = str(value or "")
+    text = _SUP_ELEMENT_RE.sub("", text)
+    text = _HTML_TAG_RE.sub("", text)
+    text = text.replace("\u00ad", "").replace("·", "").replace("|", "").strip()
+    return _LEADING_HOMONYM_RE.sub("", text)
+
+
 def _has_usable_compound_bar(record: dict[str, Any], lemma: str) -> bool:
     stycke = str(record.get("stycke", ""))
     if "|" not in stycke:
         return False
-    normalized = stycke.replace("·", "").replace("|", "").strip()
-    return normalized.casefold() == lemma.casefold()
+    return _normalized_stycke_carrier(stycke).casefold() == lemma.casefold()
 
 
 def complete_noun_entry(
