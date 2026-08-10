@@ -80,16 +80,7 @@ def _is_direct_or_marker_licensed(item: SlotOperation) -> bool:
 
 
 def _is_explicit_only_notation(notation: str) -> bool:
-    """Accept branches made solely of fully written SAOL forms.
-
-    The common slot assigner deliberately requires a notation marker because it
-    is also used in contexts where an arbitrary lexical phrase must not be
-    mistaken for inflection.  Here we already know that the source field is the
-    noun inflection carrier, so one or more explicit form tokens are sufficient
-    evidence.  This covers both complete pairs such as ``bobben bobbar`` and a
-    single explicitly written slot such as ``muttret`` without word-specific
-    rules.
-    """
+    """Accept a noun inflection carrier made solely of fully written forms."""
 
     branches = split_alternative_branches(notation)
     if not branches:
@@ -120,6 +111,14 @@ def _is_directly_materialized_notation(notation: str) -> bool:
         definite_plural_slot="pl_def",
     )
     if not branches:
+        # A whole notation can fail common slot assignment merely because one
+        # ``_`` branch consists only of explicit words. Verify each branch on
+        # its own before falling back to the explicit-only carrier rule. This
+        # keeps ``+n +ar _ bh:n bh:ar`` structural: the relative and explicit
+        # branches are independent and neither depends on the other.
+        raw_branches = split_alternative_branches(ordinary)
+        if len(raw_branches) > 1:
+            return all(_is_directly_materialized_notation(branch.text) for branch in raw_branches)
         return _is_explicit_only_notation(ordinary)
     return all(
         _is_direct_or_marker_licensed(item)
