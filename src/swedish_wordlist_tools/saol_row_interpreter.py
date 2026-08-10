@@ -296,14 +296,23 @@ def _assign_noun_slots(record: dict[str, Any], tokens: tuple[str, ...]):
         if operations is None or any(operation.kind is not FormOperationKind.EXPLICIT for operation in operations):
             return None
 
-    # A trailing separator supplies only structural evidence that these are
-    # forms; it does not change their sequential slot assignment.
     return assign_labeled_slots(
         (*tokens, ";"),
         singular_slot="sg_def",
         plural_slot="pl_indef",
         definite_plural_slot="pl_def",
     )
+
+
+def _is_uninflected_branch(tokens: tuple[str, ...]) -> bool:
+    """Return true for a branch whose base form is explicitly uninflected."""
+
+    meaningful = tuple(
+        token.casefold()
+        for token in tokens
+        if token not in {";", ","}
+    )
+    return meaningful == ("oböjl.",)
 
 
 def interpret_noun_row(record: dict[str, Any]) -> InterpretedRow | None:
@@ -331,6 +340,12 @@ def interpret_noun_row(record: dict[str, Any]) -> InterpretedRow | None:
             if marker not in seen:
                 seen.add(marker)
                 key_forms.append(KeyForm("lemma", branch_base, "explicit_variant_branch"))
+
+        # ``oböjl.`` is a complete branch instruction: the branch base itself
+        # is the only nominal form. This is branch semantics, not a paradigm
+        # special case for any particular noun.
+        if _is_uninflected_branch(branch.tokens):
+            continue
 
         lemma_variant = _branch_lemma_variant(branch_base, branch.tokens)
         if lemma_variant is not None:
