@@ -60,17 +60,7 @@ def is_null_noun_notation(value: object) -> bool:
 
 
 def _is_materialized_slot_notation(notation: str) -> bool:
-    """Verify one-branch noun notation using shared form primitives.
-
-    The operation kind decides evidential strength, not the word class or the
-    spelling of the form. Thus ``+n askor`` is the same structural case as an
-    explicitly written irregular verb form such as ``sprang`` or ``kan``: the
-    token is EXPLICIT and directly states the written form for its slot.
-
-    ``ibl.`` means "ibland" and licenses the following alternative in the same
-    slot. A replacement operation is accepted in that constrained context; other
-    tail replacements remain subject to replacement-specific checks.
-    """
+    """Verify one-branch noun notation using shared form primitives."""
 
     if "_" in notation:
         return False
@@ -95,9 +85,17 @@ def _is_materialized_slot_notation(notation: str) -> bool:
 
 
 def _is_materialized_branch_notation(notation: str) -> bool:
-    """Verify underscore branches made only of directly stated form operations."""
+    """Verify underscore branches made only of directly stated form operations.
 
-    if "_" not in notation or "el." in notation.casefold() or re.search(r"(?:^|\s)H(?:\s|$)", notation):
+    Alternative markers such as ``el.``, ``H`` and ``ibl.`` are handled by the
+    shared slot assigner inside each branch. They do not weaken the evidence: if
+    every resulting operation is direct (unchanged, append or an explicitly
+    written form), the complete multi-branch notation is mechanically stated by
+    SAOL. Tail replacements remain outside this rule because applying them still
+    depends on the noun base.
+    """
+
+    if "_" not in notation:
         return False
     branches = split_alternative_branches(notation)
     if len(branches) < 2:
@@ -117,16 +115,7 @@ def _is_materialized_branch_notation(notation: str) -> bool:
 
 
 def _artifact_materializes_replacements(row: dict[str, Any]) -> bool:
-    """Trust replacement operations only after the noun generator accepted them.
-
-    ``complete_noun_entry`` already refuses unmarked tail replacements unless
-    their application is structurally grounded (for example by the compound
-    boundary in ``stycke``) or explicitly licensed as a plural-use form.  A
-    validation row whose generator is ``canonical_artifact`` has therefore
-    passed that stronger source-aware gate.  Re-parsing the notation here lets
-    validation reuse that proof instead of maintaining a second list of noun
-    replacement patterns.
-    """
+    """Trust replacement operations only after the noun generator accepted them."""
 
     if str(row.get("generator") or "") != "canonical_artifact":
         return False
