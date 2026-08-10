@@ -178,6 +178,62 @@ def interpret_labelled_comparison_adjective_slots(record: dict[str, Any]) -> Adj
     return AdjectiveSlots(lemma=lemma, forms=_dedupe_forms(forms), rule="structural_labelled_comparison_slots")
 
 
+def _unlabelled_comparison_alternative_slot(
+    index: int,
+    last_slot: str | None,
+    _operation: FormOperation,
+) -> str | None:
+    if index == 0:
+        return "neuter_singular"
+    if index == 1 and last_slot == "neuter_singular":
+        return "comparative"
+    if index >= 3 and last_slot == "comparative":
+        return "superlative"
+    return None
+
+
+_ADJECTIVE_UNLABELLED_COMPARISON_ALTERNATIVE_GRAMMAR = SlotGrammar(
+    label_slots={},
+    implicit_slot=_unlabelled_comparison_alternative_slot,
+    alternative_markers=frozenset({"h"}),
+    require_marker=True,
+)
+
+
+def interpret_unlabelled_comparison_alternatives(record: dict[str, Any]) -> AdjectiveSlots | None:
+    """Interpret e.g. ``+t, trängre H +are, trängst H +ast`` structurally."""
+    lemma = _value(record, "normaliserat_ord").casefold()
+    raw_text = _value(record, "text")
+    if not lemma or " " in lemma or not lemma.isalpha() or " h " not in f" {normalize_notation(raw_text)} ":
+        return None
+    operations = interpret_single_slot_sequence(
+        raw_text,
+        _ADJECTIVE_UNLABELLED_COMPARISON_ALTERNATIVE_GRAMMAR,
+    )
+    if operations is None:
+        return None
+    expected = (
+        "neuter_singular",
+        "comparative",
+        "comparative",
+        "superlative",
+        "superlative",
+    )
+    if tuple(item.slot for item in operations) != expected:
+        return None
+    forms: list[AdjectiveForm] = [AdjectiveForm(lemma, "common_singular")]
+    for item in operations:
+        value = _apply_positive_operation(lemma, item.operation, neuter=item.slot == "neuter_singular")
+        if value is None:
+            return None
+        forms.append(AdjectiveForm(value, item.slot))
+    return AdjectiveSlots(
+        lemma=lemma,
+        forms=_dedupe_forms(forms),
+        rule="structural_unlabelled_comparison_alternatives",
+    )
+
+
 def _same_slot_alternative_implicit_slot(
     index: int,
     _last_slot: str | None,
@@ -217,6 +273,48 @@ def interpret_unlabelled_adjective_alternatives(record: dict[str, Any]) -> Adjec
         lemma=lemma,
         forms=_dedupe_forms(forms),
         rule="structural_same_slot_alternatives",
+    )
+
+
+def _partial_label_implicit_slot(
+    index: int,
+    _last_slot: str | None,
+    _operation: FormOperation,
+) -> str | None:
+    if index == 0:
+        return "masculine_definite"
+    return None
+
+
+_ADJECTIVE_PARTIAL_LABEL_GRAMMAR = SlotGrammar(
+    label_slots={"superl.": "superlative"},
+    implicit_slot=_partial_label_implicit_slot,
+    transparent_markers=frozenset({"vard."}),
+    require_marker=True,
+)
+
+
+def interpret_partial_labelled_adjective_slots(record: dict[str, Any]) -> AdjectiveSlots | None:
+    """Interpret partial labelled paradigms such as ``ende, vard. superl. endaste``."""
+    lemma = _value(record, "normaliserat_ord").casefold()
+    raw_text = _value(record, "text")
+    if not lemma or " " in lemma or not lemma.isalpha() or "vard." not in normalize_notation(raw_text):
+        return None
+    operations = interpret_single_slot_sequence(raw_text, _ADJECTIVE_PARTIAL_LABEL_GRAMMAR)
+    if operations is None:
+        return None
+    if tuple(item.slot for item in operations) != ("masculine_definite", "superlative"):
+        return None
+    forms: list[AdjectiveForm] = [AdjectiveForm(lemma, "common_singular")]
+    for item in operations:
+        value = _apply_positive_operation(lemma, item.operation, neuter=False)
+        if value is None:
+            return None
+        forms.append(AdjectiveForm(value, item.slot))
+    return AdjectiveSlots(
+        lemma=lemma,
+        forms=_dedupe_forms(forms),
+        rule="structural_partial_labelled_slots",
     )
 
 
@@ -319,7 +417,9 @@ def interpret_adjective_row(record: dict[str, Any]) -> AdjectiveSlots | None:
         interpret_unlabelled_positive_adjective_slots(record)
         or interpret_labelled_positive_adjective_slots(record)
         or interpret_labelled_comparison_adjective_slots(record)
+        or interpret_unlabelled_comparison_alternatives(record)
         or interpret_unlabelled_adjective_alternatives(record)
+        or interpret_partial_labelled_adjective_slots(record)
         or interpret_usage_restricted_adjective_slots(record)
         or interpret_parallel_positive_adjective_slots(record)
         or interpret_simple_adjective_slots(record)
