@@ -3,7 +3,12 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .saol_notation import FormOperationKind, assign_labeled_slots, split_alternative_branches
+from .saol_notation import (
+    FormOperationKind,
+    assign_labeled_slots,
+    split_alternative_branches,
+    tokenize_notation,
+)
 from .saol_row_interpreter import interpret_noun_row
 
 MECHANICALLY_VERIFIED_NOUN_NOTATIONS = frozenset(
@@ -51,18 +56,44 @@ def is_null_noun_notation(value: object) -> bool:
     return str(value).strip().casefold() in _NULL_NOTATIONS
 
 
+def _is_fully_relative_slot_notation(notation: str) -> bool:
+    """Return true when SAOL states every form as a relative operation.
+
+    This covers both ordinary ``el.`` alternatives and zero-plural/labelled
+    variants.  SALDO may contain only one of the alternatives; that is a source
+    coverage difference, not uncertainty in what SAOL says.
+
+    Keep lexical explicit forms, tail replacements and H-marked paradigms out of
+    this family: those deserve separate structural handling/diagnostics.
+    """
+
+    if "_" in notation or re.search(r"(?:^|\s)H(?:\s|$)", notation):
+        return False
+    tokens = tokenize_notation(notation)
+    if not tokens:
+        return False
+    assigned = assign_labeled_slots(
+        tokens,
+        singular_slot="sg_def",
+        plural_slot="pl_indef",
+        definite_plural_slot="pl_def",
+    )
+    if not assigned:
+        return False
+    return all(
+        item.operation.kind in {FormOperationKind.UNCHANGED, FormOperationKind.APPEND}
+        for item in assigned
+    )
+
+
 def _is_fully_relative_branch_notation(notation: str) -> bool:
     """Verify ``_`` alternatives whose grammatical information is all relative.
 
-    ``_`` itself merely separates complete SAOL paradigm branches.  Such a row
+    ``_`` itself merely separates complete SAOL paradigm branches. Such a row
     is mechanically safe when every branch can be assigned to noun slots and
     every actual form operation is either unchanged or an append operation.
-    There is then no lexical guess: SAOL states every branch, while the noun
-    interpreter supplies the branch base (including an hv-bound alternative
-    spelling where the article has one).
-
-    Explicit words, tail replacements, ``el.`` alternatives and H-marked forms
-    remain outside this family and stay diagnostic.
+    Explicit words, tail replacements, ``el.`` inside a branch and H-marked
+    forms remain outside this family.
     """
 
     if "_" not in notation or "el." in notation.casefold() or re.search(r"(?:^|\s)H(?:\s|$)", notation):
@@ -92,6 +123,8 @@ def is_mechanically_verified_noun_notation(row_or_notation: dict[str, Any] | str
     if notation in MECHANICALLY_VERIFIED_NOUN_NOTATIONS:
         return True
     if _EXPLICIT_PLURAL.fullmatch(notation) or _USED_IN_PLURAL.fullmatch(notation):
+        return True
+    if _is_fully_relative_slot_notation(notation):
         return True
     return _is_fully_relative_branch_notation(notation)
 
