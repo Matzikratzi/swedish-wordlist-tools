@@ -60,13 +60,31 @@ def _clean_surface(value: Any) -> str:
     return _LEADING_HOMONYM_RE.sub("", text)
 
 
+def _join_compound_boundary(prefix: str, head: str) -> str:
+    """Join SAOL compound parts using ordinary Swedish triple-consonant spelling.
+
+    The bar in ``ord``/``stycke`` marks morphology, not a literal string split.
+    When a prefix ending in a doubled consonant meets a head beginning with the
+    same consonant, Swedish spelling keeps only two consonants across the
+    boundary: ``hall|ländska`` therefore materializes as ``halländska``.
+    """
+
+    if (
+        len(prefix) >= 2
+        and head
+        and prefix[-1].casefold() == prefix[-2].casefold() == head[0].casefold()
+    ):
+        return prefix[:-1] + head
+    return prefix + head
+
+
 def _structural_surfaces(record: dict[str, Any]) -> tuple[str, ...]:
     """Return SAOL surfaces that may carry an explicit compound boundary.
 
     ``stycke`` usually carries the lodstreck, but some faksimil rows keep it only
-    in ``ord`` (for example ``hall|ländska`` and ``bluff|faktura``).  ``ord`` is
-    used here only as structural evidence when removing bars/dots yields exactly
-    the normalized lemma; it is never accepted as a free-standing lemma source.
+    in ``ord`` (for example ``hall|ländska`` and ``bluff|faktura``). ``ord`` is
+    used here only as structural evidence. The actual written lemma remains
+    ``normaliserat_ord`` unless separate variant evidence explicitly rebases it.
     """
 
     values: list[str] = []
@@ -77,13 +95,20 @@ def _structural_surfaces(record: dict[str, Any]) -> tuple[str, ...]:
     return tuple(values)
 
 
-def _compound_parts(record: dict[str, Any], lemma: str) -> tuple[str, str] | None:
+def compound_parts(record: dict[str, Any], lemma: str) -> tuple[str, str] | None:
+    """Return a structurally verified prefix/head split for the normalized lemma."""
+
     for surface in _structural_surfaces(record):
         if "|" not in surface:
             continue
         prefix, head = surface.rsplit("|", 1)
         prefix = prefix.replace("|", "")
-        if _comparison_key(prefix + head) == _comparison_key(lemma):
+        literal = prefix + head
+        normalized = _join_compound_boundary(prefix, head)
+        if (
+            _comparison_key(literal) == _comparison_key(lemma)
+            or _comparison_key(normalized) == _comparison_key(lemma)
+        ):
             return prefix, head
     return None
 
@@ -128,8 +153,6 @@ def _replace_unmarked_final_component(lemma: str, replacement: str) -> str | Non
 
 
 def _append_to_hyphen_component(word: str, suffix: str) -> str:
-    """Append normally, unless the payload repeats the final hyphen component."""
-
     prefix, separator, component = word.rpartition("-")
     if (
         separator
@@ -153,14 +176,12 @@ def _append_to_first_word(lemma: str, suffix: str) -> str:
     return result + (separator + rest if separator else "")
 
 
-def _apply_to_carrier(
-    record: dict[str, Any], carrier: str, operation: FormOperation
-) -> str | None:
+def _apply_to_carrier(record: dict[str, Any], carrier: str, operation: FormOperation) -> str | None:
     if operation.kind is FormOperationKind.REPLACE_TAIL:
-        parts = _compound_parts(record, carrier)
+        parts = compound_parts(record, carrier)
         if parts is not None:
             prefix, _head = parts
-            return prefix + operation.value
+            return _join_compound_boundary(prefix, operation.value)
     return apply_form_operation(
         carrier,
         operation,
@@ -169,14 +190,12 @@ def _apply_to_carrier(
     )
 
 
-def apply_form_operation_to_noun(
-    record: dict[str, Any], lemma: str, operation: FormOperation
-) -> str | None:
+def apply_form_operation_to_noun(record: dict[str, Any], lemma: str, operation: FormOperation) -> str | None:
     if operation.kind is FormOperationKind.REPLACE_TAIL:
-        parts = _compound_parts(record, lemma)
+        parts = compound_parts(record, lemma)
         if parts is not None:
             prefix, _head = parts
-            return prefix + operation.value
+            return _join_compound_boundary(prefix, operation.value)
 
     return apply_form_operation(
         lemma,
@@ -186,9 +205,7 @@ def apply_form_operation_to_noun(
     )
 
 
-def apply_form_token(
-    record: dict[str, Any], lemma: str, token: str
-) -> str | None:
+def apply_form_token(record: dict[str, Any], lemma: str, token: str) -> str | None:
     operation = parse_form_operation(token)
     if operation is None:
         return None
@@ -234,8 +251,6 @@ def _colon_stem(value: str) -> str | None:
 
 
 def _branch_lemma_variant(lemma: str, tokens: tuple[str, ...]) -> tuple[str, str] | None:
-    """Derive a branch's alternative base spelling from its first colon form."""
-
     for token in tokens:
         operations = parse_form_operations(token)
         if operations is None:
@@ -259,9 +274,7 @@ def _branch_lemma_variant(lemma: str, tokens: tuple[str, ...]) -> tuple[str, str
     return None
 
 
-def _explicit_branch_bases(
-    record: dict[str, Any], lemma: str, branch_count: int
-) -> tuple[str, ...]:
+def _explicit_branch_bases(record: dict[str, Any], lemma: str, branch_count: int) -> tuple[str, ...]:
     alternative = str(record.get("_saol_alternative_lemma") or "").strip()
     if branch_count == 2 and alternative and alternative.casefold() != lemma.casefold():
         return (lemma, alternative)
@@ -311,16 +324,12 @@ def interpret_noun_row(record: dict[str, Any]) -> InterpretedRow | None:
         if slot_operations is None:
             return None
         for assigned in slot_operations:
-            written_form = apply_form_operation_to_noun(
-                record, branch_base, assigned.operation
-            )
+            written_form = apply_form_operation_to_noun(record, branch_base, assigned.operation)
             if written_form is None:
                 return None
             marker = (assigned.slot, written_form)
             if marker not in seen:
                 seen.add(marker)
-                key_forms.append(
-                    KeyForm(assigned.slot, written_form, assigned.token)
-                )
+                key_forms.append(KeyForm(assigned.slot, written_form, assigned.token))
 
     return InterpretedRow(lemma, pattern, tuple(key_forms))
