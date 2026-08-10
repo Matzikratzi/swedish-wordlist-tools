@@ -53,6 +53,33 @@ class SaolSlotInterpreterTests(unittest.TestCase):
                     tuple(item.operation.kind for item in operations),
                 )
 
+    def test_each_editorial_usage_atom_is_independently_transparent(self) -> None:
+        grammar = SlotGrammar(
+            label_slots={"pl.": "plural"},
+            implicit_slot=implicit_positive,
+            alternative_markers=frozenset({"el."}),
+            require_marker=True,
+        )
+        for marker in ("högt.", "vanl.", "åld.", "t.ex.", "om:", "fraser:", "måttord:"):
+            with self.subTest(marker=marker):
+                operations = interpret_single_slot_sequence(f"pl. {marker} +xy", grammar)
+                self.assertIsNotNone(operations)
+                assert operations is not None
+                self.assertEqual(("plural",), tuple(item.slot for item in operations))
+
+    def test_editorial_usage_atoms_do_not_change_alternative_slot(self) -> None:
+        grammar = SlotGrammar(
+            label_slots={"pl.": "plural"},
+            implicit_slot=implicit_positive,
+            alternative_markers=frozenset({"el."}),
+            require_marker=True,
+        )
+        operations = interpret_single_slot_sequence("pl. +ar el. om: sorter: +er", grammar)
+        self.assertIsNotNone(operations)
+        assert operations is not None
+        self.assertEqual(("plural", "plural"), tuple(item.slot for item in operations))
+        self.assertEqual("el.", operations[-1].alternative_marker)
+
     def test_relative_operations_are_notation_markers_themselves(self) -> None:
         grammar = SlotGrammar(
             label_slots={},
