@@ -61,58 +61,43 @@ class SaolNotationTests(unittest.TestCase):
         self.assertIsNotNone(assigned)
         assert assigned is not None
         self.assertEqual(
-            (
-                ("sg_def", "+n"),
-                ("pl_indef", "+"),
-                ("pl_indef", "+s"),
-            ),
+            (("sg_def", "+n"), ("pl_indef", "+"), ("pl_indef", "+s")),
+            tuple((item.slot, item.token) for item in assigned),
+        )
+
+    def test_ibl_marks_an_alternative_in_the_same_slot(self) -> None:
+        tokens = tokenize_notation("+n; pl. + ibl. -metrar")
+        self.assertEqual(("+n", ";", "pl.", "+", "ibl.", "-metrar"), tokens)
+        assert tokens is not None
+        assigned = assign_labeled_slots(
+            tokens,
+            singular_slot="sg_def",
+            plural_slot="pl_indef",
+            definite_plural_slot="pl_def",
+        )
+        self.assertIsNotNone(assigned)
+        assert assigned is not None
+        self.assertEqual(
+            (("sg_def", "+n"), ("pl_indef", "+"), ("pl_indef", "-metrar")),
             tuple((item.slot, item.token) for item in assigned),
         )
 
     def test_drops_strict_prefix_alternative_at_source_limit(self) -> None:
         text = "komp. närmare el. närmre, superl. närmast el. närm"
         self.assertEqual(50, len(text))
-        self.assertEqual(
-            (
-                "komp.",
-                "närmare",
-                "el.",
-                "närmre",
-                ",",
-                "superl.",
-                "närmast",
-            ),
-            tokenize_notation(text),
-        )
+        self.assertEqual(("komp.", "närmare", "el.", "närmre", ",", "superl.", "närmast"), tokenize_notation(text))
 
     def test_drops_any_final_token_and_dangling_alternative_at_source_limit(self) -> None:
         text = "+n; pl. kamrar el. +, best. pl. kamrarna el. kamma"
         self.assertEqual(50, len(text))
         tokens = tokenize_notation(text)
-        self.assertEqual(
-            (
-                "+n",
-                ";",
-                "pl.",
-                "kamrar",
-                "el.",
-                "+",
-                ",",
-                "best.",
-                "pl.",
-                "kamrarna",
-            ),
-            tokens,
-        )
+        self.assertEqual(("+n", ";", "pl.", "kamrar", "el.", "+", ",", "best.", "pl.", "kamrarna"), tokens)
         self.assertNotIn("kamma", tokens or ())
 
     def test_keeps_complete_or_nonlimited_alternatives(self) -> None:
         shorter = "komp. närmare el. närm"
         self.assertLess(len(shorter), 50)
-        self.assertEqual(
-            ("komp.", "närmare", "el.", "närm"),
-            tokenize_notation(shorter),
-        )
+        self.assertEqual(("komp.", "närmare", "el.", "närm"), tokenize_notation(shorter))
         exact_but_not_prefix = "x" * 38 + " helform el. annan"
         self.assertEqual(56, len(exact_but_not_prefix))
 
@@ -130,14 +115,7 @@ class SaolNotationTests(unittest.TestCase):
         )
         self.assertIsNotNone(assigned)
         assert assigned is not None
-        self.assertEqual(
-            (
-                ("sg_def", "+et"),
-                ("pl_indef", "+"),
-                ("pl_indef", "+er"),
-            ),
-            tuple((item.slot, item.token) for item in assigned),
-        )
+        self.assertEqual((('sg_def', '+et'), ('pl_indef', '+'), ('pl_indef', '+er')), tuple((item.slot, item.token) for item in assigned))
 
     def test_assigns_common_labels_to_supplied_slots(self) -> None:
         assigned = assign_labeled_slots(
@@ -148,25 +126,10 @@ class SaolNotationTests(unittest.TestCase):
         )
         self.assertIsNotNone(assigned)
         assert assigned is not None
-        self.assertEqual(
-            (
-                ("sg_def", "+n"),
-                ("pl_indef", "+"),
-                ("pl_indef", "-metrar"),
-                ("pl_def", "+na"),
-            ),
-            tuple((item.slot, item.token) for item in assigned),
-        )
+        self.assertEqual((('sg_def', '+n'), ('pl_indef', '+'), ('pl_indef', '-metrar'), ('pl_def', '+na')), tuple((item.slot, item.token) for item in assigned))
 
     def test_rejects_unmarked_explicit_prose_as_slot_sequence(self) -> None:
-        self.assertIsNone(
-            assign_labeled_slots(
-                ("helt", "okänd", "notation"),
-                singular_slot="sg_def",
-                plural_slot="pl_indef",
-                definite_plural_slot="pl_def",
-            )
-        )
+        self.assertIsNone(assign_labeled_slots(("helt", "okänd", "notation"), singular_slot="sg_def", plural_slot="pl_indef", definite_plural_slot="pl_def"))
 
     def test_applies_default_operations(self) -> None:
         self.assertEqual("blå", apply_form_operation("blå", parse_form_operation("+")))
@@ -177,37 +140,19 @@ class SaolNotationTests(unittest.TestCase):
         operation = parse_form_operation("+t")
         self.assertIsNotNone(operation)
         assert operation is not None
-        result = apply_form_operation(
-            "glad",
-            operation,
-            append=lambda base, suffix: "glatt" if (base, suffix) == ("glad", "t") else base + suffix,
-        )
+        result = apply_form_operation("glad", operation, append=lambda base, suffix: "glatt" if (base, suffix) == ("glad", "t") else base + suffix)
         self.assertEqual("glatt", result)
 
         replacement = parse_form_operation("-bundna")
         self.assertIsNotNone(replacement)
         assert replacement is not None
-        self.assertEqual(
-            "obundna",
-            apply_form_operation(
-                "obunden",
-                replacement,
-                replace_tail=lambda base, tail: "obundna" if (base, tail) == ("obunden", "bundna") else None,
-            ),
-        )
+        self.assertEqual("obundna", apply_form_operation("obunden", replacement, replace_tail=lambda base, tail: "obundna" if (base, tail) == ("obunden", "bundna") else None))
 
     def test_prefers_explicit_replacement_handler_to_overlap_guess(self) -> None:
         replacement = parse_form_operation("-klockor")
         self.assertIsNotNone(replacement)
         assert replacement is not None
-        self.assertEqual(
-            "alarmklockor",
-            apply_form_operation(
-                "alarmklocka",
-                replacement,
-                replace_tail=lambda _base, _tail: "alarmklockor",
-            ),
-        )
+        self.assertEqual("alarmklockor", apply_form_operation("alarmklocka", replacement, replace_tail=lambda _base, _tail: "alarmklockor"))
 
 
 if __name__ == "__main__":
