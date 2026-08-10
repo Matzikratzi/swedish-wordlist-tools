@@ -136,6 +136,32 @@ class NounSharedSlotInterpreterTests(unittest.TestCase):
             _assign_labelled_noun_slots_shared(self._tokens("+en +ar"))
         )
 
+    def test_underscore_only_splits_into_independent_branches(self) -> None:
+        branches = split_alternative_branches("+xy _ -xyz")
+        self.assertEqual(2, len(branches))
+        self.assertEqual(("+xy",), branches[0].tokens)
+        self.assertEqual(("-xyz",), branches[1].tokens)
+
+    def test_each_underscore_branch_restarts_implicit_slot_state(self) -> None:
+        branches = split_alternative_branches("+xy +ab _ -xyz +cd")
+        self.assertEqual(2, len(branches))
+
+        first = _assign_unlabelled_relative_noun_slots_shared(branches[0].tokens)
+        second = _assign_unlabelled_relative_noun_slots_shared(branches[1].tokens)
+        self.assertIsNotNone(first)
+        self.assertIsNotNone(second)
+        assert first is not None
+        assert second is not None
+
+        self.assertEqual(
+            ("sg_def", "pl_indef"),
+            tuple(item.slot for item in first),
+        )
+        self.assertEqual(
+            ("sg_def", "pl_indef"),
+            tuple(item.slot for item in second),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
