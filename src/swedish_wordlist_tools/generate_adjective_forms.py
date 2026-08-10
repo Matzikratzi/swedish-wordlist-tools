@@ -5,8 +5,8 @@ import json
 from pathlib import Path
 from typing import Any, Iterable
 
+from .adjective_clean_room_interpreter import interpret_adjective_row
 from .adjective_form_provenance import form_provenance_details
-from .adjective_row_interpreter import interpret_adjective_row
 from .analyze_adjectives import _value
 from .jsonl import read_jsonl
 from .saol_boundaries import restore_replacement_bar_prefix
