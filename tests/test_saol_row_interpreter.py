@@ -44,6 +44,31 @@ class SaolRowInterpreterTests(unittest.TestCase):
         self.assertEqual("fiskelaget", row.form("sg_def") if row else None)
         self.assertEqual("fiskelag", row.form("pl_indef") if row else None)
 
+    def test_best_plural_is_one_compound_slot_instruction(self) -> None:
+        row = interpret_noun_row(
+            self.record("kammare", "+n; pl. +, best. pl. kamrarna")
+        )
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual("kammaren", row.form("sg_def"))
+        self.assertEqual("kammare", row.form("pl_indef"))
+        self.assertEqual("kamrarna", row.form("pl_def"))
+
+    def test_fully_written_noun_forms_use_shared_slot_order(self) -> None:
+        row = interpret_noun_row(self.record("broder", "brodern bröder"))
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual("brodern", row.form("sg_def"))
+        self.assertEqual("bröder", row.form("pl_indef"))
+
+    def test_applies_suffixes_to_final_word_in_phrase(self) -> None:
+        row = interpret_noun_row(
+            self.record("a conto-betalning", "+en +ar", "a conto-be·tal·ning")
+        )
+        self.assertIsNotNone(row)
+        self.assertEqual("a conto-betalningen", row.form("sg_def") if row else None)
+        self.assertEqual("a conto-betalningar", row.form("pl_indef") if row else None)
+
     def test_uses_bar_for_explicit_compound_head(self) -> None:
         row = interpret_noun_row(self.record("alarmklocka", "+n -klockor", "a·larm|klocka"))
         self.assertIsNotNone(row)
