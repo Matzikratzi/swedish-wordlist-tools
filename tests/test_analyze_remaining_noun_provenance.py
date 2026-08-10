@@ -42,11 +42,14 @@ class RemainingNounProvenanceTests(unittest.TestCase):
             },
         ]
         summary = analyze(validation, artifacts)
-        self.assertEqual(2, summary["records"])
+        # ``+en _ ankaret`` is now structurally verified: one relative branch
+        # plus one explicit branch. It therefore leaves the remaining-mismatch
+        # provenance population just like the ordinary ``+en +er`` row.
+        self.assertEqual(1, summary["records"])
         self.assertEqual(1, summary["bucket_counts"]["mixed_direct_and_derived"])
-        self.assertEqual(1, summary["bucket_counts"]["direct_saol_slots_only"])
+        self.assertNotIn("direct_saol_slots_only", summary["bucket_counts"])
         self.assertEqual(1, summary["extra_form_kind_counts"]["derived_definite_plural"])
-        self.assertEqual(2, summary["extra_form_kind_counts"]["interpreted_slot"])
+        self.assertEqual(1, summary["extra_form_kind_counts"]["interpreted_slot"])
 
     def test_ignores_non_noun_non_mismatch_and_mechanical_rows(self) -> None:
         validation = [
