@@ -8,7 +8,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-DEFAULT_BASE = "https://spraakbanken.gu.se/karp-api"
+DEFAULT_BASE = "https://spraakbanken4.it.gu.se/karps/v1/"
 DEFAULT_OUT = Path("reports/karp-saol14-probe.json")
 DEFAULT_WORDS = ("halländska", "hajp", "akne", "ankare")
 
