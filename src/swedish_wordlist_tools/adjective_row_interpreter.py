@@ -44,6 +44,24 @@ def _apply_positive_operation(
     )
 
 
+def _dedupe_forms(forms: list[AdjectiveForm]) -> tuple[AdjectiveForm, ...]:
+    deduped: list[AdjectiveForm] = []
+    seen: set[tuple[str, str]] = set()
+    for form in forms:
+        marker = (form.written_form, form.slot)
+        if marker not in seen:
+            deduped.append(form)
+            seen.add(marker)
+    return tuple(deduped)
+
+
+def _single_operation(token: str) -> FormOperation | None:
+    parsed = parse_form_operations(token)
+    if parsed is None or len(parsed) != 1:
+        return None
+    return parsed[0]
+
+
 def interpret_unlabelled_positive_adjective_slots(
     record: dict[str, Any],
 ) -> AdjectiveSlots | None:
@@ -71,10 +89,10 @@ def interpret_unlabelled_positive_adjective_slots(
 
     operations: list[FormOperation] = []
     for token in tokens:
-        parsed = parse_form_operations(token)
-        if parsed is None or len(parsed) != 1:
+        operation = _single_operation(token)
+        if operation is None:
             return None
-        operations.append(parsed[0])
+        operations.append(operation)
 
     forms: list[AdjectiveForm] = [AdjectiveForm(lemma, "common_singular")]
     if len(operations) == 1:
@@ -104,17 +122,103 @@ def interpret_unlabelled_positive_adjective_slots(
             )
         )
 
-    deduped: list[AdjectiveForm] = []
-    seen: set[tuple[str, str]] = set()
-    for form in forms:
-        marker = (form.written_form, form.slot)
-        if marker not in seen:
-            deduped.append(form)
-            seen.add(marker)
     return AdjectiveSlots(
         lemma=lemma,
-        forms=tuple(deduped),
+        forms=_dedupe_forms(forms),
         rule="structural_positive_sequence",
+    )
+
+
+def interpret_simple_labelled_adjective_slots(
+    record: dict[str, Any],
+) -> AdjectiveSlots | None:
+    """Interpret simple positive ADJ labels independently from form operations.
+
+    ``n.``/``neutr.``, ``pl.`` and ``mask.`` select only the grammatical slot.
+    The following token remains an ordinary SAOL form operation. After a labelled
+    neuter form, one further unlabelled operation is the ordinary
+    definite/plural slot, which covers notations such as ``n. +, +a`` without a
+    whole-pattern rule.
+
+    Comparison labels, usage restrictions, branch separators and compound label
+    phrases are deliberately left to later structural layers or the legacy
+    fallback.
+    """
+
+    lemma = _value(record, "normaliserat_ord").casefold()
+    raw_text = _value(record, "text")
+    if not lemma or " " in lemma or not lemma.isalpha() or not raw_text:
+        return None
+
+    text = normalize_notation(raw_text)
+    if " _ " in f" {text} ":
+        return None
+    tokens = tokenize_notation(text)
+    if tokens is None:
+        return None
+
+    slot_labels = {
+        "n.": "neuter_singular",
+        "neutr.": "neuter_singular",
+        "pl.": "definite_or_plural",
+        "mask.": "masculine_definite",
+    }
+    forbidden = {
+        "best.",
+        "komp.",
+        "superl.",
+        "el.",
+        "h",
+        "ibl.",
+    }
+
+    forms: list[AdjectiveForm] = [AdjectiveForm(lemma, "common_singular")]
+    selected_slot: str | None = None
+    previous_slot: str | None = None
+    saw_label = False
+    saw_operation = False
+
+    for token in tokens:
+        lower = token.casefold()
+        if token in {",", ";"}:
+            continue
+        if lower in forbidden or lower.endswith(":"):
+            return None
+        if lower in slot_labels:
+            selected_slot = slot_labels[lower]
+            saw_label = True
+            continue
+
+        operation = _single_operation(token)
+        if operation is None:
+            return None
+
+        if selected_slot is not None:
+            slot = selected_slot
+            selected_slot = None
+        elif previous_slot == "neuter_singular":
+            slot = "definite_or_plural"
+        else:
+            return None
+
+        value = _apply_positive_operation(
+            lemma,
+            operation,
+            neuter=slot == "neuter_singular",
+        )
+        if value is None:
+            return None
+        forms.append(AdjectiveForm(value, slot))
+        previous_slot = slot
+        saw_operation = True
+
+    if selected_slot is not None or not saw_label or not saw_operation:
+        return None
+
+    return AdjectiveSlots(
+        lemma=lemma,
+        forms=_dedupe_forms(forms),
+        rule="structural_labelled_positive_slots",
     )
 
 
@@ -123,5 +227,6 @@ def interpret_adjective_row(record: dict[str, Any]) -> AdjectiveSlots | None:
 
     return (
         interpret_unlabelled_positive_adjective_slots(record)
+        or interpret_simple_labelled_adjective_slots(record)
         or interpret_simple_adjective_slots(record)
     )
