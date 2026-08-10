@@ -62,7 +62,32 @@ class NounHomonymStyckeReplacementTests(unittest.TestCase):
                 self.assertIn(plural, forms)
                 self.assertIn(plural + "na", forms)
 
-    def test_ord_bar_must_resolve_exactly_to_normalized_lemma(self) -> None:
+    def test_triple_consonant_boundary_uses_normalized_spelling(self) -> None:
+        forms = self._forms(
+            "halländska",
+            "+n -ländskor",
+            "halländska",
+            "hall|ländska",
+        )
+        self.assertIn("halländska", forms)
+        self.assertIn("halländskan", forms)
+        self.assertIn("halländskor", forms)
+        self.assertIn("halländskorna", forms)
+        self.assertNotIn("hallländska", forms)
+        self.assertNotIn("hallländskor", forms)
+
+    def test_distinct_ord_spelling_is_not_structural_without_variant_evidence(self) -> None:
+        record = {
+            "normaliserat_ord": "akne",
+            "upos": "NOUN",
+            "ordkl": "s. +n",
+            "text": "+n -former",
+            "stycke": "akne",
+            "ord": "ac|ne",
+        }
+        self.assertIsNone(complete_noun_entry(record, None))
+
+    def test_ord_bar_must_resolve_to_normalized_lemma(self) -> None:
         record = {
             "normaliserat_ord": "ankare",
             "upos": "NOUN",
@@ -76,7 +101,7 @@ class NounHomonymStyckeReplacementTests(unittest.TestCase):
     def test_same_structure_is_not_suffix_specific(self) -> None:
         examples = (
             ("frilista", "+n -listor", "1fri|lista", "frilistor"),
-            ("halländska", "+n -ländskor", "1hal|ländska", "halländskor"),
+            ("halländska", "+n -ländskor", "halländska", "halländskor"),
             ("flåhacka", "+n -hackor", "1flå|hacka", "flåhackor"),
         )
         for lemma, text, stycke, plural in examples:
