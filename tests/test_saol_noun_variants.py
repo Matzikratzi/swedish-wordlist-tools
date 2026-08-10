@@ -61,7 +61,7 @@ class SaolNounVariantTests(unittest.TestCase):
             forms = forms_from_artifacts(self._acne_records()[0], artifacts)
             self.assertEqual({"acne", "acnes", "acnen", "acnens"}, forms)
 
-    def test_hv_is_required_before_rebasing(self):
+    def test_hv_is_required_before_rebasing_single_branch_ord_variant(self):
         records = [{"normaliserat_ord": "akne", "homonr": "0", "subnr": 1, "ordkl": "s. +n", "stycke": "akne", "text": "+n", "upos": "NOUN", "ord": "acne"}]
         prepared = prepare_noun_variant_records(records)
         self.assertEqual("akne", prepared[0]["normaliserat_ord"])
@@ -107,19 +107,46 @@ class SaolNounVariantTests(unittest.TestCase):
         forms = {item["written_form"] for item in rows[0]["forms"]}
         self.assertEqual(
             {
-                "bankväsen",
-                "bankväsens",
-                "bankväsende",
-                "bankväsendes",
-                "bankväsendet",
-                "bankväsendets",
-                "bankväsenden",
-                "bankväsendens",
-                "bankväsendena",
-                "bankväsendenas",
+                "bankväsen", "bankväsens", "bankväsende", "bankväsendes",
+                "bankväsendet", "bankväsendets", "bankväsenden", "bankväsendens",
+                "bankväsendena", "bankväsendenas",
             },
             forms,
         )
+
+    def test_duplicate_noun_rows_bind_hajp_and_hype_to_separate_branches(self):
+        records = [
+            {
+                "normaliserat_ord": "hajp", "homonr": "1", "subnr": 386768,
+                "ordkl": "s. +en; pl. +er el. ...", "stycke": "hajp",
+                "text": "+en; pl. +er el. +ar _ +n [haj>pen]",
+                "upos": "NOUN", "ord": "hajp",
+            },
+            {
+                "normaliserat_ord": "hajp", "homonr": "0", "subnr": 386768,
+                "ordkl": "s. +en; pl. +er el. ...", "stycke": "hajp",
+                "text": "+en; pl. +er el. +ar _ +n [haj>pen]",
+                "upos": "NOUN", "ord": "hype",
+            },
+        ]
+        prepared = prepare_noun_variant_records(records)
+        for row in prepared:
+            self.assertEqual("hype", row["_saol_alternative_lemma"])
+            self.assertEqual("duplicate_noun_article_rows", row["_saol_variant_evidence"])
+
+        rows, _comparisons, _summary = generate_noun_artifact(prepared)
+        for artifact in rows:
+            forms = {item["written_form"] for item in artifact["forms"]}
+            self.assertEqual(
+                {
+                    "hajp", "hajps", "hajpen", "hajpens",
+                    "hajper", "hajpers", "hajperna", "hajpernas",
+                    "hajpar", "hajpars", "hajparna", "hajparnas",
+                    "hype", "hypes", "hypen", "hypens",
+                },
+                forms,
+            )
+            self.assertNotIn("hajpn", forms)
 
     def test_allan_cross_reference_alone_does_not_create_noun_variant(self):
         records = [{"normaliserat_ord": "all", "homonr": "0", "subnr": 1, "ordkl": "(hv)", "stycke": "allan", "text": "(null)", "upos": "X", "ord": "allan"}]
