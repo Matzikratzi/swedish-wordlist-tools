@@ -6,8 +6,7 @@ from swedish_wordlist_tools.saol_notation import split_alternative_branches
 from swedish_wordlist_tools.saol_row_interpreter import (
     _NOUN_LABELLED_SLOT_GRAMMAR,
     _assign_labelled_noun_slots_shared,
-    _assign_unlabelled_explicit_noun_slots_shared,
-    _assign_unlabelled_relative_noun_slots_shared,
+    _assign_unlabelled_noun_atoms_shared,
     _coalesce_noun_slot_labels,
     _explicit_branch_bases,
 )
@@ -72,16 +71,20 @@ class NounSharedSlotInterpreterTests(unittest.TestCase):
                     self.assertIsNone(assigned[0].alternative_marker)
                     self.assertEqual(marker.casefold(), assigned[1].alternative_marker)
 
-    def test_unlabelled_relative_alternatives_reuse_same_slot_for_each_operation_kind(self) -> None:
+    def test_unlabelled_alternatives_reuse_same_slot_for_each_operation_kind(self) -> None:
+        record = {"ordkl": "s."}
         for first, second in (
             ("+xy", "+ab"),
             ("+xy", "-xyz"),
             ("-xyz", "+xy"),
             ("+xy", "+"),
+            ("+xy", "helform"),
+            ("helform", "+xy"),
         ):
             with self.subTest(first=first, second=second):
-                assigned = _assign_unlabelled_relative_noun_slots_shared(
-                    self._tokens(f"{first} el. {second}")
+                assigned = _assign_unlabelled_noun_atoms_shared(
+                    record,
+                    self._tokens(f"{first} el. {second}"),
                 )
                 self.assertIsNotNone(assigned)
                 assert assigned is not None
@@ -89,22 +92,7 @@ class NounSharedSlotInterpreterTests(unittest.TestCase):
                     ("sg_def", "sg_def"),
                     tuple(item.slot for item in assigned),
                 )
-                self.assertIsNone(assigned[0].alternative_marker)
                 self.assertEqual("el.", assigned[1].alternative_marker)
-
-    def test_unlabelled_explicit_alternatives_reuse_same_slot_in_noun_context(self) -> None:
-        assigned = _assign_unlabelled_explicit_noun_slots_shared(
-            {"ordkl": "s. formen el. formen2"},
-            self._tokens("formen el. formen2"),
-        )
-        self.assertIsNotNone(assigned)
-        assert assigned is not None
-        self.assertEqual(
-            ("sg_def", "sg_def"),
-            tuple(item.slot for item in assigned),
-        )
-        self.assertIsNone(assigned[0].alternative_marker)
-        self.assertEqual("el.", assigned[1].alternative_marker)
 
     def test_vard_is_transparent_usage_metadata_in_noun_notation(self) -> None:
         assigned = _assign_labelled_noun_slots_shared(
@@ -135,20 +123,27 @@ class NounSharedSlotInterpreterTests(unittest.TestCase):
                 assert assigned is not None
                 self.assertEqual((expected_slot,), tuple(item.slot for item in assigned))
 
-    def test_unlabelled_relative_atoms_compose_without_new_rule(self) -> None:
-        assigned = _assign_unlabelled_relative_noun_slots_shared(
-            self._tokens("+xy -xyz")
-        )
-        self.assertIsNotNone(assigned)
-        assert assigned is not None
-        self.assertEqual(
-            ("sg_def", "pl_indef"),
-            tuple(item.slot for item in assigned),
-        )
+    def test_unlabelled_atoms_compose_without_kind_specific_rule(self) -> None:
+        record = {"ordkl": "s."}
+        for text in (
+            "+xy -xyz",
+            "+xy helform",
+            "helform +xy",
+            "+xy +",
+        ):
+            with self.subTest(text=text):
+                assigned = _assign_unlabelled_noun_atoms_shared(record, self._tokens(text))
+                self.assertIsNotNone(assigned)
+                assert assigned is not None
+                self.assertEqual(
+                    ("sg_def", "pl_indef"),
+                    tuple(item.slot for item in assigned),
+                )
 
     def test_optional_expansion_stays_in_first_implicit_slot(self) -> None:
-        assigned = _assign_unlabelled_relative_noun_slots_shared(
-            self._tokens("+(e)n")
+        assigned = _assign_unlabelled_noun_atoms_shared(
+            {"ordkl": "s."},
+            self._tokens("+(e)n"),
         )
         self.assertIsNotNone(assigned)
         assert assigned is not None
@@ -157,8 +152,8 @@ class NounSharedSlotInterpreterTests(unittest.TestCase):
             tuple(item.slot for item in assigned),
         )
 
-    def test_explicit_atom_uses_shared_slots_only_in_noun_context(self) -> None:
-        assigned = _assign_unlabelled_explicit_noun_slots_shared(
+    def test_explicit_atom_requires_noun_context(self) -> None:
+        assigned = _assign_unlabelled_noun_atoms_shared(
             {"ordkl": "s. helformen"},
             self._tokens("helformen"),
         )
@@ -167,16 +162,20 @@ class NounSharedSlotInterpreterTests(unittest.TestCase):
         self.assertEqual(("sg_def",), tuple(item.slot for item in assigned))
 
         self.assertIsNone(
-            _assign_unlabelled_explicit_noun_slots_shared(
+            _assign_unlabelled_noun_atoms_shared(
                 {"ordkl": "adj. helformen"},
                 self._tokens("helformen"),
             )
         )
 
-    def test_explicit_form_is_not_relative_composition(self) -> None:
-        self.assertIsNone(
-            _assign_unlabelled_relative_noun_slots_shared(self._tokens("helform"))
+    def test_relative_atoms_do_not_require_noun_context(self) -> None:
+        assigned = _assign_unlabelled_noun_atoms_shared(
+            {},
+            self._tokens("+en +ar"),
         )
+        self.assertIsNotNone(assigned)
+        assert assigned is not None
+        self.assertEqual(("sg_def", "pl_indef"), tuple(item.slot for item in assigned))
 
     def test_labelled_contract_does_not_claim_unlabelled_sequence(self) -> None:
         self.assertIsNone(
@@ -193,7 +192,7 @@ class NounSharedSlotInterpreterTests(unittest.TestCase):
         branches = split_alternative_branches("+xy +ab _ -xyz +cd")
         self.assertEqual(2, len(branches))
         assigned = [
-            _assign_unlabelled_relative_noun_slots_shared(branch.tokens)
+            _assign_unlabelled_noun_atoms_shared({}, branch.tokens)
             for branch in branches
         ]
         self.assertTrue(all(items is not None for items in assigned))
