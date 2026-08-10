@@ -41,6 +41,22 @@ class NounMechanicalValidationTests(unittest.TestCase):
         self.assertTrue(is_mechanically_verified_noun_notation("best. +; i: pl. används: -verkningar"))
         self.assertTrue(is_mechanically_verified_noun_notation("best. +; i: pl. används: -ansökningar"))
 
+    def test_fully_relative_el_alternatives_are_mechanical(self):
+        for notation in (
+            "+et el. +en",
+            "+en el. +et",
+            "+et; pl. +er el. +",
+            "+t; pl. +n el. +",
+            "+en; pl. +ar el. +er",
+            "+et el. +en; pl. +",
+            "+et el. +en; pl. + el. +er",
+            "+et; pl. + el. +er",
+            "+n el. +t; pl. +",
+            "+en el. +et; pl. +ar el. +",
+        ):
+            with self.subTest(notation=notation):
+                self.assertTrue(is_mechanically_verified_noun_notation(notation))
+
     def test_fully_relative_underscore_branches_are_mechanical(self):
         for notation in (
             "+det; pl. +, best. pl. +dena _ +t +n",
@@ -53,11 +69,11 @@ class NounMechanicalValidationTests(unittest.TestCase):
             with self.subTest(notation=notation):
                 self.assertTrue(is_mechanically_verified_noun_notation(notation))
 
-    def test_non_relative_or_el_branching_stays_diagnostic(self):
+    def test_lexical_or_h_branching_stays_diagnostic(self):
         for notation in (
             "+n; pl. -kamrar el. +, best. pl. -kamrarna el. -ka",
-            "+et; pl. +er el. +",
-            "+t; pl. +n el. +",
+            "+en el. vard. -dan; pl. +ar",
+            "+n; pl. + H +s",
             "+en _ ankaret",
             "+en _ -rötter",
         ):
@@ -83,10 +99,10 @@ class NounMechanicalValidationTests(unittest.TestCase):
                     )
                 )
 
-    def test_ordkl_is_not_used_when_text_contains_notation(self):
+    def test_ordkl_is_not_used_when_text_contains_lexical_notation(self):
         self.assertFalse(
             is_mechanically_verified_noun_row(
-                {"lemma": "test", "notation": "+t; pl. +n el. +", "ordkl": "s. oböjl."}
+                {"lemma": "test", "notation": "+en el. vard. -dan; pl. +ar", "ordkl": "s. oböjl."}
             )
         )
 
