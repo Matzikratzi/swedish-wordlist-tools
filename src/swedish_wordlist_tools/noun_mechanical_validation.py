@@ -148,6 +148,8 @@ def _artifact_materializes_replacements(row: dict[str, Any]) -> bool:
 
 def is_mechanically_verified_noun_notation(row_or_notation: dict[str, Any] | str) -> bool:
     notation = normalized_notation(row_or_notation)
+    if is_null_noun_notation(notation):
+        return False
     if _is_directly_materialized_notation(notation):
         return True
 
