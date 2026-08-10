@@ -279,6 +279,7 @@ def _noun_shared_implicit_slot(index: int, last_slot: str | None, _operation: Fo
 
 
 _NOUN_ALTERNATIVE_MARKERS = frozenset({"el.", "h", "ibl."})
+_NOUN_TRANSPARENT_MARKERS = frozenset({"vard."})
 
 _NOUN_LABELLED_SLOT_GRAMMAR = SlotGrammar(
     label_slots={
@@ -288,6 +289,7 @@ _NOUN_LABELLED_SLOT_GRAMMAR = SlotGrammar(
     },
     implicit_slot=_noun_shared_implicit_slot,
     alternative_markers=_NOUN_ALTERNATIVE_MARKERS,
+    transparent_markers=_NOUN_TRANSPARENT_MARKERS,
     require_marker=True,
 )
 
@@ -295,6 +297,7 @@ _NOUN_UNLABELLED_SLOT_GRAMMAR = SlotGrammar(
     label_slots={},
     implicit_slot=_noun_shared_implicit_slot,
     alternative_markers=_NOUN_ALTERNATIVE_MARKERS,
+    transparent_markers=_NOUN_TRANSPARENT_MARKERS,
     require_marker=False,
 )
 
@@ -327,6 +330,10 @@ def _is_noun_alternative_marker(token: str) -> bool:
     return token.strip().strip("()").casefold() in _NOUN_ALTERNATIVE_MARKERS
 
 
+def _is_noun_transparent_marker(token: str) -> bool:
+    return token.strip().strip("()").casefold() in _NOUN_TRANSPARENT_MARKERS
+
+
 def _assign_labelled_noun_slots_shared(tokens: tuple[str, ...]):
     """Use the shared engine only for branches with explicit noun slot labels."""
 
@@ -343,7 +350,11 @@ def _assign_unlabelled_relative_noun_slots_shared(tokens: tuple[str, ...]):
 
     saw_form = False
     for token in tokens:
-        if token in {",", ";"} or _is_noun_alternative_marker(token):
+        if (
+            token in {",", ";"}
+            or _is_noun_alternative_marker(token)
+            or _is_noun_transparent_marker(token)
+        ):
             continue
         operations = parse_form_operations(token)
         if operations is None:
@@ -368,7 +379,11 @@ def _assign_unlabelled_explicit_noun_slots_shared(
 
     saw_form = False
     for token in tokens:
-        if token in {",", ";"} or _is_noun_alternative_marker(token):
+        if (
+            token in {",", ";"}
+            or _is_noun_alternative_marker(token)
+            or _is_noun_transparent_marker(token)
+        ):
             continue
         operations = parse_form_operations(token)
         if operations is None:
