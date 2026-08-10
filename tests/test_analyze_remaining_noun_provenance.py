@@ -15,7 +15,7 @@ class RemainingNounProvenanceTests(unittest.TestCase):
             },
             {
                 "record_id": "2", "homonym_number": "1", "lemma": "katt", "upos": "NOUN",
-                "status": "form_set_mismatch", "notation": "+n; pl. + H +s",
+                "status": "form_set_mismatch", "notation": "+en _ ankaret",
                 "extra_from_saol": ["katter"], "missing_from_saol": [],
             },
             {
