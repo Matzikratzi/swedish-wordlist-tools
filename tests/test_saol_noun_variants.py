@@ -88,13 +88,18 @@ class SaolNounVariantTests(unittest.TestCase):
         rows, _comparisons, _summary = generate_noun_artifact(prepared)
         variant_artifact = next(row for row in rows if row["record_id"] == "442860" and row["homonym_number"] == "0")
         forms = {item["written_form"] for item in variant_artifact["forms"]}
+        # The article text is exactly 50 characters, so its final token
+        # ``ankarna`` is not trusted. Keep only the forms before that fragment,
+        # and do not invent the superficially regular but wrong ``ankarena``.
         self.assertEqual(
             {
                 "ankar", "ankars", "ankaret", "ankarets", "ankare", "ankares",
-                "ankaren", "ankarens", "ankarna", "ankarnas",
+                "ankaren", "ankarens",
             },
             forms,
         )
+        self.assertNotIn("ankarena", forms)
+        self.assertNotIn("ankarenas", forms)
 
     def test_two_branch_vasen_uses_explicit_variant_as_second_base(self):
         records = [
