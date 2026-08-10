@@ -105,6 +105,20 @@ class NounValidationRebaselineTests(unittest.TestCase):
         self.assertNotIn("remaining_form_set_mismatch", summary["counts"])
         self.assertFalse(any(key.startswith("scope_mismatch_") for key in summary["counts"]))
 
+    def test_truncated_unsupported_source_is_also_source_error(self):
+        notation = "+n [då>$en el. då>djen]; pl. +r [då>$er el. då>dje"
+        self.assertEqual(50, len(notation))
+        rows = [{
+            "upos": "NOUN", "lemma": "doge", "record_id": "43", "homonym_number": "1",
+            "notation": notation,
+            "generated_forms": [],
+            "saldo_forms": ["doge"],
+            "status": "saol_pattern_unsupported",
+        }]
+        summary = classify(rows)
+        self.assertEqual(1, summary["counts"]["source_text_truncated"])
+        self.assertNotIn("unsupported", summary["counts"])
+
     def test_variant_coverage_difference_is_separate_from_parser_and_scope_mismatch(self):
         rows = [{
             "upos": "NOUN", "lemma": "akne", "record_id": "42", "homonym_number": "0",
