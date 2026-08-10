@@ -94,7 +94,24 @@ class NounSharedSlotInterpreterTests(unittest.TestCase):
                 )
                 self.assertEqual("el.", assigned[1].alternative_marker)
 
-    def test_vard_is_transparent_usage_metadata_in_noun_notation(self) -> None:
+    def test_each_editorial_token_is_independently_transparent(self) -> None:
+        cases = (
+            ("i: pl. +xy", "pl_indef"),
+            ("som: pl. +xy", "pl_indef"),
+            ("pl. används: +xy", "pl_indef"),
+            ("pl. anv. +xy", "pl_indef"),
+            ("pl. kan: +xy", "pl_indef"),
+            ("pl. användas: +xy", "pl_indef"),
+            ("pl. vard. +xy", "pl_indef"),
+        )
+        for text, expected_slot in cases:
+            with self.subTest(text=text):
+                assigned = self._assign(text)
+                self.assertIsNotNone(assigned)
+                assert assigned is not None
+                self.assertEqual((expected_slot,), tuple(item.slot for item in assigned))
+
+    def test_vard_is_transparent_between_alternative_marker_and_form(self) -> None:
         assigned = _assign_labelled_noun_slots_shared(
             self._tokens("+en el. vard. -dan; pl. +ar")
         )
