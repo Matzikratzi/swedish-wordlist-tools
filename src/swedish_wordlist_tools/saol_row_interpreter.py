@@ -345,39 +345,23 @@ def _assign_labelled_noun_slots_shared(tokens: tuple[str, ...]):
     )
 
 
-def _assign_unlabelled_relative_noun_slots_shared(tokens: tuple[str, ...]):
-    """Compose relative atoms and same-slot alternatives without a paradigm rule."""
-
-    saw_form = False
-    for token in tokens:
-        if (
-            token in {",", ";"}
-            or _is_noun_alternative_marker(token)
-            or _is_noun_transparent_marker(token)
-        ):
-            continue
-        operations = parse_form_operations(token)
-        if operations is None:
-            return None
-        if any(operation.kind is FormOperationKind.EXPLICIT for operation in operations):
-            return None
-        saw_form = True
-    if not saw_form:
-        return None
-    return assign_slots_with_grammar(tokens, _NOUN_UNLABELLED_SLOT_GRAMMAR)
-
-
-def _assign_unlabelled_explicit_noun_slots_shared(
+def _assign_unlabelled_noun_atoms_shared(
     record: dict[str, Any],
     tokens: tuple[str, ...],
 ):
-    """Assign explicit full forms and same-slot alternatives in noun context."""
+    """Compose any independently valid noun form atoms in one sequence.
+
+    Relative operations and explicit full forms are primitive peers here.  The
+    shared slot engine decides only where successive atoms belong.  Explicit
+    lexical atoms require verified noun inflection context so ordinary prose is
+    not mistaken for a paradigm.
+    """
 
     ordkl = re.sub(r"\s+", " ", str(record.get("ordkl", "")).strip()).casefold()
-    if re.search(r"\bs\.", ordkl) is None:
-        return None
-
+    noun_context = re.search(r"\bs\.", ordkl) is not None
     saw_form = False
+    saw_explicit = False
+
     for token in tokens:
         if (
             token in {",", ";"}
@@ -388,10 +372,11 @@ def _assign_unlabelled_explicit_noun_slots_shared(
         operations = parse_form_operations(token)
         if operations is None:
             return None
-        if any(operation.kind is not FormOperationKind.EXPLICIT for operation in operations):
-            return None
         saw_form = True
-    if not saw_form:
+        if any(operation.kind is FormOperationKind.EXPLICIT for operation in operations):
+            saw_explicit = True
+
+    if not saw_form or (saw_explicit and not noun_context):
         return None
     return assign_slots_with_grammar(tokens, _NOUN_UNLABELLED_SLOT_GRAMMAR)
 
@@ -403,11 +388,7 @@ def _assign_noun_slots(record: dict[str, Any], tokens: tuple[str, ...]):
     if shared is not None:
         return shared
 
-    shared = _assign_unlabelled_relative_noun_slots_shared(tokens)
-    if shared is not None:
-        return shared
-
-    shared = _assign_unlabelled_explicit_noun_slots_shared(record, tokens)
+    shared = _assign_unlabelled_noun_atoms_shared(record, tokens)
     if shared is not None:
         return shared
 
