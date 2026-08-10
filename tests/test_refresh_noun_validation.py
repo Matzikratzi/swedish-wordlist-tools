@@ -10,6 +10,7 @@ class RefreshNounValidationTests(unittest.TestCase):
         self.assertEqual(
             (
                 "swedish_wordlist_tools.generate_noun_forms_variants",
+                "swedish_wordlist_tools.analyze_noun_shared_coverage",
                 "swedish_wordlist_tools.revalidate_direct_forms",
                 "swedish_wordlist_tools.rebaseline_noun_validation",
                 "swedish_wordlist_tools.analyze_remaining_noun_notations",
