@@ -178,6 +178,48 @@ def interpret_labelled_comparison_adjective_slots(record: dict[str, Any]) -> Adj
     return AdjectiveSlots(lemma=lemma, forms=_dedupe_forms(forms), rule="structural_labelled_comparison_slots")
 
 
+def _same_slot_alternative_implicit_slot(
+    index: int,
+    _last_slot: str | None,
+    operation: FormOperation,
+) -> str | None:
+    if index == 0 and operation.kind is FormOperationKind.EXPLICIT:
+        return "definite_or_plural"
+    return None
+
+
+_ADJECTIVE_SAME_SLOT_ALTERNATIVE_GRAMMAR = SlotGrammar(
+    label_slots={},
+    implicit_slot=_same_slot_alternative_implicit_slot,
+    alternative_markers=frozenset({"el."}),
+    require_marker=True,
+)
+
+
+def interpret_unlabelled_adjective_alternatives(record: dict[str, Any]) -> AdjectiveSlots | None:
+    """Interpret ``X el. Y`` as two explicit realizations of one slot."""
+    lemma = _value(record, "normaliserat_ord").casefold()
+    raw_text = _value(record, "text")
+    if not lemma or " " in lemma or not lemma.isalpha() or "el." not in normalize_notation(raw_text):
+        return None
+    operations = interpret_single_slot_sequence(raw_text, _ADJECTIVE_SAME_SLOT_ALTERNATIVE_GRAMMAR)
+    if operations is None:
+        return None
+    forms: list[AdjectiveForm] = [AdjectiveForm(lemma, "common_singular")]
+    for item in operations:
+        if item.slot != "definite_or_plural":
+            return None
+        value = _apply_positive_operation(lemma, item.operation, neuter=False)
+        if value is None:
+            return None
+        forms.append(AdjectiveForm(value, item.slot))
+    return AdjectiveSlots(
+        lemma=lemma,
+        forms=_dedupe_forms(forms),
+        rule="structural_same_slot_alternatives",
+    )
+
+
 def interpret_usage_restricted_adjective_slots(record: dict[str, Any]) -> AdjectiveSlots | None:
     """Interpret restriction vocabulary as metadata, not inflection paradigms."""
     lemma = _value(record, "normaliserat_ord").casefold()
@@ -277,6 +319,7 @@ def interpret_adjective_row(record: dict[str, Any]) -> AdjectiveSlots | None:
         interpret_unlabelled_positive_adjective_slots(record)
         or interpret_labelled_positive_adjective_slots(record)
         or interpret_labelled_comparison_adjective_slots(record)
+        or interpret_unlabelled_adjective_alternatives(record)
         or interpret_usage_restricted_adjective_slots(record)
         or interpret_parallel_positive_adjective_slots(record)
         or interpret_simple_adjective_slots(record)
