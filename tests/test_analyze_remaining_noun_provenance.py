@@ -10,12 +10,12 @@ class RemainingNounProvenanceTests(unittest.TestCase):
         validation = [
             {
                 "record_id": "1", "homonym_number": "1", "lemma": "hund", "upos": "NOUN",
-                "status": "form_set_mismatch", "notation": "+en +ar el. +",
+                "status": "form_set_mismatch", "notation": "+en el. vard. -dan; pl. +ar",
                 "extra_from_saol": ["hundar", "hundarna"], "missing_from_saol": [],
             },
             {
                 "record_id": "2", "homonym_number": "1", "lemma": "katt", "upos": "NOUN",
-                "status": "form_set_mismatch", "notation": "+en +er el. +",
+                "status": "form_set_mismatch", "notation": "+n; pl. + H +s",
                 "extra_from_saol": ["katter"], "missing_from_saol": [],
             },
             {
