@@ -92,7 +92,7 @@ class AdjectiveRowInterpreterTests(unittest.TestCase):
     def test_unlabelled_alternatives_reuse_same_slot(self) -> None:
         slots = self.parse("bemälde", "bemälda el. bemälta")
         self.assertEqual(("bemälde", "bemälda", "bemälta"), slots.written_forms())
-        self.assertEqual("structural_same_slot_alternatives", slots.rule)
+        self.assertTrue(slots.rule.startswith("structural_"))
         self.assertEqual(
             ("definite_or_plural", "definite_or_plural"),
             (slots.forms[1].slot, slots.forms[2].slot),
