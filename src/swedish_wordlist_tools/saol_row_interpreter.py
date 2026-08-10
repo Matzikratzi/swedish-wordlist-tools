@@ -279,7 +279,17 @@ def _noun_shared_implicit_slot(index: int, last_slot: str | None, _operation: Fo
 
 
 _NOUN_ALTERNATIVE_MARKERS = frozenset({"el.", "h", "ibl."})
-_NOUN_TRANSPARENT_MARKERS = frozenset({"vard."})
+_NOUN_TRANSPARENT_MARKERS = frozenset(
+    {
+        "vard.",
+        "i:",
+        "som:",
+        "används:",
+        "anv.",
+        "kan:",
+        "användas:",
+    }
+)
 
 _NOUN_LABELLED_SLOT_GRAMMAR = SlotGrammar(
     label_slots={
