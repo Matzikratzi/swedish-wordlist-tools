@@ -129,20 +129,18 @@ def interpret_unlabelled_positive_adjective_slots(
     )
 
 
-def interpret_simple_labelled_adjective_slots(
+def interpret_labelled_positive_adjective_slots(
     record: dict[str, Any],
 ) -> AdjectiveSlots | None:
-    """Interpret simple positive ADJ labels independently from form operations.
+    """Interpret positive ADJ labels independently from form operations.
 
-    ``n.``/``neutr.``, ``pl.`` and ``mask.`` select only the grammatical slot.
-    The following token remains an ordinary SAOL form operation. After a labelled
-    neuter form, one further unlabelled operation is the ordinary
-    definite/plural slot, which covers notations such as ``n. +, +a`` without a
-    whole-pattern rule.
+    Labels only select slots. ``el.`` makes the next operation another realization
+    of the preceding slot. An initial unlabelled operation before a label is the
+    neuter form, so e.g. ``-blått, best. och: pl. + el. +a`` is interpreted as
+    four independent instructions rather than as one paradigm-shaped regex.
 
-    Comparison labels, usage restrictions, branch separators and compound label
-    phrases are deliberately left to later structural layers or the legacy
-    fallback.
+    Comparison labels, usage restrictions and ``_`` branches remain outside this
+    layer for now.
     """
 
     lemma = _value(record, "normaliserat_ord").casefold()
@@ -161,13 +159,12 @@ def interpret_simple_labelled_adjective_slots(
         "n.": "neuter_singular",
         "neutr.": "neuter_singular",
         "pl.": "definite_or_plural",
+        "best.": "definite_or_plural",
         "mask.": "masculine_definite",
     }
     forbidden = {
-        "best.",
         "komp.",
         "superl.",
-        "el.",
         "h",
         "ibl.",
     }
@@ -182,7 +179,19 @@ def interpret_simple_labelled_adjective_slots(
         lower = token.casefold()
         if token in {",", ";"}:
             continue
-        if lower in forbidden or lower.endswith(":"):
+        if lower in forbidden:
+            return None
+        if lower == "och:":
+            if not saw_label:
+                return None
+            continue
+        if lower == "el.":
+            if previous_slot is None:
+                return None
+            selected_slot = previous_slot
+            saw_label = True
+            continue
+        if lower.endswith(":"):
             return None
         if lower in slot_labels:
             selected_slot = slot_labels[lower]
@@ -196,6 +205,8 @@ def interpret_simple_labelled_adjective_slots(
         if selected_slot is not None:
             slot = selected_slot
             selected_slot = None
+        elif not saw_operation:
+            slot = "neuter_singular"
         elif previous_slot == "neuter_singular":
             slot = "definite_or_plural"
         else:
@@ -227,6 +238,6 @@ def interpret_adjective_row(record: dict[str, Any]) -> AdjectiveSlots | None:
 
     return (
         interpret_unlabelled_positive_adjective_slots(record)
-        or interpret_simple_labelled_adjective_slots(record)
+        or interpret_labelled_positive_adjective_slots(record)
         or interpret_simple_adjective_slots(record)
     )
