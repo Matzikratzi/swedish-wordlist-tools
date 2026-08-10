@@ -6,6 +6,7 @@ from swedish_wordlist_tools.saol_notation import (
     FormOperationKind,
     apply_form_operation,
     assign_labeled_slots,
+    assign_notation_branches,
     is_direct_form_operation,
     parse_form_operation,
     tokenize_notation,
@@ -96,6 +97,25 @@ class SaolNotationTests(unittest.TestCase):
         self.assertEqual(
             (("sg_def", "+n"), ("pl_indef", "+"), ("pl_indef", "-metrar")),
             tuple((item.slot, item.token) for item in assigned),
+        )
+
+    def test_complete_notation_is_only_branching_plus_independent_slot_operations(self) -> None:
+        branches = assign_notation_branches(
+            "+en; pl. +er el. +ar _ +n [haj>pen]",
+            singular_slot="sg_def",
+            plural_slot="pl_indef",
+            definite_plural_slot="pl_def",
+        )
+        self.assertIsNotNone(branches)
+        assert branches is not None
+        self.assertEqual(2, len(branches))
+        self.assertEqual(
+            (("sg_def", "+en"), ("pl_indef", "+er"), ("pl_indef", "+ar")),
+            tuple((item.slot, item.token) for item in branches[0].operations),
+        )
+        self.assertEqual(
+            (("sg_def", "+n"),),
+            tuple((item.slot, item.token) for item in branches[1].operations),
         )
 
     def test_drops_strict_prefix_alternative_at_source_limit(self) -> None:
