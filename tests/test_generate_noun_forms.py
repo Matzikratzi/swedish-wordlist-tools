@@ -7,6 +7,8 @@ from swedish_wordlist_tools.generate_noun_forms import (
     generate_noun_artifact,
     render_comparison,
 )
+from swedish_wordlist_tools.noun_paradigm import _complete_from_slots, _entry_from_interpreted_row, _genitive
+from swedish_wordlist_tools.saol_row_interpreter import InterpretedRow, KeyForm
 
 
 class GenerateNounFormsTests(unittest.TestCase):
@@ -40,6 +42,42 @@ class GenerateNounFormsTests(unittest.TestCase):
         )
         self.assertNotIn("base_generator", {form["source_stage"] for form in row["forms"]})
         self.assertIsNotNone(comparison)
+
+    def test_genitive_rule_is_an_independent_operation(self) -> None:
+        self.assertEqual("bils", _genitive("bil"))
+        self.assertEqual("bilens", _genitive("bilen"))
+        self.assertEqual("bilars", _genitive("bilar"))
+        self.assertEqual("bilarnas", _genitive("bilarna"))
+        for already_sibilant in ("hus", "box", "quiz"):
+            with self.subTest(form=already_sibilant):
+                self.assertEqual(already_sibilant, _genitive(already_sibilant))
+
+    def test_genitive_completion_is_applied_to_each_noun_slot_independently(self) -> None:
+        cases = (
+            ("lemma", "bil", "sg indef gen", "bils"),
+            ("sg_def", "bilen", "sg def gen", "bilens"),
+            ("pl_indef", "bilar", "pl indef gen", "bilars"),
+            ("pl_def", "bilarna", "pl def gen", "bilarnas"),
+        )
+        for slot, written_form, wanted_msd, expected_genitive in cases:
+            with self.subTest(slot=slot):
+                row = InterpretedRow(
+                    lemma="bil",
+                    pattern="atomic-test",
+                    key_forms=(KeyForm(slot, written_form, "atomic-test"),),
+                )
+                entry = _complete_from_slots(
+                    _entry_from_interpreted_row(row),
+                    derive_missing_plural_definite=False,
+                )
+                self.assertIn(
+                    (expected_genitive, wanted_msd),
+                    {
+                        (form.written_form, str(form.msd).casefold())
+                        for form in entry.word_forms
+                        if form.msd is not None
+                    },
+                )
 
     def test_comparison_classifies_more_forms_and_reasons(self) -> None:
         rows, comparisons, summary = generate_noun_artifact([
