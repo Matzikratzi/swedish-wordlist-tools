@@ -89,12 +89,33 @@ class AdjectiveRowInterpreterTests(unittest.TestCase):
                 self.assertEqual(expected, slots.written_forms())
                 self.assertEqual("structural_labelled_comparison_slots", slots.rule)
 
+    def test_unlabelled_comparison_alternatives_are_structural(self) -> None:
+        slots = self.parse("trång", "+t, trängre H +are, trängst H +ast")
+        self.assertEqual(
+            ("trång", "trångt", "trängre", "trångare", "trängst", "trångast"),
+            slots.written_forms(),
+        )
+        self.assertEqual("structural_unlabelled_comparison_alternatives", slots.rule)
+        self.assertEqual(
+            ("comparative", "comparative", "superlative", "superlative"),
+            tuple(form.slot for form in slots.forms[2:]),
+        )
+
     def test_unlabelled_alternatives_reuse_same_slot(self) -> None:
         slots = self.parse("bemälde", "bemälda el. bemälta")
         self.assertEqual(("bemälde", "bemälda", "bemälta"), slots.written_forms())
         self.assertTrue(slots.rule.startswith("structural_"))
         self.assertEqual(
             ("definite_or_plural", "definite_or_plural"),
+            (slots.forms[1].slot, slots.forms[2].slot),
+        )
+
+    def test_partial_labelled_sequence_is_structural(self) -> None:
+        slots = self.parse("enda", "ende, vard. superl. endaste")
+        self.assertEqual(("enda", "ende", "endaste"), slots.written_forms())
+        self.assertEqual("structural_partial_labelled_slots", slots.rule)
+        self.assertEqual(
+            ("masculine_definite", "superlative"),
             (slots.forms[1].slot, slots.forms[2].slot),
         )
 
