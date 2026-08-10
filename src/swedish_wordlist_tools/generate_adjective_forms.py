@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .adjective_form_provenance import form_provenance_details
-from .analyze_adjectives import _interpret_record, _value
+from .adjective_row_interpreter import interpret_adjective_row
+from .analyze_adjectives import _value
 from .jsonl import read_jsonl
 from .saol_boundaries import restore_replacement_bar_prefix
 from .saol_source_corrections import apply_saol_source_corrections
@@ -18,7 +19,7 @@ DEFAULT_SUMMARY = Path("reports/saol14-adjective-forms-summary.json")
 
 def generated_row(record: dict[str, Any]) -> dict[str, Any] | None:
     corrected = apply_saol_source_corrections(record)
-    slots = _interpret_record(corrected)
+    slots = interpret_adjective_row(corrected)
     if slots is None:
         return None
 
