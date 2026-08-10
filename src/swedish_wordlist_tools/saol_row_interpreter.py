@@ -278,6 +278,8 @@ def _noun_shared_implicit_slot(index: int, last_slot: str | None, _operation: Fo
     return "pl_indef"
 
 
+_NOUN_ALTERNATIVE_MARKERS = frozenset({"el.", "h", "ibl."})
+
 _NOUN_LABELLED_SLOT_GRAMMAR = SlotGrammar(
     label_slots={
         "pl.": "pl_indef",
@@ -285,13 +287,14 @@ _NOUN_LABELLED_SLOT_GRAMMAR = SlotGrammar(
         "best.pl.": "pl_def",
     },
     implicit_slot=_noun_shared_implicit_slot,
-    alternative_markers=frozenset({"el.", "h", "ibl."}),
+    alternative_markers=_NOUN_ALTERNATIVE_MARKERS,
     require_marker=True,
 )
 
 _NOUN_UNLABELLED_SLOT_GRAMMAR = SlotGrammar(
     label_slots={},
     implicit_slot=_noun_shared_implicit_slot,
+    alternative_markers=_NOUN_ALTERNATIVE_MARKERS,
     require_marker=False,
 )
 
@@ -320,6 +323,10 @@ def _has_noun_slot_label(tokens: tuple[str, ...]) -> bool:
     return "pl." in lowered or "best." in lowered
 
 
+def _is_noun_alternative_marker(token: str) -> bool:
+    return token.strip().strip("()").casefold() in _NOUN_ALTERNATIVE_MARKERS
+
+
 def _assign_labelled_noun_slots_shared(tokens: tuple[str, ...]):
     """Use the shared engine only for branches with explicit noun slot labels."""
 
@@ -332,16 +339,11 @@ def _assign_labelled_noun_slots_shared(tokens: tuple[str, ...]):
 
 
 def _assign_unlabelled_relative_noun_slots_shared(tokens: tuple[str, ...]):
-    """Compose already-proven relative form atoms without adding a paradigm rule.
-
-    This path accepts only primitive relative operations (``+...``, ``-...`` or
-    ``+``), including optional expansion inside one token. Explicit full forms,
-    labels, alternatives and prose stay on their separately validated paths.
-    """
+    """Compose relative atoms and same-slot alternatives without a paradigm rule."""
 
     saw_form = False
     for token in tokens:
-        if token in {",", ";"}:
+        if token in {",", ";"} or _is_noun_alternative_marker(token):
             continue
         operations = parse_form_operations(token)
         if operations is None:
@@ -358,7 +360,7 @@ def _assign_unlabelled_explicit_noun_slots_shared(
     record: dict[str, Any],
     tokens: tuple[str, ...],
 ):
-    """Assign explicit full forms only inside verified noun inflection context."""
+    """Assign explicit full forms and same-slot alternatives in noun context."""
 
     ordkl = re.sub(r"\s+", " ", str(record.get("ordkl", "")).strip()).casefold()
     if re.search(r"\bs\.", ordkl) is None:
@@ -366,7 +368,7 @@ def _assign_unlabelled_explicit_noun_slots_shared(
 
     saw_form = False
     for token in tokens:
-        if token in {",", ";"}:
+        if token in {",", ";"} or _is_noun_alternative_marker(token):
             continue
         operations = parse_form_operations(token)
         if operations is None:
