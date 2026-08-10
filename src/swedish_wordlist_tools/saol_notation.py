@@ -41,11 +41,15 @@ class SlotOperation:
     operation: FormOperation
 
 
-# These operations directly determine a written form once the slot/base is known.
-# EXPLICIT is deliberately ordklass-neutral: ``askor`` for a noun, ``sprang`` or
-# ``sprungit`` for a verb, and ``kan`` as an explicitly stated verb form are the
-# same primitive operation.  REPLACE_TAIL is different because its realization
-# still depends on deciding how the operation applies to the base spelling.
+@dataclass(frozen=True)
+class SlotBranch:
+    """One ``_`` branch after every form token has been assigned independently."""
+
+    text: str
+    tokens: tuple[str, ...]
+    operations: tuple[SlotOperation, ...]
+
+
 DIRECT_FORM_OPERATION_KINDS = frozenset(
     {
         FormOperationKind.UNCHANGED,
@@ -56,40 +60,20 @@ DIRECT_FORM_OPERATION_KINDS = frozenset(
 
 
 def is_direct_form_operation(operation: FormOperation) -> bool:
-    """Whether SAOL directly determines the resulting written form.
-
-    The distinction is about notation, not word class.  A fully written form is
-    always EXPLICIT, whether it is a noun plural, an irregular verb preterite,
-    a supine, or any other inflectional slot.
-    """
-
     return operation.kind in DIRECT_FORM_OPERATION_KINDS
 
 
 _BRACKET_COMMENT = re.compile(r"\s*\[[^\]]*\]")
 _HTML_TAG = re.compile(r"</?[^>]+>")
-_GLUED_LABEL_OPERATION = re.compile(
-    r"(?<!\w)([A-Za-zÅÄÖåäöÉéÜü]+\.)(?=[+\-])"
-)
+_GLUED_LABEL_OPERATION = re.compile(r"(?<!\w)([A-Za-zÅÄÖåäöÉéÜü]+\.)(?=[+\-])")
 _FORM_PAYLOAD = re.compile(r"[^\s;,_]+")
 _EXPLICIT_FORM = re.compile(r"[^\s;,+_]+")
 _OPTIONAL_FORM_TOKEN = re.compile(r"^([^()]*)\(([^()]+)\)([^()]*)$")
-_NOTATION_TOKEN_RE = re.compile(
-    r"pl\.|best\.|el\.|[;,]|[+\-][^\s;,_]*|[^\s;,+_]+",
-    re.IGNORECASE,
-)
+_NOTATION_TOKEN_RE = re.compile(r"pl\.|best\.|el\.|[;,]|[+\-][^\s;,_]*|[^\s;,+_]+", re.IGNORECASE)
 _SOURCE_TEXT_LIMIT = 50
 
 
 def _drop_untrusted_final_token(text: str) -> str:
-    """Drop the incomplete tail whenever SAOL ``text`` hits the export limit.
-
-    A 50-character field is potentially truncated. The final whitespace-delimited
-    token is therefore not evidence, even if it happens to look complete. If the
-    token was introduced by a final ``el.``, that marker is incomplete too and is
-    discarded with the token. Earlier completed tokens and labels remain usable.
-    """
-
     if len(text) != _SOURCE_TEXT_LIMIT:
         return text
     stripped = text.rstrip()
@@ -129,8 +113,6 @@ def normalize_notation(text: str) -> str:
 
 
 def tokenize_notation(text: str) -> tuple[str, ...] | None:
-    """Tokenize one SAOL notation branch without changing form spelling."""
-
     cleaned = _clean_notation_spelling(text)
     tokens: list[str] = []
     position = 0
@@ -145,8 +127,6 @@ def tokenize_notation(text: str) -> tuple[str, ...] | None:
 
 
 def expand_optional_form_token(token: str) -> tuple[str, ...]:
-    """Expand one parenthesized optional segment in any form token."""
-
     raw = token.strip()
     match = _OPTIONAL_FORM_TOKEN.fullmatch(raw)
     if match is None:
@@ -176,7 +156,6 @@ def parse_form_operation(token: str) -> FormOperation | None:
         if value and _FORM_PAYLOAD.fullmatch(value):
             return FormOperation(FormOperationKind.REPLACE_TAIL, value, raw)
         return None
-
     if (
         not raw
         or _is_comment_word(raw)
@@ -207,12 +186,12 @@ def assign_labeled_slots(
     definite_plural_slot: str,
     ignored_markers: frozenset[str] = frozenset(),
 ) -> tuple[SlotOperation, ...] | None:
-    """Assign form operations while ignoring SAOL's explanatory prose.
+    """Assign each form token independently to a grammatical slot.
 
-    ``el.``, ``H`` and ``ibl.`` all introduce an alternative realization of
-    the previously stated grammatical slot.  ``ibl.`` means "ibland" and marks
-    a fully licensed but less usual alternative; it does not weaken the form's
-    validity.
+    Labels change only the current slot. ``el.``, ``H`` and ``ibl.`` make the
+    next form an alternative realization of the previous slot. They never merge
+    two form tokens into a special paradigm. ``_`` is handled one level above
+    this function and merely starts another branch.
     """
 
     result: list[SlotOperation] = []
@@ -281,6 +260,55 @@ def assign_labeled_slots(
     return tuple(result) if result else None
 
 
+def split_alternative_branches(text: str) -> tuple[NotationBranch, ...]:
+    cleaned = _clean_notation_spelling(text)
+    branches: list[NotationBranch] = []
+    for branch_text in re.split(r"\s+_\s+", cleaned):
+        branch_text = branch_text.strip()
+        if not branch_text:
+            return ()
+        tokens = tokenize_notation(branch_text)
+        if tokens is None:
+            return ()
+        branches.append(NotationBranch(branch_text, tokens))
+    return tuple(branches)
+
+
+def assign_notation_branches(
+    text: str,
+    *,
+    singular_slot: str,
+    plural_slot: str,
+    definite_plural_slot: str,
+    ignored_markers: frozenset[str] = frozenset(),
+) -> tuple[SlotBranch, ...] | None:
+    """Parse complete SAOL notation without recognizing whole paradigms.
+
+    This is the common structural pipeline for all word classes: ``_`` creates
+    independent branches, labels select slots, alternative markers reuse the
+    preceding slot, and every remaining form token becomes one primitive
+    ``FormOperation``. Word-class code supplies only the slot names and how an
+    operation is applied to a base spelling.
+    """
+
+    branches = split_alternative_branches(text)
+    if not branches:
+        return None
+    result: list[SlotBranch] = []
+    for branch in branches:
+        operations = assign_labeled_slots(
+            branch.tokens,
+            singular_slot=singular_slot,
+            plural_slot=plural_slot,
+            definite_plural_slot=definite_plural_slot,
+            ignored_markers=ignored_markers,
+        )
+        if operations is None:
+            return None
+        result.append(SlotBranch(branch.text, branch.tokens, operations))
+    return tuple(result)
+
+
 def _best_overlap_replacement(base: str, tail: str) -> tuple[str | None, int]:
     best_index = -1
     best_score = 0
@@ -323,25 +351,7 @@ def apply_form_operation(
     return None
 
 
-def split_alternative_branches(text: str) -> tuple[NotationBranch, ...]:
-    cleaned = _clean_notation_spelling(text)
-    branches: list[NotationBranch] = []
-    for branch_text in re.split(r"\s+_\s+", cleaned):
-        branch_text = branch_text.strip()
-        if not branch_text:
-            return ()
-        tokens = tokenize_notation(branch_text)
-        if tokens is None:
-            return ()
-        branches.append(NotationBranch(branch_text, tokens))
-    return tuple(branches)
-
-
 def split_forms(text: str) -> tuple[str, ...]:
     normalized = normalize_notation(text)
     normalized = normalized.replace(",", " ").replace(";", " ")
-    return tuple(
-        token
-        for token in normalized.split()
-        if token not in {"el.", "h", "ibl.", "_", "och"}
-    )
+    return tuple(token for token in normalized.split() if token not in {"el.", "h", "ibl.", "_", "och"})
