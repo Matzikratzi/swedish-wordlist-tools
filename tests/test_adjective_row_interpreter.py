@@ -61,6 +61,22 @@ class AdjectiveRowInterpreterTests(unittest.TestCase):
                 self.assertEqual(expected, slots.written_forms())
                 self.assertEqual("structural_labelled_positive_slots", slots.rule)
 
+    def test_labelled_comparison_slots_are_structural(self) -> None:
+        cases = (
+            ("ringa", "komp. +re, superl. +st", ("ringa", "ringare", "ringast")),
+            ("få", "komp. färre, superl. färst", ("få", "färre", "färst")),
+            (
+                "förnäm",
+                "+t +a, komp. +are, superl. +st H +ast",
+                ("förnäm", "förnämt", "förnäma", "förnämare", "förnämst", "förnämast"),
+            ),
+        )
+        for lemma, notation, expected in cases:
+            with self.subTest(notation=notation):
+                slots = self.parse(lemma, notation)
+                self.assertEqual(expected, slots.written_forms())
+                self.assertEqual("structural_labelled_comparison_slots", slots.rule)
+
     def test_positive_parallel_branches_are_independent(self) -> None:
         cases = (
             (
@@ -113,11 +129,6 @@ class AdjectiveRowInterpreterTests(unittest.TestCase):
             slots.written_forms(),
         )
         self.assertNotEqual("structural_parallel_positive_branches", slots.rule)
-
-    def test_comparison_still_falls_back(self) -> None:
-        comparison = self.parse("ringa", "komp. +re, superl. +st")
-        self.assertEqual(("ringa", "ringare", "ringast"), comparison.written_forms())
-        self.assertNotEqual("structural_labelled_positive_slots", comparison.rule)
 
 
 if __name__ == "__main__":
