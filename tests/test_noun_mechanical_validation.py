@@ -110,13 +110,46 @@ class NounMechanicalValidationTests(unittest.TestCase):
             with self.subTest(notation=notation):
                 self.assertTrue(is_mechanically_verified_noun_notation(notation))
 
-    def test_unbounded_tail_replacement_branching_stays_diagnostic(self):
+    def test_unbounded_tail_replacement_branching_stays_diagnostic_as_notation(self):
         for notation in (
             "+n; pl. -kamrar el. +, best. pl. -kamrarna el. -ka",
             "+en _ -rötter",
+            "+en +ar _ +n -grepar",
         ):
             with self.subTest(notation=notation):
                 self.assertFalse(is_mechanically_verified_noun_notation(notation))
+
+    def test_canonical_artifact_proves_source_aware_replacement_was_materialized(self):
+        self.assertTrue(
+            is_mechanically_verified_noun_row(
+                {
+                    "lemma": "dynggrep",
+                    "notation": "+en +ar _ +n -grepar",
+                    "generator": "canonical_artifact",
+                }
+            )
+        )
+        self.assertTrue(
+            is_mechanically_verified_noun_row(
+                {
+                    "lemma": "snöskoter",
+                    "notation": "+n -skotrar _ +n -scootrar",
+                    "generator": "canonical_artifact",
+                }
+            )
+        )
+
+    def test_unmaterialized_replacement_is_not_verified_by_validation(self):
+        self.assertFalse(
+            is_mechanically_verified_noun_row(
+                {
+                    "lemma": "test",
+                    "notation": "+en _ -rötter",
+                    "generator": "canonical_artifact_missing",
+                    "ordkl": "s. oböjl.",
+                }
+            )
+        )
 
     def test_missing_notation_representations(self):
         for value in (None, "", "(null)", "null", "  (NULL)  "):
