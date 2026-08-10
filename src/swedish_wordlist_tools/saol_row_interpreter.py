@@ -39,6 +39,7 @@ class InterpretedRow:
 
 _SUP_ELEMENT_RE = re.compile(r"<sup\b[^>]*>.*?</sup>", re.IGNORECASE | re.DOTALL)
 _HTML_TAG_RE = re.compile(r"<[^>]*>")
+_LEADING_HOMONYM_RE = re.compile(r"^\d+(?=\D)")
 
 
 def _comparison_key(value: Any) -> str:
@@ -48,29 +49,47 @@ def _comparison_key(value: Any) -> str:
     text = text.replace("\u00ad", "").replace("·", "")
     text = text.replace("‐", "-").replace("‑", "-").replace("–", "-")
     text = re.sub(r"\s+", " ", text).strip()
-    return text.casefold()
+    return _LEADING_HOMONYM_RE.sub("", text).casefold()
 
 
-def _clean_stycke(value: Any) -> str:
+def _clean_surface(value: Any) -> str:
     text = unicodedata.normalize("NFKC", str(value or ""))
     text = _SUP_ELEMENT_RE.sub("", text)
     text = _HTML_TAG_RE.sub("", text)
-    return text.replace("\u00ad", "").replace("·", "").strip()
+    text = text.replace("\u00ad", "").replace("·", "").strip()
+    return _LEADING_HOMONYM_RE.sub("", text)
+
+
+def _structural_surfaces(record: dict[str, Any]) -> tuple[str, ...]:
+    """Return SAOL surfaces that may carry an explicit compound boundary.
+
+    ``stycke`` usually carries the lodstreck, but some faksimil rows keep it only
+    in ``ord`` (for example ``hall|ländska`` and ``bluff|faktura``).  ``ord`` is
+    used here only as structural evidence when removing bars/dots yields exactly
+    the normalized lemma; it is never accepted as a free-standing lemma source.
+    """
+
+    values: list[str] = []
+    for field in ("stycke", "ord"):
+        cleaned = _clean_surface(record.get(field))
+        if cleaned and cleaned not in values:
+            values.append(cleaned)
+    return tuple(values)
 
 
 def _compound_parts(record: dict[str, Any], lemma: str) -> tuple[str, str] | None:
-    stycke = _clean_stycke(record.get("stycke"))
-    if "|" not in stycke:
-        return None
-    prefix, head = stycke.rsplit("|", 1)
-    prefix = prefix.replace("|", "")
-    if _comparison_key(prefix + head) != _comparison_key(lemma):
-        return None
-    return prefix, head
+    for surface in _structural_surfaces(record):
+        if "|" not in surface:
+            continue
+        prefix, head = surface.rsplit("|", 1)
+        prefix = prefix.replace("|", "")
+        if _comparison_key(prefix + head) == _comparison_key(lemma):
+            return prefix, head
+    return None
 
 
 def _stycke_carrier(record: dict[str, Any], lemma: str) -> tuple[str, str] | None:
-    stycke = _clean_stycke(record.get("stycke"))
+    stycke = _clean_surface(record.get("stycke"))
     if not stycke:
         return None
     carrier = stycke.replace("|", "")
@@ -243,16 +262,6 @@ def _branch_lemma_variant(lemma: str, tokens: tuple[str, ...]) -> tuple[str, str
 def _explicit_branch_bases(
     record: dict[str, Any], lemma: str, branch_count: int
 ) -> tuple[str, ...]:
-    """Return the base lemma for each ``_`` branch when sibling evidence binds one.
-
-    Variant preprocessing may attach ``_saol_alternative_lemma`` when the same
-    normalized/written pair occurs both as a real NOUN row and as an ``(hv)``
-    row.  For a two-branch notation this is strong evidence that branch one is
-    based on the normalized headword and branch two on that explicit written
-    alternative.  Single-branch rows such as ``ankare``/``ankar`` are deliberately
-    untouched: their alternative can be phrase-bound rather than a full paradigm.
-    """
-
     alternative = str(record.get("_saol_alternative_lemma") or "").strip()
     if branch_count == 2 and alternative and alternative.casefold() != lemma.casefold():
         return (lemma, alternative)
