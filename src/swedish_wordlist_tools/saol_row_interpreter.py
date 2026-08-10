@@ -9,11 +9,11 @@ from .saol_notation import (
     FormOperation,
     FormOperationKind,
     apply_form_operation,
-    assign_labeled_slots,
     parse_form_operation,
     parse_form_operations,
     split_alternative_branches,
 )
+from .saol_slot_interpreter import SlotGrammar, assign_slots_with_grammar
 from .saol_source_policy import inflection_text
 
 
@@ -267,41 +267,102 @@ def _explicit_branch_bases(record: dict[str, Any], lemma: str, branch_count: int
     return tuple(lemma for _ in range(branch_count))
 
 
-def _assign_noun_slots(record: dict[str, Any], tokens: tuple[str, ...]):
-    """Assign ordinary notation, or an explicit-only sequence in noun context.
+def _noun_implicit_slot(index: int, last_slot: str | None, _operation: FormOperation) -> str | None:
+    if index == 0:
+        return "sg_def"
+    if index == 1 and last_slot == "sg_def":
+        return "pl_indef"
+    return None
 
-    ``assign_labeled_slots`` deliberately rejects an unmarked sequence of plain
-    words because it cannot know whether it is notation or prose. Here we do
-    know the source field is a noun inflection carrier when ``ordkl`` identifies
-    a substantive. In that narrow context, fully written forms such as
-    ``brodern bröder`` are allowed and still become independent EXPLICIT
-    operations. A synthetic/prose string without noun context stays rejected.
+
+_NOUN_SLOT_GRAMMAR = SlotGrammar(
+    label_slots={
+        "pl.": "pl_indef",
+        "best.": "sg_def",
+        "best.pl.": "pl_def",
+    },
+    implicit_slot=_noun_implicit_slot,
+    alternative_markers=frozenset({"el.", "h", "ibl."}),
+    require_marker=True,
+)
+
+_NOUN_EXPLICIT_ONLY_GRAMMAR = SlotGrammar(
+    label_slots={},
+    implicit_slot=_noun_implicit_slot,
+    require_marker=False,
+)
+
+
+def _coalesce_noun_labels(tokens: tuple[str, ...]) -> tuple[str, ...]:
+    """Collapse compound noun labels before shared slot assignment.
+
+    ``best. pl.`` is one grammatical instruction: the following form belongs to
+    definite plural. Coalescing it here keeps that noun-specific vocabulary out
+    of the word-class-neutral slot engine.
     """
 
-    assigned = assign_labeled_slots(
-        tokens,
-        singular_slot="sg_def",
-        plural_slot="pl_indef",
-        definite_plural_slot="pl_def",
-    )
+    result: list[str] = []
+    index = 0
+    while index < len(tokens):
+        if (
+            tokens[index].casefold() == "best."
+            and index + 1 < len(tokens)
+            and tokens[index + 1].casefold() == "pl."
+        ):
+            result.append("best.pl.")
+            index += 2
+            continue
+        result.append(tokens[index])
+        index += 1
+    return tuple(result)
+
+
+def _noun_known_marker_tokens(tokens: tuple[str, ...]) -> tuple[str, ...] | None:
+    """Keep generic SAOL labels transparent while preserving form operations."""
+
+    result: list[str] = []
+    for token in _coalesce_noun_labels(tokens):
+        lower = token.casefold().strip("()")
+        if lower in {"pl.", "best.", "best.pl.", "el.", "h", "ibl."} or token in {";", ","}:
+            result.append(token)
+            continue
+        operations = parse_form_operations(token)
+        if operations is not None:
+            result.append(token)
+            continue
+        if lower.endswith((".", ":")):
+            # Structural/usage labels do not themselves create forms.
+            continue
+        return None
+    return tuple(result)
+
+
+def _assign_noun_slots(record: dict[str, Any], tokens: tuple[str, ...]):
+    """Assign noun form tokens through the shared word-class-neutral engine."""
+
+    prepared = _noun_known_marker_tokens(tokens)
+    if prepared is None:
+        return None
+
+    assigned = assign_slots_with_grammar(prepared, _NOUN_SLOT_GRAMMAR)
     if assigned is not None:
         return assigned
 
+    # A sequence consisting only of fully written forms has no syntax marker.
+    # It is accepted only when the source row itself identifies a substantive;
+    # this prevents arbitrary prose from becoming inflection merely because its
+    # words happen to be parseable as EXPLICIT form operations.
     ordkl = re.sub(r"\s+", " ", str(record.get("ordkl", "")).strip()).casefold()
     if re.search(r"\bs\.", ordkl) is None:
         return None
-
-    for token in tokens:
+    meaningful = tuple(token for token in prepared if token not in {";", ","})
+    for token in meaningful:
         operations = parse_form_operations(token)
-        if operations is None or any(operation.kind is not FormOperationKind.EXPLICIT for operation in operations):
+        if operations is None or any(
+            operation.kind is not FormOperationKind.EXPLICIT for operation in operations
+        ):
             return None
-
-    return assign_labeled_slots(
-        (*tokens, ";"),
-        singular_slot="sg_def",
-        plural_slot="pl_indef",
-        definite_plural_slot="pl_def",
-    )
+    return assign_slots_with_grammar(meaningful, _NOUN_EXPLICIT_ONLY_GRAMMAR)
 
 
 def _is_uninflected_branch(tokens: tuple[str, ...]) -> bool:
@@ -341,9 +402,6 @@ def interpret_noun_row(record: dict[str, Any]) -> InterpretedRow | None:
                 seen.add(marker)
                 key_forms.append(KeyForm("lemma", branch_base, "explicit_variant_branch"))
 
-        # ``oböjl.`` is a complete branch instruction: the branch base itself
-        # is the only nominal form. This is branch semantics, not a paradigm
-        # special case for any particular noun.
         if _is_uninflected_branch(branch.tokens):
             continue
 
