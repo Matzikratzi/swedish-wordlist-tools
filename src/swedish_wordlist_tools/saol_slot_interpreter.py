@@ -75,29 +75,35 @@ def assign_slots_with_grammar(
         operations = parse_form_operations(token)
         if operations is None:
             return None
-        # Relative SAOL operations are notation in their own right.  A sequence
+        # Relative SAOL operations are notation in their own right. A sequence
         # such as ``+en +ar`` or ``+n -hackor`` therefore needs no label or
-        # punctuation marker to be structurally valid.  Fully written EXPLICIT
+        # punctuation marker to be structurally valid. Fully written EXPLICIT
         # forms remain unmarked so a word class can apply its own source-context
         # safety gate before accepting plain lexical text as inflection.
         if any(operation.kind is not FormOperationKind.EXPLICIT for operation in operations):
             saw_marker = True
+
+        # One source token denotes one grammatical slot even when optional
+        # spelling expands it to several primitive operations. Thus ``+(e)n``
+        # yields ``+n`` and ``+en`` as alternative realizations of the same slot,
+        # rather than advancing the implicit slot sequence between the variants.
+        token_slot = selected_slot
+        if token_slot is None:
+            token_slot = grammar.implicit_slot(form_index, last_slot, operations[0])
+        if token_slot is None:
+            return None
+
         for operation in operations:
-            slot = selected_slot
-            if slot is None:
-                slot = grammar.implicit_slot(form_index, last_slot, operation)
-            if slot is None:
-                return None
             result.append(
                 SlotOperation(
-                    slot=slot,
+                    slot=token_slot,
                     token=token,
                     operation=operation,
                     alternative_marker=alternative_marker,
                 )
             )
-            last_slot = slot
-            form_index += 1
+        last_slot = token_slot
+        form_index += 1
         selected_slot = None
         alternative_marker = None
 
