@@ -36,12 +36,10 @@ _LEADING_HOMONYM_RE = re.compile(r"^\d+(?=\D)")
 
 
 def _genitive(form: str) -> str:
-    """Return the ordinary Swedish genitive spelling."""
     return form if form.casefold().endswith(("s", "x", "z")) else form + "s"
 
 
 def _entry_from_interpreted_row(row: InterpretedRow) -> GeneratedEntry:
-    """Convert interpreted noun slots to the legacy generated-entry shape."""
     forms: list[GeneratedWordForm] = []
     seen: set[tuple[str, str]] = set()
     for key_form in row.key_forms:
@@ -63,8 +61,6 @@ def _entry_from_interpreted_row(row: InterpretedRow) -> GeneratedEntry:
 
 
 def _lemma_only_entry(record: dict[str, Any], reason: str) -> GeneratedEntry | None:
-    """Preserve only the normalized headword when source data makes forms unreliable."""
-
     lemma = str(record.get("normaliserat_ord", "")).strip()
     if not lemma:
         return None
@@ -107,7 +103,6 @@ def _derive_definite_plural(
     singular_definites: tuple[str, ...],
     plural: str,
 ) -> str | None:
-    """Derive definite plural where SAOL + SAG make the result mechanical."""
     folded_plural = plural.casefold()
     folded_lemma = lemma.casefold()
     folded_singulars = tuple(form.casefold() for form in singular_definites)
@@ -124,21 +119,16 @@ def _derive_definite_plural(
 
     if folded_plural.endswith("r"):
         return plural + "na"
-
     if folded_plural.endswith("en"):
         return plural + "a"
     if folded_plural.endswith("n") and neuter:
         return plural + "a"
-
     if folded_plural.endswith(("a", "i")):
         return plural
-
     if folded_plural.endswith(("gäss", "löss", "möss", "män")):
         return plural + "en"
-
     if folded_plural.endswith("s"):
         return None
-
     return None
 
 
@@ -185,11 +175,7 @@ def _complete_from_slots(entry: GeneratedEntry) -> GeneratedEntry:
         additions.extend(
             (
                 GeneratedWordForm(plural_definite, _PL_DEF_NOM, "derived_definite_plural"),
-                GeneratedWordForm(
-                    _genitive(plural_definite),
-                    _PL_DEF_GEN,
-                    "derived_genitive",
-                ),
+                GeneratedWordForm(_genitive(plural_definite), _PL_DEF_GEN, "derived_genitive"),
             )
         )
 
@@ -209,15 +195,7 @@ def _replacement_is_explicit_plural_use(record: dict[str, Any]) -> bool:
     return _EXPLICIT_PLURAL_USE_RE.search(str(record.get("text", ""))) is not None
 
 
-def _normalized_stycke_carrier(value: object) -> str:
-    """Normalize SAOL display markup before comparing stycke with the lemma.
-
-    Homonym numbers are typography, not part of the word. In faksimil JSON they
-    occur both as ``<sup>1</sup>`` and as a plain leading digit (``1flå|hacka``).
-    Removing them here lets the existing lodstreck bind ``-replacement`` to the
-    compound head without teaching the parser anything about ``-hackor`` etc.
-    """
-
+def _normalized_bar_carrier(value: object) -> str:
     text = str(value or "")
     text = _SUP_ELEMENT_RE.sub("", text)
     text = _HTML_TAG_RE.sub("", text)
@@ -226,24 +204,27 @@ def _normalized_stycke_carrier(value: object) -> str:
 
 
 def _has_usable_compound_bar(record: dict[str, Any], lemma: str) -> bool:
-    stycke = str(record.get("stycke", ""))
-    if "|" not in stycke:
-        return False
-    return _normalized_stycke_carrier(stycke).casefold() == lemma.casefold()
+    """Whether SAOL structurally identifies a replaceable final component.
+
+    ``stycke`` is preferred, but the faksimil export sometimes places the
+    lodstreck only in ``ord`` while ``stycke`` is the plain display spelling.
+    ``ord`` is accepted only when its cleaned carrier equals the normalized lemma,
+    so this is structural evidence rather than a general alternate-lemma rule.
+    """
+
+    for field in ("stycke", "ord"):
+        value = str(record.get(field, ""))
+        if "|" not in value:
+            continue
+        if _normalized_bar_carrier(value).casefold() == lemma.casefold():
+            return True
+    return False
 
 
 def complete_noun_entry(
     record: dict[str, Any],
     entry: GeneratedEntry | None,
 ) -> GeneratedEntry | None:
-    """Build a noun paradigm from SAOL operations mapped to noun slots.
-
-    ``ord`` is deliberately not used as a general lemma carrier here.  It can
-    represent a spelling variant, but also a phrase-bound alternative form or a
-    cross-reference/example occurrence (for example ``ankar`` under ``ankare``).
-    Until those row types are classified structurally, ``normaliserat_ord`` is
-    the conservative base for paradigm generation.
-    """
     if str(record.get("upos", "")).upper() != "NOUN":
         return entry
 
