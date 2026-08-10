@@ -6,6 +6,7 @@ from swedish_wordlist_tools.saol_notation import split_alternative_branches
 from swedish_wordlist_tools.saol_row_interpreter import (
     _NOUN_LABELLED_SLOT_GRAMMAR,
     _assign_labelled_noun_slots_shared,
+    _assign_unlabelled_explicit_noun_slots_shared,
     _assign_unlabelled_relative_noun_slots_shared,
     _coalesce_noun_slot_labels,
 )
@@ -107,6 +108,22 @@ class NounSharedSlotInterpreterTests(unittest.TestCase):
         self.assertEqual(
             ("sg_def", "sg_def"),
             tuple(item.slot for item in assigned),
+        )
+
+    def test_explicit_atom_uses_shared_slots_only_in_noun_context(self) -> None:
+        assigned = _assign_unlabelled_explicit_noun_slots_shared(
+            {"ordkl": "s. helformen"},
+            self._tokens("helformen"),
+        )
+        self.assertIsNotNone(assigned)
+        assert assigned is not None
+        self.assertEqual(("sg_def",), tuple(item.slot for item in assigned))
+
+        self.assertIsNone(
+            _assign_unlabelled_explicit_noun_slots_shared(
+                {"ordkl": "adj. helformen"},
+                self._tokens("helformen"),
+            )
         )
 
     def test_explicit_form_is_not_relative_composition(self) -> None:
