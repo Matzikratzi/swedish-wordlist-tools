@@ -5,6 +5,7 @@ from typing import Any
 
 from .saol_notation import (
     FormOperationKind,
+    SlotOperation,
     assign_notation_branches,
     is_direct_form_operation,
 )
@@ -51,20 +52,38 @@ def _parsed_noun_branches(notation: str):
     )
 
 
+def _is_direct_or_marker_licensed(item: SlotOperation) -> bool:
+    """Whether this independent token is mechanically licensed by SAOL.
+
+    Direct operations state their result immediately. ``ibl.`` (ibland) is a
+    semantic marker saying that the following alternative is also fully valid;
+    therefore an otherwise base-dependent REPLACE_TAIL operation introduced by
+    ``ibl.`` is licensed at the notation level without recognizing the complete
+    paradigm that contains it.
+    """
+
+    if is_direct_form_operation(item.operation):
+        return True
+    return (
+        item.operation.kind is FormOperationKind.REPLACE_TAIL
+        and item.alternative_marker == "ibl."
+    )
+
+
 def _is_directly_materialized_notation(notation: str) -> bool:
-    """True when every independent form token directly determines its form.
+    """True when every independent form token is mechanically licensed.
 
     There are deliberately no noun-paradigm patterns here. ``+en``, ``+er``, an
-    explicit ``ärtor``, colon forms, ``el.``, ``H`` and ``_`` are all handled by
-    the common notation parser. Verification only asks whether each resulting
-    primitive operation is direct.
+    explicit ``ärtor``, colon forms, ``el.``, ``H``, ``ibl.`` and ``_`` are all
+    handled by the common notation parser. Verification only examines the
+    resulting primitive operations plus per-token marker metadata.
     """
 
     branches = _parsed_noun_branches(notation)
     if not branches:
         return False
     return all(
-        is_direct_form_operation(item.operation)
+        _is_direct_or_marker_licensed(item)
         for branch in branches
         for item in branch.operations
     )
