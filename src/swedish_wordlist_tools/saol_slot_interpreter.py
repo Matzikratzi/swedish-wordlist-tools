@@ -28,7 +28,7 @@ class SlotGrammar:
     label_slots: Mapping[str, str]
     implicit_slot: ImplicitSlotResolver
     alternative_markers: frozenset[str] = frozenset({"el.", "h", "ibl."})
-    transparent_markers: frozenset[str] = frozenset()
+    transparent_markers: frozenset[str] = frozenset({"i:", "som:", "används:", "anv."})
     punctuation: frozenset[str] = frozenset({",", ";"})
     require_marker: bool = False
 
