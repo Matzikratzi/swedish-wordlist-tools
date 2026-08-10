@@ -120,14 +120,7 @@ def tokenize_notation(text: str) -> tuple[str, ...] | None:
 
 
 def expand_optional_form_token(token: str) -> tuple[str, ...]:
-    """Expand one parenthesized optional segment in any form token.
-
-    The expansion is orthographic and ordklass-neutral. Examples:
-    ``+(e)n`` -> ``+n``, ``+en``; ``håll(e)s`` -> ``hålls``, ``hålles``;
-    ``fyrti(o)förste`` -> ``fyrtiförste``, ``fyrtioförste``.
-    Tokens with no optional segment are returned unchanged. Nested, empty or
-    multiple parenthesized segments are deliberately left unchanged.
-    """
+    """Expand one parenthesized optional segment in any form token."""
 
     raw = token.strip()
     match = _OPTIONAL_FORM_TOKEN.fullmatch(raw)
@@ -171,8 +164,6 @@ def parse_form_operation(token: str) -> FormOperation | None:
 
 
 def parse_form_operations(token: str) -> tuple[FormOperation, ...] | None:
-    """Parse all orthographic variants of one optional form token."""
-
     operations: list[FormOperation] = []
     for variant in expand_optional_form_token(_unwrap_token(token)):
         operation = parse_form_operation(variant)
@@ -191,7 +182,13 @@ def assign_labeled_slots(
     definite_plural_slot: str,
     ignored_markers: frozenset[str] = frozenset(),
 ) -> tuple[SlotOperation, ...] | None:
-    """Assign form operations while ignoring SAOL's explanatory prose."""
+    """Assign form operations while ignoring SAOL's explanatory prose.
+
+    ``el.``, ``H`` and ``ibl.`` all introduce an alternative realization of
+    the previously stated grammatical slot.  ``ibl.`` means "ibland" and marks
+    a fully licensed but less usual alternative; it does not weaken the form's
+    validity.
+    """
 
     result: list[SlotOperation] = []
     context = "singular"
@@ -210,7 +207,7 @@ def assign_labeled_slots(
         if lower in ignored_markers:
             saw_notation_marker = True
             continue
-        if lower in {"el.", "h"}:
+        if lower in {"el.", "h", "ibl."}:
             saw_notation_marker = True
             alternative_next = last_slot is not None
             continue
@@ -321,5 +318,5 @@ def split_forms(text: str) -> tuple[str, ...]:
     return tuple(
         token
         for token in normalized.split()
-        if token not in {"el.", "h", "_", "och"}
+        if token not in {"el.", "h", "ibl.", "_", "och"}
     )
