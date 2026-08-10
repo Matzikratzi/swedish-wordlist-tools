@@ -69,16 +69,20 @@ def _single_operation(token: str) -> FormOperation | None:
 
 
 def interpret_unlabelled_positive_adjective_slots(record: dict[str, Any]) -> AdjectiveSlots | None:
+    """Interpret unlabelled positive/comparison sequences by slot order."""
     lemma = _value(record, "normaliserat_ord").casefold()
     raw_text = _value(record, "text")
     if not lemma or " " in lemma or not lemma.isalpha() or not raw_text:
         return None
     text = normalize_notation(raw_text)
     tokens = tokenize_notation(text)
-    if tokens is None or len(tokens) not in {1, 2}:
+    if tokens is None:
+        return None
+    form_tokens = tuple(token for token in tokens if token not in {",", ";"})
+    if len(form_tokens) not in {1, 2, 4}:
         return None
     operations: list[FormOperation] = []
-    for token in tokens:
+    for token in form_tokens:
         operation = _single_operation(token)
         if operation is None:
             return None
@@ -92,12 +96,16 @@ def interpret_unlabelled_positive_adjective_slots(record: dict[str, Any]) -> Adj
             return None
         forms.append(AdjectiveForm(value, slot))
     else:
-        neuter = _apply_positive_operation(lemma, operations[0], neuter=True)
-        definite = _apply_positive_operation(lemma, operations[1], neuter=False)
-        if neuter is None or definite is None:
-            return None
-        forms.extend((AdjectiveForm(neuter, "neuter_singular"), AdjectiveForm(definite, "definite_or_plural")))
-    return AdjectiveSlots(lemma=lemma, forms=_dedupe_forms(forms), rule="structural_positive_sequence")
+        slots = ("neuter_singular", "definite_or_plural")
+        if len(operations) == 4:
+            slots += ("comparative", "superlative")
+        for operation, slot in zip(operations, slots):
+            value = _apply_positive_operation(lemma, operation, neuter=slot == "neuter_singular")
+            if value is None:
+                return None
+            forms.append(AdjectiveForm(value, slot))
+    rule = "structural_full_adjective_sequence" if len(operations) == 4 else "structural_positive_sequence"
+    return AdjectiveSlots(lemma=lemma, forms=_dedupe_forms(forms), rule=rule)
 
 
 def _labelled_positive_implicit_slot(index: int, last_slot: str | None, _operation: FormOperation) -> str | None:
@@ -183,7 +191,6 @@ def interpret_usage_restricted_adjective_slots(record: dict[str, Any]) -> Adject
     forms: list[AdjectiveForm] = [AdjectiveForm(lemma, "common_singular")]
     restrictions: tuple[UsageRestriction, ...]
     form_token: str | None = None
-
     if words[:3] == ["n.", "sing.", "obest."] and len(words) in {4, 5}:
         if words[3] not in {"obrukl.", "undviks:"}:
             return None
@@ -195,13 +202,9 @@ def interpret_usage_restricted_adjective_slots(record: dict[str, Any]) -> Adject
         form_token = words[2]
     elif len(words) == 7 and words[:6] == ["mest:", "oböjl.", "best.", "och:", "pl.", "ibl."]:
         form_token = words[6]
-        restrictions = (
-            UsageRestriction("paradigm", "mostly_uninflected"),
-            UsageRestriction("definite_or_plural", "occasional"),
-        )
+        restrictions = (UsageRestriction("paradigm", "mostly_uninflected"), UsageRestriction("definite_or_plural", "occasional"))
     else:
         return None
-
     if form_token is not None:
         operation = _single_operation(form_token)
         if operation is None:
@@ -211,17 +214,8 @@ def interpret_usage_restricted_adjective_slots(record: dict[str, Any]) -> Adject
             return None
         forms.append(AdjectiveForm(value, "definite_or_plural"))
         if len(restrictions) == 2 and restrictions[1].label == "occasional":
-            restrictions = (
-                restrictions[0],
-                UsageRestriction("definite_or_plural", "occasional", (value,)),
-            )
-
-    return AdjectiveSlots(
-        lemma=lemma,
-        forms=_dedupe_forms(forms),
-        rule="structural_usage_restrictions",
-        restrictions=restrictions,
-    )
+            restrictions = (restrictions[0], UsageRestriction("definite_or_plural", "occasional", (value,)))
+    return AdjectiveSlots(lemma=lemma, forms=_dedupe_forms(forms), rule="structural_usage_restrictions", restrictions=restrictions)
 
 
 def _common_from_neuter_for_e_plural(neuter: str) -> str | None:
