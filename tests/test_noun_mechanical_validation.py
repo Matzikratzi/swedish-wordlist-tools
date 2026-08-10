@@ -66,6 +66,7 @@ class NounMechanicalValidationTests(unittest.TestCase):
             "visslet",
             "dreglet _ dräglet",
             "sjabblet _ schabblet",
+            "+en _ ankaret",
         ):
             with self.subTest(notation=notation):
                 self.assertTrue(is_mechanically_verified_noun_notation(notation))
@@ -188,6 +189,7 @@ class NounMechanicalValidationTests(unittest.TestCase):
         for value in (None, "", "(null)", "null", "  (NULL)  "):
             with self.subTest(value=value):
                 self.assertTrue(is_null_noun_notation(value))
+                self.assertFalse(is_mechanically_verified_noun_notation(value or ""))
         self.assertFalse(is_null_noun_notation("+en"))
 
     def test_ordkl_carriers_are_mechanically_verified_through_interpreter(self):
