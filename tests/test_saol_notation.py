@@ -6,6 +6,7 @@ from swedish_wordlist_tools.saol_notation import (
     FormOperationKind,
     apply_form_operation,
     assign_labeled_slots,
+    is_direct_form_operation,
     parse_form_operation,
     tokenize_notation,
 )
@@ -26,6 +27,21 @@ class SaolNotationTests(unittest.TestCase):
                 self.assertIsNotNone(operation)
                 assert operation is not None
                 self.assertEqual(expected, (operation.kind, operation.value))
+
+    def test_explicit_inflections_are_one_word_class_neutral_primitive(self) -> None:
+        for written_form in ("askor", "sprang", "sprungit", "kan", "bättre"):
+            with self.subTest(written_form=written_form):
+                operation = parse_form_operation(written_form)
+                self.assertIsNotNone(operation)
+                assert operation is not None
+                self.assertEqual(FormOperationKind.EXPLICIT, operation.kind)
+                self.assertTrue(is_direct_form_operation(operation))
+                self.assertEqual(written_form, apply_form_operation("irrelevant-bas", operation))
+
+        replacement = parse_form_operation("-bundna")
+        self.assertIsNotNone(replacement)
+        assert replacement is not None
+        self.assertFalse(is_direct_form_operation(replacement))
 
     def test_preserves_spelling_in_noun_operations(self) -> None:
         cases = {
