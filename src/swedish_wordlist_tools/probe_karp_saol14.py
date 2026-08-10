@@ -29,8 +29,19 @@ def fetch_json(url: str, *, context: ssl.SSLContext) -> Any:
         return json.load(response)
 
 
-def build_search_url(base: str, resource: str, word: str, size: int = 20) -> str:
-    q = f'entryWord = "{word}"'
+def resource_entry_word_field(config: dict[str, Any], resource: str) -> str:
+    for item in config.get("resources", []):
+        if item.get("resourceId") == resource:
+            entry_word = item.get("entryWord") or {}
+            field = entry_word.get("field")
+            if field:
+                return str(field)
+            raise ValueError(f"Resource {resource!r} has no entryWord field in Karp config")
+    raise ValueError(f"Resource {resource!r} not found in Karp config")
+
+
+def build_search_url(base: str, resource: str, field: str, word: str, size: int = 20) -> str:
+    q = f'{field} = "{word}"'
     params = urllib.parse.urlencode({"resources": resource, "q": q, "size": size})
     return f"{base.rstrip('/')}/search?{params}"
 
@@ -60,7 +71,10 @@ def main() -> None:
     config_url = f"{args.base.rstrip('/')}/config"
     result["config_url"] = config_url
     try:
-        result["config"] = fetch_json(config_url, context=context)
+        config = fetch_json(config_url, context=context)
+        result["config"] = config
+        entry_word_field = resource_entry_word_field(config, args.resource)
+        result["entry_word_field"] = entry_word_field
     except Exception as exc:
         result["config_error"] = f"{type(exc).__name__}: {exc}"
         args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -73,7 +87,7 @@ def main() -> None:
 
     searches: dict[str, Any] = {}
     for word in words:
-        url = build_search_url(args.base, args.resource, word)
+        url = build_search_url(args.base, args.resource, entry_word_field, word)
         try:
             payload = fetch_json(url, context=context)
             searches[word] = {"url": url, "payload": payload}
@@ -85,6 +99,7 @@ def main() -> None:
     args.out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"Karp config: {config_url}")
     print(f"Resource: {args.resource}")
+    print(f"Entry word field: {entry_word_field}")
     print(f"Words: {', '.join(words)}")
     print(f"Output: {args.out}")
 
