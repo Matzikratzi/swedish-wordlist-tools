@@ -11,8 +11,7 @@ from .jsonl import read_jsonl
 from .saol_noun_variants import prepare_noun_variant_records
 from .saol_row_interpreter import (
     _assign_labelled_noun_slots_shared,
-    _assign_unlabelled_explicit_noun_slots_shared,
-    _assign_unlabelled_relative_noun_slots_shared,
+    _assign_unlabelled_noun_atoms_shared,
     _clean_notation_structure,
     _is_uninflected_branch,
 )
@@ -30,10 +29,8 @@ def branch_path(record: dict[str, Any], tokens: tuple[str, ...]) -> str:
         return "structural_uninflected"
     if _assign_labelled_noun_slots_shared(tokens) is not None:
         return "shared_labelled"
-    if _assign_unlabelled_relative_noun_slots_shared(tokens) is not None:
-        return "shared_relative"
-    if _assign_unlabelled_explicit_noun_slots_shared(record, tokens) is not None:
-        return "shared_explicit"
+    if _assign_unlabelled_noun_atoms_shared(record, tokens) is not None:
+        return "shared_unlabelled_atoms"
     return "legacy_fallback"
 
 
