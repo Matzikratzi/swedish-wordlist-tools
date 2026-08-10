@@ -38,17 +38,36 @@ class AdjectiveRowInterpreterTests(unittest.TestCase):
         self.assertEqual(("förstnämnde", "förstnämnda"), explicit.written_forms())
         self.assertEqual("definite_or_plural", explicit.forms[1].slot)
 
-    def test_labels_and_parallel_branches_fall_back_without_output_change(self) -> None:
-        labelled = self.parse("fullmäktig", "pl. +e")
-        self.assertEqual(("fullmäktig", "fullmäktige"), labelled.written_forms())
-        self.assertNotEqual("structural_positive_sequence", labelled.rule)
+    def test_simple_labels_select_slots_structurally(self) -> None:
+        cases = (
+            ("kortväxt", "n. +, +a", ("kortväxt", "kortväxta")),
+            ("hot", "neutr. +; pl. hotta", ("hot", "hotta")),
+            ("fullmäktig", "pl. +e", ("fullmäktig", "fullmäktige")),
+            ("främsta", "mask. främste", ("främsta", "främste")),
+        )
+        for lemma, notation, expected in cases:
+            with self.subTest(notation=notation):
+                slots = self.parse(lemma, notation)
+                self.assertEqual(expected, slots.written_forms())
+                self.assertEqual("structural_labelled_positive_slots", slots.rule)
 
+    def test_parallel_and_compound_labels_still_fall_back(self) -> None:
         parallel = self.parse("ledsen", "ledset ledsna _ lesset lessna")
         self.assertEqual(
             ("ledsen", "ledset", "ledsna", "lesset", "lessna"),
             parallel.written_forms(),
         )
-        self.assertNotEqual("structural_positive_sequence", parallel.rule)
+        self.assertNotEqual("structural_labelled_positive_slots", parallel.rule)
+
+        alternatives = self.parse(
+            "akvamarinblå",
+            "-blått, best. och: pl. + el. +a",
+        )
+        self.assertEqual(
+            ("akvamarinblå", "akvamarinblått", "akvamarinblåa"),
+            alternatives.written_forms(),
+        )
+        self.assertNotEqual("structural_labelled_positive_slots", alternatives.rule)
 
 
 if __name__ == "__main__":
