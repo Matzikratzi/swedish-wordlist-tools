@@ -29,6 +29,18 @@ class AdjectiveRowInterpreterTests(unittest.TestCase):
                 self.assertEqual(expected, slots.written_forms())
                 self.assertEqual("structural_positive_sequence", slots.rule)
 
+    def test_full_unlabelled_sequences_use_slot_order(self) -> None:
+        cases = (
+            ("god", "gott goda, bättre bäst", ("god", "gott", "goda", "bättre", "bäst")),
+            ("dålig", "+t +a, sämre sämst", ("dålig", "dåligt", "dåliga", "sämre", "sämst")),
+            ("stor", "+t +a, större störst", ("stor", "stort", "stora", "större", "störst")),
+        )
+        for lemma, notation, expected in cases:
+            with self.subTest(notation=notation):
+                slots = self.parse(lemma, notation)
+                self.assertEqual(expected, slots.written_forms())
+                self.assertEqual("structural_full_adjective_sequence", slots.rule)
+
     def test_single_operations_are_assigned_by_operation_role(self) -> None:
         neuter = self.parse("dan", "+t")
         self.assertEqual(("dan", "dant"), neuter.written_forms())
@@ -97,32 +109,14 @@ class AdjectiveRowInterpreterTests(unittest.TestCase):
             (
                 "fasetterad",
                 "fasetterat +e _ facetterat +e",
-                (
-                    "fasetterad",
-                    "fasetterat",
-                    "fasetterade",
-                    "facetterad",
-                    "facetterat",
-                    "facetterade",
-                ),
+                ("fasetterad", "fasetterat", "fasetterade", "facetterad", "facetterat", "facetterade"),
             ),
             (
                 "hårdflörtad",
                 "-flörtat +e _ -flirtat +e",
-                (
-                    "hårdflörtad",
-                    "hårdflörtat",
-                    "hårdflörtade",
-                    "hårdflirtad",
-                    "hårdflirtat",
-                    "hårdflirtade",
-                ),
+                ("hårdflörtad", "hårdflörtat", "hårdflörtade", "hårdflirtad", "hårdflirtat", "hårdflirtade"),
             ),
-            (
-                "ledsen",
-                "ledset ledsna _ lesset lessna",
-                ("ledsen", "ledset", "ledsna", "lesset", "lessna"),
-            ),
+            ("ledsen", "ledset ledsna _ lesset lessna", ("ledsen", "ledset", "ledsna", "lesset", "lessna")),
         )
         for lemma, notation, expected in cases:
             with self.subTest(notation=notation):
@@ -132,17 +126,7 @@ class AdjectiveRowInterpreterTests(unittest.TestCase):
 
     def test_more_exotic_parallel_variant_still_falls_back(self) -> None:
         slots = self.parse("sjangdobel", "+t sjangdobla _ +t schangdobla")
-        self.assertEqual(
-            (
-                "sjangdobel",
-                "sjangdobelt",
-                "sjangdobla",
-                "schangdobel",
-                "schangdobelt",
-                "schangdobla",
-            ),
-            slots.written_forms(),
-        )
+        self.assertEqual(("sjangdobel", "sjangdobelt", "sjangdobla", "schangdobel", "schangdobelt", "schangdobla"), slots.written_forms())
         self.assertNotEqual("structural_parallel_positive_branches", slots.rule)
 
 
