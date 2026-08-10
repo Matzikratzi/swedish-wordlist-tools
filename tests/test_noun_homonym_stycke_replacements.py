@@ -6,13 +6,14 @@ from swedish_wordlist_tools.noun_paradigm import complete_noun_entry
 
 
 class NounHomonymStyckeReplacementTests(unittest.TestCase):
-    def _forms(self, lemma: str, text: str, stycke: str) -> set[str]:
+    def _forms(self, lemma: str, text: str, stycke: str, ord_value: str = "") -> set[str]:
         record = {
             "normaliserat_ord": lemma,
             "upos": "NOUN",
             "ordkl": "s.",
             "text": text,
             "stycke": stycke,
+            "ord": ord_value,
         }
         entry = complete_noun_entry(record, None)
         self.assertIsNotNone(entry)
@@ -48,6 +49,29 @@ class NounHomonymStyckeReplacementTests(unittest.TestCase):
                 "avresornas",
             }.issubset(forms)
         )
+
+    def test_ord_bar_is_structural_fallback_when_stycke_is_plain(self) -> None:
+        examples = (
+            ("halländska", "+n -ländskor", "halländska", "hall|ländska", "halländskor"),
+            ("bluffaktura", "+n -fakturor", "bluffaktura", "bluff|fakt·ura", "bluffakturor"),
+            ("rollista", "+n -listor", "rollista", "rol|lista", "rollistor"),
+        )
+        for lemma, text, stycke, ord_value, plural in examples:
+            with self.subTest(lemma=lemma):
+                forms = self._forms(lemma, text, stycke, ord_value)
+                self.assertIn(plural, forms)
+                self.assertIn(plural + "na", forms)
+
+    def test_ord_bar_must_resolve_exactly_to_normalized_lemma(self) -> None:
+        record = {
+            "normaliserat_ord": "ankare",
+            "upos": "NOUN",
+            "ordkl": "s.",
+            "text": "+n -karlar",
+            "stycke": "ankare",
+            "ord": "ankar|karl",
+        }
+        self.assertIsNone(complete_noun_entry(record, None))
 
     def test_same_structure_is_not_suffix_specific(self) -> None:
         examples = (
