@@ -289,6 +289,12 @@ _NOUN_LABELLED_SLOT_GRAMMAR = SlotGrammar(
     require_marker=True,
 )
 
+_NOUN_UNLABELLED_SLOT_GRAMMAR = SlotGrammar(
+    label_slots={},
+    implicit_slot=_noun_shared_implicit_slot,
+    require_marker=False,
+)
+
 
 def _coalesce_noun_slot_labels(tokens: tuple[str, ...]) -> tuple[str, ...]:
     """Treat ``best. pl.`` as one noun slot label before generic assignment."""
@@ -345,7 +351,32 @@ def _assign_unlabelled_relative_noun_slots_shared(tokens: tuple[str, ...]):
         saw_form = True
     if not saw_form:
         return None
-    return assign_slots_with_grammar(tokens, _NOUN_LABELLED_SLOT_GRAMMAR)
+    return assign_slots_with_grammar(tokens, _NOUN_UNLABELLED_SLOT_GRAMMAR)
+
+
+def _assign_unlabelled_explicit_noun_slots_shared(
+    record: dict[str, Any],
+    tokens: tuple[str, ...],
+):
+    """Assign explicit full forms only inside verified noun inflection context."""
+
+    ordkl = re.sub(r"\s+", " ", str(record.get("ordkl", "")).strip()).casefold()
+    if re.search(r"\bs\.", ordkl) is None:
+        return None
+
+    saw_form = False
+    for token in tokens:
+        if token in {",", ";"}:
+            continue
+        operations = parse_form_operations(token)
+        if operations is None:
+            return None
+        if any(operation.kind is not FormOperationKind.EXPLICIT for operation in operations):
+            return None
+        saw_form = True
+    if not saw_form:
+        return None
+    return assign_slots_with_grammar(tokens, _NOUN_UNLABELLED_SLOT_GRAMMAR)
 
 
 def _assign_noun_slots(record: dict[str, Any], tokens: tuple[str, ...]):
@@ -359,26 +390,12 @@ def _assign_noun_slots(record: dict[str, Any], tokens: tuple[str, ...]):
     if shared is not None:
         return shared
 
-    assigned = assign_labeled_slots(
-        tokens,
-        singular_slot="sg_def",
-        plural_slot="pl_indef",
-        definite_plural_slot="pl_def",
-    )
-    if assigned is not None:
-        return assigned
-
-    ordkl = re.sub(r"\s+", " ", str(record.get("ordkl", "")).strip()).casefold()
-    if re.search(r"\bs\.", ordkl) is None:
-        return None
-
-    for token in tokens:
-        operations = parse_form_operations(token)
-        if operations is None or any(operation.kind is not FormOperationKind.EXPLICIT for operation in operations):
-            return None
+    shared = _assign_unlabelled_explicit_noun_slots_shared(record, tokens)
+    if shared is not None:
+        return shared
 
     return assign_labeled_slots(
-        (*tokens, ";"),
+        tokens,
         singular_slot="sg_def",
         plural_slot="pl_indef",
         definite_plural_slot="pl_def",
