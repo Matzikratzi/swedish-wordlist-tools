@@ -34,11 +34,18 @@ class FormOperation:
 
 @dataclass(frozen=True)
 class SlotOperation:
-    """One form operation assigned to an ordklass-provided grammatical slot."""
+    """One independent form operation assigned to a grammatical slot.
+
+    ``alternative_marker`` records how this token was introduced, without
+    changing the primitive operation itself.  Thus ``ibl. -metrar`` remains a
+    REPLACE_TAIL operation whose status as a fully licensed alternative is
+    carried separately as ``alternative_marker='ibl.'``.
+    """
 
     slot: str
     token: str
     operation: FormOperation
+    alternative_marker: str | None = None
 
 
 @dataclass(frozen=True)
@@ -199,7 +206,7 @@ def assign_labeled_slots(
     pending_best = False
     seen_singular_form = False
     last_slot: str | None = None
-    alternative_next = False
+    alternative_marker: str | None = None
     saw_notation_marker = False
 
     for token in tokens:
@@ -213,18 +220,18 @@ def assign_labeled_slots(
             continue
         if lower in {"el.", "h", "ibl."}:
             saw_notation_marker = True
-            alternative_next = last_slot is not None
+            alternative_marker = lower if last_slot is not None else None
             continue
         if lower == "best.":
             saw_notation_marker = True
             pending_best = True
-            alternative_next = False
+            alternative_marker = None
             continue
         if lower == "pl.":
             saw_notation_marker = True
             context = "plural_definite" if pending_best else "plural"
             pending_best = False
-            alternative_next = False
+            alternative_marker = None
             continue
         if _is_comment_word(raw) or _is_generic_label(raw):
             saw_notation_marker = True
@@ -236,9 +243,10 @@ def assign_labeled_slots(
         if any(operation.kind is not FormOperationKind.EXPLICIT for operation in operations):
             saw_notation_marker = True
 
-        if alternative_next and last_slot is not None:
+        marker_for_token = alternative_marker
+        if alternative_marker is not None and last_slot is not None:
             slot = last_slot
-            alternative_next = False
+            alternative_marker = None
         elif context == "plural_definite":
             slot = definite_plural_slot
         elif context == "plural":
@@ -251,7 +259,10 @@ def assign_labeled_slots(
             slot = plural_slot
             context = "after_plural"
 
-        result.extend(SlotOperation(slot, raw, operation) for operation in operations)
+        result.extend(
+            SlotOperation(slot, raw, operation, marker_for_token)
+            for operation in operations
+        )
         last_slot = slot
         pending_best = False
 
