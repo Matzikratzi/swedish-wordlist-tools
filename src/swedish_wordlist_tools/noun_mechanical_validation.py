@@ -58,13 +58,16 @@ def is_null_noun_notation(value: object) -> bool:
     return str(value).strip().casefold() in _NULL_NOTATIONS
 
 
-def _is_fully_relative_slot_notation(notation: str) -> bool:
-    """Return true when every materialized slot form is relative to the lemma.
+def _is_materialized_slot_notation(notation: str) -> bool:
+    """Verify one-branch noun notation made from directly stated operations.
 
-    ``el.`` and ``H`` are both alternative markers at this layer. The shared
-    notation parser assigns the operation after either marker to the same slot
-    as the preceding form. If all forms are append/unchanged operations, SAOL
-    has stated the alternatives mechanically.
+    Explicit forms are ordinary SAOL slot values, not special cases. Thus
+    ``+n askor``, ``+n auror`` and any analogous notation are accepted through
+    the shared tokenizer/slot assignment rather than via word-specific rules.
+
+    ``ibl.`` means "ibland" and licenses the following alternative in the same
+    slot. A replacement operation is accepted in that constrained context; other
+    tail replacements remain subject to the older replacement-specific checks.
     """
 
     if "_" in notation:
@@ -80,24 +83,19 @@ def _is_fully_relative_slot_notation(notation: str) -> bool:
     )
     if not assigned:
         return False
-    return all(
-        item.operation.kind in {FormOperationKind.UNCHANGED, FormOperationKind.APPEND}
-        for item in assigned
-    )
+
+    safe_kinds = {
+        FormOperationKind.UNCHANGED,
+        FormOperationKind.APPEND,
+        FormOperationKind.EXPLICIT,
+    }
+    if "ibl." in notation.casefold():
+        safe_kinds.add(FormOperationKind.REPLACE_TAIL)
+    return all(item.operation.kind in safe_kinds for item in assigned)
 
 
 def _is_materialized_branch_notation(notation: str) -> bool:
-    """Verify underscore branches made only of direct, non-heuristic forms.
-
-    Explicitly written forms are as strong evidence as ``+`` suffix operations:
-    SAOL states the spelling directly. Tail replacement operations stay outside
-    this family because their realization still depends on choosing the correct
-    amount of the lemma tail to replace.
-
-    ``el.``/``H`` inside an underscore branch remain diagnostic for now so this
-    rule only widens the already-understood branch model by one primitive:
-    EXPLICIT.
-    """
+    """Verify underscore branches made only of direct, non-heuristic forms."""
 
     if "_" not in notation or "el." in notation.casefold() or re.search(r"(?:^|\s)H(?:\s|$)", notation):
         return False
@@ -135,7 +133,7 @@ def is_mechanically_verified_noun_notation(row_or_notation: dict[str, Any] | str
         return True
     if _TWO_REPLACEMENT_PARADIGM.fullmatch(notation):
         return True
-    if _is_fully_relative_slot_notation(notation):
+    if _is_materialized_slot_notation(notation):
         return True
     return _is_materialized_branch_notation(notation)
 
