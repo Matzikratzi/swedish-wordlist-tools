@@ -17,42 +17,76 @@ class NounSharedSlotInterpreterTests(unittest.TestCase):
         self.assertEqual(1, len(branches))
         return branches[0].tokens
 
-    def test_plural_label_selects_plural_slot(self) -> None:
-        assigned = _assign_labelled_noun_slots_shared(self._tokens("pl. +ar"))
-        self.assertIsNotNone(assigned)
-        assert assigned is not None
-        self.assertEqual(("pl_indef",), tuple(item.slot for item in assigned))
-
-    def test_definite_plural_is_composed_from_two_labels(self) -> None:
-        tokens = self._tokens("best. pl. +na")
-        self.assertEqual(("best.", "pl.", "+na"), tokens)
-        self.assertEqual(("best.pl.", "+na"), _coalesce_noun_slot_labels(tokens))
-
-        assigned = assign_slots_with_grammar(
+    def _assign(self, text: str):
+        tokens = self._tokens(text)
+        return assign_slots_with_grammar(
             _coalesce_noun_slot_labels(tokens),
             _NOUN_LABELLED_SLOT_GRAMMAR,
         )
-        self.assertIsNotNone(assigned)
-        assert assigned is not None
-        self.assertEqual(("pl_def",), tuple(item.slot for item in assigned))
 
-    def test_el_reuses_preceding_plural_slot(self) -> None:
-        assigned = _assign_labelled_noun_slots_shared(
-            self._tokens("pl. +er el. +ar")
-        )
-        self.assertIsNotNone(assigned)
-        assert assigned is not None
-        self.assertEqual(("pl_indef", "pl_indef"), tuple(item.slot for item in assigned))
-        self.assertIsNone(assigned[0].alternative_marker)
-        self.assertEqual("el.", assigned[1].alternative_marker)
+    def test_each_primitive_operation_works_in_each_noun_slot(self) -> None:
+        operations = {
+            "+xy": 1,       # append
+            "-xyz": 1,      # replace tail
+            "+": 1,         # unchanged
+            "helform": 1,   # explicit full form
+            "+(e)n": 2,     # optional spelling => two realizations, same slot
+        }
+        slots = {
+            "best. {token}": "sg_def",
+            "pl. {token}": "pl_indef",
+            "best. pl. {token}": "pl_def",
+        }
 
-    def test_compact_labelled_plural_uses_shared_slots(self) -> None:
-        assigned = _assign_labelled_noun_slots_shared(self._tokens("+et; pl. +"))
-        self.assertIsNotNone(assigned)
-        assert assigned is not None
-        self.assertEqual(("sg_def", "pl_indef"), tuple(item.slot for item in assigned))
+        for token, expected_count in operations.items():
+            for template, expected_slot in slots.items():
+                text = template.format(token=token)
+                with self.subTest(token=token, slot=expected_slot):
+                    assigned = self._assign(text)
+                    self.assertIsNotNone(assigned)
+                    assert assigned is not None
+                    self.assertEqual(expected_count, len(assigned))
+                    self.assertEqual(
+                        (expected_slot,) * expected_count,
+                        tuple(item.slot for item in assigned),
+                    )
 
-    def test_unlabelled_relative_sequence_is_not_migrated_yet(self) -> None:
+    def test_each_alternative_marker_reuses_exactly_one_preceding_slot(self) -> None:
+        for marker in ("el.", "H", "ibl."):
+            for label, expected_slot in (
+                ("best.", "sg_def"),
+                ("pl.", "pl_indef"),
+                ("best. pl.", "pl_def"),
+            ):
+                with self.subTest(marker=marker, slot=expected_slot):
+                    assigned = self._assign(f"{label} +xy {marker} -xyz")
+                    self.assertIsNotNone(assigned)
+                    assert assigned is not None
+                    self.assertEqual(
+                        (expected_slot, expected_slot),
+                        tuple(item.slot for item in assigned),
+                    )
+                    self.assertIsNone(assigned[0].alternative_marker)
+                    self.assertEqual(marker.casefold(), assigned[1].alternative_marker)
+
+    def test_definite_plural_is_only_a_composed_slot_label(self) -> None:
+        tokens = self._tokens("best. pl. +xy")
+        self.assertEqual(("best.", "pl.", "+xy"), tokens)
+        self.assertEqual(("best.pl.", "+xy"), _coalesce_noun_slot_labels(tokens))
+
+    def test_labelled_shared_wrapper_accepts_one_atomic_operation(self) -> None:
+        for text, expected_slot in (
+            ("pl. +xy", "pl_indef"),
+            ("best. +xy", "sg_def"),
+            ("best. pl. +xy", "pl_def"),
+        ):
+            with self.subTest(text=text):
+                assigned = _assign_labelled_noun_slots_shared(self._tokens(text))
+                self.assertIsNotNone(assigned)
+                assert assigned is not None
+                self.assertEqual((expected_slot,), tuple(item.slot for item in assigned))
+
+    def test_unlabelled_sequence_is_not_part_of_this_contract(self) -> None:
         self.assertIsNone(
             _assign_labelled_noun_slots_shared(self._tokens("+en +ar"))
         )
