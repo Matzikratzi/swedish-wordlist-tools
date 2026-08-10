@@ -12,6 +12,7 @@ _RELATIVE_TOKEN = re.compile(
     r"^(?:\+[^\s;,]*|pl\.|best\.|n\.|sing\.|obest\.)$",
     re.IGNORECASE,
 )
+_LEADING_HOMONYM = re.compile(r"^\d+(?=\D)")
 
 
 def is_null_text(value: object) -> bool:
@@ -45,6 +46,42 @@ def is_simple_relative_noun_notation(value: object) -> bool:
     )
 
 
+def _without_homonym_marker(value: object) -> str:
+    """Clean a printed headword and remove only a leading homonym digit."""
+
+    return _LEADING_HOMONYM.sub("", clean_saol_word(value))
+
+
+def _explicit_article_base(record: dict[str, Any]) -> str | None:
+    """Return a written article lemma when both ``ord`` and ``stycke`` prove it.
+
+    ``normaliserat_ord`` is an index/grouping key and can collapse a historical
+    or alternative headword onto another spelling.  A row may nevertheless be
+    its own printed article.  Treat the written surface as the article base only
+    when the independently exported ``ord`` and ``stycke`` fields agree after
+    presentation cleanup (middle dots, bars, HTML and homonym digit) and both
+    differ from ``normaliserat_ord``.
+
+    This captures e.g. ``kapri·foli·um`` stored under normalized ``kaprifol``.
+    It deliberately does not capture ``hall|ländska``/``halländska`` (where
+    ``ord`` carries morphology rather than a distinct spelling), ``acne`` under
+    ``akne`` (where ``stycke`` still names the normalized article), or
+    ``bankväsende`` under ``bankväsen`` (where the bar-bearing ``stycke`` names
+    the primary compound structure).
+    """
+
+    normalized = _without_homonym_marker(record.get("normaliserat_ord"))
+    written = _without_homonym_marker(record.get("ord"))
+    stycke = _without_homonym_marker(record.get("stycke"))
+    if not normalized or not written or not stycke:
+        return None
+    if written.casefold() == normalized.casefold():
+        return None
+    if written.casefold() != stycke.casefold():
+        return None
+    return written
+
+
 def _variant_pair(record: dict[str, Any]) -> tuple[str, str] | None:
     normalized = clean_saol_word(record.get("normaliserat_ord"))
     written = clean_saol_word(record.get("ord"))
@@ -72,29 +109,22 @@ def _record_identity(record: dict[str, Any]) -> tuple[str, str, str]:
 
 
 def prepare_noun_variant_records(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Attach structural sibling evidence before noun generation.
+    """Attach structural sibling and article-surface evidence before generation.
 
-    ``ord`` is not generally a lemma carrier: it can also contain phrase-bound
-    forms and cross-reference material. Three independent structures make it
-    safe to use as an alternative noun base:
+    ``normaliserat_ord`` groups/indexes SAOL rows but is not always the printed
+    lemma of an individual article.  Four independent structures can therefore
+    select another noun base:
 
+    * matching ``ord`` and ``stycke`` fields can prove that this row is itself a
+      separately written article under a normalized grouping key;
     * a matching ``(hv)`` row confirms a written alternative;
-    * a ``homonr=0`` NOUN row can share exact article identity (same record id,
-      normalized lemma and notation) with a primary NOUN row. For a
-      single-branch article, that row is the materialized variant paradigm and
-      may be rebased directly on its own ``ord``;
-    * duplicate NOUN rows for a two-branch article expose distinct ``ord``
-      spellings. When there is exactly one spelling other than the normalized
-      headword, that spelling is the base of branch two.
+    * a ``homonr=0`` NOUN row can share exact article identity with a primary
+      NOUN row and carry that article's written variant base;
+    * duplicate two-branch NOUN rows can expose the separate bases of ``_``
+      branches.
 
-    The single-branch rule is what SAOL14 uses for e.g. ``ankare``/``ankar``:
-    the primary and ``homonr=0`` rows share ``subnr`` and explicit inflection
-    text, while ``ord=ankar`` identifies the variant base. A different homonym
-    such as ``ankare`` 2 has another ``subnr`` and cannot participate.
-
-    The two-branch rule is what SAOL14 uses for e.g. ``hajp``/``hype``: one
-    JSONL row has ``ord=hajp`` and the sibling has ``ord=hype``, while the shared
-    notation is ``+en; pl. +er el. +ar _ +n [...]``.
+    These are article/variant relations, not inflection paradigms.  Inflection
+    tokens are still interpreted independently downstream.
     """
 
     materialized = [dict(record) for record in records]
@@ -134,6 +164,19 @@ def prepare_noun_variant_records(records: Iterable[dict[str, Any]]) -> list[dict
         written = clean_saol_word(record.get("ord"))
         pair = _variant_pair(record)
         own_confirmed_variant = pair is not None and pair in hv_pairs
+
+        # Some normalized keys contain a second, separately printed article.
+        # When both ord and stycke independently name that written headword,
+        # rebase this article before considering cross-reference variants.
+        article_base = _explicit_article_base(record)
+        if article_base is not None:
+            prepared = dict(record)
+            prepared["_saol_source_normaliserat_ord"] = str(record.get("normaliserat_ord") or "")
+            prepared["normaliserat_ord"] = article_base
+            prepared["_saol_variant_mode"] = "rebase_article_surface"
+            prepared["_saol_variant_evidence"] = "matching_ord_and_stycke"
+            result.append(prepared)
+            continue
 
         identity = _record_identity(record)
         article_rows = noun_rows_by_article.get(identity, [])
