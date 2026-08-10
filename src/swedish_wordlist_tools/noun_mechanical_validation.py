@@ -8,6 +8,8 @@ from .saol_notation import (
     SlotOperation,
     assign_notation_branches,
     is_direct_form_operation,
+    parse_form_operations,
+    split_alternative_branches,
 )
 from .saol_row_interpreter import interpret_noun_row
 
@@ -77,6 +79,34 @@ def _is_direct_or_marker_licensed(item: SlotOperation) -> bool:
     )
 
 
+def _is_explicit_only_notation(notation: str) -> bool:
+    """Accept branches made solely of fully written SAOL forms.
+
+    The common slot assigner deliberately requires a notation marker because it
+    is also used in contexts where an arbitrary lexical phrase must not be
+    mistaken for inflection.  Here we already know that the source field is the
+    noun inflection carrier, so one or more explicit form tokens are sufficient
+    evidence.  This covers both complete pairs such as ``bobben bobbar`` and a
+    single explicitly written slot such as ``muttret`` without word-specific
+    rules.
+    """
+
+    branches = split_alternative_branches(notation)
+    if not branches:
+        return False
+    for branch in branches:
+        if not branch.tokens:
+            return False
+        for token in branch.tokens:
+            operations = parse_form_operations(token)
+            if not operations or any(
+                operation.kind is not FormOperationKind.EXPLICIT
+                for operation in operations
+            ):
+                return False
+    return True
+
+
 def _is_directly_materialized_notation(notation: str) -> bool:
     """True when every independent form token/branch is mechanically licensed."""
 
@@ -90,7 +120,7 @@ def _is_directly_materialized_notation(notation: str) -> bool:
         definite_plural_slot="pl_def",
     )
     if not branches:
-        return False
+        return _is_explicit_only_notation(ordinary)
     return all(
         _is_direct_or_marker_licensed(item)
         for branch in branches
