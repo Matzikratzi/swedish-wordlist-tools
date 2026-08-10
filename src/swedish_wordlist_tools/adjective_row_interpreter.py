@@ -186,6 +186,65 @@ def interpret_labelled_positive_adjective_slots(
     )
 
 
+def _comparison_implicit_slot(
+    index: int,
+    last_slot: str | None,
+    _operation: FormOperation,
+) -> str | None:
+    # Labelled comparison may be preceded by the ordinary positive pair.
+    if index == 0:
+        return "neuter_singular"
+    if index == 1 and last_slot == "neuter_singular":
+        return "definite_or_plural"
+    return None
+
+
+_ADJECTIVE_COMPARISON_GRAMMAR = SlotGrammar(
+    label_slots={
+        "komp.": "comparative",
+        "superl.": "superlative",
+    },
+    implicit_slot=_comparison_implicit_slot,
+    alternative_markers=frozenset({"el.", "h"}),
+    require_marker=True,
+)
+
+
+def interpret_labelled_comparison_adjective_slots(
+    record: dict[str, Any],
+) -> AdjectiveSlots | None:
+    """Interpret explicit comparison labels and alternatives structurally."""
+
+    lemma = _value(record, "normaliserat_ord").casefold()
+    raw_text = _value(record, "text")
+    if not lemma or " " in lemma or not lemma.isalpha() or not raw_text:
+        return None
+    lowered = normalize_notation(raw_text)
+    if "komp." not in lowered and "superl." not in lowered:
+        return None
+
+    operations = interpret_single_slot_sequence(raw_text, _ADJECTIVE_COMPARISON_GRAMMAR)
+    if operations is None:
+        return None
+
+    forms: list[AdjectiveForm] = [AdjectiveForm(lemma, "common_singular")]
+    for item in operations:
+        value = _apply_positive_operation(
+            lemma,
+            item.operation,
+            neuter=item.slot == "neuter_singular",
+        )
+        if value is None:
+            return None
+        forms.append(AdjectiveForm(value, item.slot))
+
+    return AdjectiveSlots(
+        lemma=lemma,
+        forms=_dedupe_forms(forms),
+        rule="structural_labelled_comparison_slots",
+    )
+
+
 def _common_from_neuter_for_e_plural(neuter: str) -> str | None:
     """Invert the productive ``-ad -> -at`` positive relation when evidenced."""
 
@@ -243,10 +302,6 @@ def interpret_parallel_positive_adjective_slots(
         neuter_operation = neuter_item.operation
         plural_operation = plural_item.operation
 
-        # Relative neuter + explicit variant form may introduce a different
-        # branch lemma (e.g. +t schangdobla). Without independent evidence for
-        # that lemma this layer must fall back rather than attach it to the
-        # primary article lemma.
         if (
             neuter_operation.kind in {FormOperationKind.APPEND, FormOperationKind.UNCHANGED}
             and plural_operation.kind is FormOperationKind.EXPLICIT
@@ -299,6 +354,7 @@ def interpret_adjective_row(record: dict[str, Any]) -> AdjectiveSlots | None:
     return (
         interpret_unlabelled_positive_adjective_slots(record)
         or interpret_labelled_positive_adjective_slots(record)
+        or interpret_labelled_comparison_adjective_slots(record)
         or interpret_parallel_positive_adjective_slots(record)
         or interpret_simple_adjective_slots(record)
     )
