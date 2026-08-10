@@ -37,6 +37,27 @@ class NounMechanicalValidationTests(unittest.TestCase):
             with self.subTest(notation=notation):
                 self.assertTrue(is_mechanically_verified_noun_notation(notation))
 
+    def test_explicit_written_slot_forms_are_generic(self):
+        for notation in (
+            "+n askor",
+            "+n auror",
+            "+n blastulor",
+            "+n bråtar",
+            "+n canastor",
+            "+en böter",
+            "+en; pl. takfötter el. +ar",
+        ):
+            with self.subTest(notation=notation):
+                self.assertTrue(is_mechanically_verified_noun_notation(notation))
+
+    def test_ibl_marks_fully_valid_alternative(self):
+        for notation in (
+            "+n; pl. + ibl. -metrar",
+            "+n; pl. + ibl. -kilometrar",
+        ):
+            with self.subTest(notation=notation):
+                self.assertTrue(is_mechanically_verified_noun_notation(notation))
+
     def test_constrained_lexical_replacement_paradigms_are_mechanical(self):
         for notation in (
             "+en el. vard. -dan; pl. +ar",
