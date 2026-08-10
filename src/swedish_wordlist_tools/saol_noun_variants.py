@@ -34,12 +34,7 @@ def _tokens(text: str) -> tuple[str, ...]:
 
 
 def is_simple_relative_noun_notation(value: object) -> bool:
-    """Return true for a single-base noun paradigm safe to rebase on ``ord``.
-
-    This is intentionally narrower than the diagnostic relative-notation class.
-    Alternative branches (``_``), ``el.`` and bracket variants can encode more
-    than one base spelling, so they are not rebased wholesale here.
-    """
+    """Return true for a single-base noun paradigm safe to rebase on ``ord``."""
 
     text = str(value or "").strip()
     if is_null_text(text) or "_" in text or "el." in text.casefold() or "[" in text:
@@ -63,24 +58,34 @@ def _has_two_alternative_branches(value: object) -> bool:
     return bool(text) and text.count("_") == 1
 
 
+def _record_identity(record: dict[str, Any]) -> tuple[str, str, str]:
+    """Identify duplicate JSONL rows that encode one printed SAOL article."""
+
+    record_id = str(record.get("subnr") or record.get("urspr_lopnr") or record.get("id") or "")
+    normalized = clean_saol_word(record.get("normaliserat_ord")).casefold()
+    text = " ".join(str(record.get("text") or "").split())
+    return record_id, normalized, text
+
+
 def prepare_noun_variant_records(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Attach conservative sibling evidence before noun generation.
+    """Attach structural sibling evidence before noun generation.
 
-    ``ord`` can be a spelling variant, a phrase-bound form, or a cross-reference
-    occurrence, so a written alternative is acted on only when an ``(hv)`` row
-    independently confirms the same normalized/written pair.
+    ``ord`` is not generally a lemma carrier: it can also contain phrase-bound
+    forms and cross-reference material. Two independent structures make it safe:
 
-    Simple one-base relative paradigms are rebased on the confirmed written
-    variant (``akne`` -> ``acne``).  For complex rows the alternative is carried
-    separately.  Importantly, when SAOL expresses a two-branch ``_`` paradigm,
-    the confirmed alternative belongs to the *article*, not only to the duplicate
-    source row whose own ``ord`` happens to contain that spelling.  Therefore a
-    unique ``(hv)`` alternative is attached to every two-branch NOUN row with the
-    same normalized lemma.  This makes both the main and duplicate rows interpret
-    e.g. ``bankväsen _ bankväsende`` with the same branch bases.
+    * a matching ``(hv)`` row confirms a written alternative;
+    * duplicate NOUN rows for the same printed article (same record id,
+      normalized lemma and notation) expose distinct ``ord`` spellings. When
+      that article has exactly two ``_`` branches and exactly one spelling other
+      than the normalized headword, that spelling is the base of branch two.
+
+    The second rule is what SAOL14 uses for e.g. ``hajp``/``hype``: one JSONL row
+    has ``ord=hajp`` and the sibling has ``ord=hype``, while the shared notation
+    is ``+en; pl. +er el. +ar _ +n [...]``.
     """
 
     materialized = [dict(record) for record in records]
+
     hv_pairs = {
         pair
         for record in materialized
@@ -92,6 +97,14 @@ def prepare_noun_variant_records(records: Iterable[dict[str, Any]]) -> list[dict
     for normalized, written in hv_pairs:
         hv_by_normalized[normalized].add(written)
 
+    noun_written_by_article: dict[tuple[str, str, str], set[str]] = defaultdict(set)
+    for record in materialized:
+        if _saol_upos(record) != "NOUN" or not _has_two_alternative_branches(record.get("text")):
+            continue
+        written = clean_saol_word(record.get("ord"))
+        if written:
+            noun_written_by_article[_record_identity(record)].add(written)
+
     result: list[dict[str, Any]] = []
     for record in materialized:
         if _saol_upos(record) != "NOUN":
@@ -102,11 +115,20 @@ def prepare_noun_variant_records(records: Iterable[dict[str, Any]]) -> list[dict
         pair = _variant_pair(record)
         own_confirmed_variant = pair is not None and pair in hv_pairs
 
-        # A two-branch article can have its alternative spelling represented in
-        # a sibling (hv) row rather than in this particular NOUN row's ``ord``.
-        # Bind it only when the article has exactly one confirmed alternative;
-        # ambiguous multi-alternative articles remain diagnostic.
-        article_alternatives = hv_by_normalized.get(normalized.casefold(), set()) if normalized else set()
+        article_alternatives = set(hv_by_normalized.get(normalized.casefold(), set())) if normalized else set()
+
+        # Duplicate NOUN rows can themselves encode the printed heading variants.
+        # Require exact article identity, exactly two branches, and exactly one
+        # non-primary spelling before using that spelling as branch-two base.
+        sibling_spellings = noun_written_by_article.get(_record_identity(record), set())
+        sibling_alternatives = {
+            spelling
+            for spelling in sibling_spellings
+            if normalized and spelling.casefold() != normalized.casefold()
+        }
+        if len(sibling_alternatives) == 1:
+            article_alternatives.update(sibling_alternatives)
+
         branch_alternative = None
         if _has_two_alternative_branches(record.get("text")) and len(article_alternatives) == 1:
             branch_alternative = next(iter(article_alternatives))
@@ -117,7 +139,11 @@ def prepare_noun_variant_records(records: Iterable[dict[str, Any]]) -> list[dict
 
         prepared = dict(record)
         prepared["_saol_source_normaliserat_ord"] = str(record.get("normaliserat_ord") or "")
-        prepared["_saol_variant_evidence"] = "matching_hv_and_noun_row"
+        prepared["_saol_variant_evidence"] = (
+            "duplicate_noun_article_rows"
+            if branch_alternative in sibling_alternatives
+            else "matching_hv_and_noun_row"
+        )
 
         if own_confirmed_variant and is_simple_relative_noun_notation(record.get("text")):
             prepared["normaliserat_ord"] = clean_saol_word(record.get("ord"))
