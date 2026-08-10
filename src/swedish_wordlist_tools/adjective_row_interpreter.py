@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from .adjective_slots import (
@@ -66,6 +67,16 @@ def _single_operation(token: str) -> FormOperation | None:
     if parsed is None or len(parsed) != 1:
         return None
     return parsed[0]
+
+
+def _compound_prefix(record: dict[str, Any], lemma: str) -> str:
+    stycke = re.sub(r"<[^>]+>", "", _value(record, "stycke")).casefold()
+    if "|" not in stycke:
+        return ""
+    prefix = "".join(stycke.split("|")[:-1])
+    prefix = re.sub(r"^\d+", "", prefix)
+    prefix = "".join(char for char in prefix if char.isalpha() or char == "-")
+    return prefix if prefix and lemma.startswith(prefix) else ""
 
 
 def interpret_unlabelled_positive_adjective_slots(record: dict[str, Any]) -> AdjectiveSlots | None:
@@ -178,11 +189,7 @@ def interpret_labelled_comparison_adjective_slots(record: dict[str, Any]) -> Adj
     return AdjectiveSlots(lemma=lemma, forms=_dedupe_forms(forms), rule="structural_labelled_comparison_slots")
 
 
-def _unlabelled_comparison_alternative_slot(
-    index: int,
-    last_slot: str | None,
-    _operation: FormOperation,
-) -> str | None:
+def _unlabelled_comparison_alternative_slot(index: int, last_slot: str | None, _operation: FormOperation) -> str | None:
     if index == 0:
         return "neuter_singular"
     if index == 1 and last_slot == "neuter_singular":
@@ -201,24 +208,14 @@ _ADJECTIVE_UNLABELLED_COMPARISON_ALTERNATIVE_GRAMMAR = SlotGrammar(
 
 
 def interpret_unlabelled_comparison_alternatives(record: dict[str, Any]) -> AdjectiveSlots | None:
-    """Interpret e.g. ``+t, trängre H +are, trängst H +ast`` structurally."""
     lemma = _value(record, "normaliserat_ord").casefold()
     raw_text = _value(record, "text")
     if not lemma or " " in lemma or not lemma.isalpha() or " h " not in f" {normalize_notation(raw_text)} ":
         return None
-    operations = interpret_single_slot_sequence(
-        raw_text,
-        _ADJECTIVE_UNLABELLED_COMPARISON_ALTERNATIVE_GRAMMAR,
-    )
+    operations = interpret_single_slot_sequence(raw_text, _ADJECTIVE_UNLABELLED_COMPARISON_ALTERNATIVE_GRAMMAR)
     if operations is None:
         return None
-    expected = (
-        "neuter_singular",
-        "comparative",
-        "comparative",
-        "superlative",
-        "superlative",
-    )
+    expected = ("neuter_singular", "comparative", "comparative", "superlative", "superlative")
     if tuple(item.slot for item in operations) != expected:
         return None
     forms: list[AdjectiveForm] = [AdjectiveForm(lemma, "common_singular")]
@@ -227,18 +224,10 @@ def interpret_unlabelled_comparison_alternatives(record: dict[str, Any]) -> Adje
         if value is None:
             return None
         forms.append(AdjectiveForm(value, item.slot))
-    return AdjectiveSlots(
-        lemma=lemma,
-        forms=_dedupe_forms(forms),
-        rule="structural_unlabelled_comparison_alternatives",
-    )
+    return AdjectiveSlots(lemma=lemma, forms=_dedupe_forms(forms), rule="structural_unlabelled_comparison_alternatives")
 
 
-def _same_slot_alternative_implicit_slot(
-    index: int,
-    _last_slot: str | None,
-    operation: FormOperation,
-) -> str | None:
+def _same_slot_alternative_implicit_slot(index: int, _last_slot: str | None, operation: FormOperation) -> str | None:
     if index == 0 and operation.kind is FormOperationKind.EXPLICIT:
         return "definite_or_plural"
     return None
@@ -253,7 +242,6 @@ _ADJECTIVE_SAME_SLOT_ALTERNATIVE_GRAMMAR = SlotGrammar(
 
 
 def interpret_unlabelled_adjective_alternatives(record: dict[str, Any]) -> AdjectiveSlots | None:
-    """Interpret ``X el. Y`` as two explicit realizations of one slot."""
     lemma = _value(record, "normaliserat_ord").casefold()
     raw_text = _value(record, "text")
     if not lemma or " " in lemma or not lemma.isalpha() or "el." not in normalize_notation(raw_text):
@@ -269,18 +257,10 @@ def interpret_unlabelled_adjective_alternatives(record: dict[str, Any]) -> Adjec
         if value is None:
             return None
         forms.append(AdjectiveForm(value, item.slot))
-    return AdjectiveSlots(
-        lemma=lemma,
-        forms=_dedupe_forms(forms),
-        rule="structural_same_slot_alternatives",
-    )
+    return AdjectiveSlots(lemma=lemma, forms=_dedupe_forms(forms), rule="structural_same_slot_alternatives")
 
 
-def _partial_label_implicit_slot(
-    index: int,
-    _last_slot: str | None,
-    _operation: FormOperation,
-) -> str | None:
+def _partial_label_implicit_slot(index: int, _last_slot: str | None, _operation: FormOperation) -> str | None:
     if index == 0:
         return "masculine_definite"
     return None
@@ -295,15 +275,12 @@ _ADJECTIVE_PARTIAL_LABEL_GRAMMAR = SlotGrammar(
 
 
 def interpret_partial_labelled_adjective_slots(record: dict[str, Any]) -> AdjectiveSlots | None:
-    """Interpret partial labelled paradigms such as ``ende, vard. superl. endaste``."""
     lemma = _value(record, "normaliserat_ord").casefold()
     raw_text = _value(record, "text")
     if not lemma or " " in lemma or not lemma.isalpha() or "vard." not in normalize_notation(raw_text):
         return None
     operations = interpret_single_slot_sequence(raw_text, _ADJECTIVE_PARTIAL_LABEL_GRAMMAR)
-    if operations is None:
-        return None
-    if tuple(item.slot for item in operations) != ("masculine_definite", "superlative"):
+    if operations is None or tuple(item.slot for item in operations) != ("masculine_definite", "superlative"):
         return None
     forms: list[AdjectiveForm] = [AdjectiveForm(lemma, "common_singular")]
     for item in operations:
@@ -311,15 +288,85 @@ def interpret_partial_labelled_adjective_slots(record: dict[str, Any]) -> Adject
         if value is None:
             return None
         forms.append(AdjectiveForm(value, item.slot))
+    return AdjectiveSlots(lemma=lemma, forms=_dedupe_forms(forms), rule="structural_partial_labelled_slots")
+
+
+def interpret_bare_adjective_slot_label(record: dict[str, Any]) -> AdjectiveSlots | None:
+    lemma = _value(record, "normaliserat_ord").casefold()
+    raw_text = normalize_notation(_value(record, "text"))
+    if not lemma or " " in lemma or not lemma.isalpha() or raw_text != "best.":
+        return None
     return AdjectiveSlots(
         lemma=lemma,
-        forms=_dedupe_forms(forms),
-        rule="structural_partial_labelled_slots",
+        forms=(AdjectiveForm(lemma, "definite_or_plural"),),
+        rule="structural_bare_slot_label",
     )
 
 
+def interpret_full_labelled_adjective_slots(record: dict[str, Any]) -> AdjectiveSlots | None:
+    """Interpret rich labelled sequences by state, not by whole-paradigm regex."""
+    lemma = _value(record, "normaliserat_ord").casefold()
+    raw_text = _value(record, "text")
+    if not lemma or " " in lemma or not lemma.isalpha() or not raw_text:
+        return None
+    tokens = tokenize_notation(normalize_notation(raw_text))
+    if tokens is None or "best." not in tokens or "pl." not in tokens:
+        return None
+
+    forms: list[AdjectiveForm] = [AdjectiveForm(lemma, "common_singular")]
+    state = "positive"
+    positive_count = 0
+    best_count = 0
+    post_plural_count = 0
+    for token in tokens:
+        lower = token.casefold()
+        if token in {",", ";"}:
+            continue
+        if lower == "best.":
+            state = "best"
+            continue
+        if lower == "pl.":
+            state = "plural"
+            continue
+        operation = _single_operation(token)
+        if operation is None:
+            return None
+        if state == "positive":
+            if positive_count != 0:
+                return None
+            slot = "neuter_singular"
+            positive_count += 1
+        elif state == "best":
+            if best_count == 0:
+                slot = "masculine_definite"
+            elif best_count == 1:
+                slot = "definite_or_plural"
+            else:
+                return None
+            best_count += 1
+        elif state == "plural":
+            if post_plural_count == 0:
+                slot = "definite_or_plural"
+            elif post_plural_count == 1:
+                slot = "comparative"
+            elif post_plural_count == 2:
+                slot = "superlative"
+            else:
+                return None
+            post_plural_count += 1
+        else:
+            return None
+        value = _apply_positive_operation(lemma, operation, neuter=slot == "neuter_singular")
+        if value is None:
+            return None
+        forms.append(AdjectiveForm(value, slot))
+
+    if (positive_count, best_count, post_plural_count) != (1, 2, 3):
+        return None
+    return AdjectiveSlots(lemma=lemma, forms=_dedupe_forms(forms), rule="structural_full_labelled_slots")
+
+
 def interpret_usage_restricted_adjective_slots(record: dict[str, Any]) -> AdjectiveSlots | None:
-    """Interpret restriction vocabulary as metadata, not inflection paradigms."""
     lemma = _value(record, "normaliserat_ord").casefold()
     raw_text = _value(record, "text")
     if not lemma or " " in lemma or not lemma.isalpha() or not raw_text:
@@ -383,6 +430,7 @@ def interpret_parallel_positive_adjective_slots(record: dict[str, Any]) -> Adjec
     branches = interpret_slot_branches(raw_text, _ADJECTIVE_PARALLEL_POSITIVE_GRAMMAR)
     if branches is None or len(branches) < 2:
         return None
+    prefix = _compound_prefix(record, lemma)
     forms: list[AdjectiveForm] = [AdjectiveForm(lemma, "common_singular")]
     for branch in branches:
         if len(branch.operations) != 2:
@@ -395,6 +443,8 @@ def interpret_parallel_positive_adjective_slots(record: dict[str, Any]) -> Adjec
         if neuter_operation.kind in {FormOperationKind.APPEND, FormOperationKind.UNCHANGED} and plural_operation.kind is FormOperationKind.EXPLICIT:
             return None
         neuter = _apply_positive_operation(lemma, neuter_operation, neuter=True)
+        if neuter is None and prefix and neuter_operation.kind is FormOperationKind.REPLACE_TAIL:
+            neuter = prefix + neuter_operation.value
         if neuter is None:
             return None
         branch_common: str | None = None
@@ -415,11 +465,13 @@ def interpret_parallel_positive_adjective_slots(record: dict[str, Any]) -> Adjec
 def interpret_adjective_row(record: dict[str, Any]) -> AdjectiveSlots | None:
     return (
         interpret_unlabelled_positive_adjective_slots(record)
+        or interpret_unlabelled_adjective_alternatives(record)
         or interpret_labelled_positive_adjective_slots(record)
         or interpret_labelled_comparison_adjective_slots(record)
         or interpret_unlabelled_comparison_alternatives(record)
-        or interpret_unlabelled_adjective_alternatives(record)
         or interpret_partial_labelled_adjective_slots(record)
+        or interpret_bare_adjective_slot_label(record)
+        or interpret_full_labelled_adjective_slots(record)
         or interpret_usage_restricted_adjective_slots(record)
         or interpret_parallel_positive_adjective_slots(record)
         or interpret_simple_adjective_slots(record)
