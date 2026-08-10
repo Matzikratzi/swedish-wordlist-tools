@@ -72,6 +72,40 @@ class NounSharedSlotInterpreterTests(unittest.TestCase):
                     self.assertIsNone(assigned[0].alternative_marker)
                     self.assertEqual(marker.casefold(), assigned[1].alternative_marker)
 
+    def test_unlabelled_relative_alternatives_reuse_same_slot_for_each_operation_kind(self) -> None:
+        for first, second in (
+            ("+xy", "+ab"),
+            ("+xy", "-xyz"),
+            ("-xyz", "+xy"),
+            ("+xy", "+"),
+        ):
+            with self.subTest(first=first, second=second):
+                assigned = _assign_unlabelled_relative_noun_slots_shared(
+                    self._tokens(f"{first} el. {second}")
+                )
+                self.assertIsNotNone(assigned)
+                assert assigned is not None
+                self.assertEqual(
+                    ("sg_def", "sg_def"),
+                    tuple(item.slot for item in assigned),
+                )
+                self.assertIsNone(assigned[0].alternative_marker)
+                self.assertEqual("el.", assigned[1].alternative_marker)
+
+    def test_unlabelled_explicit_alternatives_reuse_same_slot_in_noun_context(self) -> None:
+        assigned = _assign_unlabelled_explicit_noun_slots_shared(
+            {"ordkl": "s. formen el. formen2"},
+            self._tokens("formen el. formen2"),
+        )
+        self.assertIsNotNone(assigned)
+        assert assigned is not None
+        self.assertEqual(
+            ("sg_def", "sg_def"),
+            tuple(item.slot for item in assigned),
+        )
+        self.assertIsNone(assigned[0].alternative_marker)
+        self.assertEqual("el.", assigned[1].alternative_marker)
+
     def test_definite_plural_is_only_a_composed_slot_label(self) -> None:
         tokens = self._tokens("best. pl. +xy")
         self.assertEqual(("best.", "pl.", "+xy"), tokens)
