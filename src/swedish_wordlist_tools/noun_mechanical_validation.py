@@ -63,7 +63,7 @@ def _is_materialized_slot_notation(notation: str) -> bool:
     """Verify one-branch noun notation using shared form primitives.
 
     The operation kind decides evidential strength, not the word class or the
-    spelling of the form.  Thus ``+n askor`` is the same structural case as an
+    spelling of the form. Thus ``+n askor`` is the same structural case as an
     explicitly written irregular verb form such as ``sprang`` or ``kan``: the
     token is EXPLICIT and directly states the written form for its slot.
 
@@ -116,6 +116,44 @@ def _is_materialized_branch_notation(notation: str) -> bool:
     return True
 
 
+def _artifact_materializes_replacements(row: dict[str, Any]) -> bool:
+    """Trust replacement operations only after the noun generator accepted them.
+
+    ``complete_noun_entry`` already refuses unmarked tail replacements unless
+    their application is structurally grounded (for example by the compound
+    boundary in ``stycke``) or explicitly licensed as a plural-use form.  A
+    validation row whose generator is ``canonical_artifact`` has therefore
+    passed that stronger source-aware gate.  Re-parsing the notation here lets
+    validation reuse that proof instead of maintaining a second list of noun
+    replacement patterns.
+    """
+
+    if str(row.get("generator") or "") != "canonical_artifact":
+        return False
+    notation = normalized_notation(row)
+    branches = split_alternative_branches(notation)
+    if not branches:
+        return False
+
+    saw_replacement = False
+    for branch in branches:
+        assigned = assign_labeled_slots(
+            branch.tokens,
+            singular_slot="sg_def",
+            plural_slot="pl_indef",
+            definite_plural_slot="pl_def",
+        )
+        if not assigned:
+            return False
+        for item in assigned:
+            if item.operation.kind is FormOperationKind.REPLACE_TAIL:
+                saw_replacement = True
+                continue
+            if not is_direct_form_operation(item.operation):
+                return False
+    return saw_replacement
+
+
 def is_mechanically_verified_noun_notation(row_or_notation: dict[str, Any] | str) -> bool:
     notation = normalized_notation(row_or_notation)
     if notation in MECHANICALLY_VERIFIED_NOUN_NOTATIONS:
@@ -135,6 +173,8 @@ def is_mechanically_verified_noun_notation(row_or_notation: dict[str, Any] | str
 
 def is_mechanically_verified_noun_row(row: dict[str, Any]) -> bool:
     if is_mechanically_verified_noun_notation(row):
+        return True
+    if _artifact_materializes_replacements(row):
         return True
     if not is_null_noun_notation(row.get("notation")):
         return False
