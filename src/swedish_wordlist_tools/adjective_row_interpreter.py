@@ -280,6 +280,16 @@ def interpret_parallel_positive_adjective_slots(
         if neuter_operation is None or plural_operation is None:
             return None
 
+        # A relative neuter operation followed by a fully explicit second form
+        # may introduce a different variant lemma (e.g. +t schangdobla). The
+        # current structural layer has no independent evidence for that branch
+        # lemma, so it must not attach the explicit form to the primary lemma.
+        if (
+            neuter_operation.kind in {FormOperationKind.APPEND, FormOperationKind.UNCHANGED}
+            and plural_operation.kind is FormOperationKind.EXPLICIT
+        ):
+            return None
+
         neuter = _apply_positive_operation(lemma, neuter_operation, neuter=True)
         if neuter is None:
             return None
