@@ -51,6 +51,24 @@ class SaolNotationTests(unittest.TestCase):
         self.assertEqual(("BB:t", ";", "pl.", "BB:n"), tokenize_notation("BB:t; pl. BB:n"))
         self.assertEqual(("+t", ";", "pl.", "+", "H", "+s"), tokenize_notation("+t; pl. + H +<k>s</k>"))
 
+    def test_h_marks_an_alternative_in_the_same_slot(self) -> None:
+        assigned = assign_labeled_slots(
+            ("+n", ";", "pl.", "+", "H", "+s"),
+            singular_slot="sg_def",
+            plural_slot="pl_indef",
+            definite_plural_slot="pl_def",
+        )
+        self.assertIsNotNone(assigned)
+        assert assigned is not None
+        self.assertEqual(
+            (
+                ("sg_def", "+n"),
+                ("pl_indef", "+"),
+                ("pl_indef", "+s"),
+            ),
+            tuple((item.slot, item.token) for item in assigned),
+        )
+
     def test_drops_strict_prefix_alternative_at_source_limit(self) -> None:
         text = "komp. närmare el. närmre, superl. närmast el. närm"
         self.assertEqual(50, len(text))
