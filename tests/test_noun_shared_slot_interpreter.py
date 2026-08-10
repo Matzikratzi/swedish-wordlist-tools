@@ -9,6 +9,7 @@ from swedish_wordlist_tools.saol_row_interpreter import (
     _assign_unlabelled_explicit_noun_slots_shared,
     _assign_unlabelled_relative_noun_slots_shared,
     _coalesce_noun_slot_labels,
+    _explicit_branch_bases,
 )
 from swedish_wordlist_tools.saol_slot_interpreter import assign_slots_with_grammar
 
@@ -136,30 +137,38 @@ class NounSharedSlotInterpreterTests(unittest.TestCase):
             _assign_labelled_noun_slots_shared(self._tokens("+en +ar"))
         )
 
-    def test_underscore_only_splits_into_independent_branches(self) -> None:
+    def test_underscore_only_splits_independent_branches(self) -> None:
         branches = split_alternative_branches("+xy _ -xyz")
         self.assertEqual(2, len(branches))
         self.assertEqual(("+xy",), branches[0].tokens)
         self.assertEqual(("-xyz",), branches[1].tokens)
 
-    def test_each_underscore_branch_restarts_implicit_slot_state(self) -> None:
+    def test_each_underscore_branch_restarts_implicit_slot_sequence(self) -> None:
         branches = split_alternative_branches("+xy +ab _ -xyz +cd")
         self.assertEqual(2, len(branches))
-
-        first = _assign_unlabelled_relative_noun_slots_shared(branches[0].tokens)
-        second = _assign_unlabelled_relative_noun_slots_shared(branches[1].tokens)
-        self.assertIsNotNone(first)
-        self.assertIsNotNone(second)
-        assert first is not None
-        assert second is not None
-
+        assigned = [
+            _assign_unlabelled_relative_noun_slots_shared(branch.tokens)
+            for branch in branches
+        ]
+        self.assertTrue(all(items is not None for items in assigned))
         self.assertEqual(
-            ("sg_def", "pl_indef"),
-            tuple(item.slot for item in first),
+            [("sg_def", "pl_indef"), ("sg_def", "pl_indef")],
+            [tuple(item.slot for item in items or ()) for items in assigned],
+        )
+
+    def test_explicit_variant_evidence_only_selects_branch_bases(self) -> None:
+        record = {"_saol_alternative_lemma": "variant"}
+        self.assertEqual(
+            ("huvud", "variant"),
+            _explicit_branch_bases(record, "huvud", 2),
         )
         self.assertEqual(
-            ("sg_def", "pl_indef"),
-            tuple(item.slot for item in second),
+            ("huvud",),
+            _explicit_branch_bases(record, "huvud", 1),
+        )
+        self.assertEqual(
+            ("huvud", "huvud"),
+            _explicit_branch_bases({}, "huvud", 2),
         )
 
 
