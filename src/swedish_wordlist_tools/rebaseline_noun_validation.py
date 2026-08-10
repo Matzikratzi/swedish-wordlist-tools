@@ -74,7 +74,10 @@ def classify(rows: list[dict[str, Any]], homonym_coverage: dict[str, Any] | None
         status = str(row.get("status") or "")
         semantic_status = str(row.get("semantic_status") or "")
 
-        if status == "form_set_mismatch" and is_truncated_inflection_source(row):
+        # The 50-character export cap is a source-data condition, regardless of
+        # whether the downstream validator currently reports mismatch or could
+        # not materialize a complete paradigm at all.
+        if is_truncated_inflection_source(row):
             add("source_text_truncated", lemma)
             continue
 
@@ -82,10 +85,6 @@ def classify(rows: list[dict[str, Any]], homonym_coverage: dict[str, Any] | None
             add("variant_coverage_difference", lemma)
             continue
 
-        # Once SAOL itself fully licenses a parsed paradigm, SALDO is only a
-        # comparison source. Keep such rows out of singular-scope triage even
-        # when SALDO chooses another gender, a broader paradigm, or omits one
-        # of SAOL's explicitly materialized alternative branches.
         if status == "form_set_mismatch" and is_mechanically_verified_noun_row(row):
             add("mechanically_verified_from_saol", lemma)
             continue
@@ -138,7 +137,7 @@ def render(summary: dict[str, Any]) -> str:
         "Varianttäckningsskillnader ligger separat: varje SAOL-variant har redan validerats",
         "mot sitt eget lemma och ska inte blandas in i parser-/artikelomfångsmismatchar.",
         "50-teckenstrunkerade text-fält ligger separat som source_text_truncated och",
-        "räknas inte som vanliga parser-/formmismatchar.",
+        "räknas inte som vanliga parser-/formmismatchar eller unsupported-paradigm.",
         "",
         f"NOUN-poster: {summary['noun_records']}",
         f"Artikelomfångspopulation: {summary['scope_population']}",
