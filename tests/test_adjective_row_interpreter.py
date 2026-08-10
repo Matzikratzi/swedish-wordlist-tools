@@ -6,10 +6,10 @@ from swedish_wordlist_tools.adjective_row_interpreter import interpret_adjective
 
 
 class AdjectiveRowInterpreterTests(unittest.TestCase):
-    def parse(self, lemma: str, text: str):
-        slots = interpret_adjective_row(
-            {"normaliserat_ord": lemma, "text": text, "upos": "ADJ"}
-        )
+    def parse(self, lemma: str, text: str, **extra):
+        record = {"normaliserat_ord": lemma, "text": text, "upos": "ADJ"}
+        record.update(extra)
+        slots = interpret_adjective_row(record)
         self.assertIsNotNone(slots)
         return slots
 
@@ -119,6 +119,32 @@ class AdjectiveRowInterpreterTests(unittest.TestCase):
             (slots.forms[1].slot, slots.forms[2].slot),
         )
 
+    def test_bare_slot_label_is_structural(self) -> None:
+        slots = self.parse("flesta", "best.")
+        self.assertEqual(("flesta",), slots.written_forms())
+        self.assertEqual("structural_bare_slot_label", slots.rule)
+        self.assertEqual("definite_or_plural", slots.forms[0].slot)
+
+    def test_rich_labelled_sequence_is_structural(self) -> None:
+        slots = self.parse("liten", "litet, best. lille lilla; pl. små; mindre minst")
+        self.assertEqual(
+            ("liten", "litet", "lille", "lilla", "små", "mindre", "minst"),
+            slots.written_forms(),
+        )
+        self.assertEqual("structural_full_labelled_slots", slots.rule)
+        self.assertEqual(
+            (
+                "common_singular",
+                "neuter_singular",
+                "masculine_definite",
+                "definite_or_plural",
+                "definite_or_plural",
+                "comparative",
+                "superlative",
+            ),
+            tuple(form.slot for form in slots.forms),
+        )
+
     def test_usage_restrictions_are_metadata_not_paradigms(self) -> None:
         adenoid = self.parse("adenoid", "n. sing. obest. obrukl., adenoida")
         self.assertEqual(("adenoid", "adenoida"), adenoid.written_forms())
@@ -140,17 +166,30 @@ class AdjectiveRowInterpreterTests(unittest.TestCase):
                 "fasetterad",
                 "fasetterat +e _ facetterat +e",
                 ("fasetterad", "fasetterat", "fasetterade", "facetterad", "facetterat", "facetterade"),
+                {},
             ),
             (
                 "hårdflörtad",
                 "-flörtat +e _ -flirtat +e",
                 ("hårdflörtad", "hårdflörtat", "hårdflörtade", "hårdflirtad", "hårdflirtat", "hårdflirtade"),
+                {},
             ),
-            ("ledsen", "ledset ledsna _ lesset lessna", ("ledsen", "ledset", "ledsna", "lesset", "lessna")),
+            (
+                "ledsen",
+                "ledset ledsna _ lesset lessna",
+                ("ledsen", "ledset", "ledsna", "lesset", "lessna"),
+                {},
+            ),
+            (
+                "upptuperad",
+                "-tuperat +e _ -touperat +e",
+                ("upptuperad", "upptuperat", "upptuperade", "upptouperad", "upptouperat", "upptouperade"),
+                {"stycke": "upp|tup·er·ad"},
+            ),
         )
-        for lemma, notation, expected in cases:
+        for lemma, notation, expected, extra in cases:
             with self.subTest(notation=notation):
-                slots = self.parse(lemma, notation)
+                slots = self.parse(lemma, notation, **extra)
                 self.assertEqual(expected, slots.written_forms())
                 self.assertEqual("structural_parallel_positive_branches", slots.rule)
 
