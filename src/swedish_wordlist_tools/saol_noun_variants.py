@@ -58,22 +58,26 @@ def _variant_pair(record: dict[str, Any]) -> tuple[str, str] | None:
     return normalized.casefold(), written.casefold()
 
 
+def _has_two_alternative_branches(value: object) -> bool:
+    text = str(value or "").strip()
+    return bool(text) and text.count("_") == 1
+
+
 def prepare_noun_variant_records(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     """Attach conservative sibling evidence before noun generation.
 
-    SAOL faksimil rows use ``normaliserat_ord`` as a normalization carrier.
-    ``ord`` can be a spelling variant, a phrase-bound form, or merely a
-    cross-reference form.  We therefore act only when the same normalized/written
-    pair occurs both as an ``(hv)`` row and as a real NOUN row.
+    ``ord`` can be a spelling variant, a phrase-bound form, or a cross-reference
+    occurrence, so a written alternative is acted on only when an ``(hv)`` row
+    independently confirms the same normalized/written pair.
 
-    * A simple relative ``+`` paradigm is rebased on the written form.  Example:
-      normalized ``akne`` + written ``acne`` + ``+n`` -> acne/acnen.
-    * A lexical or structurally complex paradigm keeps the normalized base, but
-      the written sibling is supplied as an additional lemma form.  Example:
-      ``ankare`` + ``ankar`` + explicit ankaret/ankaren/ankarna.
-
-    The function does not add or remove source rows; it only annotates/clones the
-    rows passed to the existing noun interpreter.
+    Simple one-base relative paradigms are rebased on the confirmed written
+    variant (``akne`` -> ``acne``).  For complex rows the alternative is carried
+    separately.  Importantly, when SAOL expresses a two-branch ``_`` paradigm,
+    the confirmed alternative belongs to the *article*, not only to the duplicate
+    source row whose own ``ord`` happens to contain that spelling.  Therefore a
+    unique ``(hv)`` alternative is attached to every two-branch NOUN row with the
+    same normalized lemma.  This makes both the main and duplicate rows interpret
+    e.g. ``bankväsen _ bankväsende`` with the same branch bases.
     """
 
     materialized = [dict(record) for record in records]
@@ -84,26 +88,44 @@ def prepare_noun_variant_records(records: Iterable[dict[str, Any]]) -> list[dict
         for pair in (_variant_pair(record),)
         if pair is not None
     }
+    hv_by_normalized: dict[str, set[str]] = defaultdict(set)
+    for normalized, written in hv_pairs:
+        hv_by_normalized[normalized].add(written)
 
     result: list[dict[str, Any]] = []
     for record in materialized:
         if _saol_upos(record) != "NOUN":
             result.append(record)
             continue
+
+        normalized = clean_saol_word(record.get("normaliserat_ord"))
         pair = _variant_pair(record)
-        if pair is None or pair not in hv_pairs:
+        own_confirmed_variant = pair is not None and pair in hv_pairs
+
+        # A two-branch article can have its alternative spelling represented in
+        # a sibling (hv) row rather than in this particular NOUN row's ``ord``.
+        # Bind it only when the article has exactly one confirmed alternative;
+        # ambiguous multi-alternative articles remain diagnostic.
+        article_alternatives = hv_by_normalized.get(normalized.casefold(), set()) if normalized else set()
+        branch_alternative = None
+        if _has_two_alternative_branches(record.get("text")) and len(article_alternatives) == 1:
+            branch_alternative = next(iter(article_alternatives))
+
+        if not own_confirmed_variant and branch_alternative is None:
             result.append(record)
             continue
 
-        written = clean_saol_word(record.get("ord"))
         prepared = dict(record)
         prepared["_saol_source_normaliserat_ord"] = str(record.get("normaliserat_ord") or "")
         prepared["_saol_variant_evidence"] = "matching_hv_and_noun_row"
-        if is_simple_relative_noun_notation(record.get("text")):
-            prepared["normaliserat_ord"] = written
+
+        if own_confirmed_variant and is_simple_relative_noun_notation(record.get("text")):
+            prepared["normaliserat_ord"] = clean_saol_word(record.get("ord"))
             prepared["_saol_variant_mode"] = "rebase_simple_relative"
         else:
-            prepared["_saol_alternative_lemma"] = written
+            written = clean_saol_word(record.get("ord")) if own_confirmed_variant else ""
+            alternative = branch_alternative or written
+            prepared["_saol_alternative_lemma"] = alternative
             prepared["_saol_variant_mode"] = "additional_lemma"
         result.append(prepared)
 
