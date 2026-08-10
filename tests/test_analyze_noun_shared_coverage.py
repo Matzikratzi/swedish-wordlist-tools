@@ -15,15 +15,32 @@ class AnalyzeNounSharedCoverageTests(unittest.TestCase):
     def test_classifies_independent_shared_paths(self) -> None:
         noun = {"ordkl": "s."}
         self.assertEqual("shared_labelled", branch_path(noun, self._tokens("pl. +ar")))
-        self.assertEqual("shared_relative", branch_path(noun, self._tokens("+en +ar")))
-        self.assertEqual("shared_explicit", branch_path(noun, self._tokens("brodern bröder")))
+        self.assertEqual(
+            "shared_unlabelled_atoms",
+            branch_path(noun, self._tokens("+en +ar")),
+        )
+        self.assertEqual(
+            "shared_unlabelled_atoms",
+            branch_path(noun, self._tokens("brodern bröder")),
+        )
         self.assertEqual("structural_uninflected", branch_path(noun, self._tokens("oböjl.")))
 
-    def test_unknown_mixed_syntax_stays_legacy_fallback(self) -> None:
+    def test_relative_and_explicit_atoms_can_mix_in_one_shared_sequence(self) -> None:
+        noun = {"ordkl": "s."}
+        self.assertEqual(
+            "shared_unlabelled_atoms",
+            branch_path(noun, self._tokens("+en bröder")),
+        )
+        self.assertEqual(
+            "shared_unlabelled_atoms",
+            branch_path(noun, self._tokens("brodern +ar")),
+        )
+
+    def test_unknown_comment_syntax_stays_legacy_fallback(self) -> None:
         noun = {"ordkl": "s."}
         self.assertEqual(
             "legacy_fallback",
-            branch_path(noun, self._tokens("+en okändmarkör +ar")),
+            branch_path(noun, self._tokens("+en okändmarkör: +ar")),
         )
 
 
