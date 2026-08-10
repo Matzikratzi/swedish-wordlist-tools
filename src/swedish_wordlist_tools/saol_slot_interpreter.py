@@ -9,7 +9,6 @@ from .saol_notation import (
     SlotOperation,
     parse_form_operations,
     split_alternative_branches,
-    tokenize_notation,
 )
 
 
@@ -53,7 +52,6 @@ def assign_slots_with_grammar(
     for token in tokens:
         lower = _clean_token(token)
         if token in grammar.punctuation:
-            saw_marker = True
             continue
         if lower in grammar.transparent_markers:
             saw_marker = True
@@ -70,8 +68,6 @@ def assign_slots_with_grammar(
             alternative_marker = None
             saw_marker = True
             continue
-        # A remaining word ending in ':' or '.' is structural prose/label syntax
-        # that this grammar did not license. Do not reinterpret it as a form.
         if lower.endswith((":", ".")) and not lower.startswith(("+", "-")):
             return None
 
