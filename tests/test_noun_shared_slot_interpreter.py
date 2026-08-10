@@ -3,7 +3,12 @@ from __future__ import annotations
 import unittest
 
 from swedish_wordlist_tools.saol_notation import split_alternative_branches
-from swedish_wordlist_tools.saol_row_interpreter import _assign_labelled_noun_slots_shared
+from swedish_wordlist_tools.saol_row_interpreter import (
+    _NOUN_LABELLED_SLOT_GRAMMAR,
+    _assign_labelled_noun_slots_shared,
+    _coalesce_noun_slot_labels,
+)
+from swedish_wordlist_tools.saol_slot_interpreter import assign_slots_with_grammar
 
 
 class NounSharedSlotInterpreterTests(unittest.TestCase):
@@ -11,6 +16,30 @@ class NounSharedSlotInterpreterTests(unittest.TestCase):
         branches = split_alternative_branches(text)
         self.assertEqual(1, len(branches))
         return branches[0].tokens
+
+    def test_labelled_plural_tokenization_and_coalescing(self) -> None:
+        tokens = self._tokens("ankaret; pl. ankare el. ankaren, best. pl. ankarna")
+        self.assertEqual(
+            ("ankaret", ";", "pl.", "ankare", "el.", "ankaren", ",", "best.", "pl.", "ankarna"),
+            tokens,
+        )
+        self.assertEqual(
+            ("ankaret", ";", "pl.", "ankare", "el.", "ankaren", ",", "best.pl.", "ankarna"),
+            _coalesce_noun_slot_labels(tokens),
+        )
+
+    def test_coalesced_sequence_is_accepted_by_shared_engine(self) -> None:
+        tokens = self._tokens("ankaret; pl. ankare el. ankaren, best. pl. ankarna")
+        assigned = assign_slots_with_grammar(
+            _coalesce_noun_slot_labels(tokens),
+            _NOUN_LABELLED_SLOT_GRAMMAR,
+        )
+        self.assertIsNotNone(assigned)
+        assert assigned is not None
+        self.assertEqual(
+            ("sg_def", "pl_indef", "pl_indef", "pl_def"),
+            tuple(item.slot for item in assigned),
+        )
 
     def test_labelled_plural_and_definite_plural_use_shared_slots(self) -> None:
         assigned = _assign_labelled_noun_slots_shared(
