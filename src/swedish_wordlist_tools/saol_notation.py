@@ -41,6 +41,31 @@ class SlotOperation:
     operation: FormOperation
 
 
+# These operations directly determine a written form once the slot/base is known.
+# EXPLICIT is deliberately ordklass-neutral: ``askor`` for a noun, ``sprang`` or
+# ``sprungit`` for a verb, and ``kan`` as an explicitly stated verb form are the
+# same primitive operation.  REPLACE_TAIL is different because its realization
+# still depends on deciding how the operation applies to the base spelling.
+DIRECT_FORM_OPERATION_KINDS = frozenset(
+    {
+        FormOperationKind.UNCHANGED,
+        FormOperationKind.APPEND,
+        FormOperationKind.EXPLICIT,
+    }
+)
+
+
+def is_direct_form_operation(operation: FormOperation) -> bool:
+    """Whether SAOL directly determines the resulting written form.
+
+    The distinction is about notation, not word class.  A fully written form is
+    always EXPLICIT, whether it is a noun plural, an irregular verb preterite,
+    a supine, or any other inflectional slot.
+    """
+
+    return operation.kind in DIRECT_FORM_OPERATION_KINDS
+
+
 _BRACKET_COMMENT = re.compile(r"\s*\[[^\]]*\]")
 _HTML_TAG = re.compile(r"</?[^>]+>")
 _GLUED_LABEL_OPERATION = re.compile(
