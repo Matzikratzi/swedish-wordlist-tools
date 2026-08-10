@@ -5,10 +5,11 @@ import json
 from pathlib import Path
 from typing import Any, Iterable
 
-from .adjective_clean_room_interpreter import interpret_adjective_row
 from .adjective_form_provenance import form_provenance_details
+from .adjective_variant_interpreter import interpret_adjective_row
 from .analyze_adjectives import _value
 from .jsonl import read_jsonl
+from .saol_adjective_variants import prepare_adjective_variant_records
 from .saol_boundaries import restore_replacement_bar_prefix
 from .saol_source_corrections import apply_saol_source_corrections
 
@@ -54,6 +55,8 @@ def generated_row(record: dict[str, Any]) -> dict[str, Any] | None:
         "lemma": lemma,
         "homonym_number": _value(record, "homonr"),
         "rule": slots.rule,
+        "variant_evidence": _value(record, "_saol_variant_evidence"),
+        "alternative_lemma": _value(record, "_saol_alternative_lemma"),
         "source_correction_applied": corrected is not record,
         "source_notation": _value(record, "text"),
         "effective_notation": notation,
@@ -76,7 +79,8 @@ def generated_row(record: dict[str, Any]) -> dict[str, Any] | None:
 
 def build_rows(saol_path: Path = DEFAULT_SAOL) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    for record in read_jsonl(saol_path):
+    records = prepare_adjective_variant_records(read_jsonl(saol_path))
+    for record in records:
         if str(record.get("upos", "")).upper() != "ADJ":
             continue
         row = generated_row(record)
@@ -102,10 +106,12 @@ def main() -> None:
     args = parser.parse_args()
 
     rows = build_rows(args.saol)
-    write_jsonl(args.jsonl, rows)
+    explicit_variant_rows = [row for row in rows if row["variant_evidence"] == "matching_hv_row"]
     summary = {
         "generated_records": len(rows),
         "generated_forms": sum(len(row["forms"]) for row in rows),
+        "explicit_hv_variant_records": len(explicit_variant_rows),
+        "explicit_hv_variant_lemmas": sorted({row["lemma"] for row in explicit_variant_rows}),
         "source_corrections_applied": sum(
             1 for row in rows if row["source_correction_applied"]
         ),
@@ -116,6 +122,7 @@ def main() -> None:
             "consume it and must not run the adjective interpreter again."
         ),
     }
+    write_jsonl(args.jsonl, rows)
     args.summary.parent.mkdir(parents=True, exist_ok=True)
     args.summary.write_text(
         json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
@@ -123,6 +130,9 @@ def main() -> None:
     )
     print(f"Genererade adjektivposter: {summary['generated_records']}")
     print(f"Genererade former: {summary['generated_forms']}")
+    print(f"Explicita (hv)-variantposter: {summary['explicit_hv_variant_records']}")
+    if summary["explicit_hv_variant_lemmas"]:
+        print("Explicita (hv)-variantlemma: " + ", ".join(summary["explicit_hv_variant_lemmas"]))
     print(f"JSONL: {args.jsonl}")
     print(f"Sammanfattning: {args.summary}")
 
