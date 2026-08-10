@@ -33,6 +33,26 @@ class SaolSlotInterpreterTests(unittest.TestCase):
         )
         self.assertEqual("el.", operations[-1].alternative_marker)
 
+    def test_editorial_plural_wording_is_transparent_around_plural_label(self) -> None:
+        grammar = SlotGrammar(
+            label_slots={"pl.": "plural"},
+            implicit_slot=implicit_positive,
+            require_marker=True,
+        )
+        for text in (
+            "i: pl. används: -xyz",
+            "som: pl. anv. -xyz",
+        ):
+            with self.subTest(text=text):
+                operations = interpret_single_slot_sequence(text, grammar)
+                self.assertIsNotNone(operations)
+                assert operations is not None
+                self.assertEqual(("plural",), tuple(item.slot for item in operations))
+                self.assertEqual(
+                    (FormOperationKind.REPLACE_TAIL,),
+                    tuple(item.operation.kind for item in operations),
+                )
+
     def test_relative_operations_are_notation_markers_themselves(self) -> None:
         grammar = SlotGrammar(
             label_slots={},
