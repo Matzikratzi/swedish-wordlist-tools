@@ -269,7 +269,7 @@ def _explicit_branch_bases(record: dict[str, Any], lemma: str, branch_count: int
 
 
 def _noun_shared_implicit_slot(index: int, last_slot: str | None, _operation: FormOperation) -> str | None:
-    """Preserve noun slot progression for explicitly labelled shared parsing."""
+    """Map successive unlabelled noun operations to their ordinary slots."""
 
     if index == 0:
         return "sg_def"
@@ -325,16 +325,37 @@ def _assign_labelled_noun_slots_shared(tokens: tuple[str, ...]):
     )
 
 
-def _assign_noun_slots(record: dict[str, Any], tokens: tuple[str, ...]):
-    """Assign noun notation while migrating syntax families to the shared engine.
+def _assign_unlabelled_relative_noun_slots_shared(tokens: tuple[str, ...]):
+    """Compose already-proven relative form atoms without adding a paradigm rule.
 
-    Labelled noun branches first use the word-class-neutral slot engine. Any
-    branch it cannot prove equivalent falls back to the established noun
-    interpreter. Unlabelled ``+``/``-`` sequences and explicit-only sequences
-    intentionally remain on the established path in this migration step.
+    This path accepts only primitive relative operations (``+...``, ``-...`` or
+    ``+``), including optional expansion inside one token. Explicit full forms,
+    labels, alternatives and prose stay on their separately validated paths.
     """
 
+    saw_form = False
+    for token in tokens:
+        if token in {",", ";"}:
+            continue
+        operations = parse_form_operations(token)
+        if operations is None:
+            return None
+        if any(operation.kind is FormOperationKind.EXPLICIT for operation in operations):
+            return None
+        saw_form = True
+    if not saw_form:
+        return None
+    return assign_slots_with_grammar(tokens, _NOUN_LABELLED_SLOT_GRAMMAR)
+
+
+def _assign_noun_slots(record: dict[str, Any], tokens: tuple[str, ...]):
+    """Assign noun notation through shared atoms, with the established fallback."""
+
     shared = _assign_labelled_noun_slots_shared(tokens)
+    if shared is not None:
+        return shared
+
+    shared = _assign_unlabelled_relative_noun_slots_shared(tokens)
     if shared is not None:
         return shared
 
@@ -401,9 +422,6 @@ def interpret_noun_row(record: dict[str, Any]) -> InterpretedRow | None:
                 seen.add(marker)
                 key_forms.append(KeyForm("lemma", branch_base, "explicit_variant_branch"))
 
-        # ``oböjl.`` is a complete branch instruction: the branch base itself
-        # is the only nominal form. This is branch semantics, not a paradigm
-        # special case for any particular noun.
         if _is_uninflected_branch(branch.tokens):
             continue
 
