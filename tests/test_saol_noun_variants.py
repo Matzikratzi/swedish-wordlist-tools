@@ -67,16 +67,34 @@ class SaolNounVariantTests(unittest.TestCase):
         self.assertEqual("akne", prepared[0]["normaliserat_ord"])
         self.assertNotIn("_saol_variant_mode", prepared[0])
 
-    def test_ankar_is_not_rebased(self):
+    def test_same_article_zero_row_rebases_ankar_explicit_paradigm(self):
         records = [
+            {"normaliserat_ord": "ankare", "homonr": "1", "subnr": 442860, "ordkl": "s. ankaret; pl. anka...", "stycke": "1ankare", "text": "ankaret; pl. ankare el. ankaren, best. pl. ankarna", "upos": "NOUN", "ord": "1ankare"},
             {"normaliserat_ord": "ankare", "homonr": "0", "subnr": 442860, "ordkl": "s. ankaret; pl. anka...", "stycke": "1ankare", "text": "ankaret; pl. ankare el. ankaren, best. pl. ankarna", "upos": "NOUN", "ord": "ankar"},
             {"normaliserat_ord": "ankare", "homonr": "1", "subnr": 442848, "ordkl": "(hv)", "stycke": "ankar", "text": "(null)", "upos": "X", "ord": "ankar"},
+            {"normaliserat_ord": "ankare", "homonr": "2", "subnr": 442865, "ordkl": "s. ankarn el. ankare...", "stycke": "2ankare", "text": "ankarn el. ankaret; pl. + el. ankaren, best. pl. ankarna", "upos": "NOUN", "ord": "2ankare"},
         ]
         prepared = prepare_noun_variant_records(records)
-        noun = prepared[0]
-        self.assertEqual("ankare", noun["normaliserat_ord"])
-        self.assertEqual("ankar", noun["_saol_alternative_lemma"])
-        self.assertEqual("additional_lemma", noun["_saol_variant_mode"])
+        primary, variant, _hv, second_homonym = prepared
+        self.assertEqual("ankare", primary["normaliserat_ord"])
+        self.assertNotIn("_saol_variant_mode", primary)
+        self.assertEqual("ankar", variant["normaliserat_ord"])
+        self.assertEqual("ankare", variant["_saol_source_normaliserat_ord"])
+        self.assertEqual("rebase_same_article_zero", variant["_saol_variant_mode"])
+        self.assertEqual("same_article_homonr_zero", variant["_saol_variant_evidence"])
+        self.assertEqual("ankare", second_homonym["normaliserat_ord"])
+        self.assertNotIn("_saol_variant_mode", second_homonym)
+
+        rows, _comparisons, _summary = generate_noun_artifact(prepared)
+        variant_artifact = next(row for row in rows if row["record_id"] == "442860" and row["homonym_number"] == "0")
+        forms = {item["written_form"] for item in variant_artifact["forms"]}
+        self.assertEqual(
+            {
+                "ankar", "ankars", "ankaret", "ankarets", "ankare", "ankares",
+                "ankaren", "ankarens", "ankarna", "ankarnas",
+            },
+            forms,
+        )
 
     def test_two_branch_vasen_uses_explicit_variant_as_second_base(self):
         records = [
