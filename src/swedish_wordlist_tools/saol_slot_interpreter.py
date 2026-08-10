@@ -33,8 +33,24 @@ class SlotGrammar:
     require_marker: bool = False
 
 
+# These are editorial usage qualifiers, not inflection operations.  Colon-ended
+# words are likewise prose labels/scopes (``om:``, ``fraser:``, ``måttord:`` ...)
+# and are transparent to slot assignment.  Keep grammatical labels such as
+# ``pl.`` and ``best.`` in each word class' explicit label map instead.
+_EDITORIAL_USAGE_MARKERS = frozenset({
+    "högt.",
+    "vanl.",
+    "åld.",
+    "t.ex.",
+})
+
+
 def _clean_token(token: str) -> str:
     return token.strip().strip("()").casefold()
+
+
+def _is_editorial_usage_marker(lower: str) -> bool:
+    return lower.endswith(":") or lower in _EDITORIAL_USAGE_MARKERS
 
 
 def assign_slots_with_grammar(
@@ -54,7 +70,7 @@ def assign_slots_with_grammar(
         lower = _clean_token(token)
         if token in grammar.punctuation:
             continue
-        if lower in grammar.transparent_markers:
+        if lower in grammar.transparent_markers or _is_editorial_usage_marker(lower):
             saw_marker = True
             continue
         if lower in grammar.alternative_markers:
