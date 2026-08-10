@@ -37,6 +37,15 @@ class NounMechanicalValidationTests(unittest.TestCase):
             with self.subTest(notation=notation):
                 self.assertTrue(is_mechanically_verified_noun_notation(notation))
 
+    def test_constrained_lexical_replacement_paradigms_are_mechanical(self):
+        for notation in (
+            "+en el. vard. -dan; pl. +ar",
+            "-centret; pl. +, best. pl. -centren",
+            "-öknen -öknar",
+        ):
+            with self.subTest(notation=notation):
+                self.assertTrue(is_mechanically_verified_noun_notation(notation))
+
     def test_explicit_used_plural_is_mechanical(self):
         self.assertTrue(is_mechanically_verified_noun_notation("best. +; i: pl. används: -verkningar"))
         self.assertTrue(is_mechanically_verified_noun_notation("best. +; i: pl. används: -ansökningar"))
@@ -69,10 +78,9 @@ class NounMechanicalValidationTests(unittest.TestCase):
             with self.subTest(notation=notation):
                 self.assertTrue(is_mechanically_verified_noun_notation(notation))
 
-    def test_lexical_or_h_branching_stays_diagnostic(self):
+    def test_h_or_unbounded_lexical_branching_stays_diagnostic(self):
         for notation in (
             "+n; pl. -kamrar el. +, best. pl. -kamrarna el. -ka",
-            "+en el. vard. -dan; pl. +ar",
             "+n; pl. + H +s",
             "+en _ ankaret",
             "+en _ -rötter",
@@ -99,10 +107,10 @@ class NounMechanicalValidationTests(unittest.TestCase):
                     )
                 )
 
-    def test_ordkl_is_not_used_when_text_contains_lexical_notation(self):
+    def test_ordkl_is_not_used_when_text_contains_unverified_notation(self):
         self.assertFalse(
             is_mechanically_verified_noun_row(
-                {"lemma": "test", "notation": "+en el. vard. -dan; pl. +ar", "ordkl": "s. oböjl."}
+                {"lemma": "test", "notation": "+n; pl. + H +s", "ordkl": "s. oböjl."}
             )
         )
 
