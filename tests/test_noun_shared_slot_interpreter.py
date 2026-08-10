@@ -6,6 +6,7 @@ from swedish_wordlist_tools.saol_notation import split_alternative_branches
 from swedish_wordlist_tools.saol_row_interpreter import (
     _NOUN_LABELLED_SLOT_GRAMMAR,
     _assign_labelled_noun_slots_shared,
+    _assign_unlabelled_relative_noun_slots_shared,
     _coalesce_noun_slot_labels,
 )
 from swedish_wordlist_tools.saol_slot_interpreter import assign_slots_with_grammar
@@ -26,11 +27,11 @@ class NounSharedSlotInterpreterTests(unittest.TestCase):
 
     def test_each_primitive_operation_works_in_each_noun_slot(self) -> None:
         operations = {
-            "+xy": 1,       # append
-            "-xyz": 1,      # replace tail
-            "+": 1,         # unchanged
-            "helform": 1,   # explicit full form
-            "+(e)n": 2,     # optional spelling => two realizations, same slot
+            "+xy": 1,
+            "-xyz": 1,
+            "+": 1,
+            "helform": 1,
+            "+(e)n": 2,
         }
         slots = {
             "best. {token}": "sg_def",
@@ -86,7 +87,34 @@ class NounSharedSlotInterpreterTests(unittest.TestCase):
                 assert assigned is not None
                 self.assertEqual((expected_slot,), tuple(item.slot for item in assigned))
 
-    def test_unlabelled_sequence_is_not_part_of_this_contract(self) -> None:
+    def test_unlabelled_relative_atoms_compose_without_new_rule(self) -> None:
+        assigned = _assign_unlabelled_relative_noun_slots_shared(
+            self._tokens("+xy -xyz")
+        )
+        self.assertIsNotNone(assigned)
+        assert assigned is not None
+        self.assertEqual(
+            ("sg_def", "pl_indef"),
+            tuple(item.slot for item in assigned),
+        )
+
+    def test_optional_expansion_stays_in_first_implicit_slot(self) -> None:
+        assigned = _assign_unlabelled_relative_noun_slots_shared(
+            self._tokens("+(e)n")
+        )
+        self.assertIsNotNone(assigned)
+        assert assigned is not None
+        self.assertEqual(
+            ("sg_def", "sg_def"),
+            tuple(item.slot for item in assigned),
+        )
+
+    def test_explicit_form_is_not_relative_composition(self) -> None:
+        self.assertIsNone(
+            _assign_unlabelled_relative_noun_slots_shared(self._tokens("helform"))
+        )
+
+    def test_labelled_contract_does_not_claim_unlabelled_sequence(self) -> None:
         self.assertIsNone(
             _assign_labelled_noun_slots_shared(self._tokens("+en +ar"))
         )
