@@ -59,7 +59,16 @@ def is_null_noun_notation(value: object) -> bool:
 
 
 def _is_fully_relative_slot_notation(notation: str) -> bool:
-    if "_" in notation or re.search(r"(?:^|\s)H(?:\s|$)", notation):
+    """Return true when every materialized slot form is relative to the lemma.
+
+    ``el.`` and ``H`` are both alternative markers at this layer.  The shared
+    notation parser assigns the operation after either marker to the same slot
+    as the preceding form.  We therefore need no noun-specific H rule: if both
+    alternatives are ordinary append/unchanged operations, SAOL has stated the
+    complete alternative mechanically.
+    """
+
+    if "_" in notation:
         return False
     tokens = tokenize_notation(notation)
     if not tokens:
