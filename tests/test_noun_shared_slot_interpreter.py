@@ -106,6 +106,18 @@ class NounSharedSlotInterpreterTests(unittest.TestCase):
         self.assertIsNone(assigned[0].alternative_marker)
         self.assertEqual("el.", assigned[1].alternative_marker)
 
+    def test_vard_is_transparent_usage_metadata_in_noun_notation(self) -> None:
+        assigned = _assign_labelled_noun_slots_shared(
+            self._tokens("+en el. vard. -dan; pl. +ar")
+        )
+        self.assertIsNotNone(assigned)
+        assert assigned is not None
+        self.assertEqual(
+            ("sg_def", "sg_def", "pl_indef"),
+            tuple(item.slot for item in assigned),
+        )
+        self.assertEqual("el.", assigned[1].alternative_marker)
+
     def test_definite_plural_is_only_a_composed_slot_label(self) -> None:
         tokens = self._tokens("best. pl. +xy")
         self.assertEqual(("best.", "pl.", "+xy"), tokens)
