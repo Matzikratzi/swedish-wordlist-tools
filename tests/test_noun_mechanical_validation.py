@@ -41,53 +41,28 @@ class NounMechanicalValidationTests(unittest.TestCase):
         self.assertTrue(is_mechanically_verified_noun_notation("best. +; i: pl. används: -verkningar"))
         self.assertTrue(is_mechanically_verified_noun_notation("best. +; i: pl. används: -ansökningar"))
 
-    def test_branching_or_compound_notation_stays_unverified_from_notation_alone(self):
+    def test_fully_relative_underscore_branches_are_mechanical(self):
+        for notation in (
+            "+det; pl. +, best. pl. +dena _ +t +n",
+            "+en +er _ +n [-en] +r [-er]",
+            "+en +er _ +n +er",
+            "+en +er _ +n +r",
+            "+en _ +n [-en]",
+            "+et; pl. + _ +t +n",
+        ):
+            with self.subTest(notation=notation):
+                self.assertTrue(is_mechanically_verified_noun_notation(notation))
+
+    def test_non_relative_or_el_branching_stays_diagnostic(self):
         for notation in (
             "+n; pl. -kamrar el. +, best. pl. -kamrarna el. -ka",
-            "+en +er _ +n [-en] +r [-er]",
-            "+det; pl. +, best. pl. +dena _ +t +n",
             "+et; pl. +er el. +",
             "+t; pl. +n el. +",
+            "+en _ ankaret",
+            "+en _ -rötter",
         ):
             with self.subTest(notation=notation):
                 self.assertFalse(is_mechanically_verified_noun_notation(notation))
-
-    def test_materialized_two_lemma_underscore_branch_is_mechanical(self):
-        row = {
-            "lemma": "bankväsen",
-            "notation": "+det; pl. +, best. pl. +dena _ +t +n",
-            "variant_validation": [
-                {
-                    "lemma": "bankväsen",
-                    "generated_forms": [
-                        "bankväsen",
-                        "bankväsens",
-                        "bankväsendet",
-                        "bankväsendena",
-                    ],
-                },
-                {
-                    "lemma": "bankväsende",
-                    "generated_forms": [
-                        "bankväsende",
-                        "bankväsendes",
-                        "bankväsendet",
-                        "bankväsenden",
-                    ],
-                },
-            ],
-        }
-        self.assertTrue(is_mechanically_verified_noun_row(row))
-
-    def test_underscore_branch_without_materialized_variant_stays_diagnostic(self):
-        row = {
-            "lemma": "test",
-            "notation": "+en +er _ +n +r",
-            "variant_validation": [
-                {"lemma": "test", "generated_forms": ["test", "testen", "tester"]}
-            ],
-        }
-        self.assertFalse(is_mechanically_verified_noun_row(row))
 
     def test_missing_notation_representations(self):
         for value in (None, "", "(null)", "null", "  (NULL)  "):
