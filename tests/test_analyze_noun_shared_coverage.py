@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from swedish_wordlist_tools.analyze_noun_shared_coverage import branch_path
+from swedish_wordlist_tools.analyze_noun_shared_coverage import branch_path, fallback_reason
 from swedish_wordlist_tools.saol_notation import split_alternative_branches
 
 
@@ -41,6 +41,17 @@ class AnalyzeNounSharedCoverageTests(unittest.TestCase):
         self.assertEqual(
             "legacy_fallback",
             branch_path(noun, self._tokens("+en okändmarkör: +ar")),
+        )
+
+    def test_fallback_reason_separates_source_truncation_from_syntax(self) -> None:
+        tokens = self._tokens("+en okändmarkör: +ar")
+        self.assertEqual(
+            "remaining_syntax",
+            fallback_reason({"text": "+en okändmarkör: +ar"}, tokens),
+        )
+        self.assertEqual(
+            "source_text_truncated",
+            fallback_reason({"text": "x" * 50}, tokens),
         )
 
 
