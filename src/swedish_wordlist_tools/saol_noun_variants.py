@@ -53,9 +53,13 @@ def _variant_pair(record: dict[str, Any]) -> tuple[str, str] | None:
     return normalized.casefold(), written.casefold()
 
 
-def _has_two_alternative_branches(value: object) -> bool:
+def _branch_count(value: object) -> int:
     text = str(value or "").strip()
-    return bool(text) and text.count("_") == 1
+    return text.count("_") + 1 if text and not is_null_text(text) else 0
+
+
+def _has_two_alternative_branches(value: object) -> bool:
+    return _branch_count(value) == 2
 
 
 def _record_identity(record: dict[str, Any]) -> tuple[str, str, str]:
@@ -71,17 +75,26 @@ def prepare_noun_variant_records(records: Iterable[dict[str, Any]]) -> list[dict
     """Attach structural sibling evidence before noun generation.
 
     ``ord`` is not generally a lemma carrier: it can also contain phrase-bound
-    forms and cross-reference material. Two independent structures make it safe:
+    forms and cross-reference material. Three independent structures make it
+    safe to use as an alternative noun base:
 
     * a matching ``(hv)`` row confirms a written alternative;
-    * duplicate NOUN rows for the same printed article (same record id,
-      normalized lemma and notation) expose distinct ``ord`` spellings. When
-      that article has exactly two ``_`` branches and exactly one spelling other
-      than the normalized headword, that spelling is the base of branch two.
+    * a ``homonr=0`` NOUN row can share exact article identity (same record id,
+      normalized lemma and notation) with the primary NOUN row. For a
+      single-branch article, that row is the materialized variant paradigm and
+      may be rebased directly on its own ``ord``;
+    * duplicate NOUN rows for a two-branch article expose distinct ``ord``
+      spellings. When there is exactly one spelling other than the normalized
+      headword, that spelling is the base of branch two.
 
-    The second rule is what SAOL14 uses for e.g. ``hajp``/``hype``: one JSONL row
-    has ``ord=hajp`` and the sibling has ``ord=hype``, while the shared notation
-    is ``+en; pl. +er el. +ar _ +n [...]``.
+    The single-branch rule is what SAOL14 uses for e.g. ``ankare``/``ankar``:
+    the primary and ``homonr=0`` rows share ``subnr`` and explicit inflection
+    text, while ``ord=ankar`` identifies the variant base. A different homonym
+    such as ``ankare`` 2 has another ``subnr`` and cannot participate.
+
+    The two-branch rule is what SAOL14 uses for e.g. ``hajp``/``hype``: one
+    JSONL row has ``ord=hajp`` and the sibling has ``ord=hype``, while the shared
+    notation is ``+en; pl. +er el. +ar _ +n [...]``.
     """
 
     materialized = [dict(record) for record in records]
@@ -97,13 +110,19 @@ def prepare_noun_variant_records(records: Iterable[dict[str, Any]]) -> list[dict
     for normalized, written in hv_pairs:
         hv_by_normalized[normalized].add(written)
 
-    noun_written_by_article: dict[tuple[str, str, str], set[str]] = defaultdict(set)
+    noun_rows_by_article: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for record in materialized:
-        if _saol_upos(record) != "NOUN" or not _has_two_alternative_branches(record.get("text")):
+        if _saol_upos(record) == "NOUN":
+            noun_rows_by_article[_record_identity(record)].append(record)
+
+    noun_written_by_two_branch_article: dict[tuple[str, str, str], set[str]] = defaultdict(set)
+    for identity, article_rows in noun_rows_by_article.items():
+        if not article_rows or not _has_two_alternative_branches(article_rows[0].get("text")):
             continue
-        written = clean_saol_word(record.get("ord"))
-        if written:
-            noun_written_by_article[_record_identity(record)].add(written)
+        for record in article_rows:
+            written = clean_saol_word(record.get("ord"))
+            if written:
+                noun_written_by_two_branch_article[identity].add(written)
 
     result: list[dict[str, Any]] = []
     for record in materialized:
@@ -112,15 +131,43 @@ def prepare_noun_variant_records(records: Iterable[dict[str, Any]]) -> list[dict
             continue
 
         normalized = clean_saol_word(record.get("normaliserat_ord"))
+        written = clean_saol_word(record.get("ord"))
         pair = _variant_pair(record)
         own_confirmed_variant = pair is not None and pair in hv_pairs
 
+        identity = _record_identity(record)
+        article_rows = noun_rows_by_article.get(identity, [])
+        article_has_primary_row = any(
+            str(sibling.get("homonr") or "") != "0"
+            and clean_saol_word(sibling.get("ord")).casefold() == normalized.casefold()
+            for sibling in article_rows
+        )
+        same_article_zero_variant = (
+            str(record.get("homonr") or "") == "0"
+            and bool(written)
+            and bool(normalized)
+            and written.casefold() != normalized.casefold()
+            and article_has_primary_row
+        )
+
+        # A one-branch homonr=0 sibling is already the variant's own paradigm.
+        # Rebase the row itself; explicit forms remain explicit and relative
+        # operations apply independently to the written variant base.
+        if same_article_zero_variant and _branch_count(record.get("text")) == 1:
+            prepared = dict(record)
+            prepared["_saol_source_normaliserat_ord"] = str(record.get("normaliserat_ord") or "")
+            prepared["normaliserat_ord"] = written
+            prepared["_saol_variant_mode"] = "rebase_same_article_zero"
+            prepared["_saol_variant_evidence"] = "same_article_homonr_zero"
+            result.append(prepared)
+            continue
+
         article_alternatives = set(hv_by_normalized.get(normalized.casefold(), set())) if normalized else set()
 
-        # Duplicate NOUN rows can themselves encode the printed heading variants.
-        # Require exact article identity, exactly two branches, and exactly one
+        # Duplicate two-branch NOUN rows can themselves encode the printed
+        # heading variants. Require exact article identity and exactly one
         # non-primary spelling before using that spelling as branch-two base.
-        sibling_spellings = noun_written_by_article.get(_record_identity(record), set())
+        sibling_spellings = noun_written_by_two_branch_article.get(identity, set())
         sibling_alternatives = {
             spelling
             for spelling in sibling_spellings
@@ -146,10 +193,9 @@ def prepare_noun_variant_records(records: Iterable[dict[str, Any]]) -> list[dict
         )
 
         if own_confirmed_variant and is_simple_relative_noun_notation(record.get("text")):
-            prepared["normaliserat_ord"] = clean_saol_word(record.get("ord"))
+            prepared["normaliserat_ord"] = written
             prepared["_saol_variant_mode"] = "rebase_simple_relative"
         else:
-            written = clean_saol_word(record.get("ord")) if own_confirmed_variant else ""
             alternative = branch_alternative or written
             prepared["_saol_alternative_lemma"] = alternative
             prepared["_saol_variant_mode"] = "additional_lemma"
