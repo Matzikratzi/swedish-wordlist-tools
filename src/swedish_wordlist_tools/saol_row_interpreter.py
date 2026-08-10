@@ -61,13 +61,7 @@ def _clean_surface(value: Any) -> str:
 
 
 def _join_compound_boundary(prefix: str, head: str) -> str:
-    """Join SAOL compound parts using ordinary Swedish triple-consonant spelling.
-
-    The bar in ``ord``/``stycke`` marks morphology, not a literal string split.
-    When a prefix ending in a doubled consonant meets a head beginning with the
-    same consonant, Swedish spelling keeps only two consonants across the
-    boundary: ``hall|ländska`` therefore materializes as ``halländska``.
-    """
+    """Join SAOL compound parts using ordinary Swedish triple-consonant spelling."""
 
     if (
         len(prefix) >= 2
@@ -79,14 +73,6 @@ def _join_compound_boundary(prefix: str, head: str) -> str:
 
 
 def _structural_surfaces(record: dict[str, Any]) -> tuple[str, ...]:
-    """Return SAOL surfaces that may carry an explicit compound boundary.
-
-    ``stycke`` usually carries the lodstreck, but some faksimil rows keep it only
-    in ``ord`` (for example ``hall|ländska`` and ``bluff|faktura``). ``ord`` is
-    used here only as structural evidence. The actual written lemma remains
-    ``normaliserat_ord`` unless separate variant evidence explicitly rebases it.
-    """
-
     values: list[str] = []
     for field in ("stycke", "ord"):
         cleaned = _clean_surface(record.get(field))
@@ -281,6 +267,45 @@ def _explicit_branch_bases(record: dict[str, Any], lemma: str, branch_count: int
     return tuple(lemma for _ in range(branch_count))
 
 
+def _assign_noun_slots(record: dict[str, Any], tokens: tuple[str, ...]):
+    """Assign ordinary notation, or an explicit-only sequence in noun context.
+
+    ``assign_labeled_slots`` deliberately rejects an unmarked sequence of plain
+    words because it cannot know whether it is notation or prose. Here we do
+    know the source field is a noun inflection carrier when ``ordkl`` identifies
+    a substantive. In that narrow context, fully written forms such as
+    ``brodern bröder`` are allowed and still become independent EXPLICIT
+    operations. A synthetic/prose string without noun context stays rejected.
+    """
+
+    assigned = assign_labeled_slots(
+        tokens,
+        singular_slot="sg_def",
+        plural_slot="pl_indef",
+        definite_plural_slot="pl_def",
+    )
+    if assigned is not None:
+        return assigned
+
+    ordkl = re.sub(r"\s+", " ", str(record.get("ordkl", "")).strip()).casefold()
+    if re.search(r"\bs\.", ordkl) is None:
+        return None
+
+    for token in tokens:
+        operations = parse_form_operations(token)
+        if operations is None or any(operation.kind is not FormOperationKind.EXPLICIT for operation in operations):
+            return None
+
+    # A trailing separator supplies only structural evidence that these are
+    # forms; it does not change their sequential slot assignment.
+    return assign_labeled_slots(
+        (*tokens, ";"),
+        singular_slot="sg_def",
+        plural_slot="pl_indef",
+        definite_plural_slot="pl_def",
+    )
+
+
 def interpret_noun_row(record: dict[str, Any]) -> InterpretedRow | None:
     if str(record.get("upos", "")).upper() != "NOUN":
         return None
@@ -315,12 +340,7 @@ def interpret_noun_row(record: dict[str, Any]) -> InterpretedRow | None:
                 seen.add(marker)
                 key_forms.append(KeyForm("lemma", written_form, source))
 
-        slot_operations = assign_labeled_slots(
-            branch.tokens,
-            singular_slot="sg_def",
-            plural_slot="pl_indef",
-            definite_plural_slot="pl_def",
-        )
+        slot_operations = _assign_noun_slots(record, branch.tokens)
         if slot_operations is None:
             return None
         for assigned in slot_operations:
