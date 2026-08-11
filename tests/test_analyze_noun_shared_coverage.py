@@ -43,17 +43,21 @@ class AnalyzeNounSharedCoverageTests(unittest.TestCase):
             branch_path(noun, self._tokens("+en okändmarkör: +ar")),
         )
 
-    def test_fallback_reason_separates_source_truncation_from_syntax(self) -> None:
-        # ``gen.`` is intentionally not a noun slot or transparent editorial
-        # marker here, so it remains a useful synthetic example of genuinely
-        # unsupported complete syntax. Colon-ended prose labels are shared.
+    def test_truncated_branch_uses_shared_prefix_instead_of_legacy(self) -> None:
+        noun = {"ordkl": "s.", "text": "x" * 50}
+        self.assertEqual(
+            "shared_truncated_partial",
+            branch_path(noun, self._tokens("+en; pl. +ar, best. pl.")),
+        )
+
+    def test_fallback_reason_is_only_for_unrecoverable_or_complete_unknown_syntax(self) -> None:
         tokens = self._tokens("+en gen. +ar")
         self.assertEqual(
             "remaining_syntax",
             fallback_reason({"text": "+en gen. +ar"}, tokens),
         )
         self.assertEqual(
-            "source_text_truncated",
+            "truncated_without_recoverable_prefix",
             fallback_reason({"text": "x" * 50}, tokens),
         )
 
