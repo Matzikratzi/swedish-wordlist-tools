@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+from .saol_notation import FormOperationKind
 from .saol_slot_interpreter import SlotGrammar, interpret_single_slot_sequence
 
 
 _BASIC_VERB_SLOTS = ("preterite", "supine")
 _VERB_POSITIONAL_SLOTS = (
+    "preterite",
+    "supine",
+    "perfect_participle_common",
+    "perfect_participle_neuter",
+    "perfect_participle_plural",
+)
+_PRESENT_FIRST_VERB_SLOTS = (
+    "present",
     "preterite",
     "supine",
     "perfect_participle_common",
@@ -22,6 +31,12 @@ def _implicit_basic_verb_slot(index, _last_slot, _operation):
 def _implicit_verb_slot(index, _last_slot, _operation):
     if 0 <= index < len(_VERB_POSITIONAL_SLOTS):
         return _VERB_POSITIONAL_SLOTS[index]
+    return None
+
+
+def _implicit_present_first_verb_slot(index, _last_slot, _operation):
+    if 0 <= index < len(_PRESENT_FIRST_VERB_SLOTS):
+        return _PRESENT_FIRST_VERB_SLOTS[index]
     return None
 
 
@@ -58,6 +73,13 @@ VERB_GRAMMAR = SlotGrammar(
         "obrukl.",
         "finl.",
     }),
+    bare_label_as_unchanged=True,
+    allow_trailing_incomplete_alternative=True,
+)
+
+PRESENT_FIRST_VERB_GRAMMAR = SlotGrammar(
+    label_slots={},
+    implicit_slot=_implicit_present_first_verb_slot,
 )
 
 
@@ -88,6 +110,28 @@ def interpret_basic_verb_sequence(text: str):
     return assigned
 
 
+def interpret_present_first_verb_sequence(text: str):
+    """Interpret a complete six-form sequence whose present form is written first.
+
+    SAOL occasionally writes a full explicit paradigm as present, preterite,
+    supine and three perfect-participle forms without labels, e.g.
+    ``föräter, föråt, förätit, föräten förätet förätna``.  Requiring exactly six
+    explicit source atoms keeps this positional grammar distinct from the normal
+    preterite-first notation.
+    """
+
+    assigned = interpret_single_slot_sequence(text, PRESENT_FIRST_VERB_GRAMMAR)
+    if assigned is None:
+        return None
+    if len(_source_tokens(assigned)) != 6:
+        return None
+    if tuple(item.slot for item in assigned) != _PRESENT_FIRST_VERB_SLOTS:
+        return None
+    if any(item.operation.kind is not FormOperationKind.EXPLICIT for item in assigned):
+        return None
+    return assigned
+
+
 def is_structurally_uninflected_verb(text: str) -> bool:
     """Return true for SAOL's explicit ``ingen böjning`` notation."""
 
@@ -98,20 +142,20 @@ def is_structurally_uninflected_verb(text: str) -> bool:
 def interpret_verb_sequence(text: str):
     """Interpret common and defective SAOL verb notation atomically.
 
-    Unlabelled source atoms occupy, in order, preterite, supine and the three
-    positive perfect-participle slots. Named labels may instead select present,
-    preterite, supine, imperative or participle slots explicitly. Editorial
-    qualifiers are transparent; ``el.``/``H`` reuse the preceding slot.
-
-    Unlike the first bootstrap version, this function does not require both
-    preterite and supine. SAOL contains genuinely defective paradigms, e.g.
-    ``djärvdes, pres. djärvs el. djärves`` and ``pres. -fås, sup. -fåtts``.
-    A structurally explicit named/marked sequence is valid even when a normal
-    paradigm slot is absent.
+    Unlabelled source atoms normally occupy, in order, preterite, supine and the
+    three positive perfect-participle slots. A complete six-form explicit
+    sequence may instead start with present and is recognized independently.
+    Named labels select present, preterite, supine, imperative or participle
+    slots explicitly. Editorial qualifiers are transparent; ``el.``/``H`` reuse
+    the preceding slot. A trailing incomplete alternative may be ignored without
+    inventing its missing form.
     """
 
     if is_structurally_uninflected_verb(text):
         return ()
+    present_first = interpret_present_first_verb_sequence(text)
+    if present_first is not None:
+        return present_first
     assigned = interpret_single_slot_sequence(text, VERB_GRAMMAR)
     if assigned is None:
         return None
