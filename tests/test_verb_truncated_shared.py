@@ -9,7 +9,7 @@ from swedish_wordlist_tools.verb_truncated_shared import assign_truncated_verb_b
 
 class VerbTruncatedSharedTests(unittest.TestCase):
     def test_49_character_source_keeps_complete_final_form_atom(self) -> None:
-        # At 49 characters the final token is complete.  The row is still
+        # At 49 characters the final token is complete. The row is still
         # potentially truncated after that token, but the token itself is safe.
         text = "tog tagit pres. tar".ljust(49)
         self.assertEqual(49, len(text))
@@ -37,6 +37,13 @@ class VerbTruncatedSharedTests(unittest.TestCase):
         assert assigned is not None
         self.assertEqual("present", assigned[-1].slot)
         self.assertEqual("tar", assigned[-1].token)
+
+    def test_label_only_prefix_is_not_recovered_from_truncated_source(self) -> None:
+        # Complete notation may use bare ``pres.`` to mean lemma-as-present,
+        # but on a truncated source the following form may simply be missing.
+        branches = split_alternative_branches("pres.")
+        self.assertEqual(1, len(branches))
+        self.assertIsNone(assign_truncated_verb_branch(branches[0].tokens))
 
     def test_ta_49_character_export_recovers_only_evidenced_prefix(self) -> None:
         text = "tog, tagit, tagen taget tagna, pres. tar el. åld."
