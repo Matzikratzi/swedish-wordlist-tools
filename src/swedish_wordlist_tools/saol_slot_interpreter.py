@@ -32,6 +32,7 @@ class SlotGrammar:
     punctuation: frozenset[str] = frozenset({",", ";"})
     require_marker: bool = False
     bare_label_as_unchanged: bool = False
+    allow_trailing_incomplete_alternative: bool = False
 
 
 # These are editorial usage qualifiers, not inflection operations.  Colon-ended
@@ -137,6 +138,18 @@ def assign_slots_with_grammar(
             form_index += 1
         selected_slot = None
         alternative_marker = None
+
+    # Some source strings end after an alternative marker (possibly followed by
+    # editorial qualifiers), e.g. ``pres. tar el. åld.``.  A word-class grammar
+    # may explicitly opt in to keeping the complete preceding forms while
+    # treating that final alternative as unavailable rather than rejecting the
+    # whole sequence.  This never invents the missing realization.
+    if selected_slot is not None and alternative_marker is not None:
+        if grammar.allow_trailing_incomplete_alternative and result:
+            selected_slot = None
+            alternative_marker = None
+        else:
+            return None
 
     # A few SAOL paradigms consist solely of a grammatical slot label, e.g.
     # adjective ``best.``.  Word classes may opt in to interpreting that as the
