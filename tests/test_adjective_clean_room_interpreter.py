@@ -147,6 +147,50 @@ class AdjectiveCleanRoomInterpreterTests(unittest.TestCase):
         )
         self.assertEqual("shared_full_adjective_atoms", slots.rule)
 
+    def test_bare_best_label_materializes_unchanged_lemma(self) -> None:
+        slots = interpret_adjective_row(
+            {
+                "normaliserat_ord": "flesta",
+                "text": "best.",
+                "stycke": "flesta",
+                "upos": "ADJ",
+            }
+        )
+        self.assertIsNotNone(slots)
+        assert slots is not None
+        self.assertEqual(("flesta",), slots.written_forms())
+        self.assertEqual(("definite_or_plural",), tuple(form.slot for form in slots.forms))
+        self.assertEqual("shared_bare_adjective_slot", slots.rule)
+
+    def test_rich_labelled_sequence_uses_shared_slot_state(self) -> None:
+        slots = interpret_adjective_row(
+            {
+                "normaliserat_ord": "liten",
+                "text": "litet, best. lille lilla; pl. små; mindre minst",
+                "stycke": "liten",
+                "upos": "ADJ",
+            }
+        )
+        self.assertIsNotNone(slots)
+        assert slots is not None
+        self.assertEqual(
+            ("liten", "litet", "lille", "lilla", "små", "mindre", "minst"),
+            slots.written_forms(),
+        )
+        self.assertEqual(
+            (
+                "common_singular",
+                "neuter_singular",
+                "masculine_definite",
+                "definite_or_plural",
+                "definite_or_plural",
+                "comparative",
+                "superlative",
+            ),
+            tuple(form.slot for form in slots.forms),
+        )
+        self.assertEqual("shared_rich_labelled_adjective_atoms", slots.rule)
+
 
 if __name__ == "__main__":
     unittest.main()
