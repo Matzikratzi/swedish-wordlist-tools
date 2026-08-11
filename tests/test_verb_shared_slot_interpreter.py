@@ -5,6 +5,7 @@ import unittest
 from swedish_wordlist_tools.verb_shared_slot_interpreter import (
     interpret_basic_verb_sequence,
     interpret_verb_sequence,
+    is_structurally_uninflected_verb,
 )
 
 
@@ -21,28 +22,19 @@ class VerbSharedSlotInterpreterTests(unittest.TestCase):
 
     def test_relative_suffix_atoms_fill_preterite_and_supine(self) -> None:
         self.assertEqual(
-            (
-                ("preterite", "+de", "append"),
-                ("supine", "+t", "append"),
-            ),
+            (("preterite", "+de", "append"), ("supine", "+t", "append")),
             self._pairs("+de +t"),
         )
 
     def test_full_written_atoms_use_the_same_slots(self) -> None:
         self.assertEqual(
-            (
-                ("preterite", "andades", "explicit"),
-                ("supine", "andats", "explicit"),
-            ),
+            (("preterite", "andades", "explicit"), ("supine", "andats", "explicit")),
             self._pairs("andades andats"),
         )
 
     def test_replacement_atoms_use_the_same_slots(self) -> None:
         self.assertEqual(
-            (
-                ("preterite", "-ställde", "replace_tail"),
-                ("supine", "-ställt", "replace_tail"),
-            ),
+            (("preterite", "-ställde", "replace_tail"), ("supine", "-ställt", "replace_tail")),
             self._pairs("-ställde -ställt"),
         )
 
@@ -118,6 +110,29 @@ class VerbSharedSlotInterpreterTests(unittest.TestCase):
             ),
             self._rich_pairs("+de +t, perf. part. n. ibl. ment"),
         )
+
+    def test_defective_preterite_and_present_need_no_supine(self) -> None:
+        self.assertEqual(
+            (
+                ("preterite", "djärvdes", "explicit"),
+                ("present", "djärvs", "explicit"),
+                ("present", "djärves", "explicit"),
+            ),
+            self._rich_pairs("djärvdes, pres. djärvs el. djärves"),
+        )
+
+    def test_explicit_present_and_supine_labels(self) -> None:
+        self.assertEqual(
+            (
+                ("present", "-fås", "replace_tail"),
+                ("supine", "-fåtts", "replace_tail"),
+            ),
+            self._rich_pairs("pres. -fås, sup. -fåtts"),
+        )
+
+    def test_explicit_no_inflection_is_structural(self) -> None:
+        self.assertTrue(is_structurally_uninflected_verb("ingen: böjning:"))
+        self.assertEqual((), interpret_verb_sequence("ingen: böjning:"))
 
 
 if __name__ == "__main__":
