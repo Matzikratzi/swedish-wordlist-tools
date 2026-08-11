@@ -32,8 +32,10 @@ def _apply_operation(base: str, operation: FormOperation, *, neuter: bool) -> st
 def _implicit_unlabelled_slot(
     index: int,
     _last_slot: str | None,
-    _operation: FormOperation,
+    operation: FormOperation,
 ) -> str | None:
+    if index == 0 and operation.kind is FormOperationKind.EXPLICIT:
+        return "definite_or_plural"
     slots = (
         "neuter_singular",
         "definite_or_plural",
@@ -49,12 +51,12 @@ _UNLABELLED_GRAMMAR = SlotGrammar(label_slots={}, implicit_slot=_implicit_unlabe
 def interpret_shared_unlabelled_adjective_slots(
     record: dict[str, Any],
 ) -> AdjectiveSlots | None:
-    """Interpret ordinary 2/4-atom adjective sequences through the shared engine.
+    """Interpret ordinary unlabelled adjective atom sequences through the shared engine.
 
     Each token remains a primitive form operation; adjective-specific code only
-    supplies the ordered grammatical slots. A single unlabelled token is left to
-    the established interpreter because SAOL uses the operation role itself to
-    distinguish lone neuter instructions from lone explicit definite/plural forms.
+    supplies the ordered grammatical slots.  For a lone atom, SAOL's operation
+    role is itself sufficient evidence: a relative operation is neuter, while a
+    fully written explicit form is definite/plural.
     """
 
     lemma = _value(record, "normaliserat_ord").casefold()
@@ -63,14 +65,24 @@ def interpret_shared_unlabelled_adjective_slots(
         return None
 
     operations = interpret_single_slot_sequence(raw_text, _UNLABELLED_GRAMMAR)
-    if operations is None or len(operations) not in {2, 4}:
+    if operations is None or len(operations) not in {1, 2, 4}:
         return None
 
-    expected_slots = (
-        ("neuter_singular", "definite_or_plural")
-        if len(operations) == 2
-        else ("neuter_singular", "definite_or_plural", "comparative", "superlative")
-    )
+    if len(operations) == 1:
+        expected_slots = (
+            "definite_or_plural",
+        ) if operations[0].operation.kind is FormOperationKind.EXPLICIT else (
+            "neuter_singular",
+        )
+    elif len(operations) == 2:
+        expected_slots = ("neuter_singular", "definite_or_plural")
+    else:
+        expected_slots = (
+            "neuter_singular",
+            "definite_or_plural",
+            "comparative",
+            "superlative",
+        )
     if tuple(item.slot for item in operations) != expected_slots:
         return None
 
@@ -114,12 +126,7 @@ _PARALLEL_GRAMMAR = SlotGrammar(label_slots={}, implicit_slot=_implicit_parallel
 
 
 def _suffix_change(source: str, target: str) -> tuple[str, str] | None:
-    """Return the minimal evidenced suffix replacement source -> target.
-
-    The common prefix is evidence shared by both written forms.  Requiring both
-    suffixes to be non-empty keeps this mechanism to replacement analogies rather
-    than inventing arbitrary deletion/insertion rules.
-    """
+    """Return the minimal evidenced suffix replacement source -> target."""
 
     limit = min(len(source), len(target))
     index = 0
@@ -147,18 +154,7 @@ def _invert_suffix_change(
 def interpret_analogical_parallel_adjective_slots(
     record: dict[str, Any],
 ) -> AdjectiveSlots | None:
-    """Infer parallel variant lemmas from an evidenced branch-to-branch analogy.
-
-    Example::
-
-        sjangdobel: +t sjangdobla _ +t schangdobla
-
-    The first branch explicitly establishes the surface relation
-    ``sjangdobel -> sjangdobla``.  Its minimal suffix replacement is then
-    inverted on ``schangdobla`` to recover ``schangdobel``.  No spelling,
-    suffix, or lemma is hard-coded; the relation must be demonstrated by the
-    first branch itself.
-    """
+    """Infer parallel variant lemmas from an evidenced branch-to-branch analogy."""
 
     lemma = _value(record, "normaliserat_ord").casefold()
     raw_text = _value(record, "text")
