@@ -32,20 +32,36 @@ class FormOperation:
     source: str = ""
 
 
+_ALTERNATIVE_RELATIONS = {
+    "el.": "alternative",
+    "h": "preferred_over",
+    "ibl.": "occasional_alternative",
+}
+
+
 @dataclass(frozen=True)
 class SlotOperation:
     """One independent form operation assigned to a grammatical slot.
 
-    ``alternative_marker`` records how this token was introduced, without
-    changing the primitive operation itself.  Thus ``ibl. -metrar`` remains a
-    REPLACE_TAIL operation whose status as a fully licensed alternative is
-    carried separately as ``alternative_marker='ibl.'``.
+    ``alternative_marker`` preserves the source marker without changing the
+    primitive form operation.  The marker also carries editorial semantics:
+    Språkbanken's ``H`` represents SAOL's printed ``hellre än`` and therefore
+    means that the preceding realization is preferred over this one.  ``el.``
+    is a neutral alternative and ``ibl.`` an occasional alternative.
     """
 
     slot: str
     token: str
     operation: FormOperation
     alternative_marker: str | None = None
+
+    @property
+    def alternative_relation(self) -> str | None:
+        """Return normalized editorial relation for an alternative marker."""
+
+        if self.alternative_marker is None:
+            return None
+        return _ALTERNATIVE_RELATIONS.get(self.alternative_marker.casefold())
 
 
 @dataclass(frozen=True)
@@ -196,9 +212,10 @@ def assign_labeled_slots(
     """Assign each form token independently to a grammatical slot.
 
     Labels change only the current slot. ``el.``, ``H`` and ``ibl.`` make the
-    next form an alternative realization of the previous slot. They never merge
-    two form tokens into a special paradigm. ``_`` is handled one level above
-    this function and merely starts another branch.
+    next form another realization of the previous slot. ``H`` specifically
+    preserves the SAOL relation ``hellre än`` (preferred over), rather than a
+    neutral alternative. ``_`` is handled one level above this function and
+    merely starts another branch.
     """
 
     result: list[SlotOperation] = []
