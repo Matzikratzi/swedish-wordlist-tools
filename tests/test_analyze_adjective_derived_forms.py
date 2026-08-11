@@ -50,8 +50,10 @@ class AnalyzeAdjectiveDerivedFormsTests(unittest.TestCase):
             {"confirmed_by_saldo": 1, "missing_from_saldo": 1},
             summary["status_counts"],
         )
+        self.assertEqual(1, summary["verified_forms"])
+        self.assertFalse(summary["all_derived_forms_verified"])
 
-    def test_saldo_gap_does_not_remove_saol_derived_forms(self) -> None:
+    def test_manual_saol_confirmation_closes_known_saldo_gaps(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             adjectives = root / "adjectives.jsonl"
@@ -100,11 +102,16 @@ class AnalyzeAdjectiveDerivedFormsTests(unittest.TestCase):
             )
 
             validation = build_rows(adjectives, saldo)
+            summary = build_summary(validation)
 
         by_form = {row["derived_form"]: row for row in validation}
-        self.assertEqual("missing_from_saldo", by_form["ringaste"]["status"])
-        self.assertEqual("missing_from_saldo", by_form["trängsta"]["status"])
-        self.assertEqual({"ringaste", "trängsta"}, set(by_form))
+        self.assertEqual("confirmed_by_saol_manual", by_form["ringaste"]["status"])
+        self.assertEqual("confirmed_by_saol_manual", by_form["trängsta"]["status"])
+        self.assertTrue(by_form["ringaste"]["manual_saol_evidence"])
+        self.assertTrue(by_form["trängsta"]["manual_saol_evidence"])
+        self.assertEqual({"confirmed_by_saol_manual": 2}, summary["status_counts"])
+        self.assertEqual(2, summary["verified_forms"])
+        self.assertTrue(summary["all_derived_forms_verified"])
 
     def test_reports_missing_saldo_lemma_separately(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
