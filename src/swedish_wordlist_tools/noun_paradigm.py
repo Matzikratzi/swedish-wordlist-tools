@@ -7,6 +7,7 @@ from typing import Any
 from .inflect import GeneratedEntry, GeneratedWordForm
 from .msd import parse_msd
 from .noun_source_errors import noun_lemma_only_source_error
+from .noun_truncated_shared import interpret_truncated_noun_row
 from .saol_notation import FormOperationKind, parse_form_operation
 from .saol_row_interpreter import InterpretedRow, compound_parts, interpret_noun_row
 from .saol_source_policy import is_truncated_inflection_source
@@ -213,6 +214,8 @@ def complete_noun_entry(
         return _lemma_only_entry(record, source_error)
 
     row = interpret_noun_row(record)
+    if row is None and is_truncated_inflection_source(record):
+        row = interpret_truncated_noun_row(record)
     if row is None:
         return None
 
