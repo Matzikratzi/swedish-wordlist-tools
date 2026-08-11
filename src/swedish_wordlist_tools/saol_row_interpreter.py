@@ -14,7 +14,11 @@ from .saol_notation import (
     parse_form_operations,
     split_alternative_branches,
 )
-from .saol_slot_interpreter import SlotGrammar, assign_slots_with_grammar
+from .saol_slot_interpreter import (
+    SlotGrammar,
+    assign_slots_with_grammar,
+    is_editorial_usage_marker,
+)
 from .saol_source_policy import inflection_text
 
 
@@ -341,7 +345,10 @@ def _is_noun_alternative_marker(token: str) -> bool:
 
 
 def _is_noun_transparent_marker(token: str) -> bool:
-    return token.strip().strip("()").casefold() in _NOUN_TRANSPARENT_MARKERS
+    return (
+        token.strip().strip("()").casefold() in _NOUN_TRANSPARENT_MARKERS
+        or is_editorial_usage_marker(token)
+    )
 
 
 def _assign_labelled_noun_slots_shared(tokens: tuple[str, ...]):
