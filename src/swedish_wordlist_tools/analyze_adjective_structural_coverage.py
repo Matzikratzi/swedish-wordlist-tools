@@ -14,16 +14,37 @@ STRUCTURAL_PREFIX = "structural_"
 SHARED_PREFIX = "shared_"
 LEGACY_EXAMPLE_LIMIT = 5
 
+# These rule families still contain adjective-specific realization logic, but
+# their tokenization/branching/slot assignment is already delegated to the
+# shared SlotGrammar engine. Keep them separate from both direct shared paths
+# and genuinely adjective-specific structural paths in the coverage report.
+SHARED_BACKED_RULES = frozenset(
+    {
+        "structural_labelled_positive_slots",
+        "structural_labelled_comparison_slots",
+        "structural_same_slot_alternatives",
+        "structural_partial_labelled_slots",
+        "structural_unlabelled_comparison_alternatives",
+        "structural_parallel_positive_branches",
+        "structural_parallel_analogical_branches",
+    }
+)
+
 
 def build_summary(path: Path = DEFAULT_ARTIFACT) -> dict[str, object]:
     rows = list(read_jsonl(path))
     rule_counts = Counter(str(row.get("rule") or "(none)") for row in rows)
-    shared = sum(count for rule, count in rule_counts.items() if rule.startswith(SHARED_PREFIX))
+    shared_direct = sum(
+        count for rule, count in rule_counts.items() if rule.startswith(SHARED_PREFIX)
+    )
+    shared_backed = sum(rule_counts.get(rule, 0) for rule in SHARED_BACKED_RULES)
     structural = sum(
-        count for rule, count in rule_counts.items() if rule.startswith(STRUCTURAL_PREFIX)
+        count
+        for rule, count in rule_counts.items()
+        if rule.startswith(STRUCTURAL_PREFIX) and rule not in SHARED_BACKED_RULES
     )
     no_inflection = rule_counts.get("lemma_only_no_inflection_text", 0)
-    clean_room = shared + structural
+    clean_room = shared_direct + shared_backed + structural
     legacy = len(rows) - clean_room - no_inflection
 
     legacy_examples: dict[str, list[dict[str, object]]] = defaultdict(list)
@@ -52,7 +73,9 @@ def build_summary(path: Path = DEFAULT_ARTIFACT) -> dict[str, object]:
 
     return {
         "records": len(rows),
-        "shared_records": shared,
+        "shared_direct_records": shared_direct,
+        "shared_backed_records": shared_backed,
+        "shared_records": shared_direct + shared_backed,
         "structural_records": structural,
         "clean_room_records": clean_room,
         "no_inflection_text_records": no_inflection,
@@ -67,8 +90,10 @@ def render_text(summary: dict[str, object]) -> str:
         "SAOL14 ADJ: clean-room-täckning",
         "",
         f"Genererade poster: {summary['records']}",
-        f"Shared-motor: {summary['shared_records']}",
-        f"Övriga strukturella vägar: {summary['structural_records']}",
+        f"Shared direkt: {summary['shared_direct_records']}",
+        f"Shared slot-motor + adjektivrealisation: {summary['shared_backed_records']}",
+        f"Shared totalt: {summary['shared_records']}",
+        f"Kvarvarande adjektivspecifika strukturella vägar: {summary['structural_records']}",
         f"Clean-room totalt: {summary['clean_room_records']}",
         f"Utan böjningstext: {summary['no_inflection_text_records']}",
         f"Legacy: {summary['legacy_records']}",
