@@ -31,6 +31,7 @@ class SlotGrammar:
     transparent_markers: frozenset[str] = frozenset({"i:", "som:", "används:", "anv."})
     punctuation: frozenset[str] = frozenset({",", ";"})
     require_marker: bool = False
+    bare_label_as_unchanged: bool = False
 
 
 # These are editorial usage qualifiers, not inflection operations.  Colon-ended
@@ -131,8 +132,25 @@ def assign_slots_with_grammar(
         selected_slot = None
         alternative_marker = None
 
+    # A few SAOL paradigms consist solely of a grammatical slot label, e.g.
+    # adjective ``best.``.  Word classes may opt in to interpreting that as the
+    # lemma itself occupying the selected slot (an implicit ``+``).  Restrict the
+    # behaviour to genuinely label-only input: a trailing label after forms can
+    # instead be evidence of truncated source data and must remain unsupported.
     if selected_slot is not None:
-        return None
+        if grammar.bare_label_as_unchanged and not result:
+            result.append(
+                SlotOperation(
+                    slot=selected_slot,
+                    token="+",
+                    operation=FormOperation(FormOperationKind.UNCHANGED, source="+"),
+                )
+            )
+            last_slot = selected_slot
+            selected_slot = None
+            saw_marker = True
+        else:
+            return None
     if grammar.require_marker and not saw_marker:
         return None
     return tuple(result) if result else None
