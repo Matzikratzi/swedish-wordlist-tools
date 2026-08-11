@@ -8,42 +8,33 @@ from swedish_wordlist_tools.analyze_verb_shared_coverage import analyze, classif
 class AnalyzeVerbSharedCoverageTests(unittest.TestCase):
     def test_classifies_basic_two_atom_sequences_as_shared(self) -> None:
         record = {"upos": "VERB", "text": "+de +t"}
-        self.assertEqual(
-            "shared_basic_preterite_supine",
-            classify_branch(record, "+de +t"),
-        )
+        self.assertEqual("shared_basic_preterite_supine", classify_branch(record, "+de +t"))
         self.assertEqual(
             "shared_basic_preterite_supine",
             classify_branch({"upos": "VERB", "text": "andades andats"}, "andades andats"),
         )
 
     def test_classifies_present_and_participle_sequences_as_rich_shared(self) -> None:
-        self.assertEqual(
-            "shared_rich_verb_slots",
-            classify_branch(
-                {"upos": "VERB", "text": "-förde, -fört, pres. -för"},
-                "-förde, -fört, pres. -för",
-            ),
-        )
-        self.assertEqual(
-            "shared_rich_verb_slots",
-            classify_branch(
-                {"upos": "VERB", "text": "band, bundit, bunden bundet bundna, pres. binder"},
-                "band, bundit, bunden bundet bundna, pres. binder",
-            ),
-        )
+        for text in (
+            "-förde, -fört, pres. -för",
+            "band, bundit, bunden bundet bundna, pres. binder",
+            "djärvdes, pres. djärvs el. djärves",
+            "pres. -fås, sup. -fåtts",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(
+                    "shared_rich_verb_slots",
+                    classify_branch({"upos": "VERB", "text": text}, text),
+                )
 
-    def test_keeps_truncated_and_remaining_structure_separate(self) -> None:
+    def test_keeps_truncated_and_structural_uninflected_separate(self) -> None:
         self.assertEqual(
             "truncated_not_yet_shared",
             classify_branch({"upos": "VERB", "text": "x" * 50}, "gick, gått, pres."),
         )
         self.assertEqual(
-            "remaining_structure",
-            classify_branch(
-                {"upos": "VERB", "text": "ingen: böjning:"},
-                "ingen: böjning:",
-            ),
+            "structural_uninflected",
+            classify_branch({"upos": "VERB", "text": "ingen: böjning:"}, "ingen: böjning:"),
         )
 
     def test_summary_counts_paths(self) -> None:
@@ -57,6 +48,8 @@ class AnalyzeVerbSharedCoverageTests(unittest.TestCase):
         self.assertEqual(3, summary["branches"])
         self.assertEqual(2, summary["shared_branches"])
         self.assertEqual(66.67, summary["shared_branch_percent"])
+        self.assertEqual(3, summary["clean_room_branches"])
+        self.assertEqual(100.0, summary["clean_room_branch_percent"])
 
 
 if __name__ == "__main__":
