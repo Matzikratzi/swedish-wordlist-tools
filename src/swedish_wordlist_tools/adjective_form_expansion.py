@@ -3,14 +3,29 @@ from __future__ import annotations
 from .adjective_slots import AdjectiveForm, AdjectiveSlots
 
 
+def _expanded_superlative_forms(base: str) -> tuple[tuple[str, str], ...]:
+    """Return regular definite superlative forms licensed by the surface ending.
+
+    Regular ``-ast`` superlatives take ``-aste`` in definite/plural use. Other
+    superlatives ending in ``-st`` take ``+a`` and optionally masculine ``+e``.
+    The decision is based only on the already interpreted superlative form.
+    """
+
+    if base.endswith("ast"):
+        return ((base + "e", "superlative_definite_or_plural"),)
+    if base.endswith("st"):
+        return (
+            (base + "a", "superlative_definite_or_plural"),
+            (base + "e", "superlative_masculine_definite"),
+        )
+    return ()
+
+
 def expand_adjective_forms(slots: AdjectiveSlots) -> AdjectiveSlots:
     """Materialize regular inflection of already interpreted adjective slot forms.
 
-    SAOL can give the predicative/indefinite superlative as one atom (for example
-    ``minst``) while the ordinary definite/plural and masculine definite forms are
-    regular inflections of that atom.  This layer deliberately runs *after* row
-    interpretation: it does not reinterpret SAOL notation and it contains no
-    lemma-specific exceptions.
+    This layer deliberately runs *after* row interpretation: it does not
+    reinterpret SAOL notation and it contains no lemma-specific exceptions.
     """
 
     forms = list(slots.forms)
@@ -19,13 +34,7 @@ def expand_adjective_forms(slots: AdjectiveSlots) -> AdjectiveSlots:
     for form in slots.forms:
         if form.slot != "superlative":
             continue
-        base = form.written_form
-        if not base.endswith("st"):
-            continue
-        for written_form, slot in (
-            (base + "a", "superlative_definite_or_plural"),
-            (base + "e", "superlative_masculine_definite"),
-        ):
+        for written_form, slot in _expanded_superlative_forms(form.written_form):
             marker = (written_form, slot)
             if marker not in seen:
                 forms.append(AdjectiveForm(written_form, slot, provenance="derived_inflection"))
