@@ -4,7 +4,6 @@ import unittest
 
 from swedish_wordlist_tools.verb_shared_slot_interpreter import (
     interpret_basic_verb_sequence,
-    interpret_present_first_verb_sequence,
     interpret_verb_sequence,
     is_structurally_uninflected_verb,
 )
@@ -45,11 +44,18 @@ class VerbSharedSlotInterpreterTests(unittest.TestCase):
             ("present", "binder", "explicit"),
         ), self._rich_pairs("band, bundit, bunden bundet bundna, pres. binder"))
 
-    def test_present_first_full_explicit_sequence_is_atomic(self) -> None:
-        assigned = interpret_present_first_verb_sequence("föräter, föråt, förätit, föräten förätet förätna")
-        self.assertIsNotNone(assigned)
-        assert assigned is not None
-        self.assertEqual(("present", "preterite", "supine", "perfect_participle_common", "perfect_participle_neuter", "perfect_participle_plural"), tuple(item.slot for item in assigned))
+    def test_verified_five_atom_handha_sequence(self) -> None:
+        self.assertEqual((
+            ("preterite", "-hade", "replace_tail"),
+            ("supine", "-haft", "replace_tail"),
+            ("perfect_participle_common", "-havd", "replace_tail"),
+            ("perfect_participle_neuter", "-haft", "replace_tail"),
+            ("perfect_participle_plural", "-havda", "replace_tail"),
+            ("present", "-har", "replace_tail"),
+        ), self._rich_pairs("-hade, -haft, -havd -haft -havda, pres. -har"))
+
+    def test_unlabelled_six_atom_sequence_is_not_assumed_present_first(self) -> None:
+        self.assertIsNone(interpret_verb_sequence("föräter, föråt, förätit, föräten förätet förätna"))
 
     def test_neuter_label_reuses_participle_neuter_slot(self) -> None:
         self.assertEqual((
