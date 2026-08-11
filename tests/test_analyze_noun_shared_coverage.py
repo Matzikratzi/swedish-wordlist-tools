@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import unittest
 
-from swedish_wordlist_tools.analyze_noun_shared_coverage import branch_path, fallback_reason
+from swedish_wordlist_tools.analyze_noun_shared_coverage import (
+    analyze,
+    branch_path,
+    fallback_reason,
+)
 from swedish_wordlist_tools.saol_notation import split_alternative_branches
 
 
@@ -60,6 +64,31 @@ class AnalyzeNounSharedCoverageTests(unittest.TestCase):
             "truncated_without_recoverable_prefix",
             fallback_reason({"text": "x" * 50}, tokens),
         )
+
+    def test_truncated_record_is_counted_before_branch_classification(self) -> None:
+        summary = analyze(
+            [
+                {
+                    "upos": "NOUN",
+                    "normaliserat_ord": "x",
+                    "homonr": "1",
+                    "subnr": 1,
+                    "text": "x" * 50,
+                    "ordkl": "s.",
+                },
+                {
+                    "upos": "NOUN",
+                    "normaliserat_ord": "y",
+                    "homonr": "1",
+                    "subnr": 2,
+                    "text": "+en; pl. +ar, best. pl." + " " * 24,
+                    "ordkl": "s.",
+                },
+            ]
+        )
+        self.assertEqual(2, summary["truncated_records"])
+        self.assertEqual(1, summary["truncated_records_without_branches"])
+        self.assertEqual("x", summary["truncated_without_branches"][0]["lemma"])
 
 
 if __name__ == "__main__":
