@@ -18,6 +18,7 @@ class AnalyzeAdjectiveDerivedFormsTests(unittest.TestCase):
                 "lemma": "liten",
                 "homonym_number": "1",
                 "source_notation": "litet; mindre minst",
+                "source_record": {"normaliserat_ord": "liten", "upos": "ADJ"},
                 "forms": [
                     {"written_form": "minst", "slot": "superlative", "provenance": "explicit"},
                     {"written_form": "minsta", "slot": "superlative_definite_or_plural", "provenance": "derived_inflection"},
@@ -50,6 +51,61 @@ class AnalyzeAdjectiveDerivedFormsTests(unittest.TestCase):
             summary["status_counts"],
         )
 
+    def test_saldo_gap_does_not_remove_saol_derived_forms(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            adjectives = root / "adjectives.jsonl"
+            saldo = root / "saldo.jsonl"
+            rows = [
+                {
+                    "lemma": "ringa",
+                    "source_record": {"normaliserat_ord": "ringa", "upos": "ADJ"},
+                    "forms": [
+                        {"written_form": "ringast", "slot": "superlative", "provenance": "explicit"},
+                        {"written_form": "ringaste", "slot": "superlative_definite_or_plural", "provenance": "derived_inflection"},
+                    ],
+                },
+                {
+                    "lemma": "trång",
+                    "source_record": {"normaliserat_ord": "trång", "upos": "ADJ"},
+                    "forms": [
+                        {"written_form": "trängst", "slot": "superlative", "provenance": "explicit"},
+                        {"written_form": "trängsta", "slot": "superlative_definite_or_plural", "provenance": "derived_inflection"},
+                    ],
+                },
+            ]
+            adjectives.write_text(
+                "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+            saldo.write_text(
+                "".join(
+                    json.dumps(row, ensure_ascii=False) + "\n"
+                    for row in (
+                        {
+                            "id": "ringa..av.1",
+                            "upos": "ADJ",
+                            "lemmas": ["ringa"],
+                            "forms": ["ringa"],
+                        },
+                        {
+                            "id": "trång..av.1",
+                            "upos": "ADJ",
+                            "lemmas": ["trång"],
+                            "forms": ["trång", "trängst", "trängste", "trångaste"],
+                        },
+                    )
+                ),
+                encoding="utf-8",
+            )
+
+            validation = build_rows(adjectives, saldo)
+
+        by_form = {row["derived_form"]: row for row in validation}
+        self.assertEqual("missing_from_saldo", by_form["ringaste"]["status"])
+        self.assertEqual("missing_from_saldo", by_form["trängsta"]["status"])
+        self.assertEqual({"ringaste", "trängsta"}, set(by_form))
+
     def test_reports_missing_saldo_lemma_separately(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -59,6 +115,7 @@ class AnalyzeAdjectiveDerivedFormsTests(unittest.TestCase):
                 json.dumps(
                     {
                         "lemma": "okänd",
+                        "source_record": {"normaliserat_ord": "okänd", "upos": "ADJ"},
                         "forms": [
                             {"written_form": "okändast", "slot": "superlative", "provenance": "explicit"},
                             {"written_form": "okändaste", "slot": "superlative_definite_or_plural", "provenance": "derived_inflection"},
