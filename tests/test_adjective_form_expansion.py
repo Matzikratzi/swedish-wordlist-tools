@@ -33,6 +33,17 @@ class AdjectiveFormExpansionTests(unittest.TestCase):
         self.assertEqual("derived_inflection", expanded.forms[-2].provenance)
         self.assertEqual("derived_inflection", expanded.forms[-1].provenance)
 
+    def test_regular_ast_superlative_expands_to_aste(self) -> None:
+        slots = AdjectiveSlots(
+            lemma="snabb",
+            forms=(AdjectiveForm("snabbast", "superlative"),),
+            rule="test",
+        )
+        expanded = expand_adjective_forms(slots)
+        self.assertEqual(("snabbast", "snabbaste"), expanded.written_forms())
+        self.assertEqual("superlative_definite_or_plural", expanded.forms[-1].slot)
+        self.assertEqual("derived_inflection", expanded.forms[-1].provenance)
+
     def test_non_st_superlative_is_not_guessed(self) -> None:
         slots = AdjectiveSlots(
             lemma="x",
