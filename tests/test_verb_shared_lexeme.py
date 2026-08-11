@@ -6,9 +6,14 @@ from swedish_wordlist_tools.verb_shared_lexeme import interpret_shared_playable_
 
 
 class VerbSharedLexemeTests(unittest.TestCase):
-    def parse(self, lemma: str, text: str | None):
+    def parse(self, lemma: str, text: str | None, *, stycke: str | None = None):
         slots = interpret_shared_playable_verb_slots(
-            {"normaliserat_ord": lemma, "upos": "VERB", "text": text, "stycke": lemma}
+            {
+                "normaliserat_ord": lemma,
+                "upos": "VERB",
+                "text": text,
+                "stycke": lemma if stycke is None else stycke,
+            }
         )
         self.assertIsNotNone(slots)
         assert slots is not None
@@ -28,6 +33,27 @@ class VerbSharedLexemeTests(unittest.TestCase):
         self.assertEqual(("bunden",), slots.forms_for("perfect_participle_common"))
         self.assertEqual(("bundet",), slots.forms_for("perfect_participle_neuter"))
         self.assertEqual(("bundna",), slots.forms_for("perfect_participle_plural"))
+
+    def test_compound_replacement_uses_saol_lodstreck(self) -> None:
+        slots = self.parse("avvika", "-vek -vikit", stycke="av|vika")
+        self.assertEqual(("avvek",), slots.forms_for("preterite"))
+        self.assertEqual(("avvikit",), slots.forms_for("supine"))
+
+    def test_long_compound_replacement_uses_saol_lodstreck(self) -> None:
+        slots = self.parse("blottlägga", "-lade -lagt", stycke="blott|lägga")
+        self.assertEqual(("blottlade",), slots.forms_for("preterite"))
+        self.assertEqual(("blottlagt",), slots.forms_for("supine"))
+
+    def test_compound_replacement_without_verified_bar_is_rejected(self) -> None:
+        slots = interpret_shared_playable_verb_slots(
+            {
+                "normaliserat_ord": "avvika",
+                "upos": "VERB",
+                "text": "-vek -vikit",
+                "stycke": "avvika",
+            }
+        )
+        self.assertIsNone(slots)
 
     def test_49_character_ta_row_does_not_complete_missing_tail(self) -> None:
         text = "tog, tagit, tagen taget tagna, pres. tar el. åld."
