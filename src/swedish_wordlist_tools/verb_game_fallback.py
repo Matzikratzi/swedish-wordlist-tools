@@ -6,6 +6,7 @@ from typing import Any
 from .inflect import normalise_pattern
 from .lexeme_slots import LexemeSlots, SlotForm, build_lexeme_slots
 from .verb_residual_policy import interpret_residual_verb_slots
+from .verb_shared_lexeme import interpret_shared_playable_verb_slots
 from .verb_slots import interpret_verb_slots
 
 _WORD = r"[A-Za-zÅÄÖåäöÉéÜü]+(?:-[A-Za-zÅÄÖåäöÉéÜü]+)*"
@@ -55,12 +56,7 @@ def _is_playable_lemma(lemma: str) -> bool:
 
 
 def _explicit_labelled_forms(pattern: str) -> tuple[SlotForm, ...]:
-    """Extract only forms explicitly governed by grammatical labels.
-
-    Labels and usage markers are never emitted as words. A labelled segment
-    contributes a form only when it contains an actual non-marker token. Thus
-    ``sup. måst`` yields ``måst``, while ``pres. och pret.`` yields nothing.
-    """
+    """Extract only forms explicitly governed by grammatical labels."""
     forms: list[SlotForm] = []
     for match in _LABEL_RE.finditer(pattern):
         label = match.group("label").casefold()
@@ -104,17 +100,22 @@ def _attested_forms(
 
 
 def interpret_playable_verb_slots(record: dict[str, Any]) -> LexemeSlots | None:
-    """Interpret a playable verb, preferring the strict shared parser.
+    """Interpret a playable verb, preferring the shared clean-room grammar.
 
-    Multiword lemmas and affix entries are deliberately excluded before any
-    parser is called. Residual rows then use the same narrow policy as the verb
-    audit, keeping the canonical export and the analysis in agreement.
+    The older verb parser and residual/fallback paths remain temporarily below
+    the shared path only so export deltas can be audited while the migration is
+    completed.  A row successfully interpreted by the shared grammar never
+    reaches those older paths.
     """
     if str(record.get("upos", "")).upper() != "VERB":
         return None
     lemma = str(record.get("normaliserat_ord") or "").strip()
     if not _is_playable_lemma(lemma):
         return None
+
+    shared = interpret_shared_playable_verb_slots(record)
+    if shared is not None:
+        return shared
 
     parsed = interpret_verb_slots(record)
     if parsed is not None:
