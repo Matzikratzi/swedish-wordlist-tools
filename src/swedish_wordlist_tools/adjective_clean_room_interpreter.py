@@ -5,7 +5,7 @@ from typing import Any
 from .adjective_row_interpreter import interpret_adjective_row as interpret_existing_adjective_row
 from .adjective_slots import AdjectiveForm, AdjectiveSlots, _neuter_t
 from .saol_notation import FormOperation, FormOperationKind, apply_form_operation
-from .saol_slot_interpreter import SlotGrammar, interpret_slot_branches
+from .saol_slot_interpreter import SlotGrammar, interpret_single_slot_sequence, interpret_slot_branches
 
 
 def _value(record: dict[str, Any], key: str) -> str:
@@ -26,6 +26,75 @@ def _apply_operation(base: str, operation: FormOperation, *, neuter: bool) -> st
         base,
         operation,
         append=lambda word, suffix: _append_positive(word, suffix, neuter=neuter),
+    )
+
+
+def _implicit_unlabelled_slot(
+    index: int,
+    _last_slot: str | None,
+    _operation: FormOperation,
+) -> str | None:
+    slots = (
+        "neuter_singular",
+        "definite_or_plural",
+        "comparative",
+        "superlative",
+    )
+    return slots[index] if index < len(slots) else None
+
+
+_UNLABELLED_GRAMMAR = SlotGrammar(label_slots={}, implicit_slot=_implicit_unlabelled_slot)
+
+
+def interpret_shared_unlabelled_adjective_slots(
+    record: dict[str, Any],
+) -> AdjectiveSlots | None:
+    """Interpret ordinary 2/4-atom adjective sequences through the shared engine.
+
+    Each token remains a primitive form operation; adjective-specific code only
+    supplies the ordered grammatical slots. A single unlabelled token is left to
+    the established interpreter because SAOL uses the operation role itself to
+    distinguish lone neuter instructions from lone explicit definite/plural forms.
+    """
+
+    lemma = _value(record, "normaliserat_ord").casefold()
+    raw_text = _value(record, "text")
+    if not lemma or " " in lemma or not lemma.isalpha() or not raw_text or "_" in raw_text:
+        return None
+
+    operations = interpret_single_slot_sequence(raw_text, _UNLABELLED_GRAMMAR)
+    if operations is None or len(operations) not in {2, 4}:
+        return None
+
+    expected_slots = (
+        ("neuter_singular", "definite_or_plural")
+        if len(operations) == 2
+        else ("neuter_singular", "definite_or_plural", "comparative", "superlative")
+    )
+    if tuple(item.slot for item in operations) != expected_slots:
+        return None
+
+    forms: list[AdjectiveForm] = [AdjectiveForm(lemma, "common_singular")]
+    for item in operations:
+        value = _apply_operation(
+            lemma,
+            item.operation,
+            neuter=item.slot == "neuter_singular",
+        )
+        if value is None:
+            return None
+        form = AdjectiveForm(value, item.slot)
+        if form not in forms:
+            forms.append(form)
+
+    return AdjectiveSlots(
+        lemma=lemma,
+        forms=tuple(forms),
+        rule=(
+            "shared_full_adjective_atoms"
+            if len(operations) == 4
+            else "shared_positive_atoms"
+        ),
     )
 
 
@@ -133,16 +202,12 @@ def interpret_analogical_parallel_adjective_slots(
     seen_common = {lemma}
 
     for neuter_operation, plural_operation in parsed[1:]:
-        # Parallel branches must expose the same structural neuter instruction;
-        # otherwise the first branch is not evidence for the second one.
         if neuter_operation != first_neuter_operation:
             return None
         plural = plural_operation.value.casefold()
         common = _invert_suffix_change(plural, old_suffix, new_suffix)
         if common is None or common in seen_common:
             return None
-        # Verify that the inferred common form reproduces the explicit branch
-        # surface under exactly the evidenced suffix replacement.
         if not common.endswith(old_suffix):
             return None
         reproduced = common[: -len(old_suffix)] + new_suffix
@@ -170,11 +235,13 @@ def interpret_analogical_parallel_adjective_slots(
 def interpret_adjective_row(record: dict[str, Any]) -> AdjectiveSlots | None:
     """Canonical clean-room ADJ interpreter with conservative legacy fallback."""
 
+    shared_unlabelled = interpret_shared_unlabelled_adjective_slots(record)
+    if shared_unlabelled is not None:
+        return shared_unlabelled
+
     structural_parallel = interpret_analogical_parallel_adjective_slots(record)
     existing = interpret_existing_adjective_row(record)
     if structural_parallel is not None:
-        # Use the analogical result only for the old branch family it replaces.
-        # Other already-structural branch interpretations stay authoritative.
         if existing is None or existing.rule == "generic_parallel_slots":
             return structural_parallel
     return existing
