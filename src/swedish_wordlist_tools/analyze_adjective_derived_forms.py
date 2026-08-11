@@ -21,7 +21,7 @@ def _canonical_saldo_match(
     row: dict[str, Any],
     saldo: dict[str, list[dict[str, Any]]],
     form_index: dict[str, list[dict[str, Any]]],
-) -> tuple[set[str], tuple[str, ...], str]:
+) -> tuple[set[str], tuple[str, ...], str, bool]:
     source_record = dict(row.get("source_record") or {})
     source_record["normaliserat_ord"] = str(row.get("lemma") or source_record.get("normaliserat_ord") or "")
     source_record["upos"] = "ADJ"
@@ -37,11 +37,11 @@ def _canonical_saldo_match(
         generated_forms,
     )
     if selected is None:
-        return set(), (), ""
+        return set(), (), "", False
     method, analyses = selected
     forms = {form for analysis in analyses for form in _analysis_forms(analysis)}
     ids = tuple(sorted({str(analysis.get("id") or "") for analysis in analyses if analysis.get("id")}))
-    return forms, ids, method
+    return forms, ids, method, bool(analyses)
 
 
 def build_rows(
@@ -62,7 +62,7 @@ def build_rows(
             continue
 
         lemma = str(row.get("lemma") or "")
-        saldo_forms, saldo_ids, match_method = _canonical_saldo_match(row, saldo, form_index)
+        saldo_forms, saldo_ids, match_method, matched = _canonical_saldo_match(row, saldo, form_index)
         saldo_folded = {form.casefold() for form in saldo_forms}
         source_superlatives = sorted(
             {
@@ -74,7 +74,7 @@ def build_rows(
         )
         for form in derived:
             written_form = str(form.get("written_form") or "")
-            if not saldo_ids:
+            if not matched:
                 status = "lemma_missing_in_saldo"
             elif written_form.casefold() in saldo_folded:
                 status = "confirmed_by_saldo"
