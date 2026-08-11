@@ -8,6 +8,7 @@ from typing import Any
 
 from .generate_noun_forms import DEFAULT_SAOL
 from .jsonl import read_jsonl
+from .noun_truncated_shared import assign_truncated_noun_branch
 from .saol_noun_variants import prepare_noun_variant_records
 from .saol_row_interpreter import (
     _assign_labelled_noun_slots_shared,
@@ -31,19 +32,16 @@ def branch_path(record: dict[str, Any], tokens: tuple[str, ...]) -> str:
         return "shared_labelled"
     if _assign_unlabelled_noun_atoms_shared(record, tokens) is not None:
         return "shared_unlabelled_atoms"
+    if is_truncated_inflection_source(record) and assign_truncated_noun_branch(record, tokens) is not None:
+        return "shared_truncated_partial"
     return "legacy_fallback"
 
 
 def fallback_reason(record: dict[str, Any], tokens: tuple[str, ...]) -> str:
-    """Explain why one legacy branch is outside the shared clean-room grammar.
-
-    Source truncation is a property of the SAOL14 export, not of the notation
-    grammar. Everything else remains genuine syntax to inspect before retiring
-    the legacy fallback.
-    """
+    """Explain why one legacy branch is outside the shared clean-room grammar."""
 
     if is_truncated_inflection_source(record):
-        return "source_text_truncated"
+        return "truncated_without_recoverable_prefix"
     return "remaining_syntax"
 
 
@@ -57,6 +55,7 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
     noun_records = 0
     branch_count = 0
     records_with_fallback: set[tuple[str, str, str]] = set()
+    truncated_records: set[tuple[str, str, str]] = set()
 
     for record in records:
         if str(record.get("upos") or "").upper() != "NOUN":
@@ -74,6 +73,8 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
         lemma = str(record.get("normaliserat_ord") or "")
         homonym = str(record.get("homonr") or "")
         record_id = str(record.get("subnr") or record.get("urspr_lopnr") or record.get("id") or "")
+        if is_truncated_inflection_source(record):
+            truncated_records.add((record_id, homonym, lemma))
         for branch_index, branch in enumerate(branches):
             branch_count += 1
             path = branch_path(record, branch.tokens)
@@ -112,6 +113,8 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
         "noun_records": noun_records,
         "branches": branch_count,
         "path_counts": dict(path_counts.most_common()),
+        "truncated_records": len(truncated_records),
+        "shared_truncated_partial_branches": path_counts.get("shared_truncated_partial", 0),
         "records_with_legacy_fallback": len(records_with_fallback),
         "legacy_fallback_branches": path_counts.get("legacy_fallback", 0),
         "legacy_fallback_notations": len(fallback_groups),
@@ -144,12 +147,14 @@ def render(summary: dict[str, Any]) -> str:
     lines = [
         "SAOL14 NOUN: täckning av gemensam slotmotor",
         "",
-        "Varje böjningsbranch klassificeras oberoende. Rapporten mäter vilken",
-        "tilldelningsväg som faktiskt kan tolka branchens redan tokeniserade atomer.",
-        "Den ändrar inte genereringen och använder inte SALDO som facit.",
+        "Varje böjningsbranch klassificeras oberoende. Trunkerade källrader",
+        "tolkas med samma shared-grammatik så långt ett komplett prefix räcker;",
+        "ingen saknad slutform eller slot gissas fram.",
         "",
         f"NOUN-poster: {summary['noun_records']}",
         f"Böjningsbrancher: {summary['branches']}",
+        f"Trunkerade poster: {summary['truncated_records']}",
+        f"Shared trunkerade partial-brancher: {summary['shared_truncated_partial_branches']}",
         f"Poster med legacy-fallback: {summary['records_with_legacy_fallback']}",
         f"Legacy-fallback-brancher: {summary['legacy_fallback_branches']}",
         f"Legacy-fallback-notationer: {summary['legacy_fallback_notations']}",
@@ -160,10 +165,12 @@ def render(summary: dict[str, Any]) -> str:
         lines.append(f"  {count:7d}  {path}")
 
     lines.extend(["", "Legacy-fallback efter orsak:"])
+    if not summary["fallback_reason_counts"]:
+        lines.append("        0  (inga)")
     for reason, count in summary["fallback_reason_counts"].items():
         lines.append(f"  {count:7d}  {reason}")
 
-    for reason in ("remaining_syntax", "source_text_truncated"):
+    for reason in ("remaining_syntax", "truncated_without_recoverable_prefix"):
         groups = summary["fallback_reason_groups"].get(reason, [])
         lines.extend(["", f"{reason} – största notationer:"])
         _render_groups(lines, groups)
@@ -185,6 +192,8 @@ def main() -> None:
 
     print(f"NOUN-poster: {summary['noun_records']}")
     print(f"Böjningsbrancher: {summary['branches']}")
+    print(f"Trunkerade poster: {summary['truncated_records']}")
+    print(f"Shared trunkerade partial-brancher: {summary['shared_truncated_partial_branches']}")
     print(f"Poster med legacy-fallback: {summary['records_with_legacy_fallback']}")
     print(f"Legacy-fallback-brancher: {summary['legacy_fallback_branches']}")
     print(f"Legacy-fallback-notationer: {summary['legacy_fallback_notations']}")
