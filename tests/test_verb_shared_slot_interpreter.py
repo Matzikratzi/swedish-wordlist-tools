@@ -14,8 +14,8 @@ class VerbSharedSlotInterpreterTests(unittest.TestCase):
     def test_relative_suffix_atoms_fill_preterite_and_supine(self) -> None:
         self.assertEqual(
             (
-                ("preterite", "+de", "suffix"),
-                ("supine", "+t", "suffix"),
+                ("preterite", "+de", "append"),
+                ("supine", "+t", "append"),
             ),
             self._pairs("+de +t"),
         )
@@ -32,8 +32,8 @@ class VerbSharedSlotInterpreterTests(unittest.TestCase):
     def test_replacement_atoms_use_the_same_slots(self) -> None:
         self.assertEqual(
             (
-                ("preterite", "-ställde", "replacement"),
-                ("supine", "-ställt", "replacement"),
+                ("preterite", "-ställde", "replace_tail"),
+                ("supine", "-ställt", "replace_tail"),
             ),
             self._pairs("-ställde -ställt"),
         )
