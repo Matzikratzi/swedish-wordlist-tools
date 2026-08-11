@@ -128,7 +128,13 @@ def assign_slots_with_grammar(
                 )
             )
         last_slot = token_slot
-        form_index += 1
+        # An explicit alternative marker means that this token is another
+        # realization of the preceding grammatical slot. It therefore must not
+        # consume the next implicit positional slot. This is the same principle
+        # as optional variants within one source token, only expressed across
+        # two tokens (``+ar el. +er``, ``bytte el. böt`` etc.).
+        if alternative_marker is None:
+            form_index += 1
         selected_slot = None
         alternative_marker = None
 
