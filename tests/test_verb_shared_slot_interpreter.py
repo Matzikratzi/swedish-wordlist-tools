@@ -29,6 +29,13 @@ class VerbSharedSlotInterpreterTests(unittest.TestCase):
     def test_replacement_atoms_use_the_same_slots(self) -> None:
         self.assertEqual((("preterite", "-ställde", "replace_tail"), ("supine", "-ställt", "replace_tail")), self._pairs("-ställde -ställt"))
 
+    def test_lone_explicit_form_keeps_unknown_morphology(self) -> None:
+        self.assertEqual(
+            (("explicit_form", "måtte", "explicit"),),
+            self._rich_pairs("måtte"),
+        )
+        self.assertIsNone(interpret_verb_sequence("+de"))
+
     def test_longer_sequence_is_not_claimed_by_basic_interpreter(self) -> None:
         self.assertIsNone(interpret_basic_verb_sequence("gick gått pres. går"))
 
