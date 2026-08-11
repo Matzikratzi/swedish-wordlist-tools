@@ -33,15 +33,18 @@ BASIC_VERB_GRAMMAR = SlotGrammar(
 VERB_GRAMMAR = SlotGrammar(
     label_slots={
         "pres.": "present",
+        "pret.": "preterite",
+        "sup.": "supine",
         "imper.": "imperative",
         "perf.": "perfect_participle_common",
         "part.": "perfect_participle_common",
         "n.": "perfect_participle_neuter",
     },
     implicit_slot=_implicit_verb_slot,
-    # ``el.`` and ``H`` really introduce an alternative realization of the
-    # preceding slot.  Usage qualifiers such as ``prov.`` and ``ibl.`` merely
-    # qualify that alternative and must not disturb the selected slot.
+    # ``el.`` and ``H`` introduce another realization of the preceding slot.
+    # H is Språkbanken's encoding of SAOL's ``hellre än`` relation; the shared
+    # SlotOperation preserves that preference as metadata without changing the
+    # grammatical slot.
     alternative_markers=frozenset({"el.", "h"}),
     transparent_markers=frozenset({
         "i:",
@@ -70,11 +73,8 @@ def interpret_basic_verb_sequence(text: str):
     """Interpret the canonical two-atom SAOL verb sequence.
 
     In unlabelled verb notation the first form atom is preterite and the second
-    is supine.  The atoms themselves remain generic SAOL operations: append,
+    is supine. The atoms themselves remain generic SAOL operations: append,
     replacement, unchanged, optional expansion, or a fully written form.
-
-    This deliberately handles only the two-atom core.  Richer labelled and
-    participial sequences are handled by :func:`interpret_verb_sequence`.
     """
 
     assigned = interpret_single_slot_sequence(text, BASIC_VERB_GRAMMAR)
@@ -88,24 +88,31 @@ def interpret_basic_verb_sequence(text: str):
     return assigned
 
 
+def is_structurally_uninflected_verb(text: str) -> bool:
+    """Return true for SAOL's explicit ``ingen böjning`` notation."""
+
+    normalized = " ".join(text.casefold().replace(";", " ").replace(",", " ").split())
+    return normalized == "ingen: böjning:"
+
+
 def interpret_verb_sequence(text: str):
-    """Interpret common SAOL verb notation without paradigm regexes.
+    """Interpret common and defective SAOL verb notation atomically.
 
     Unlabelled source atoms occupy, in order, preterite, supine and the three
-    positive perfect-participle slots (common, neuter, plural). ``pres.`` and
-    ``imper.`` select named finite slots. ``perf. part.`` selects the perfect
-    participle domain and ``n.`` its neuter slot. Editorial qualifiers remain
-    transparent while ``el.``/``H`` reuse the preceding grammatical slot.
+    positive perfect-participle slots. Named labels may instead select present,
+    preterite, supine, imperative or participle slots explicitly. Editorial
+    qualifiers are transparent; ``el.``/``H`` reuse the preceding slot.
 
-    The function intentionally requires at least preterite + supine. Other
-    grammatical structures are added only when the source inventory
-    demonstrates their meaning.
+    Unlike the first bootstrap version, this function does not require both
+    preterite and supine. SAOL contains genuinely defective paradigms, e.g.
+    ``djärvdes, pres. djärvs el. djärves`` and ``pres. -fås, sup. -fåtts``.
+    A structurally explicit named/marked sequence is valid even when a normal
+    paradigm slot is absent.
     """
 
+    if is_structurally_uninflected_verb(text):
+        return ()
     assigned = interpret_single_slot_sequence(text, VERB_GRAMMAR)
     if assigned is None:
-        return None
-    occupied = {operation.slot for operation in assigned}
-    if "preterite" not in occupied or "supine" not in occupied:
         return None
     return assigned
