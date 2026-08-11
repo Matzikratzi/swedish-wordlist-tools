@@ -10,7 +10,11 @@ from .analyze_verb_notation_inventory import DEFAULT_SAOL
 from .jsonl import read_jsonl
 from .saol_notation import split_alternative_branches
 from .saol_source_policy import inflection_text, is_truncated_inflection_source
-from .verb_shared_slot_interpreter import interpret_basic_verb_sequence, interpret_verb_sequence
+from .verb_shared_slot_interpreter import (
+    interpret_basic_verb_sequence,
+    interpret_verb_sequence,
+    is_structurally_uninflected_verb,
+)
 
 DEFAULT_TEXT = Path("reports/saol14-verb-shared-coverage.txt")
 DEFAULT_JSON = Path("reports/saol14-verb-shared-coverage.json")
@@ -19,6 +23,8 @@ DEFAULT_JSON = Path("reports/saol14-verb-shared-coverage.json")
 def classify_branch(record: dict[str, Any], text: str) -> str:
     if is_truncated_inflection_source(record):
         return "truncated_not_yet_shared"
+    if is_structurally_uninflected_verb(text):
+        return "structural_uninflected"
     if interpret_basic_verb_sequence(text) is not None:
         return "shared_basic_preterite_supine"
     if interpret_verb_sequence(text) is not None:
@@ -38,8 +44,7 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
         if str(record.get("upos") or "").upper() != "VERB":
             continue
         verb_records += 1
-        truncated = is_truncated_inflection_source(record)
-        if truncated:
+        if is_truncated_inflection_source(record):
             truncated_records += 1
 
         pattern = inflection_text(record)
@@ -66,6 +71,7 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
         path_counts.get("shared_basic_preterite_supine", 0)
         + path_counts.get("shared_rich_verb_slots", 0)
     )
+    clean_room = shared + path_counts.get("structural_uninflected", 0)
     return {
         "verb_records": verb_records,
         "without_inflection_text": without_inflection_text,
@@ -74,6 +80,8 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
         "path_counts": dict(path_counts.most_common()),
         "shared_branches": shared,
         "shared_branch_percent": round(100.0 * shared / branch_count, 2) if branch_count else 0.0,
+        "clean_room_branches": clean_room,
+        "clean_room_branch_percent": round(100.0 * clean_room / branch_count, 2) if branch_count else 0.0,
         "examples": dict(examples),
     }
 
@@ -82,16 +90,17 @@ def render(summary: dict[str, Any]) -> str:
     lines = [
         "SAOL14 VERB: shared-täckning",
         "",
-        "Shared-motorn tolkar atomärt preteritum + supinum och därefter",
-        "positionsbundna perfektparticipformer samt etiketter för presens,",
-        "imperativ och neutrum. Trunkerade rader hålls fortfarande separat",
-        "och tas ännu inte över av prefix-tolkning.",
+        "Shared-motorn tolkar atomärt positionsbundna och explicit etiketterade",
+        "verbslots, inklusive defekta paradigm där normala former saknas.",
+        "'ingen böjning' redovisas separat som strukturellt löst. Trunkerade",
+        "rader hålls fortfarande separat tills prefix-tolkningen kopplas in.",
         "",
         f"VERB-poster: {summary['verb_records']}",
         f"Utan böjningstext: {summary['without_inflection_text']}",
         f"Trunkerade poster: {summary['truncated_records']}",
         f"Böjningsbrancher: {summary['branches']}",
         f"Shared brancher totalt: {summary['shared_branches']} ({summary['shared_branch_percent']:.2f} %)",
+        f"Clean-room brancher totalt: {summary['clean_room_branches']} ({summary['clean_room_branch_percent']:.2f} %)",
         "",
         "Vägar:",
     ]
@@ -105,9 +114,7 @@ def render(summary: dict[str, Any]) -> str:
             lines.append("  (inga)")
         for row in rows[:20]:
             hom = f" ({row['homonym_number']})" if row["homonym_number"] else ""
-            lines.append(
-                f"  {row['lemma']}{hom} | branch {row['branch']} | text={row['text']!r}"
-            )
+            lines.append(f"  {row['lemma']}{hom} | branch {row['branch']} | text={row['text']!r}")
     return "\n".join(lines) + "\n"
 
 
@@ -128,6 +135,7 @@ def main() -> None:
     print(f"Trunkerade poster: {summary['truncated_records']}")
     print(f"Böjningsbrancher: {summary['branches']}")
     print(f"Shared brancher totalt: {summary['shared_branches']} ({summary['shared_branch_percent']:.2f} %)")
+    print(f"Clean-room brancher totalt: {summary['clean_room_branches']} ({summary['clean_room_branch_percent']:.2f} %)")
     for path, count in summary["path_counts"].items():
         print(f"{path}: {count}")
     print(f"Text: {args.text}")
