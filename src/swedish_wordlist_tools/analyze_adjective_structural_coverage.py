@@ -14,10 +14,6 @@ STRUCTURAL_PREFIX = "structural_"
 SHARED_PREFIX = "shared_"
 LEGACY_EXAMPLE_LIMIT = 5
 
-# These rule families still contain adjective-specific realization logic, but
-# their tokenization/branching/slot assignment is already delegated to the
-# shared SlotGrammar engine. Keep them separate from both direct shared paths
-# and genuinely adjective-specific structural paths in the coverage report.
 SHARED_BACKED_RULES = frozenset(
     {
         "structural_labelled_positive_slots",
@@ -30,6 +26,12 @@ SHARED_BACKED_RULES = frozenset(
     }
 )
 
+# These rows do not represent unresolved inflection mechanics.  They add either
+# usage restrictions around already-materialized forms or an explicitly
+# evidenced relation between parallel variant lemmas.
+METADATA_RULES = frozenset({"structural_usage_restrictions"})
+VARIANT_RELATION_RULES = frozenset({"structural_parallel_explicit_variant"})
+
 
 def build_summary(path: Path = DEFAULT_ARTIFACT) -> dict[str, object]:
     rows = list(read_jsonl(path))
@@ -38,13 +40,16 @@ def build_summary(path: Path = DEFAULT_ARTIFACT) -> dict[str, object]:
         count for rule, count in rule_counts.items() if rule.startswith(SHARED_PREFIX)
     )
     shared_backed = sum(rule_counts.get(rule, 0) for rule in SHARED_BACKED_RULES)
+    metadata = sum(rule_counts.get(rule, 0) for rule in METADATA_RULES)
+    variant_relations = sum(rule_counts.get(rule, 0) for rule in VARIANT_RELATION_RULES)
+    excluded_structural = SHARED_BACKED_RULES | METADATA_RULES | VARIANT_RELATION_RULES
     structural = sum(
         count
         for rule, count in rule_counts.items()
-        if rule.startswith(STRUCTURAL_PREFIX) and rule not in SHARED_BACKED_RULES
+        if rule.startswith(STRUCTURAL_PREFIX) and rule not in excluded_structural
     )
     no_inflection = rule_counts.get("lemma_only_no_inflection_text", 0)
-    clean_room = shared_direct + shared_backed + structural
+    clean_room = shared_direct + shared_backed + metadata + variant_relations + structural
     legacy = len(rows) - clean_room - no_inflection
 
     legacy_examples: dict[str, list[dict[str, object]]] = defaultdict(list)
@@ -76,6 +81,8 @@ def build_summary(path: Path = DEFAULT_ARTIFACT) -> dict[str, object]:
         "shared_direct_records": shared_direct,
         "shared_backed_records": shared_backed,
         "shared_records": shared_direct + shared_backed,
+        "metadata_records": metadata,
+        "variant_relation_records": variant_relations,
         "structural_records": structural,
         "clean_room_records": clean_room,
         "no_inflection_text_records": no_inflection,
@@ -93,7 +100,9 @@ def render_text(summary: dict[str, object]) -> str:
         f"Shared direkt: {summary['shared_direct_records']}",
         f"Shared slot-motor + adjektivrealisation: {summary['shared_backed_records']}",
         f"Shared totalt: {summary['shared_records']}",
-        f"Kvarvarande adjektivspecifika strukturella vägar: {summary['structural_records']}",
+        f"Bruksmetadata: {summary['metadata_records']}",
+        f"Explicita variantrelationer: {summary['variant_relation_records']}",
+        f"Kvarvarande adjektivspecifik böjningsmekanik: {summary['structural_records']}",
         f"Clean-room totalt: {summary['clean_room_records']}",
         f"Utan böjningstext: {summary['no_inflection_text_records']}",
         f"Legacy: {summary['legacy_records']}",
