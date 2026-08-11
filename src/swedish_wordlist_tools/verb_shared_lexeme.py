@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from .lexeme_slots import LexemeSlots, SlotForm, build_lexeme_slots
-from .saol_notation import FormOperation, FormOperationKind, apply_form_operation, split_alternative_branches
+from .saol_notation import FormOperation, apply_form_operation, split_alternative_branches
+from .saol_row_interpreter import compound_parts
 from .saol_source_policy import inflection_text, is_truncated_inflection_source
 from .verb_shared_slot_interpreter import (
     interpret_basic_verb_sequence,
@@ -22,45 +23,46 @@ def _playable_lemma(record: dict[str, Any]) -> str | None:
     return lemma
 
 
-def _common_prefix_length(left: str, right: str) -> int:
-    count = 0
-    for a, b in zip(left.casefold(), right.casefold()):
-        if a != b:
-            break
-        count += 1
-    return count
+def _join_compound_boundary(prefix: str, head: str) -> str:
+    """Join SAOL compound parts using ordinary Swedish triple-consonant spelling."""
+
+    if (
+        len(prefix) >= 2
+        and head
+        and prefix[-1].casefold() == prefix[-2].casefold() == head[0].casefold()
+    ):
+        return prefix[:-1] + head
+    return prefix + head
 
 
-def _replace_verb_final_component(lemma: str, replacement: str) -> str | None:
-    """Realize SAOL ``-tail`` using the old spelling semantics, not old parsing.
+def _replace_verb_final_component(
+    record: dict[str, Any], lemma: str, replacement: str
+) -> str | None:
+    """Realize SAOL ``-tail`` from the lexeme's explicit lodstreck structure.
 
-    Verb replacements occasionally share only one initial letter with the
-    replaced final component (``ange`` + ``-gav`` -> ``angav``), so the generic
-    two-letter overlap threshold is deliberately relaxed here.  For multiword
-    lemmas only the first word would be affected, but such lemmas are excluded
-    from this direct playable path before realization.
+    The divis replaces the part to the right of the final lodstreck.  This is
+    the same structural rule already used by noun/adjective realization; no
+    spelling-overlap heuristic is used for verbs.
     """
 
-    best_start: int | None = None
-    best_shared = 0
-    for start in range(len(lemma)):
-        candidate = lemma[start:]
-        shared = _common_prefix_length(candidate, replacement)
-        if shared > best_shared and len(candidate) >= 3:
-            best_start = start
-            best_shared = shared
-    if best_start is None or best_shared < 1:
+    parts = compound_parts(record, lemma)
+    if parts is None:
         return None
-    return lemma[:best_start] + replacement
+    prefix, _head = parts
+    return _join_compound_boundary(prefix, replacement)
 
 
-def realize_verb_operation(lemma: str, operation: FormOperation) -> str | None:
+def realize_verb_operation(
+    record: dict[str, Any], lemma: str, operation: FormOperation
+) -> str | None:
     """Apply one already parsed SAOL operation to a verb lemma."""
 
     return apply_form_operation(
         lemma,
         operation,
-        replace_tail=_replace_verb_final_component,
+        replace_tail=lambda base, replacement: _replace_verb_final_component(
+            record, base, replacement
+        ),
     )
 
 
@@ -124,7 +126,7 @@ def interpret_shared_playable_verb_slots(record: dict[str, Any]) -> LexemeSlots 
         if assigned is None:
             return None
         for item in assigned:
-            written = realize_verb_operation(lemma, item.operation)
+            written = realize_verb_operation(record, lemma, item.operation)
             if written is None:
                 return None
             detail = item.alternative_relation or item.alternative_marker or ""
