@@ -45,6 +45,26 @@ def fallback_reason(record: dict[str, Any], tokens: tuple[str, ...]) -> str:
     return "remaining_syntax"
 
 
+def _record_identity(record: dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(record.get("subnr") or record.get("urspr_lopnr") or record.get("id") or ""),
+        str(record.get("homonr") or ""),
+        str(record.get("normaliserat_ord") or ""),
+    )
+
+
+def _record_example(record: dict[str, Any], reason: str) -> dict[str, str]:
+    record_id, homonym, lemma = _record_identity(record)
+    return {
+        "lemma": lemma,
+        "homonym_number": homonym,
+        "record_id": record_id,
+        "reason": reason,
+        "text": str(record.get("text") or ""),
+        "ordkl": str(record.get("ordkl") or ""),
+    }
+
+
 def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
     path_counts: Counter[str] = Counter()
     fallback_reason_counts: Counter[str] = Counter()
@@ -56,32 +76,42 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
     branch_count = 0
     records_with_fallback: set[tuple[str, str, str]] = set()
     truncated_records: set[tuple[str, str, str]] = set()
+    truncated_without_branches: list[dict[str, str]] = []
 
     for record in records:
         if str(record.get("upos") or "").upper() != "NOUN":
             continue
         noun_records += 1
+        identity = _record_identity(record)
+        truncated = is_truncated_inflection_source(record)
+        if truncated:
+            truncated_records.add(identity)
+
         pattern = inflection_text(record)
         if pattern is None:
             path_counts["no_inflection_text"] += 1
+            if truncated:
+                truncated_without_branches.append(
+                    _record_example(record, "no_inflection_text")
+                )
             continue
         branches = split_alternative_branches(_clean_notation_structure(pattern))
         if not branches:
             path_counts["untokenized"] += 1
+            if truncated:
+                truncated_without_branches.append(
+                    _record_example(record, "untokenized")
+                )
             continue
 
-        lemma = str(record.get("normaliserat_ord") or "")
-        homonym = str(record.get("homonr") or "")
-        record_id = str(record.get("subnr") or record.get("urspr_lopnr") or record.get("id") or "")
-        if is_truncated_inflection_source(record):
-            truncated_records.add((record_id, homonym, lemma))
+        record_id, homonym, lemma = identity
         for branch_index, branch in enumerate(branches):
             branch_count += 1
             path = branch_path(record, branch.tokens)
             path_counts[path] += 1
             if path != "legacy_fallback":
                 continue
-            records_with_fallback.add((record_id, homonym, lemma))
+            records_with_fallback.add(identity)
             reason = fallback_reason(record, branch.tokens)
             fallback_reason_counts[reason] += 1
             example = {
@@ -114,6 +144,8 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
         "branches": branch_count,
         "path_counts": dict(path_counts.most_common()),
         "truncated_records": len(truncated_records),
+        "truncated_records_without_branches": len(truncated_without_branches),
+        "truncated_without_branches": truncated_without_branches,
         "shared_truncated_partial_branches": path_counts.get("shared_truncated_partial", 0),
         "records_with_legacy_fallback": len(records_with_fallback),
         "legacy_fallback_branches": path_counts.get("legacy_fallback", 0),
@@ -154,6 +186,7 @@ def render(summary: dict[str, Any]) -> str:
         f"NOUN-poster: {summary['noun_records']}",
         f"Böjningsbrancher: {summary['branches']}",
         f"Trunkerade poster: {summary['truncated_records']}",
+        f"Trunkerade poster utan branchklassificering: {summary['truncated_records_without_branches']}",
         f"Shared trunkerade partial-brancher: {summary['shared_truncated_partial_branches']}",
         f"Poster med legacy-fallback: {summary['records_with_legacy_fallback']}",
         f"Legacy-fallback-brancher: {summary['legacy_fallback_branches']}",
@@ -163,6 +196,16 @@ def render(summary: dict[str, Any]) -> str:
     ]
     for path, count in summary["path_counts"].items():
         lines.append(f"  {count:7d}  {path}")
+
+    lines.extend(["", "Trunkerade poster utan branchklassificering:"])
+    if not summary["truncated_without_branches"]:
+        lines.append("        0  (inga)")
+    for example in summary["truncated_without_branches"]:
+        homonym = f" ({example['homonym_number']})" if example["homonym_number"] else ""
+        lines.append(
+            f"  {example['lemma']}{homonym} | id={example['record_id']} | "
+            f"reason={example['reason']} | text={example['text']!r} | ordkl={example['ordkl']!r}"
+        )
 
     lines.extend(["", "Legacy-fallback efter orsak:"])
     if not summary["fallback_reason_counts"]:
@@ -193,6 +236,7 @@ def main() -> None:
     print(f"NOUN-poster: {summary['noun_records']}")
     print(f"Böjningsbrancher: {summary['branches']}")
     print(f"Trunkerade poster: {summary['truncated_records']}")
+    print(f"Trunkerade poster utan branchklassificering: {summary['truncated_records_without_branches']}")
     print(f"Shared trunkerade partial-brancher: {summary['shared_truncated_partial_branches']}")
     print(f"Poster med legacy-fallback: {summary['records_with_legacy_fallback']}")
     print(f"Legacy-fallback-brancher: {summary['legacy_fallback_branches']}")
