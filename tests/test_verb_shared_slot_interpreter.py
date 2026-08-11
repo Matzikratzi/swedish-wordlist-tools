@@ -4,6 +4,7 @@ import unittest
 
 from swedish_wordlist_tools.verb_shared_slot_interpreter import (
     interpret_basic_verb_sequence,
+    interpret_present_first_verb_sequence,
     interpret_verb_sequence,
     is_structurally_uninflected_verb,
 )
@@ -64,6 +65,24 @@ class VerbSharedSlotInterpreterTests(unittest.TestCase):
             self._rich_pairs("band, bundit, bunden bundet bundna, pres. binder"),
         )
 
+    def test_present_first_full_explicit_sequence_is_atomic(self) -> None:
+        assigned = interpret_present_first_verb_sequence(
+            "föräter, föråt, förätit, föräten förätet förätna"
+        )
+        self.assertIsNotNone(assigned)
+        assert assigned is not None
+        self.assertEqual(
+            (
+                "present",
+                "preterite",
+                "supine",
+                "perfect_participle_common",
+                "perfect_participle_neuter",
+                "perfect_participle_plural",
+            ),
+            tuple(item.slot for item in assigned),
+        )
+
     def test_neuter_label_reuses_participle_neuter_slot(self) -> None:
         self.assertEqual(
             (
@@ -99,6 +118,29 @@ class VerbSharedSlotInterpreterTests(unittest.TestCase):
                 ("supine", "myst", "explicit"),
             ),
             self._rich_pairs("myste H mös, myst"),
+        )
+
+    def test_trailing_incomplete_alternative_keeps_complete_prefix(self) -> None:
+        pairs = self._rich_pairs(
+            "tog, tagit, tagen taget tagna, pres. tar el. åld."
+        )
+        self.assertEqual(
+            (
+                "preterite",
+                "supine",
+                "perfect_participle_common",
+                "perfect_participle_neuter",
+                "perfect_participle_plural",
+                "present",
+            ),
+            tuple(slot for slot, _token, _kind in pairs),
+        )
+        self.assertEqual("tar", pairs[-1][1])
+
+    def test_bare_present_label_means_lemma_present(self) -> None:
+        self.assertEqual(
+            (("present", "+", "unchanged"),),
+            self._rich_pairs("pres."),
         )
 
     def test_perf_part_neuter_with_usage_qualifier_is_one_slot(self) -> None:
