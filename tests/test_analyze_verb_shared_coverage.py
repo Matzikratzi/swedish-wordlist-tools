@@ -27,11 +27,18 @@ class AnalyzeVerbSharedCoverageTests(unittest.TestCase):
                     classify_branch({"upos": "VERB", "text": text}, text),
                 )
 
-    def test_keeps_truncated_and_structural_uninflected_separate(self) -> None:
+    def test_truncated_branch_uses_shared_visible_prefix(self) -> None:
+        record = {"upos": "VERB", "text": "x" * 50}
         self.assertEqual(
-            "truncated_not_yet_shared",
-            classify_branch({"upos": "VERB", "text": "x" * 50}, "gick, gått, pres."),
+            "shared_truncated_partial",
+            classify_branch(record, "gick, gått, pres."),
         )
+        self.assertEqual(
+            "truncated_without_recoverable_prefix",
+            classify_branch(record, "pres."),
+        )
+
+    def test_structural_uninflected_is_separate(self) -> None:
         self.assertEqual(
             "structural_uninflected",
             classify_branch({"upos": "VERB", "text": "ingen: böjning:"}, "ingen: böjning:"),
