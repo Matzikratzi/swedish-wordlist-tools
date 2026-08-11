@@ -74,8 +74,8 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
     )
     noun_records = 0
     branch_count = 0
+    truncated_record_count = 0
     records_with_fallback: set[tuple[str, str, str]] = set()
-    truncated_records: set[tuple[str, str, str]] = set()
     truncated_without_branches: list[dict[str, str]] = []
 
     for record in records:
@@ -85,7 +85,7 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
         identity = _record_identity(record)
         truncated = is_truncated_inflection_source(record)
         if truncated:
-            truncated_records.add(identity)
+            truncated_record_count += 1
 
         pattern = inflection_text(record)
         if pattern is None:
@@ -143,7 +143,7 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
         "noun_records": noun_records,
         "branches": branch_count,
         "path_counts": dict(path_counts.most_common()),
-        "truncated_records": len(truncated_records),
+        "truncated_records": truncated_record_count,
         "truncated_records_without_branches": len(truncated_without_branches),
         "truncated_without_branches": truncated_without_branches,
         "shared_truncated_partial_branches": path_counts.get("shared_truncated_partial", 0),
