@@ -87,7 +87,7 @@ def analyze(
                 assert operations is not None
                 realised: list[dict[str, Any]] = []
                 for operation in operations:
-                    written = realize_verb_operation(lemma, operation)
+                    written = realize_verb_operation(record, lemma, operation)
                     if written is None:
                         realised.append(
                             {
