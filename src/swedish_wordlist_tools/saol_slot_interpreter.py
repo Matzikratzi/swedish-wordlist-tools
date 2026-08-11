@@ -42,6 +42,7 @@ _EDITORIAL_USAGE_MARKERS = frozenset({
     "vanl.",
     "åld.",
     "t.ex.",
+    "f.",
 })
 
 
@@ -49,7 +50,14 @@ def _clean_token(token: str) -> str:
     return token.strip().strip("()").casefold()
 
 
-def _is_editorial_usage_marker(lower: str) -> bool:
+def is_editorial_usage_marker(token: str) -> bool:
+    """Return true for transparent editorial prose/usage tokens.
+
+    The classifier is intentionally grammatical-slot neutral so word-class
+    safety gates and the shared slot engine agree on which tokens are metadata.
+    """
+
+    lower = _clean_token(token)
     return lower.endswith(":") or lower in _EDITORIAL_USAGE_MARKERS
 
 
@@ -70,7 +78,7 @@ def assign_slots_with_grammar(
         lower = _clean_token(token)
         if token in grammar.punctuation:
             continue
-        if lower in grammar.transparent_markers or _is_editorial_usage_marker(lower):
+        if lower in grammar.transparent_markers or is_editorial_usage_marker(token):
             saw_marker = True
             continue
         if lower in grammar.alternative_markers:
