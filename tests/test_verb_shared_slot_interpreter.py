@@ -2,12 +2,20 @@ from __future__ import annotations
 
 import unittest
 
-from swedish_wordlist_tools.verb_shared_slot_interpreter import interpret_basic_verb_sequence
+from swedish_wordlist_tools.verb_shared_slot_interpreter import (
+    interpret_basic_verb_sequence,
+    interpret_verb_sequence,
+)
 
 
 class VerbSharedSlotInterpreterTests(unittest.TestCase):
     def _pairs(self, text: str):
         assigned = interpret_basic_verb_sequence(text)
+        self.assertIsNotNone(assigned)
+        return tuple((item.slot, item.token, item.operation.kind.value) for item in assigned)
+
+    def _rich_pairs(self, text: str):
+        assigned = interpret_verb_sequence(text)
         self.assertIsNotNone(assigned)
         return tuple((item.slot, item.token, item.operation.kind.value) for item in assigned)
 
@@ -40,6 +48,46 @@ class VerbSharedSlotInterpreterTests(unittest.TestCase):
 
     def test_longer_sequence_is_not_claimed_by_basic_interpreter(self) -> None:
         self.assertIsNone(interpret_basic_verb_sequence("gick gått pres. går"))
+
+    def test_present_label_selects_present_slot(self) -> None:
+        self.assertEqual(
+            (
+                ("preterite", "-förde", "replace_tail"),
+                ("supine", "-fört", "replace_tail"),
+                ("present", "-för", "replace_tail"),
+            ),
+            self._rich_pairs("-förde, -fört, pres. -för"),
+        )
+
+    def test_positional_perfect_participle_slots_are_atomic(self) -> None:
+        self.assertEqual(
+            (
+                ("preterite", "band", "explicit"),
+                ("supine", "bundit", "explicit"),
+                ("perfect_participle_common", "bunden", "explicit"),
+                ("perfect_participle_neuter", "bundet", "explicit"),
+                ("perfect_participle_plural", "bundna", "explicit"),
+                ("present", "binder", "explicit"),
+            ),
+            self._rich_pairs("band, bundit, bunden bundet bundna, pres. binder"),
+        )
+
+    def test_neuter_label_reuses_participle_neuter_slot(self) -> None:
+        self.assertEqual(
+            (
+                ("preterite", "-gjorde", "replace_tail"),
+                ("supine", "-gjort", "replace_tail"),
+                ("perfect_participle_common", "-gjord", "replace_tail"),
+                ("perfect_participle_neuter", "-gjort", "replace_tail"),
+                ("present", "-gör", "replace_tail"),
+            ),
+            self._rich_pairs("-gjorde, -gjort, -gjord n. -gjort, pres. -gör"),
+        )
+
+    def test_imperative_label_selects_imperative_slot(self) -> None:
+        pairs = self._rich_pairs("-svor, -svurit, pres. -svär, imper. -svär")
+        self.assertEqual("present", pairs[-2][0])
+        self.assertEqual("imperative", pairs[-1][0])
 
 
 if __name__ == "__main__":
