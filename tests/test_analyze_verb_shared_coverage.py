@@ -17,6 +17,22 @@ class AnalyzeVerbSharedCoverageTests(unittest.TestCase):
             classify_branch({"upos": "VERB", "text": "andades andats"}, "andades andats"),
         )
 
+    def test_classifies_present_and_participle_sequences_as_rich_shared(self) -> None:
+        self.assertEqual(
+            "shared_rich_verb_slots",
+            classify_branch(
+                {"upos": "VERB", "text": "-förde, -fört, pres. -för"},
+                "-förde, -fört, pres. -för",
+            ),
+        )
+        self.assertEqual(
+            "shared_rich_verb_slots",
+            classify_branch(
+                {"upos": "VERB", "text": "band, bundit, bunden bundet bundna, pres. binder"},
+                "band, bundit, bunden bundet bundna, pres. binder",
+            ),
+        )
+
     def test_keeps_truncated_and_remaining_structure_separate(self) -> None:
         self.assertEqual(
             "truncated_not_yet_shared",
@@ -24,19 +40,23 @@ class AnalyzeVerbSharedCoverageTests(unittest.TestCase):
         )
         self.assertEqual(
             "remaining_structure",
-            classify_branch({"upos": "VERB", "text": "gick, gått, pres. går"}, "gick, gått, pres. går"),
+            classify_branch(
+                {"upos": "VERB", "text": "ingen: böjning:"},
+                "ingen: böjning:",
+            ),
         )
 
     def test_summary_counts_paths(self) -> None:
         records = [
             {"upos": "VERB", "normaliserat_ord": "a", "text": "+de +t", "ordkl": "v."},
             {"upos": "VERB", "normaliserat_ord": "b", "text": "gick, gått, pres. går", "ordkl": "v."},
+            {"upos": "VERB", "normaliserat_ord": "c", "text": "ingen: böjning:", "ordkl": "v."},
         ]
         summary = analyze(records)
-        self.assertEqual(2, summary["verb_records"])
-        self.assertEqual(2, summary["branches"])
-        self.assertEqual(1, summary["shared_branches"])
-        self.assertEqual(50.0, summary["shared_branch_percent"])
+        self.assertEqual(3, summary["verb_records"])
+        self.assertEqual(3, summary["branches"])
+        self.assertEqual(2, summary["shared_branches"])
+        self.assertEqual(66.67, summary["shared_branch_percent"])
 
 
 if __name__ == "__main__":
