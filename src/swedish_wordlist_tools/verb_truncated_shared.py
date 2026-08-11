@@ -3,7 +3,6 @@ from __future__ import annotations
 from .saol_notation import parse_form_operations
 from .verb_shared_slot_interpreter import (
     interpret_basic_verb_sequence,
-    interpret_present_first_verb_sequence,
     interpret_verb_sequence,
 )
 
@@ -43,8 +42,6 @@ def assign_truncated_verb_branch(tokens: tuple[str, ...]):
         text = " ".join(prefix)
 
         assigned = interpret_basic_verb_sequence(text)
-        if assigned is None:
-            assigned = interpret_present_first_verb_sequence(text)
         if assigned is None:
             assigned = interpret_verb_sequence(text)
         if assigned is not None:
