@@ -29,13 +29,11 @@ def _apply_operation(base: str, operation: FormOperation, *, neuter: bool) -> st
     )
 
 
-def _implicit_unlabelled_slot(
+def _implicit_sequence_slot(
     index: int,
     _last_slot: str | None,
-    operation: FormOperation,
+    _operation: FormOperation,
 ) -> str | None:
-    if index == 0 and operation.kind is FormOperationKind.EXPLICIT:
-        return "definite_or_plural"
     slots = (
         "neuter_singular",
         "definite_or_plural",
@@ -45,7 +43,22 @@ def _implicit_unlabelled_slot(
     return slots[index] if index < len(slots) else None
 
 
-_UNLABELLED_GRAMMAR = SlotGrammar(label_slots={}, implicit_slot=_implicit_unlabelled_slot)
+def _implicit_single_slot(
+    index: int,
+    _last_slot: str | None,
+    operation: FormOperation,
+) -> str | None:
+    if index != 0:
+        return None
+    return (
+        "definite_or_plural"
+        if operation.kind is FormOperationKind.EXPLICIT
+        else "neuter_singular"
+    )
+
+
+_SEQUENCE_GRAMMAR = SlotGrammar(label_slots={}, implicit_slot=_implicit_sequence_slot)
+_SINGLE_GRAMMAR = SlotGrammar(label_slots={}, implicit_slot=_implicit_single_slot)
 
 
 def interpret_shared_unlabelled_adjective_slots(
@@ -53,10 +66,11 @@ def interpret_shared_unlabelled_adjective_slots(
 ) -> AdjectiveSlots | None:
     """Interpret ordinary unlabelled adjective atom sequences through the shared engine.
 
-    Each token remains a primitive form operation; adjective-specific code only
-    supplies the ordered grammatical slots.  For a lone atom, SAOL's operation
-    role is itself sufficient evidence: a relative operation is neuter, while a
-    fully written explicit form is definite/plural.
+    Multi-atom sequences use pure positional slots.  A lone atom is a separate
+    grammatical contract: SAOL's operation role is itself sufficient evidence,
+    with a relative operation denoting neuter and a fully written explicit form
+    denoting definite/plural.  The distinction is structural and independent of
+    any particular adjective spelling.
     """
 
     lemma = _value(record, "normaliserat_ord").casefold()
@@ -64,11 +78,14 @@ def interpret_shared_unlabelled_adjective_slots(
     if not lemma or " " in lemma or not lemma.isalpha() or not raw_text or "_" in raw_text:
         return None
 
-    operations = interpret_single_slot_sequence(raw_text, _UNLABELLED_GRAMMAR)
+    operations = interpret_single_slot_sequence(raw_text, _SEQUENCE_GRAMMAR)
     if operations is None or len(operations) not in {1, 2, 4}:
         return None
 
     if len(operations) == 1:
+        operations = interpret_single_slot_sequence(raw_text, _SINGLE_GRAMMAR)
+        if operations is None or len(operations) != 1:
+            return None
         expected_slots = (
             "definite_or_plural",
         ) if operations[0].operation.kind is FormOperationKind.EXPLICIT else (
