@@ -36,18 +36,21 @@ class AnalyzeNounSharedCoverageTests(unittest.TestCase):
             branch_path(noun, self._tokens("brodern +ar")),
         )
 
-    def test_unknown_comment_syntax_stays_legacy_fallback(self) -> None:
+    def test_generic_colon_editorial_label_is_shared(self) -> None:
         noun = {"ordkl": "s."}
         self.assertEqual(
-            "legacy_fallback",
+            "shared_unlabelled_atoms",
             branch_path(noun, self._tokens("+en okändmarkör: +ar")),
         )
 
     def test_fallback_reason_separates_source_truncation_from_syntax(self) -> None:
-        tokens = self._tokens("+en okändmarkör: +ar")
+        # ``gen.`` is intentionally not a noun slot or transparent editorial
+        # marker here, so it remains a useful synthetic example of genuinely
+        # unsupported complete syntax. Colon-ended prose labels are shared.
+        tokens = self._tokens("+en gen. +ar")
         self.assertEqual(
             "remaining_syntax",
-            fallback_reason({"text": "+en okändmarkör: +ar"}, tokens),
+            fallback_reason({"text": "+en gen. +ar"}, tokens),
         )
         self.assertEqual(
             "source_text_truncated",
