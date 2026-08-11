@@ -1,19 +1,13 @@
 from __future__ import annotations
 
-from .saol_notation import FormOperationKind
 from .saol_slot_interpreter import SlotGrammar, interpret_single_slot_sequence
 
 
 _BASIC_VERB_SLOTS = ("preterite", "supine")
+# Verified from complete, purely positional SAOL14 rows and checked against
+# SALDO MSD. The five-position form is:
+#   preterite, supine, perfect participle common/neuter/plural.
 _VERB_POSITIONAL_SLOTS = (
-    "preterite",
-    "supine",
-    "perfect_participle_common",
-    "perfect_participle_neuter",
-    "perfect_participle_plural",
-)
-_PRESENT_FIRST_VERB_SLOTS = (
-    "present",
     "preterite",
     "supine",
     "perfect_participle_common",
@@ -31,12 +25,6 @@ def _implicit_basic_verb_slot(index, _last_slot, _operation):
 def _implicit_verb_slot(index, _last_slot, _operation):
     if 0 <= index < len(_VERB_POSITIONAL_SLOTS):
         return _VERB_POSITIONAL_SLOTS[index]
-    return None
-
-
-def _implicit_present_first_verb_slot(index, _last_slot, _operation):
-    if 0 <= index < len(_PRESENT_FIRST_VERB_SLOTS):
-        return _PRESENT_FIRST_VERB_SLOTS[index]
     return None
 
 
@@ -72,11 +60,6 @@ VERB_GRAMMAR = SlotGrammar(
     bare_label_as_unchanged=True,
 )
 
-PRESENT_FIRST_VERB_GRAMMAR = SlotGrammar(
-    label_slots={},
-    implicit_slot=_implicit_present_first_verb_slot,
-)
-
 
 def _source_tokens(assigned):
     result = []
@@ -98,28 +81,17 @@ def interpret_basic_verb_sequence(text: str):
     return assigned
 
 
-def interpret_present_first_verb_sequence(text: str):
-    """Interpret a complete six-form explicit present-first sequence."""
-
-    assigned = interpret_single_slot_sequence(text, PRESENT_FIRST_VERB_GRAMMAR)
-    if assigned is None:
-        return None
-    if len(_source_tokens(assigned)) != 6:
-        return None
-    if tuple(item.slot for item in assigned) != _PRESENT_FIRST_VERB_SLOTS:
-        return None
-    if any(item.operation.kind is not FormOperationKind.EXPLICIT for item in assigned):
-        return None
-    return assigned
-
-
 def is_structurally_uninflected_verb(text: str) -> bool:
     normalized = " ".join(text.casefold().replace(";", " ").replace(",", " ").split())
     return normalized == "ingen: böjning:"
 
 
 def interpret_verb_sequence(text: str):
-    """Interpret complete common and defective SAOL verb notation atomically.
+    """Interpret SAOL verb notation with only evidenced positional semantics.
+
+    Complete unlabelled rows support one-position preterite, two-position
+    preterite+supine and the five-position sequence ending in three perfect
+    participle forms. Explicit labels may add or select other slots.
 
     Incomplete endings are deliberately rejected here. If the source is known
     to be truncated, source policy and the verb partial-prefix path decide how
@@ -128,7 +100,4 @@ def interpret_verb_sequence(text: str):
 
     if is_structurally_uninflected_verb(text):
         return ()
-    present_first = interpret_present_first_verb_sequence(text)
-    if present_first is not None:
-        return present_first
     return interpret_single_slot_sequence(text, VERB_GRAMMAR)
