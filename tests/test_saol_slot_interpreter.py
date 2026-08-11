@@ -80,6 +80,26 @@ class SaolSlotInterpreterTests(unittest.TestCase):
         self.assertEqual(("plural", "plural"), tuple(item.slot for item in operations))
         self.assertEqual("el.", operations[-1].alternative_marker)
 
+    def test_alternative_does_not_consume_next_implicit_position(self) -> None:
+        slots = ("first", "second")
+
+        def implicit(index, _last_slot, _operation):
+            return slots[index] if index < len(slots) else None
+
+        grammar = SlotGrammar(
+            label_slots={},
+            implicit_slot=implicit,
+            alternative_markers=frozenset({"el."}),
+        )
+        operations = interpret_single_slot_sequence("a el. b, c", grammar)
+        self.assertIsNotNone(operations)
+        assert operations is not None
+        self.assertEqual(
+            ("first", "first", "second"),
+            tuple(item.slot for item in operations),
+        )
+        self.assertEqual("el.", operations[1].alternative_marker)
+
     def test_relative_operations_are_notation_markers_themselves(self) -> None:
         grammar = SlotGrammar(
             label_slots={},
