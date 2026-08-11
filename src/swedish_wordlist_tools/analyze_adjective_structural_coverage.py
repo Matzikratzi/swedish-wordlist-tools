@@ -11,20 +11,29 @@ DEFAULT_ARTIFACT = Path("reports/saol14-adjective-forms.jsonl")
 DEFAULT_TEXT = Path("reports/saol14-adjective-structural-coverage.txt")
 DEFAULT_JSON = Path("reports/saol14-adjective-structural-coverage.json")
 STRUCTURAL_PREFIX = "structural_"
+SHARED_PREFIX = "shared_"
 LEGACY_EXAMPLE_LIMIT = 5
 
 
 def build_summary(path: Path = DEFAULT_ARTIFACT) -> dict[str, object]:
     rows = list(read_jsonl(path))
     rule_counts = Counter(str(row.get("rule") or "(none)") for row in rows)
+    shared = sum(count for rule, count in rule_counts.items() if rule.startswith(SHARED_PREFIX))
     structural = sum(
         count for rule, count in rule_counts.items() if rule.startswith(STRUCTURAL_PREFIX)
     )
+    no_inflection = rule_counts.get("lemma_only_no_inflection_text", 0)
+    clean_room = shared + structural
+    legacy = len(rows) - clean_room - no_inflection
 
     legacy_examples: dict[str, list[dict[str, object]]] = defaultdict(list)
     for row in rows:
         rule = str(row.get("rule") or "(none)")
-        if rule.startswith(STRUCTURAL_PREFIX) or rule == "lemma_only_no_inflection_text":
+        if (
+            rule.startswith(STRUCTURAL_PREFIX)
+            or rule.startswith(SHARED_PREFIX)
+            or rule == "lemma_only_no_inflection_text"
+        ):
             continue
         if len(legacy_examples[rule]) >= LEGACY_EXAMPLE_LIMIT:
             continue
@@ -43,8 +52,11 @@ def build_summary(path: Path = DEFAULT_ARTIFACT) -> dict[str, object]:
 
     return {
         "records": len(rows),
+        "shared_records": shared,
         "structural_records": structural,
-        "legacy_or_other_records": len(rows) - structural,
+        "clean_room_records": clean_room,
+        "no_inflection_text_records": no_inflection,
+        "legacy_records": legacy,
         "rule_counts": dict(rule_counts.most_common()),
         "legacy_examples": dict(legacy_examples),
     }
@@ -52,11 +64,14 @@ def build_summary(path: Path = DEFAULT_ARTIFACT) -> dict[str, object]:
 
 def render_text(summary: dict[str, object]) -> str:
     lines = [
-        "SAOL14 ADJ: strukturell clean-room-täckning",
+        "SAOL14 ADJ: clean-room-täckning",
         "",
         f"Genererade poster: {summary['records']}",
-        f"Strukturella poster: {summary['structural_records']}",
-        f"Gamla/övriga regelvägar: {summary['legacy_or_other_records']}",
+        f"Shared-motor: {summary['shared_records']}",
+        f"Övriga strukturella vägar: {summary['structural_records']}",
+        f"Clean-room totalt: {summary['clean_room_records']}",
+        f"Utan böjningstext: {summary['no_inflection_text_records']}",
+        f"Legacy: {summary['legacy_records']}",
         "",
         "Regler:",
     ]
@@ -65,7 +80,7 @@ def render_text(summary: dict[str, object]) -> str:
 
     examples = dict(summary.get("legacy_examples") or {})
     if examples:
-        lines.extend(("", "Kvarvarande gamla regelvägar – exempel:"))
+        lines.extend(("", "Kvarvarande legacy-vägar – exempel:"))
         for rule, rows in examples.items():
             lines.append("")
             lines.append(f"{rule}:")
@@ -81,7 +96,7 @@ def render_text(summary: dict[str, object]) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Measure how much of the ADJ artifact uses structural notation parsing"
+        description="Measure how much of the ADJ artifact uses shared/structural clean-room parsing"
     )
     parser.add_argument("artifact", nargs="?", type=Path, default=DEFAULT_ARTIFACT)
     parser.add_argument("--text", type=Path, default=DEFAULT_TEXT)
