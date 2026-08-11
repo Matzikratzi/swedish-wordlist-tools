@@ -17,6 +17,7 @@ DEFAULT_TEXT = Path("reports/saol14-verb-positional-semantics.txt")
 DEFAULT_JSON = Path("reports/saol14-verb-positional-semantics.json")
 
 _PUNCTUATION = frozenset({",", ";"})
+_ALTERNATIVE_MARKERS = frozenset({"el.", "h", "ibl."})
 
 
 def pure_unlabelled_form_tokens(tokens: tuple[str, ...]) -> tuple[str, ...] | None:
@@ -32,6 +33,8 @@ def pure_unlabelled_form_tokens(tokens: tuple[str, ...]) -> tuple[str, ...] | No
     for token in tokens:
         if token in _PUNCTUATION:
             continue
+        if token.casefold() in _ALTERNATIVE_MARKERS:
+            return None
         operations = parse_form_operations(token)
         if operations is None:
             return None
