@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Any, Iterable
 
+from .adjective_form_expansion import expand_adjective_forms
 from .adjective_form_provenance import form_provenance_details
 from .adjective_variant_interpreter import interpret_adjective_row
 from .analyze_adjectives import _value
@@ -23,6 +24,7 @@ def generated_row(record: dict[str, Any]) -> dict[str, Any] | None:
     slots = interpret_adjective_row(corrected)
     if slots is None:
         return None
+    slots = expand_adjective_forms(slots)
 
     lemma = slots.lemma
     stycke = _value(record, "stycke")
@@ -35,19 +37,35 @@ def generated_row(record: dict[str, Any]) -> dict[str, Any] | None:
             notation=notation,
             written_form=form.written_form,
         )
-        provenance = form_provenance_details(
-            written_form=written_form,
-            lemma=lemma,
-            slot=form.slot,
-            notation=notation,
-            stycke=stycke,
-        )
+        if form.provenance == "derived_inflection":
+            provenance_kind = form.provenance
+            source_token = None
+            operation_base = next(
+                (
+                    source_form.written_form
+                    for source_form in slots.forms
+                    if source_form.slot == "superlative"
+                    and written_form.startswith(source_form.written_form)
+                ),
+                None,
+            )
+        else:
+            provenance = form_provenance_details(
+                written_form=written_form,
+                lemma=lemma,
+                slot=form.slot,
+                notation=notation,
+                stycke=stycke,
+            )
+            provenance_kind = provenance.kind
+            source_token = provenance.source_token
+            operation_base = provenance.operation_base
         forms.append({
             "written_form": written_form,
             "slot": form.slot,
-            "provenance": provenance.kind,
-            "source_token": provenance.source_token,
-            "operation_base": provenance.operation_base,
+            "provenance": provenance_kind,
+            "source_token": source_token,
+            "operation_base": operation_base,
         })
 
     return {
