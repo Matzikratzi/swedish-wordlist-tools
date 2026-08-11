@@ -66,6 +66,8 @@ class AnalyzeNounSharedCoverageTests(unittest.TestCase):
         )
 
     def test_truncated_record_is_counted_before_branch_classification(self) -> None:
+        second_text = "+en; pl. +ar, best. pl." + " " * 27
+        self.assertEqual(50, len(second_text))
         summary = analyze(
             [
                 {
@@ -81,7 +83,7 @@ class AnalyzeNounSharedCoverageTests(unittest.TestCase):
                     "normaliserat_ord": "y",
                     "homonr": "1",
                     "subnr": 2,
-                    "text": "+en; pl. +ar, best. pl." + " " * 24,
+                    "text": second_text,
                     "ordkl": "s.",
                 },
             ]
