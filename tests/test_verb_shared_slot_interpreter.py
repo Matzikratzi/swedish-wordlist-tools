@@ -89,6 +89,36 @@ class VerbSharedSlotInterpreterTests(unittest.TestCase):
         self.assertEqual("present", pairs[-2][0])
         self.assertEqual("imperative", pairs[-1][0])
 
+    def test_editorial_qualifier_keeps_alternative_in_same_slot(self) -> None:
+        self.assertEqual(
+            (
+                ("preterite", "bytte", "explicit"),
+                ("preterite", "böt", "explicit"),
+                ("supine", "bytt", "explicit"),
+            ),
+            self._rich_pairs("bytte el. prov. böt, bytt"),
+        )
+
+    def test_h_alternative_reuses_preceding_slot(self) -> None:
+        self.assertEqual(
+            (
+                ("preterite", "myste", "explicit"),
+                ("preterite", "mös", "explicit"),
+                ("supine", "myst", "explicit"),
+            ),
+            self._rich_pairs("myste H mös, myst"),
+        )
+
+    def test_perf_part_neuter_with_usage_qualifier_is_one_slot(self) -> None:
+        self.assertEqual(
+            (
+                ("preterite", "+de", "append"),
+                ("supine", "+t", "append"),
+                ("perfect_participle_neuter", "ment", "explicit"),
+            ),
+            self._rich_pairs("+de +t, perf. part. n. ibl. ment"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
