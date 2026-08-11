@@ -32,6 +32,7 @@ class SaolSlotInterpreterTests(unittest.TestCase):
             tuple(item.operation.kind for item in operations),
         )
         self.assertEqual("el.", operations[-1].alternative_marker)
+        self.assertEqual("alternative", operations[-1].alternative_relation)
 
     def test_editorial_plural_wording_is_transparent_around_plural_label(self) -> None:
         grammar = SlotGrammar(
@@ -79,6 +80,7 @@ class SaolSlotInterpreterTests(unittest.TestCase):
         assert operations is not None
         self.assertEqual(("plural", "plural"), tuple(item.slot for item in operations))
         self.assertEqual("el.", operations[-1].alternative_marker)
+        self.assertEqual("alternative", operations[-1].alternative_relation)
 
     def test_alternative_does_not_consume_next_implicit_position(self) -> None:
         slots = ("first", "second")
@@ -99,6 +101,29 @@ class SaolSlotInterpreterTests(unittest.TestCase):
             tuple(item.slot for item in operations),
         )
         self.assertEqual("el.", operations[1].alternative_marker)
+        self.assertEqual("alternative", operations[1].alternative_relation)
+
+    def test_h_preserves_hellre_an_preference_relation_in_same_slot(self) -> None:
+        slots = ("preterite", "supine")
+
+        def implicit(index, _last_slot, _operation):
+            return slots[index] if index < len(slots) else None
+
+        grammar = SlotGrammar(
+            label_slots={},
+            implicit_slot=implicit,
+            alternative_markers=frozenset({"h"}),
+        )
+        operations = interpret_single_slot_sequence("myste H mös, myst", grammar)
+        self.assertIsNotNone(operations)
+        assert operations is not None
+        self.assertEqual(
+            ("preterite", "preterite", "supine"),
+            tuple(item.slot for item in operations),
+        )
+        self.assertEqual("h", operations[1].alternative_marker)
+        self.assertEqual("preferred_over", operations[1].alternative_relation)
+        self.assertIsNone(operations[0].alternative_relation)
 
     def test_relative_operations_are_notation_markers_themselves(self) -> None:
         grammar = SlotGrammar(
