@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .saol_notation import FormOperationKind
 from .saol_slot_interpreter import SlotGrammar, interpret_single_slot_sequence
 
 
@@ -28,9 +29,18 @@ def _implicit_verb_slot(index, _last_slot, _operation):
     return None
 
 
+def _implicit_explicit_form_slot(index, _last_slot, _operation):
+    return "explicit_form" if index == 0 else None
+
+
 BASIC_VERB_GRAMMAR = SlotGrammar(
     label_slots={},
     implicit_slot=_implicit_basic_verb_slot,
+)
+
+SINGLE_EXPLICIT_VERB_GRAMMAR = SlotGrammar(
+    label_slots={},
+    implicit_slot=_implicit_explicit_form_slot,
 )
 
 VERB_GRAMMAR = SlotGrammar(
@@ -81,6 +91,24 @@ def interpret_basic_verb_sequence(text: str):
     return assigned
 
 
+def _interpret_single_explicit_verb_form(text: str):
+    """Keep a lone written form without inventing tense or mood.
+
+    SAOL14 has exactly one complete, purely positional one-atom verb branch:
+    ``må (2): måtte``. SAOL 2026 identifies that form as preterite subjunctive,
+    while SALDO labels it more coarsely as indicative preterite. Position alone
+    therefore does not justify a grammatical slot. We preserve the attested
+    written form as ``explicit_form`` and leave its morphology unspecified.
+    """
+
+    assigned = interpret_single_slot_sequence(text, SINGLE_EXPLICIT_VERB_GRAMMAR)
+    if assigned is None or len(_source_tokens(assigned)) != 1 or len(assigned) != 1:
+        return None
+    if assigned[0].operation.kind is not FormOperationKind.EXPLICIT:
+        return None
+    return assigned
+
+
 def is_structurally_uninflected_verb(text: str) -> bool:
     normalized = " ".join(text.casefold().replace(";", " ").replace(",", " ").split())
     return normalized == "ingen: böjning:"
@@ -89,9 +117,10 @@ def is_structurally_uninflected_verb(text: str) -> bool:
 def interpret_verb_sequence(text: str):
     """Interpret SAOL verb notation with only evidenced positional semantics.
 
-    Complete unlabelled rows support one-position preterite, two-position
-    preterite+supine and the five-position sequence ending in three perfect
-    participle forms. Explicit labels may add or select other slots.
+    Complete unlabelled rows support a lone explicitly attested form with
+    unknown morphology, two-position preterite+supine, and the five-position
+    sequence ending in three perfect-participle forms. Explicit labels may add
+    or select other slots.
 
     Incomplete endings are deliberately rejected here. If the source is known
     to be truncated, source policy and the verb partial-prefix path decide how
@@ -100,4 +129,9 @@ def interpret_verb_sequence(text: str):
 
     if is_structurally_uninflected_verb(text):
         return ()
+
+    single = interpret_single_slot_sequence(text, SINGLE_EXPLICIT_VERB_GRAMMAR)
+    if single is not None and len(_source_tokens(single)) == 1:
+        return _interpret_single_explicit_verb_form(text)
+
     return interpret_single_slot_sequence(text, VERB_GRAMMAR)
