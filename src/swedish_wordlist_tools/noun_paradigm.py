@@ -213,9 +213,8 @@ def complete_noun_entry(
     if source_error is not None:
         return _lemma_only_entry(record, source_error)
 
-    row = interpret_noun_row(record)
-    if row is None and is_truncated_inflection_source(record):
-        row = interpret_truncated_noun_row(record)
+    truncated = is_truncated_inflection_source(record)
+    row = interpret_truncated_noun_row(record) if truncated else interpret_noun_row(record)
     if row is None:
         return None
 
@@ -229,5 +228,5 @@ def complete_noun_entry(
     interpreted = _entry_from_interpreted_row(row)
     return _complete_from_slots(
         interpreted,
-        derive_missing_plural_definite=not is_truncated_inflection_source(record),
+        derive_missing_plural_definite=not truncated,
     )
