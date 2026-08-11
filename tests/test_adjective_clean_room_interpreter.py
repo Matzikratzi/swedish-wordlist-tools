@@ -78,6 +78,24 @@ class AdjectiveCleanRoomInterpreterTests(unittest.TestCase):
         )
         self.assertEqual("shared_positive_atoms", slots.rule)
 
+    def test_explicit_first_atom_in_two_sequence_is_still_positional(self) -> None:
+        slots = interpret_adjective_row(
+            {
+                "normaliserat_ord": "bebodd",
+                "text": "bebott bebodda",
+                "stycke": "bebodd",
+                "upos": "ADJ",
+            }
+        )
+        self.assertIsNotNone(slots)
+        assert slots is not None
+        self.assertEqual(("bebodd", "bebott", "bebodda"), slots.written_forms())
+        self.assertEqual(
+            ("common_singular", "neuter_singular", "definite_or_plural"),
+            tuple(form.slot for form in slots.forms),
+        )
+        self.assertEqual("shared_positive_atoms", slots.rule)
+
     def test_four_atom_sequence_uses_same_shared_slot_order(self) -> None:
         slots = interpret_adjective_row(
             {
@@ -93,6 +111,30 @@ class AdjectiveCleanRoomInterpreterTests(unittest.TestCase):
             ("stor", "stort", "stora", "större", "störst"),
             slots.written_forms(),
         )
+        self.assertEqual(
+            (
+                "common_singular",
+                "neuter_singular",
+                "definite_or_plural",
+                "comparative",
+                "superlative",
+            ),
+            tuple(form.slot for form in slots.forms),
+        )
+        self.assertEqual("shared_full_adjective_atoms", slots.rule)
+
+    def test_explicit_first_atom_in_four_sequence_is_still_positional(self) -> None:
+        slots = interpret_adjective_row(
+            {
+                "normaliserat_ord": "god",
+                "text": "gott goda, bättre bäst",
+                "stycke": "god",
+                "upos": "ADJ",
+            }
+        )
+        self.assertIsNotNone(slots)
+        assert slots is not None
+        self.assertEqual(("god", "gott", "goda", "bättre", "bäst"), slots.written_forms())
         self.assertEqual(
             (
                 "common_singular",
