@@ -34,9 +34,27 @@ VERB_GRAMMAR = SlotGrammar(
     label_slots={
         "pres.": "present",
         "imper.": "imperative",
+        "perf.": "perfect_participle_common",
+        "part.": "perfect_participle_common",
         "n.": "perfect_participle_neuter",
     },
     implicit_slot=_implicit_verb_slot,
+    # ``el.`` and ``H`` really introduce an alternative realization of the
+    # preceding slot.  Usage qualifiers such as ``prov.`` and ``ibl.`` merely
+    # qualify that alternative and must not disturb the selected slot.
+    alternative_markers=frozenset({"el.", "h"}),
+    transparent_markers=frozenset({
+        "i:",
+        "som:",
+        "används:",
+        "anv.",
+        "prov.",
+        "vard.",
+        "åld.",
+        "ibl.",
+        "obrukl.",
+        "finl.",
+    }),
 )
 
 
@@ -71,16 +89,17 @@ def interpret_basic_verb_sequence(text: str):
 
 
 def interpret_verb_sequence(text: str):
-    """Interpret the common SAOL verb slot sequence without paradigm regexes.
+    """Interpret common SAOL verb notation without paradigm regexes.
 
     Unlabelled source atoms occupy, in order, preterite, supine and the three
-    positive perfect-participle slots (common, neuter, plural).  ``pres.`` and
-    ``imper.`` select their named finite slots, while ``n.`` selects the neuter
-    perfect participle.  Alternatives remain generic shared-engine alternatives.
+    positive perfect-participle slots (common, neuter, plural). ``pres.`` and
+    ``imper.`` select named finite slots. ``perf. part.`` selects the perfect
+    participle domain and ``n.`` its neuter slot. Editorial qualifiers remain
+    transparent while ``el.``/``H`` reuse the preceding grammatical slot.
 
-    The function intentionally requires at least preterite + supine.  Other
-    editorial or grammatical structures are added only when the source
-    inventory demonstrates their meaning.
+    The function intentionally requires at least preterite + supine. Other
+    grammatical structures are added only when the source inventory
+    demonstrates their meaning.
     """
 
     assigned = interpret_single_slot_sequence(text, VERB_GRAMMAR)
