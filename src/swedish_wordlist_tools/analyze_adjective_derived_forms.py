@@ -7,27 +7,41 @@ from pathlib import Path
 from typing import Any
 
 from .artifact_paths import SALDO_FORMS
-from .compare_sources import _key
 from .generate_adjective_forms import DEFAULT_JSONL as DEFAULT_ADJECTIVE_FORMS
 from .jsonl import read_jsonl
-from .saldo_form_artifact import read_saldo_forms
+from .revalidate_direct_forms_core import select_direct_match_from_artifacts
+from .saldo_form_artifact import build_form_index, read_saldo_forms
+from .validate_direct_forms import _analysis_forms
 
 DEFAULT_TEXT = Path("reports/saol14-adjective-derived-form-validation.txt")
 DEFAULT_JSON = Path("reports/saol14-adjective-derived-form-validation.json")
 
 
-def _saldo_adjective_forms(
-    lemma: str,
+def _canonical_saldo_match(
+    row: dict[str, Any],
     saldo: dict[str, list[dict[str, Any]]],
-) -> tuple[set[str], tuple[str, ...]]:
-    analyses = [
-        analysis
-        for analysis in saldo.get(_key(lemma), ())
-        if str(analysis.get("upos") or "").upper() == "ADJ"
-    ]
-    forms = {str(form) for analysis in analyses for form in analysis.get("forms", ())}
+    form_index: dict[str, list[dict[str, Any]]],
+) -> tuple[set[str], tuple[str, ...], str]:
+    source_record = dict(row.get("source_record") or {})
+    source_record["normaliserat_ord"] = str(row.get("lemma") or source_record.get("normaliserat_ord") or "")
+    source_record["upos"] = "ADJ"
+    generated_forms = {
+        str(form.get("written_form") or "")
+        for form in row.get("forms", ())
+        if str(form.get("written_form") or "")
+    }
+    selected = select_direct_match_from_artifacts(
+        source_record,
+        saldo,
+        form_index,
+        generated_forms,
+    )
+    if selected is None:
+        return set(), (), ""
+    method, analyses = selected
+    forms = {form for analysis in analyses for form in _analysis_forms(analysis)}
     ids = tuple(sorted({str(analysis.get("id") or "") for analysis in analyses if analysis.get("id")}))
-    return forms, ids
+    return forms, ids, method
 
 
 def build_rows(
@@ -35,6 +49,7 @@ def build_rows(
     saldo_forms_path: Path = SALDO_FORMS,
 ) -> list[dict[str, Any]]:
     saldo = read_saldo_forms(saldo_forms_path)
+    form_index = build_form_index(saldo)
     result: list[dict[str, Any]] = []
 
     for row in read_jsonl(adjective_forms_path):
@@ -47,7 +62,7 @@ def build_rows(
             continue
 
         lemma = str(row.get("lemma") or "")
-        saldo_forms, saldo_ids = _saldo_adjective_forms(lemma, saldo)
+        saldo_forms, saldo_ids, match_method = _canonical_saldo_match(row, saldo, form_index)
         saldo_folded = {form.casefold() for form in saldo_forms}
         source_superlatives = sorted(
             {
@@ -74,6 +89,7 @@ def build_rows(
                     "derived_form": written_form,
                     "derived_slot": str(form.get("slot") or ""),
                     "status": status,
+                    "saldo_match_method": match_method,
                     "saldo_ids": list(saldo_ids),
                     "saldo_forms": sorted(saldo_forms, key=str.casefold),
                 }
@@ -85,10 +101,12 @@ def build_rows(
 
 def build_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     counts = Counter(str(row["status"]) for row in rows)
+    match_counts = Counter(str(row.get("saldo_match_method") or "") for row in rows if row.get("saldo_match_method"))
     return {
         "derived_forms": len(rows),
         "derived_lemmas": len({str(row["lemma"]).casefold() for row in rows}),
         "status_counts": dict(sorted(counts.items())),
+        "match_method_counts": dict(sorted(match_counts.items())),
         "rows": rows,
     }
 
@@ -99,12 +117,19 @@ def render_text(summary: dict[str, Any]) -> str:
         "",
         "SALDO används endast som extern kontroll. Reglerna härleds från SAOL,",
         "och avvikelse mot SALDO ändrar inte automatiskt den genererade formen.",
+        "Samma kanoniska lemma/UPOS-matchning används som i den ordinarie",
+        "SAOL/SALDO-valideringen.",
         "",
         f"Härledda former: {summary['derived_forms']}",
         f"Lemma med härledda former: {summary['derived_lemmas']}",
     ]
     for status, count in summary["status_counts"].items():
         lines.append(f"{status}: {count}")
+    if summary.get("match_method_counts"):
+        lines.append("")
+        lines.append("SALDO-matchningsmetoder:")
+        for method, count in summary["match_method_counts"].items():
+            lines.append(f"  {count}  {method}")
 
     for status in ("missing_from_saldo", "lemma_missing_in_saldo", "confirmed_by_saldo"):
         selected = [row for row in summary["rows"] if row["status"] == status]
@@ -115,7 +140,7 @@ def render_text(summary: dict[str, Any]) -> str:
             base = ", ".join(row["source_superlatives"]) or "?"
             lines.append(
                 f"  {row['lemma']} | {base} -> {row['derived_form']} | "
-                f"slot={row['derived_slot']}"
+                f"slot={row['derived_slot']} | match={row.get('saldo_match_method') or '-'}"
             )
             if status == "missing_from_saldo":
                 lines.append("    SALDO: " + ", ".join(row["saldo_forms"]))
@@ -142,6 +167,8 @@ def main() -> None:
     print(f"Lemma med härledda former: {summary['derived_lemmas']}")
     for status, count in summary["status_counts"].items():
         print(f"{status}: {count}")
+    for method, count in summary["match_method_counts"].items():
+        print(f"match {method}: {count}")
     print(f"Text: {args.text}")
     print(f"JSON: {args.json}")
 
