@@ -8,13 +8,14 @@ from typing import Any
 
 from .analyze_verb_notation_inventory import DEFAULT_SAOL
 from .jsonl import read_jsonl
-from .saol_notation import split_alternative_branches
+from .saol_notation import split_alternative_branches, tokenize_notation
 from .saol_source_policy import inflection_text, is_truncated_inflection_source
 from .verb_shared_slot_interpreter import (
     interpret_basic_verb_sequence,
     interpret_verb_sequence,
     is_structurally_uninflected_verb,
 )
+from .verb_truncated_shared import assign_truncated_verb_branch
 
 DEFAULT_TEXT = Path("reports/saol14-verb-shared-coverage.txt")
 DEFAULT_JSON = Path("reports/saol14-verb-shared-coverage.json")
@@ -22,7 +23,10 @@ DEFAULT_JSON = Path("reports/saol14-verb-shared-coverage.json")
 
 def classify_branch(record: dict[str, Any], text: str) -> str:
     if is_truncated_inflection_source(record):
-        return "truncated_not_yet_shared"
+        tokens = tokenize_notation(text)
+        if tokens and assign_truncated_verb_branch(tokens) is not None:
+            return "shared_truncated_partial"
+        return "truncated_without_recoverable_prefix"
     if is_structurally_uninflected_verb(text):
         return "structural_uninflected"
     if interpret_basic_verb_sequence(text) is not None:
@@ -70,6 +74,7 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
     shared = (
         path_counts.get("shared_basic_preterite_supine", 0)
         + path_counts.get("shared_rich_verb_slots", 0)
+        + path_counts.get("shared_truncated_partial", 0)
     )
     clean_room = shared + path_counts.get("structural_uninflected", 0)
     return {
@@ -92,8 +97,10 @@ def render(summary: dict[str, Any]) -> str:
         "",
         "Shared-motorn tolkar atomärt positionsbundna och explicit etiketterade",
         "verbslots, inklusive defekta paradigm där normala former saknas.",
-        "'ingen böjning' redovisas separat som strukturellt löst. Trunkerade",
-        "rader hålls fortfarande separat tills prefix-tolkningen kopplas in.",
+        "Trunkerade 49/50-teckensrader går genom samma grammatik som säkra",
+        "prefix: 49 behåller sista synliga token men antas kunna fortsätta;",
+        "50 använder inte sista synliga token alls. Ingen saknad slutform gissas.",
+        "'ingen böjning' redovisas separat som strukturellt löst.",
         "",
         f"VERB-poster: {summary['verb_records']}",
         f"Utan böjningstext: {summary['without_inflection_text']}",
@@ -107,7 +114,7 @@ def render(summary: dict[str, Any]) -> str:
     for path, count in summary["path_counts"].items():
         lines.append(f"  {count:7d}  {path}")
 
-    for path in ("truncated_not_yet_shared", "remaining_structure"):
+    for path in ("truncated_without_recoverable_prefix", "remaining_structure"):
         rows = summary["examples"].get(path, [])
         lines.extend(("", f"{path} – exempel:"))
         if not rows:
