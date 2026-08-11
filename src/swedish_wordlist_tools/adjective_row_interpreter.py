@@ -194,7 +194,10 @@ def _unlabelled_comparison_alternative_slot(index: int, last_slot: str | None, _
         return "neuter_singular"
     if index == 1 and last_slot == "neuter_singular":
         return "comparative"
-    if index >= 3 and last_slot == "comparative":
+    # Explicit alternatives do not consume a positional slot in the shared
+    # interpreter. After ``trängre H +are`` the next independent form is
+    # therefore index 2 (not 3), and starts the superlative slot.
+    if index >= 2 and last_slot == "comparative":
         return "superlative"
     return None
 
