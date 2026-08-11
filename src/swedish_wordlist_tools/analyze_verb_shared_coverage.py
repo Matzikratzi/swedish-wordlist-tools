@@ -10,17 +10,19 @@ from .analyze_verb_notation_inventory import DEFAULT_SAOL
 from .jsonl import read_jsonl
 from .saol_notation import split_alternative_branches
 from .saol_source_policy import inflection_text, is_truncated_inflection_source
-from .verb_shared_slot_interpreter import interpret_basic_verb_sequence
+from .verb_shared_slot_interpreter import interpret_basic_verb_sequence, interpret_verb_sequence
 
 DEFAULT_TEXT = Path("reports/saol14-verb-shared-coverage.txt")
 DEFAULT_JSON = Path("reports/saol14-verb-shared-coverage.json")
 
 
 def classify_branch(record: dict[str, Any], text: str) -> str:
-    if interpret_basic_verb_sequence(text) is not None:
-        return "shared_basic_preterite_supine"
     if is_truncated_inflection_source(record):
         return "truncated_not_yet_shared"
+    if interpret_basic_verb_sequence(text) is not None:
+        return "shared_basic_preterite_supine"
+    if interpret_verb_sequence(text) is not None:
+        return "shared_rich_verb_slots"
     return "remaining_structure"
 
 
@@ -60,7 +62,10 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
                     }
                 )
 
-    shared = path_counts.get("shared_basic_preterite_supine", 0)
+    shared = (
+        path_counts.get("shared_basic_preterite_supine", 0)
+        + path_counts.get("shared_rich_verb_slots", 0)
+    )
     return {
         "verb_records": verb_records,
         "without_inflection_text": without_inflection_text,
@@ -75,17 +80,18 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
 
 def render(summary: dict[str, Any]) -> str:
     lines = [
-        "SAOL14 VERB: första shared-täckningen",
+        "SAOL14 VERB: shared-täckning",
         "",
-        "Första steget accepterar endast den atomära tvåformssekvensen",
-        "preteritum + supinum. Trunkerade rader klassificeras separat och",
-        "tas ännu inte över av prefix-tolkning.",
+        "Shared-motorn tolkar atomärt preteritum + supinum och därefter",
+        "positionsbundna perfektparticipformer samt etiketter för presens,",
+        "imperativ och neutrum. Trunkerade rader hålls fortfarande separat",
+        "och tas ännu inte över av prefix-tolkning.",
         "",
         f"VERB-poster: {summary['verb_records']}",
         f"Utan böjningstext: {summary['without_inflection_text']}",
         f"Trunkerade poster: {summary['truncated_records']}",
         f"Böjningsbrancher: {summary['branches']}",
-        f"Shared tvåatomsbrancher: {summary['shared_branches']} ({summary['shared_branch_percent']:.2f} %)",
+        f"Shared brancher totalt: {summary['shared_branches']} ({summary['shared_branch_percent']:.2f} %)",
         "",
         "Vägar:",
     ]
@@ -121,7 +127,7 @@ def main() -> None:
     print(f"Utan böjningstext: {summary['without_inflection_text']}")
     print(f"Trunkerade poster: {summary['truncated_records']}")
     print(f"Böjningsbrancher: {summary['branches']}")
-    print(f"Shared tvåatomsbrancher: {summary['shared_branches']} ({summary['shared_branch_percent']:.2f} %)")
+    print(f"Shared brancher totalt: {summary['shared_branches']} ({summary['shared_branch_percent']:.2f} %)")
     for path, count in summary["path_counts"].items():
         print(f"{path}: {count}")
     print(f"Text: {args.text}")
