@@ -127,6 +127,113 @@ def interpret_shared_unlabelled_adjective_slots(
     )
 
 
+def _no_implicit_slot(
+    _index: int,
+    _last_slot: str | None,
+    _operation: FormOperation,
+) -> str | None:
+    return None
+
+
+_BARE_LABEL_GRAMMAR = SlotGrammar(
+    label_slots={"best.": "definite_or_plural"},
+    implicit_slot=_no_implicit_slot,
+    require_marker=True,
+    bare_label_as_unchanged=True,
+)
+
+
+def interpret_shared_bare_adjective_slot(record: dict[str, Any]) -> AdjectiveSlots | None:
+    """Interpret a bare adjective slot label as the unchanged lemma in that slot."""
+
+    lemma = _value(record, "normaliserat_ord").casefold()
+    raw_text = _value(record, "text")
+    if not lemma or " " in lemma or not lemma.isalpha() or not raw_text:
+        return None
+    operations = interpret_single_slot_sequence(raw_text, _BARE_LABEL_GRAMMAR)
+    if operations is None or len(operations) != 1:
+        return None
+    item = operations[0]
+    if (
+        item.slot != "definite_or_plural"
+        or item.operation.kind is not FormOperationKind.UNCHANGED
+    ):
+        return None
+    return AdjectiveSlots(
+        lemma=lemma,
+        forms=(AdjectiveForm(lemma, item.slot),),
+        rule="shared_bare_adjective_slot",
+    )
+
+
+def _implicit_rich_labelled_slot(
+    index: int,
+    last_slot: str | None,
+    _operation: FormOperation,
+) -> str | None:
+    if index == 0:
+        return "neuter_singular"
+    if last_slot == "masculine_definite":
+        return "definite_or_plural"
+    if last_slot == "definite_or_plural":
+        return "comparative"
+    if last_slot == "comparative":
+        return "superlative"
+    return None
+
+
+_RICH_LABELLED_GRAMMAR = SlotGrammar(
+    label_slots={
+        "best.": "masculine_definite",
+        "pl.": "definite_or_plural",
+    },
+    implicit_slot=_implicit_rich_labelled_slot,
+    require_marker=True,
+)
+
+
+def interpret_shared_rich_labelled_adjective_slots(
+    record: dict[str, Any],
+) -> AdjectiveSlots | None:
+    """Interpret rich labelled ADJ rows through shared labels and atom ordering."""
+
+    lemma = _value(record, "normaliserat_ord").casefold()
+    raw_text = _value(record, "text")
+    if not lemma or " " in lemma or not lemma.isalpha() or not raw_text:
+        return None
+    operations = interpret_single_slot_sequence(raw_text, _RICH_LABELLED_GRAMMAR)
+    if operations is None:
+        return None
+    expected = (
+        "neuter_singular",
+        "masculine_definite",
+        "definite_or_plural",
+        "definite_or_plural",
+        "comparative",
+        "superlative",
+    )
+    if tuple(item.slot for item in operations) != expected:
+        return None
+
+    forms: list[AdjectiveForm] = [AdjectiveForm(lemma, "common_singular")]
+    for item in operations:
+        value = _apply_operation(
+            lemma,
+            item.operation,
+            neuter=item.slot == "neuter_singular",
+        )
+        if value is None:
+            return None
+        form = AdjectiveForm(value, item.slot)
+        if form not in forms:
+            forms.append(form)
+    return AdjectiveSlots(
+        lemma=lemma,
+        forms=tuple(forms),
+        rule="shared_rich_labelled_adjective_atoms",
+    )
+
+
 def _implicit_parallel_slot(
     index: int,
     _last_slot: str | None,
@@ -251,6 +358,14 @@ def interpret_adjective_row(record: dict[str, Any]) -> AdjectiveSlots | None:
     shared_unlabelled = interpret_shared_unlabelled_adjective_slots(record)
     if shared_unlabelled is not None:
         return shared_unlabelled
+
+    shared_bare = interpret_shared_bare_adjective_slot(record)
+    if shared_bare is not None:
+        return shared_bare
+
+    shared_rich = interpret_shared_rich_labelled_adjective_slots(record)
+    if shared_rich is not None:
+        return shared_rich
 
     structural_parallel = interpret_analogical_parallel_adjective_slots(record)
     existing = interpret_existing_adjective_row(record)
