@@ -30,6 +30,36 @@ class AdjectiveCleanRoomInterpreterTests(unittest.TestCase):
         )
         self.assertEqual("structural_parallel_analogical_branches", slots.rule)
 
+    def test_single_relative_atom_uses_neuter_slot(self) -> None:
+        slots = interpret_adjective_row(
+            {
+                "normaliserat_ord": "dan",
+                "text": "+t",
+                "stycke": "dan",
+                "upos": "ADJ",
+            }
+        )
+        self.assertIsNotNone(slots)
+        assert slots is not None
+        self.assertEqual(("dan", "dant"), slots.written_forms())
+        self.assertEqual("neuter_singular", slots.forms[1].slot)
+        self.assertEqual("shared_positive_atoms", slots.rule)
+
+    def test_single_explicit_atom_uses_definite_or_plural_slot(self) -> None:
+        slots = interpret_adjective_row(
+            {
+                "normaliserat_ord": "förstnämnde",
+                "text": "förstnämnda",
+                "stycke": "förstnämnde",
+                "upos": "ADJ",
+            }
+        )
+        self.assertIsNotNone(slots)
+        assert slots is not None
+        self.assertEqual(("förstnämnde", "förstnämnda"), slots.written_forms())
+        self.assertEqual("definite_or_plural", slots.forms[1].slot)
+        self.assertEqual("shared_positive_atoms", slots.rule)
+
     def test_two_atom_positive_sequence_uses_shared_slots(self) -> None:
         slots = interpret_adjective_row(
             {
