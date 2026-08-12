@@ -24,6 +24,10 @@ _CANONICAL_ORDKL = {
     "VERB": "verb",
     "PRON": "pron.",
 }
+_ADJ_RELATION_SLOTS = {
+    "komp.": "comparative",
+    "superl.": "superlative",
+}
 
 
 def _target_from_route(route: str) -> str | None:
@@ -59,6 +63,40 @@ def routed_record(record: dict[str, Any], route: str, target: str) -> dict[str, 
     return prepared
 
 
+def _generate_relation_row(record: dict[str, Any], route: str, target: str) -> dict[str, Any] | None:
+    """Return a direct form for an X row that labels its printed spelling's role.
+
+    Some ``(hv)`` rows do not contain a paradigm at all.  Instead the printed
+    alternative itself is assigned a grammatical role, e.g. ``färre`` with
+    notation ``komp.`` under adjective ``få``.  Such a row is explicit form
+    evidence and must not be fed to the target paradigm parser as if ``färre``
+    were a new adjective lemma to inflect.
+    """
+
+    if target != "ADJ" or not route.endswith("_from_hv_sibling"):
+        return None
+    notation = " ".join(_primary_text(record).casefold().split())
+    slot = _ADJ_RELATION_SLOTS.get(notation)
+    if slot is None:
+        return None
+    base = _routed_base(record, route)
+    if not base:
+        return None
+    return {
+        "lemma": base,
+        "forms": [
+            {
+                "written_form": base,
+                "slot": slot,
+                "provenance": "explicit_hv_relation",
+                "source_token": notation,
+                "operation_base": base,
+            }
+        ],
+        "relation_only": True,
+    }
+
+
 def _generate_target_row(record: dict[str, Any], target: str) -> dict[str, Any] | None:
     if target == "NOUN":
         row, _comparison = canonical_noun_row(record)
@@ -81,6 +119,7 @@ def generate_rows(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any
     rows: list[dict[str, Any]] = []
     route_counts: Counter[str] = Counter()
     generated_counts: Counter[str] = Counter()
+    relation_only = 0
     failed: list[dict[str, Any]] = []
 
     for source in materialized:
@@ -91,8 +130,14 @@ def generate_rows(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any
         if target is None:
             continue
         route_counts[route] += 1
-        prepared = routed_record(source, route, target)
-        generated = _generate_target_row(prepared, target) if prepared is not None else None
+
+        generated = _generate_relation_row(source, route, target)
+        if generated is not None:
+            relation_only += 1
+        else:
+            prepared = routed_record(source, route, target)
+            generated = _generate_target_row(prepared, target) if prepared is not None else None
+
         if generated is None:
             failed.append({
                 "lemma": clean_saol_word(source.get("normaliserat_ord")),
@@ -116,6 +161,7 @@ def generate_rows(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any
             "target_upos": target,
             "route": route,
             "routed_lemma": str(generated.get("lemma") or ""),
+            "relation_only": bool(generated.get("relation_only")),
             "forms": list(generated.get("forms") or []),
         })
 
@@ -129,6 +175,7 @@ def generate_rows(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any
         "routable_records": sum(route_counts.values()),
         "generated_records": len(rows),
         "failed_records": len(failed),
+        "relation_only_records": relation_only,
         "generated_by_target": dict(sorted(generated_counts.items())),
         "route_counts": dict(sorted(route_counts.items())),
         "generated_form_rows": sum(len(row["forms"]) for row in rows),
@@ -144,10 +191,13 @@ def render_text(summary: dict[str, Any]) -> str:
         "",
         "Routade X-rader rebases på sin tryckta ordform när raden är en (hv)-variant",
         "och körs därefter genom exakt samma NOUN/ADJ/VERB-shared-generator som",
-        "den verifierade huvudordklassen. Inga X-specifika böjningsregler används.",
+        "den verifierade huvudordklassen. X-rader som explicit märker den tryckta",
+        "formen med en grammatisk roll (t.ex. komp.) bevaras som relationsformer",
+        "utan att behandlas som ett nytt paradigm.",
         "",
         f"Routbara poster: {summary['routable_records']}",
         f"Genererade poster: {summary['generated_records']}",
+        f"Varav rena relationsposter: {summary['relation_only_records']}",
         f"Misslyckade poster: {summary['failed_records']}",
         f"Genererade formrader: {summary['generated_form_rows']}",
         f"Unika skrivna former: {summary['unique_written_forms']}",
@@ -190,6 +240,7 @@ def main() -> None:
     args.text.write_text(render_text(summary), encoding="utf-8")
     print(f"Routbara X-poster: {summary['routable_records']}")
     print(f"Genererade X-poster via shared: {summary['generated_records']}")
+    print(f"Varav rena relationsposter: {summary['relation_only_records']}")
     print(f"Misslyckade routade poster: {summary['failed_records']}")
     print(f"Genererade formrader: {summary['generated_form_rows']}")
     print(f"Unika skrivna former: {summary['unique_written_forms']}")
