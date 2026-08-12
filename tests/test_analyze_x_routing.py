@@ -28,6 +28,50 @@ class AnalyzeXRoutingTests(unittest.TestCase):
         self.assertEqual("unresolved_hv_no_shared_sibling", route)
         self.assertEqual((), evidence)
 
+    def test_hv_form_resolves_homonymous_verb_and_adjective(self) -> None:
+        verb = {
+            "normaliserat_ord": "få", "ord": "få", "homonr": "1", "upos": "VERB",
+            "ordkl": "v.", "text": "fick konjunktiv: finge, fått, pres. får",
+        }
+        adjective = {
+            "normaliserat_ord": "få", "ord": "få", "homonr": "2", "upos": "ADJ",
+            "ordkl": "adj.", "text": "komp. färre, superl. färst",
+        }
+        fick = {
+            "normaliserat_ord": "få", "ord": "fick", "homonr": "0", "upos": "X",
+            "ordkl": "(hv)", "text": None,
+        }
+        farst = {
+            "normaliserat_ord": "få", "ord": "färst", "homonr": "0", "upos": "X",
+            "ordkl": "(hv)", "text": None,
+        }
+        siblings = {"få": [verb, adjective, fick, farst]}
+
+        route, evidence = classify_x_record(fick, siblings)
+        self.assertEqual("route_VERB_shared_from_hv_sibling_form", route)
+        self.assertEqual(("VERB",), evidence)
+
+        route, evidence = classify_x_record(farst, siblings)
+        self.assertEqual("route_ADJ_shared_from_hv_sibling_form", route)
+        self.assertEqual(("ADJ",), evidence)
+
+    def test_hv_form_stays_ambiguous_when_both_homonyms_print_it(self) -> None:
+        noun = {
+            "normaliserat_ord": "x", "ord": "x", "upos": "NOUN",
+            "ordkl": "subst.", "text": "same",
+        }
+        adjective = {
+            "normaliserat_ord": "x", "ord": "x", "upos": "ADJ",
+            "ordkl": "adj.", "text": "same",
+        }
+        hv = {
+            "normaliserat_ord": "x", "ord": "same", "upos": "X",
+            "ordkl": "(hv)", "text": None,
+        }
+        route, evidence = classify_x_record(hv, {"x": [noun, adjective, hv]})
+        self.assertEqual("ambiguous_hv_sibling_classes", route)
+        self.assertEqual(("ADJ", "NOUN"), evidence)
+
     def test_mixed_adv_adj_routes_inflection_to_adjective_shared(self) -> None:
         record = {
             "normaliserat_ord": "ansatsvis", "ord": "ansatsvis", "upos": "X",
@@ -44,9 +88,30 @@ class AnalyzeXRoutingTests(unittest.TestCase):
         ]
         report = analyze(records)
         self.assertEqual(3, report["x_text_records"])
+        self.assertEqual(3, report["x_routing_records"])
+        self.assertEqual(0, report["x_hv_records_without_text"])
         self.assertEqual(1, report["route_counts"]["remaining_ADV"])
         self.assertEqual(1, report["route_counts"]["remaining_NUM"])
         self.assertEqual(1, report["route_counts"]["remaining_ARTICLE"])
+
+    def test_report_includes_hv_rows_without_text(self) -> None:
+        verb = {
+            "normaliserat_ord": "få", "ord": "få", "upos": "VERB",
+            "ordkl": "v.", "text": "fick fått får",
+        }
+        adjective = {
+            "normaliserat_ord": "få", "ord": "få", "upos": "ADJ",
+            "ordkl": "adj.", "text": "färre färst",
+        }
+        fick = {
+            "normaliserat_ord": "få", "ord": "fick", "upos": "X",
+            "ordkl": "(hv)", "text": None,
+        }
+        report = analyze([verb, adjective, fick])
+        self.assertEqual(0, report["x_text_records"])
+        self.assertEqual(1, report["x_hv_records_without_text"])
+        self.assertEqual(1, report["x_routing_records"])
+        self.assertEqual(1, report["route_counts"]["route_VERB_shared_from_hv_sibling_form"])
 
 
 if __name__ == "__main__":
