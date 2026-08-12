@@ -28,8 +28,8 @@ def generated_row(record: dict[str, Any]) -> dict[str, Any] | None:
             "written_form": form.written_form,
             "slot": form.slot,
             "provenance": form.provenance,
-            "source_token": form.source_token,
-            "detail": form.detail,
+            "source_token": form.source,
+            "detail": form.provenance_detail,
         }
         for form in slots.forms
     ]
