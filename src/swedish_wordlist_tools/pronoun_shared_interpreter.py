@@ -1,0 +1,110 @@
+from __future__ import annotations
+
+from typing import Any, Mapping
+
+from .lexeme_slots import LexemeSlots, SlotForm, build_lexeme_slots
+from .saol_notation import FormOperationKind, apply_form_operation
+from .saol_slot_interpreter import SlotGrammar, interpret_single_slot_sequence
+from .saol_source_policy import is_truncated_inflection_source, raw_inflection_text
+
+
+def _implicit_pronoun_slot(index: int, last_slot: str | None, _operation) -> str | None:
+    if index == 0:
+        return "neuter_singular"
+    if index == 1:
+        return "plural"
+    if last_slot == "masculine_definite":
+        return "definite_or_plural"
+    return None
+
+
+_PRONOUN_GRAMMAR = SlotGrammar(
+    label_slots={
+        "n.": "neuter_singular",
+        "pl.": "plural",
+        "gen.": "genitive",
+        "mask.": "masculine_definite",
+        "best.": "masculine_definite",
+        "objektsform:": "object",
+        "superl.": "superlative",
+    },
+    implicit_slot=_implicit_pronoun_slot,
+    transparent_markers=frozenset({
+        "i:", "som:", "används:", "anv.", "sing.", "substantivisk:",
+        "uttalat:", "och:", "också:", "skrivet:", "sällan:",
+    }),
+    allow_generic_editorial_markers=False,
+)
+
+
+def _safe_text(record: Mapping[str, Any]) -> str:
+    text = raw_inflection_text(dict(record))
+    if not is_truncated_inflection_source(dict(record)):
+        return text
+    # saol_notation itself drops an unsafe final token at exactly 50 chars.
+    # A 49-char row keeps its final complete token but remains an open paradigm.
+    return text
+
+
+def interpret_pronoun_row(record: Mapping[str, Any]) -> LexemeSlots | None:
+    if str(record.get("upos") or "").upper() != "PRON":
+        return None
+    lemma = str(record.get("normaliserat_ord") or "").strip().casefold()
+    text = _safe_text(record)
+    if not lemma or not text:
+        return None
+
+    # Bare labels are structural evidence that the unchanged lemma occupies
+    # that slot. Handle the few genuinely bare PRON paradigms explicitly by
+    # grammar, not by lemma spelling.
+    normalized = " ".join(text.casefold().split())
+    if normalized == "pl.":
+        return build_lexeme_slots(
+            lemma=lemma,
+            upos="PRON",
+            notation=text,
+            forms=(SlotForm("plural", lemma, "pl.", "shared_pronoun"),),
+            metadata={"rule": "shared_bare_plural"},
+        )
+    if normalized == "n. sing.":
+        return build_lexeme_slots(
+            lemma=lemma,
+            upos="PRON",
+            notation=text,
+            forms=(SlotForm("neuter_singular", lemma, "n. sing.", "shared_pronoun"),),
+            metadata={"rule": "shared_bare_neuter_singular"},
+        )
+
+    assigned = interpret_single_slot_sequence(text, _PRONOUN_GRAMMAR)
+    if assigned is None:
+        return None
+
+    forms: list[SlotForm] = []
+    for item in assigned:
+        operation = item.operation
+        # Until PRON lodstreck semantics are audited, never guess a '-' form.
+        if operation.kind is FormOperationKind.REPLACE_TAIL:
+            return None
+        written = apply_form_operation(lemma, operation)
+        if written is None:
+            return None
+        forms.append(
+            SlotForm(
+                item.slot,
+                written.casefold(),
+                item.token,
+                "shared_pronoun",
+                item.alternative_relation or "",
+            )
+        )
+
+    return build_lexeme_slots(
+        lemma=lemma,
+        upos="PRON",
+        notation=text,
+        forms=forms,
+        metadata={
+            "rule": "shared_pronoun_slots",
+            "truncated": "yes" if is_truncated_inflection_source(dict(record)) else "no",
+        },
+    )
