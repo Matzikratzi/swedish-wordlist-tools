@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .lexeme_slots import LexemeSlots, SlotForm, build_lexeme_slots
-from .saol_notation import FormOperation, apply_form_operation, split_alternative_branches
+from .saol_notation import FormOperation, FormOperationKind, apply_form_operation, split_alternative_branches
 from .saol_row_interpreter import compound_parts
 from .saol_source_policy import inflection_text, is_truncated_inflection_source
 from .verb_shared_slot_interpreter import (
@@ -42,7 +42,7 @@ def _replace_verb_final_component(
 
     The divis replaces the part to the right of the final lodstreck.  This is
     the same structural rule already used by noun/adjective realization; no
-    spelling-overlap heuristic is used for verbs.
+    spelling-overlap heuristic is used for structurally marked compounds.
     """
 
     parts = compound_parts(record, lemma)
@@ -55,15 +55,20 @@ def _replace_verb_final_component(
 def realize_verb_operation(
     record: dict[str, Any], lemma: str, operation: FormOperation
 ) -> str | None:
-    """Apply one already parsed SAOL operation to a verb lemma."""
+    """Apply one already parsed SAOL operation to a verb lemma.
 
-    return apply_form_operation(
-        lemma,
-        operation,
-        replace_tail=lambda base, replacement: _replace_verb_final_component(
-            record, base, replacement
-        ),
-    )
+    A verified SAOL lodstreck is authoritative for ``-tail`` operations and is
+    therefore handled before the generic overlap-based realization.  This
+    mirrors noun/adjective realization and prevents forms such as
+    ``fort|fara + -for`` from collapsing to ``for``.
+    """
+
+    if operation.kind is FormOperationKind.REPLACE_TAIL:
+        structural = _replace_verb_final_component(record, lemma, operation.value)
+        if structural is not None:
+            return structural
+
+    return apply_form_operation(lemma, operation)
 
 
 def _metadata(record: dict[str, Any], *, truncated: bool) -> dict[str, str]:
