@@ -25,15 +25,38 @@ def _key(value: str) -> str:
     return value.casefold().strip()
 
 
+def _real_generation_record(record: dict[str, Any]) -> dict[str, Any]:
+    """Use a real row's printed spelling as inflection base when it is a variant.
+
+    SAOL can export a full word-class row whose ``normaliserat_ord`` points to
+    the canonical spelling while ``ord`` contains the spelling that the row's
+    own notation actually belongs to.  The homonr=0 annexion row is the
+    canonical example: normaliserat_ord=annektion, ord=annexion, text=+en +er.
+    For this audit we must therefore test what that row itself can generate,
+    rather than silently re-inflecting the normalized spelling.
+    """
+
+    printed = clean_saol_word(record.get("ord"))
+    normalized = clean_saol_word(record.get("normaliserat_ord"))
+    if not printed or not normalized or printed.casefold() == normalized.casefold():
+        return record
+    prepared = dict(record)
+    prepared["normaliserat_ord"] = printed
+    prepared["ord"] = printed
+    prepared["stycke"] = printed
+    return prepared
+
+
 def _generated_real_forms(record: dict[str, Any]) -> set[str]:
     upos = _saol_upos(record)
+    prepared = _real_generation_record(record)
     row: dict[str, Any] | None = None
     if upos == "NOUN":
-        row, _comparison = canonical_noun_row(record)
+        row, _comparison = canonical_noun_row(prepared)
     elif upos == "ADJ":
-        row = generated_adjective_row(record)
+        row = generated_adjective_row(prepared)
     elif upos == "VERB":
-        row = generated_verb_row(record)
+        row = generated_verb_row(prepared)
     if row is None:
         return set()
     return {
@@ -87,8 +110,6 @@ def analyze(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
             for form in row.get("forms", [])
             if clean_saol_word(form.get("written_form"))
         }
-        # Even unresolved hv rows assert at least their printed spelling; include
-        # it in the audit so ignoring *all* hv rows is tested, not just routed X.
         printed = clean_saol_word(record.get("ord")) or clean_saol_word(record.get("stycke"))
         if printed:
             routed_forms.add(printed)
@@ -149,6 +170,8 @@ def render_text(report: dict[str, Any]) -> str:
         "SAOL14: audit av hypotesen att ignorera alla (hv)-rader",
         "",
         "Varje form som en (hv)-rad bidrar med jämförs mot alla icke-(hv)-rader.",
+        "När en riktig rad har annan tryckt ordform än normaliserat_ord böjs den",
+        "från den tryckta formen; raden behandlas alltså som ett eget variantparadigm.",
         "Återfunnen = egen riktig rad, genererad från riktig NOUN/ADJ/VERB-rad,",
         "eller explicit nämnd i en riktig rads text. hv_only är den verkliga restmängden.",
         "",
@@ -170,9 +193,7 @@ def render_text(report: dict[str, Any]) -> str:
                 f"{source['upos']} {source['normaliserat_ord']}({source['homonr']}) text={source['text']!r}"
                 for source in case["source_rows"]
             ) or "-"
-            lines.append(
-                f"  {case['form']!r} <- hv {case['hv_lemma']}({case['hv_homonr']}) | {source_desc}"
-            )
+            lines.append(f"  {case['form']!r} <- hv {case['hv_lemma']}({case['hv_homonr']}) | {source_desc}")
     return "\n".join(lines) + "\n"
 
 
