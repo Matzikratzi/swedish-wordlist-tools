@@ -36,6 +36,18 @@ class AuditIgnoreHvTests(unittest.TestCase):
         self.assertEqual("explicit_real_row", cases[0]["status"])
         self.assertEqual(0, report["unique_hv_only_forms"])
 
+    def test_real_homonr_zero_noun_variant_generates_from_printed_ord(self) -> None:
+        records = [
+            {"id":"r1","normaliserat_ord":"annektion","homonr":"0","ord":"annexion","stycke":"annektion","ordkl":"s. <i>+en +er</i>","text":"+en +er","upos":"NOUN"},
+            {"id":"x1","normaliserat_ord":"annektion","homonr":"1","ord":"annexion","stycke":"annexion","ordkl":"(hv) <i>+en +er</i>","text":"+en +er","upos":"X"},
+        ]
+        report = analyze(records)
+        by_form = {case["form"]: case["status"] for case in report["cases"]}
+        self.assertEqual("explicit_real_row", by_form["annexion"])
+        self.assertEqual("generated_from_real_row", by_form["annexionen"])
+        self.assertEqual("generated_from_real_row", by_form["annexioner"])
+        self.assertEqual(0, report["unique_hv_only_forms"])
+
 
 if __name__ == "__main__":
     unittest.main()
