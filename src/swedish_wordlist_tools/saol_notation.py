@@ -115,12 +115,9 @@ def _clean_notation_spelling(text: str) -> str:
     without_tags = _HTML_TAG.sub("", text)
     without_brackets = _BRACKET_COMMENT.sub("", without_tags)
     with_label_boundaries = _GLUED_LABEL_OPERATION.sub(r"\1 ", without_brackets)
-    # A standalone '-' is never a valid form operation.  Språkbanken rows can
-    # nevertheless contain OCR/export spacing such as ``pl.- rodren``.  After
-    # the label boundary is exposed above this becomes ``pl. - rodren``; join
-    # the sign to its lexical payload so the ordinary replacement parser sees
-    # exactly the SAOL operation ``-rodren``.  Do not do the same for '+', since
-    # bare '+' is itself the meaningful UNCHANGED operation.
+    # A standalone '-' is never a valid form operation. Språkbanken rows can
+    # contain export spacing such as ``pl.- rodren``. Join the sign to its
+    # lexical payload so the ordinary replacement parser sees ``-rodren``.
     with_replacement_payloads = _SPLIT_REPLACEMENT_OPERATION.sub("-", with_label_boundaries)
     return " ".join(with_replacement_payloads.split())
 
@@ -268,39 +265,126 @@ def assign_labeled_slots(
         if any(operation.kind is not FormOperationKind.EXPLICIT for operation in operations):
             saw_notation_marker = True
 
-        slot = (
-            definite_plural_slot
-            if context == "plural_definite"
-            else plural_slot
-            if context == "plural"
-            else singular_slot
-        )
-        for operation in operations:
-            result.append(
-                SlotOperation(
-                    slot=slot,
-                    token=raw,
-                    operation=operation,
-                    alternative_marker=alternative_marker,
-                )
-            )
-        last_slot = slot
-        if slot == singular_slot:
-            seen_singular_form = True
-        if alternative_marker is None:
+        marker_for_token = alternative_marker
+        if alternative_marker is not None and last_slot is not None:
+            slot = last_slot
             alternative_marker = None
-    return tuple(result) if result and (saw_notation_marker or seen_singular_form) else None
+        elif context == "plural_definite":
+            slot = definite_plural_slot
+        elif context == "plural":
+            slot = plural_slot
+            context = "after_plural"
+        elif not seen_singular_form:
+            slot = singular_slot
+            seen_singular_form = True
+        else:
+            slot = plural_slot
+            context = "after_plural"
+
+        result.extend(
+            SlotOperation(slot, raw, operation, marker_for_token)
+            for operation in operations
+        )
+        last_slot = slot
+        pending_best = False
+
+    if not saw_notation_marker:
+        return None
+    return tuple(result) if result else None
 
 
 def split_alternative_branches(text: str) -> tuple[NotationBranch, ...]:
     cleaned = _clean_notation_spelling(text)
-    if not cleaned:
-        return ()
-    raw_branches = tuple(part.strip() for part in cleaned.split("_") if part.strip())
     branches: list[NotationBranch] = []
-    for raw in raw_branches:
-        tokens = tokenize_notation(raw)
+    for branch_text in re.split(r"\s+_\s+", cleaned):
+        branch_text = branch_text.strip()
+        if not branch_text:
+            return ()
+        tokens = tokenize_notation(branch_text)
         if tokens is None:
             return ()
-        branches.append(NotationBranch(raw, tokens))
+        branches.append(NotationBranch(branch_text, tokens))
     return tuple(branches)
+
+
+def assign_notation_branches(
+    text: str,
+    *,
+    singular_slot: str,
+    plural_slot: str,
+    definite_plural_slot: str,
+    ignored_markers: frozenset[str] = frozenset(),
+) -> tuple[SlotBranch, ...] | None:
+    """Parse complete SAOL notation without recognizing whole paradigms.
+
+    This is the common structural pipeline for all word classes: ``_`` creates
+    independent branches, labels select slots, alternative markers reuse the
+    preceding slot, and every remaining form token becomes one primitive
+    ``FormOperation``. Word-class code supplies only the slot names and how an
+    operation is applied to a base spelling.
+    """
+
+    branches = split_alternative_branches(text)
+    if not branches:
+        return None
+    result: list[SlotBranch] = []
+    for branch in branches:
+        operations = assign_labeled_slots(
+            branch.tokens,
+            singular_slot=singular_slot,
+            plural_slot=plural_slot,
+            definite_plural_slot=definite_plural_slot,
+            ignored_markers=ignored_markers,
+        )
+        if operations is None:
+            return None
+        result.append(SlotBranch(branch.text, branch.tokens, operations))
+    return tuple(result)
+
+
+def _best_overlap_replacement(base: str, tail: str) -> tuple[str | None, int]:
+    best_index = -1
+    best_score = 0
+    folded_base = base.casefold()
+    folded_tail = tail.casefold()
+    for index in range(len(base)):
+        score = 0
+        while (
+            index + score < len(base)
+            and score < len(tail)
+            and folded_base[index + score] == folded_tail[score]
+        ):
+            score += 1
+        if score > best_score:
+            best_index = index
+            best_score = score
+    if best_index < 0:
+        return None, 0
+    return base[:best_index] + tail, best_score
+
+
+def apply_form_operation(
+    base: str,
+    operation: FormOperation,
+    *,
+    append: Callable[[str, str], str | None] | None = None,
+    replace_tail: Callable[[str, str], str | None] | None = None,
+) -> str | None:
+    if operation.kind is FormOperationKind.UNCHANGED:
+        return base
+    if operation.kind is FormOperationKind.EXPLICIT:
+        return operation.value
+    if operation.kind is FormOperationKind.APPEND:
+        return append(base, operation.value) if append else base + operation.value
+    if operation.kind is FormOperationKind.REPLACE_TAIL:
+        overlap, score = _best_overlap_replacement(base, operation.value)
+        if score >= 2:
+            return overlap
+        return replace_tail(base, operation.value) if replace_tail else None
+    return None
+
+
+def split_forms(text: str) -> tuple[str, ...]:
+    normalized = normalize_notation(text)
+    normalized = normalized.replace(",", " ").replace(";", " ")
+    return tuple(token for token in normalized.split() if token not in {"el.", "h", "ibl.", "_", "och"})
