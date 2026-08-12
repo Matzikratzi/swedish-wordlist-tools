@@ -39,6 +39,19 @@ class VerbSharedLexemeTests(unittest.TestCase):
         self.assertEqual(("avvek",), slots.forms_for("preterite"))
         self.assertEqual(("avvikit",), slots.forms_for("supine"))
 
+    def test_lodstreck_precedes_generic_overlap(self) -> None:
+        cases = (
+            ("fortfara", "-for -farit", "fort|fara", "fortfor", "fortfarit"),
+            ("förefalla", "-föll -fallit", "före|falla", "föreföll", "förefallit"),
+            ("handha", "-hade -haft", "hand|ha", "handhade", "handhaft"),
+            ("klarlägga", "-lade -lagt", "klar|lägga", "klarlade", "klarlagt"),
+        )
+        for lemma, text, stycke, preterite, supine in cases:
+            with self.subTest(lemma=lemma):
+                slots = self.parse(lemma, text, stycke=stycke)
+                self.assertEqual((preterite,), slots.forms_for("preterite"))
+                self.assertEqual((supine,), slots.forms_for("supine"))
+
     def test_long_compound_replacement_uses_saol_lodstreck(self) -> None:
         slots = self.parse("blottlägga", "-lade -lagt", stycke="blott|lägga")
         self.assertEqual(("blottlade",), slots.forms_for("preterite"))
