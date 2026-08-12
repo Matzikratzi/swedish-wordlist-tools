@@ -103,7 +103,10 @@ def _saol_upos(record: dict[str, Any]) -> str:
 
 def _is_affix_entry(record: dict[str, Any], lemma: str) -> bool:
     ordkl = _normalise(str(record.get("ordkl", ""))).casefold()
-    return lemma.startswith("-") or lemma.endswith("-") or "slutled" in ordkl or "i sms." in ordkl or "i sms " in ordkl
+    return (
+        lemma.startswith("-") or lemma.endswith("-") or "slutled" in ordkl
+        or "i sms." in ordkl or "i sms " in ordkl
+    )
 
 
 def read_saldo(path: Path) -> dict[str, list[dict[str, Any]]]:
@@ -118,7 +121,12 @@ def read_saldo(path: Path) -> dict[str, list[dict[str, Any]]]:
         all_forms = set(_written_forms(element))
         if not lemma_forms and all_forms:
             lemma_forms = [sorted(all_forms, key=str.casefold)[0]]
-        analysis = {"id": element.attrib.get("id", ""), "upos": _saldo_pos(element), "lemmas": set(lemma_forms), "forms": all_forms}
+        analysis = {
+            "id": element.attrib.get("id", ""),
+            "upos": _saldo_pos(element),
+            "lemmas": set(lemma_forms),
+            "forms": all_forms,
+        }
         for lemma in lemma_forms:
             entries[_key(lemma)].append(analysis)
         element.clear()
@@ -146,10 +154,29 @@ def _write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
             handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
 
 
-def compare_sources(saol_path: Path, saldo_path: Path, target_path: Path, saol_only_path: Path, ambiguous_path: Path, saldo_only_path: Path, report_path: Path) -> dict[str, Any]:
+def _add_match(
+    analyses: Iterable[dict[str, Any]],
+    target_forms: set[str],
+    matched_saldo_lemmas: set[str],
+) -> None:
+    for analysis in analyses:
+        target_forms.update(analysis["forms"])
+        matched_saldo_lemmas.update(_key(value) for value in analysis["lemmas"])
+
+
+def compare_sources(
+    saol_path: Path,
+    saldo_path: Path,
+    target_path: Path,
+    saol_only_path: Path,
+    ambiguous_path: Path,
+    saldo_only_path: Path,
+    report_path: Path,
+) -> dict[str, Any]:
     saldo = read_saldo(saldo_path)
     form_index = _build_form_index(saldo)
     target_forms: set[str] = set()
+    saol_lemma_keys: set[str] = set()
     matched_saldo_lemmas: set[str] = set()
     saol_only: list[dict[str, Any]] = []
     ambiguous: list[dict[str, Any]] = []
@@ -164,54 +191,61 @@ def compare_sources(saol_path: Path, saldo_path: Path, target_path: Path, saol_o
         if _is_affix_entry(record, lemma):
             filtered_affix_records += 1
             continue
+
         compared_records += 1
         key = _key(lemma)
+        saol_lemma_keys.add(key)
         upos = _saol_upos(record)
         candidates = list(saldo.get(key, []))
-        matched_by_form = False
-        generated = None
-        if not candidates:
-            generated = generate_entry(record)
-            generated_forms = {_key(form) for form in generated.forms if form} if generated is not None else set()
-            form_candidates: list[dict[str, Any]] = []
-            seen_ids: set[int] = set()
-            for form_key in generated_forms:
-                for candidate in form_index.get(form_key, []):
-                    candidate_id = id(candidate)
-                    if candidate_id not in seen_ids:
-                        seen_ids.add(candidate_id)
-                        form_candidates.append(candidate)
-            candidate_lemmas = {_key(candidate_lemma) for candidate in form_candidates for candidate_lemma in candidate["lemmas"]}
-            if len(candidate_lemmas) == 1:
-                candidates = form_candidates
-                matched_by_form = True
-
-        exact = [candidate for candidate in candidates if candidate["upos"] == upos]
-        inferred = False
-        if not exact and upos in {"", "X"}:
-            candidate_classes = {candidate["upos"] for candidate in candidates if candidate["upos"]}
-            if len(candidate_classes) == 1:
-                exact = candidates
-                inferred = True
-        if exact:
-            matched_records += 1
-            if upos in {"", "X"}:
-                unknown_pos_matched_records += 1
-            if inferred:
-                inferred_pos_matched_records += 1
-            if matched_by_form:
-                form_matched_records += 1
-            for candidate in exact:
-                target_forms.update(candidate["forms"])
-                matched_saldo_lemmas.update(_key(value) for value in candidate["lemmas"])
-            continue
 
         if candidates:
-            ambiguous.append({"lemma": lemma, "saol_upos": upos, "saldo_word_classes": sorted({candidate["upos"] for candidate in candidates}), "saldo_lemmas": sorted({value for candidate in candidates for value in candidate["lemmas"]}, key=str.casefold)})
+            exact = [candidate for candidate in candidates if candidate["upos"] == upos]
+            if upos not in {"", "X"} and exact:
+                matched_records += 1
+                _add_match(exact, target_forms, matched_saldo_lemmas)
+                continue
+
+            unknown = [candidate for candidate in candidates if not candidate["upos"]]
+            if upos not in {"", "X"} and len(unknown) == 1:
+                matched_records += 1
+                unknown_pos_matched_records += 1
+                _add_match(unknown, target_forms, matched_saldo_lemmas)
+                continue
+
+            candidate_classes = {candidate["upos"] for candidate in candidates}
+            if upos in {"", "X"} and len(candidate_classes) == 1 and "" not in candidate_classes:
+                matched_records += 1
+                inferred_pos_matched_records += 1
+                _add_match(candidates, target_forms, matched_saldo_lemmas)
+                continue
+
+            ambiguous.append({
+                "lemma": lemma,
+                "saol_upos": upos,
+                "saldo_word_classes": sorted({candidate["upos"] for candidate in candidates}),
+                "saldo_lemmas": sorted(
+                    {value for candidate in candidates for value in candidate["lemmas"]},
+                    key=str.casefold,
+                ),
+            })
             continue
 
-        if generated is None:
-            generated = generate_entry(record)
+        # No SALDO lemma match.  The SAOL lemma itself may already be an
+        # inflected SALDO form (e.g. ``kvisten`` -> lemma ``kvist``).  This is
+        # stronger and safer than trying to invent forms from an unsupported
+        # SAOL row, and it also works for rows with no inflection text.
+        form_candidates = [
+            candidate
+            for candidate in form_index.get(key, [])
+            if upos not in {"", "X"} and candidate["upos"] == upos
+        ]
+        if len(form_candidates) == 1:
+            matched_records += 1
+            form_matched_records += 1
+            _add_match(form_candidates, target_forms, matched_saldo_lemmas)
+            continue
+
+        generated = generate_entry(record)
         saol_only.append({
             "lemma": lemma,
             "saol_upos": upos,
@@ -220,27 +254,43 @@ def compare_sources(saol_path: Path, saldo_path: Path, target_path: Path, saol_o
         })
 
     saldo_only: list[dict[str, Any]] = []
+    covered_saldo_keys = saol_lemma_keys | matched_saldo_lemmas
     for key, analyses in saldo.items():
-        if key in matched_saldo_lemmas:
+        if key in covered_saldo_keys:
             continue
         saldo_only.append({
-            "lemmas": sorted({value for analysis in analyses for value in analysis["lemmas"]}, key=str.casefold),
+            "lemmas": sorted(
+                {value for analysis in analyses for value in analysis["lemmas"]},
+                key=str.casefold,
+            ),
             "word_classes": sorted({analysis["upos"] for analysis in analyses}),
-            "forms": sorted({value for analysis in analyses for value in analysis["forms"]}, key=str.casefold),
+            "forms": sorted(
+                {value for analysis in analyses for value in analysis["forms"]},
+                key=str.casefold,
+            ),
         })
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    target_path.write_text("\n".join(sorted(target_forms, key=str.casefold)) + "\n", encoding="utf-8")
+    target_path.write_text(
+        "\n".join(sorted(target_forms, key=str.casefold)) + ("\n" if target_forms else ""),
+        encoding="utf-8",
+    )
     _write_jsonl(saol_only_path, saol_only)
     _write_jsonl(ambiguous_path, ambiguous)
     _write_jsonl(saldo_only_path, saldo_only)
+
     report = {
-        "saol_source_records": source_records, "saol_filtered_affix_records": filtered_affix_records,
-        "saol_compared_records": compared_records, "saol_matched_records": matched_records,
+        "saol_source_records": source_records,
+        "saol_filtered_affix_records": filtered_affix_records,
+        "saol_compared_records": compared_records,
+        "saol_matched_records": matched_records,
         "saol_unknown_pos_matched_records": unknown_pos_matched_records,
         "saol_inferred_pos_matched_records": inferred_pos_matched_records,
-        "saol_form_matched_records": form_matched_records, "saol_only_records": len(saol_only),
-        "ambiguous_records": len(ambiguous), "saldo_only_lemmas": len(saldo_only), "target_unique_forms": len(target_forms),
+        "saol_form_matched_records": form_matched_records,
+        "saol_only_records": len(saol_only),
+        "ambiguous_records": len(ambiguous),
+        "saldo_only_lemmas": len(saldo_only),
+        "target_unique_forms": len(target_forms),
     }
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -257,7 +307,10 @@ def main() -> None:
     parser.add_argument("--saldo-only", type=Path, default=DEFAULT_SALDO_ONLY)
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
     args = parser.parse_args()
-    report = compare_sources(args.saol, args.saldo, args.target, args.saol_only, args.ambiguous, args.saldo_only, args.report)
+    report = compare_sources(
+        args.saol, args.saldo, args.target, args.saol_only,
+        args.ambiguous, args.saldo_only, args.report,
+    )
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
 
