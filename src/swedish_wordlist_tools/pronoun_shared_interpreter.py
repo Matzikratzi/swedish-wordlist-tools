@@ -5,7 +5,7 @@ from typing import Any, Mapping
 from .lexeme_slots import LexemeSlots, SlotForm, build_lexeme_slots
 from .saol_notation import FormOperationKind, apply_form_operation
 from .saol_slot_interpreter import SlotGrammar, interpret_single_slot_sequence
-from .saol_source_policy import is_truncated_inflection_source, raw_inflection_text
+from .saol_source_policy import is_truncated_inflection_source
 
 
 def _implicit_pronoun_slot(index: int, last_slot: str | None, _operation) -> str | None:
@@ -37,8 +37,25 @@ _PRONOUN_GRAMMAR = SlotGrammar(
 )
 
 
+def _primary_text(record: Mapping[str, Any]) -> str:
+    """Return SAOL's primary PRON inflection carrier only.
+
+    A missing ``text`` field means that this record has no primary inflection
+    notation.  Do not fall back to presentation/derived notation here; doing so
+    would make lemma-only records look like inflected records and differs from
+    the source policy used for the other word classes.
+    """
+
+    value = record.get("text")
+    if value is None or str(value) == "(null)":
+        return ""
+    return str(value).strip()
+
+
 def _safe_text(record: Mapping[str, Any]) -> str:
-    text = raw_inflection_text(dict(record))
+    text = _primary_text(record)
+    if not text:
+        return ""
     if not is_truncated_inflection_source(dict(record)):
         return text
     # saol_notation itself drops an unsafe final token at exactly 50 chars.
