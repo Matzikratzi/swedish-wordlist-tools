@@ -41,6 +41,33 @@ class PronounSharedInterpreterTests(unittest.TestCase):
         slots = self._slots("bådadera", "pl.")
         self.assertEqual("bådadera", slots.first("plural"))
 
+    def test_editorial_style_marker_keeps_alternative_slot(self) -> None:
+        slots = self._slots("er", "ert el. högt. edert, era el. högt. edra")
+        self.assertEqual(("ert", "edert"), slots.forms_for("neuter_singular"))
+        self.assertEqual(("era", "edra"), slots.forms_for("plural"))
+
+    def test_superlative_with_vard_marker(self) -> None:
+        slots = self._slots("själv", "+t +a, superl. vard. +aste")
+        self.assertEqual("självaste", slots.first("superlative"))
+
+    def test_parallel_branches_are_combined(self) -> None:
+        slots = self._slots("sådan", "+t +a _ sånt såna")
+        self.assertEqual(("sådant", "sånt"), slots.forms_for("neuter_singular"))
+        self.assertEqual(("sådana", "såna"), slots.forms_for("plural"))
+
+    def test_branch_with_labelled_variant(self) -> None:
+        slots = self._slots("någon", "något några _ nåt; pl. sällan: nåra")
+        self.assertEqual(("något", "nåt"), slots.forms_for("neuter_singular"))
+        self.assertEqual(("några", "nåra"), slots.forms_for("plural"))
+
+    def test_truncated_den_keeps_safe_prefix(self) -> None:
+        text = "n. det; gen. dess; pl. de el. vard. dom [dåm>]; ge"
+        self.assertEqual(50, len(text))
+        slots = self._slots("den", text)
+        self.assertEqual("det", slots.first("neuter_singular"))
+        self.assertEqual("dess", slots.first("genitive"))
+        self.assertEqual(("de", "dom"), slots.forms_for("plural"))
+
     def test_replace_tail_is_not_guessed(self) -> None:
         self.assertIsNone(interpret_pronoun_row({
             "normaliserat_ord": "hurdan",
