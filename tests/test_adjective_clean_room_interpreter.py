@@ -191,6 +191,32 @@ class AdjectiveCleanRoomInterpreterTests(unittest.TestCase):
         )
         self.assertEqual("shared_rich_labelled_adjective_atoms", slots.rule)
 
+    def test_best_and_plural_share_slot_with_alternative(self) -> None:
+        slots = interpret_adjective_row(
+            {
+                "normaliserat_ord": "akvamarinblå",
+                "text": "-blått, best. och: pl. + el. +a",
+                "stycke": "akva·mar·in|blå",
+                "upos": "ADJ",
+            }
+        )
+        self.assertIsNotNone(slots)
+        assert slots is not None
+        self.assertEqual(
+            ("akvamarinblå", "akvamarinblått", "akvamarinblå", "akvamarinblåa"),
+            slots.written_forms(),
+        )
+        self.assertEqual(
+            (
+                "common_singular",
+                "neuter_singular",
+                "definite_or_plural",
+                "definite_or_plural",
+            ),
+            tuple(form.slot for form in slots.forms),
+        )
+        self.assertEqual("shared_rich_labelled_adjective_atoms", slots.rule)
+
 
 if __name__ == "__main__":
     unittest.main()
