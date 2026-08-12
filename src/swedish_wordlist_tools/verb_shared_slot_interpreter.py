@@ -36,11 +36,13 @@ def _implicit_explicit_form_slot(index, _last_slot, _operation):
 BASIC_VERB_GRAMMAR = SlotGrammar(
     label_slots={},
     implicit_slot=_implicit_basic_verb_slot,
+    allow_generic_editorial_markers=False,
 )
 
 SINGLE_EXPLICIT_VERB_GRAMMAR = SlotGrammar(
     label_slots={},
     implicit_slot=_implicit_explicit_form_slot,
+    allow_generic_editorial_markers=False,
 )
 
 VERB_GRAMMAR = SlotGrammar(
@@ -73,6 +75,7 @@ VERB_GRAMMAR = SlotGrammar(
         "saknas:",
         "ingen:",
         "böjning:",
+        "och:",
     }),
     bare_label_as_unchanged=True,
     allow_generic_editorial_markers=False,
