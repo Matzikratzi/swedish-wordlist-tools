@@ -76,22 +76,27 @@ def classify_x_record(
     if head.startswith("(hv)"):
         siblings = _shared_siblings(record, siblings_by_key)
         sibling_classes = sorted({_saol_upos(sibling) for sibling in siblings})
+
+        # The printed (hv) form is stronger evidence than merely sharing a
+        # normalized lemma.  Always try it first, even when sibling discovery
+        # currently happens to expose just one word class.  This matters for
+        # homonymous lemmas such as få: ``fick`` belongs to the verb paradigm,
+        # while ``färst`` belongs to the adjective paradigm.
+        form = _printed_form(record)
+        matching_classes = sorted({
+            _saol_upos(sibling)
+            for sibling in siblings
+            if _text_mentions_form(sibling, form)
+        })
+        if len(matching_classes) == 1:
+            target = matching_classes[0]
+            return f"route_{target}_shared_from_hv_sibling_form", (target,)
+        if len(matching_classes) > 1:
+            return "ambiguous_hv_sibling_classes", tuple(matching_classes)
+
         if len(sibling_classes) == 1:
             return f"route_{sibling_classes[0]}_shared_from_hv_sibling", tuple(sibling_classes)
         if len(sibling_classes) > 1:
-            # Homonymous headwords can have several genuine word classes.  The
-            # (hv) row's homonr is not a foreign key to one of them.  Instead,
-            # use direct SAOL evidence: if its printed form occurs in exactly
-            # one sibling class's inflection text, that class owns the form.
-            form = _printed_form(record)
-            matching_classes = sorted({
-                _saol_upos(sibling)
-                for sibling in siblings
-                if _text_mentions_form(sibling, form)
-            })
-            if len(matching_classes) == 1:
-                target = matching_classes[0]
-                return f"route_{target}_shared_from_hv_sibling_form", (target,)
             return "ambiguous_hv_sibling_classes", tuple(sibling_classes)
         return "unresolved_hv_no_shared_sibling", ()
 
@@ -156,8 +161,8 @@ def render_text(report: dict[str, Any]) -> str:
         "",
         "X är en export-/UPOS-restkategori, inte en grammatisk ordklass. (hv)-rader",
         "routas bara när samma normaliserade artikel har konkret huvudpostbevis.",
-        "Vid homonyma huvudord används den tryckta (hv)-formen som direkt bevis",
-        "om den förekommer i exakt en syskonordklass böjningstext.",
+        "Den tryckta (hv)-formen används först som direkt bevis mot syskonens",
+        "böjningstext; först därefter används ensam syskonordklass som fallback.",
         "Blandade 'adv. och adj.' använder ADJ-shared för sin böjning.",
         "",
         f"X-poster med text: {report['x_text_records']}",
