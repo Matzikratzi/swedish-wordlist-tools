@@ -31,11 +31,13 @@ class AnalyzeXRoutingTests(unittest.TestCase):
     def test_hv_form_resolves_homonymous_verb_and_adjective(self) -> None:
         verb = {
             "normaliserat_ord": "få", "ord": "få", "homonr": "1", "upos": "VERB",
-            "ordkl": "v.", "text": "fick konjunktiv: finge, fått, pres. får",
+            "ordkl": "v. <i>fick konjunktiv: finge, fått, pres. får</i>",
+            "text": "fick konjunktiv: finge, fått, pres. får",
         }
         adjective = {
             "normaliserat_ord": "få", "ord": "få", "homonr": "2", "upos": "ADJ",
-            "ordkl": "adj.", "text": "komp. färre, superl. färst",
+            "ordkl": "adj. <i>komp. färre, superl. färst</i>",
+            "text": "komp. färre, superl. färst",
         }
         fick = {
             "normaliserat_ord": "få", "ord": "fick", "homonr": "0", "upos": "X",
@@ -97,11 +99,13 @@ class AnalyzeXRoutingTests(unittest.TestCase):
     def test_report_includes_hv_rows_without_text(self) -> None:
         verb = {
             "normaliserat_ord": "få", "ord": "få", "upos": "VERB",
-            "ordkl": "v.", "text": "fick fått får",
+            "ordkl": "v. <i>fick konjunktiv: finge, fått, pres. får</i>",
+            "text": "fick konjunktiv: finge, fått, pres. får",
         }
         adjective = {
             "normaliserat_ord": "få", "ord": "få", "upos": "ADJ",
-            "ordkl": "adj.", "text": "färre färst",
+            "ordkl": "adj. <i>komp. färre, superl. färst</i>",
+            "text": "komp. färre, superl. färst",
         }
         fick = {
             "normaliserat_ord": "få", "ord": "fick", "upos": "X",
