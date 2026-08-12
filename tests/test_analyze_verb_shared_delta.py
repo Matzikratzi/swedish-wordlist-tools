@@ -6,11 +6,18 @@ from swedish_wordlist_tools.analyze_verb_shared_delta import analyze
 
 
 class AnalyzeVerbSharedDeltaTests(unittest.TestCase):
-    def record(self, lemma: str, text: str, homonr: str = "1") -> dict[str, object]:
+    def record(
+        self,
+        lemma: str,
+        text: str,
+        homonr: str = "1",
+        *,
+        stycke: str | None = None,
+    ) -> dict[str, object]:
         return {
             "normaliserat_ord": lemma,
             "text": text,
-            "stycke": lemma,
+            "stycke": lemma if stycke is None else stycke,
             "upos": "VERB",
             "ordkl": "v.",
             "homonr": homonr,
@@ -35,6 +42,21 @@ class AnalyzeVerbSharedDeltaTests(unittest.TestCase):
     def test_multiword_lemma_is_outside_direct_comparison(self) -> None:
         summary = analyze([self.record("ta sig", "tog tagit")])
         self.assertEqual(0, summary["records"])
+
+    def test_legacy_label_leak_is_classified_as_notation_artifact(self) -> None:
+        summary = analyze([self.record("djärvas", "djärvdes, pres. djärvs el. djärves")])
+        self.assertIn("pres", summary["old_only_classified"]["legacy_notation_artifact"])
+        self.assertEqual([], summary["old_only_classified"]["unexplained"])
+
+    def test_50_character_final_form_is_classified_as_unsafe_tail(self) -> None:
+        text = "-stämde, -stämt, -stämd n. -stämt, pres. -stämmer,"
+        self.assertEqual(50, len(text))
+        summary = analyze([self.record("avstämma", text, stycke="av|stämma")])
+        self.assertIn(
+            "avstämmer",
+            summary["old_only_classified"]["unsafe_truncated_final_token"],
+        )
+        self.assertEqual([], summary["old_only_classified"]["unexplained"])
 
 
 if __name__ == "__main__":
