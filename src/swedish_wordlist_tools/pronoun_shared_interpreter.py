@@ -3,8 +3,12 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from .lexeme_slots import LexemeSlots, SlotForm, build_lexeme_slots
-from .saol_notation import FormOperationKind, apply_form_operation
-from .saol_slot_interpreter import SlotGrammar, interpret_single_slot_sequence
+from .saol_notation import FormOperationKind, SlotOperation, apply_form_operation
+from .saol_slot_interpreter import (
+    SlotGrammar,
+    interpret_single_slot_sequence,
+    interpret_slot_branches,
+)
 from .saol_source_policy import is_truncated_inflection_source
 
 
@@ -32,6 +36,7 @@ _PRONOUN_GRAMMAR = SlotGrammar(
     transparent_markers=frozenset({
         "i:", "som:", "används:", "anv.", "sing.", "substantivisk:",
         "uttalat:", "och:", "också:", "skrivet:", "sällan:",
+        "högt.", "vard.",
     }),
     allow_generic_editorial_markers=False,
 )
@@ -41,7 +46,7 @@ def _primary_text(record: Mapping[str, Any]) -> str:
     """Return SAOL's primary PRON inflection carrier only.
 
     A missing ``text`` field means that this record has no primary inflection
-    notation.  Do not fall back to presentation/derived notation here; doing so
+    notation. Do not fall back to presentation/derived notation here; doing so
     would make lemma-only records look like inflected records and differs from
     the source policy used for the other word classes.
     """
@@ -61,6 +66,31 @@ def _safe_text(record: Mapping[str, Any]) -> str:
     # saol_notation itself drops an unsafe final token at exactly 50 chars.
     # A 49-char row keeps its final complete token but remains an open paradigm.
     return text
+
+
+def _realize_operations(
+    lemma: str,
+    operations: tuple[SlotOperation, ...],
+) -> list[SlotForm] | None:
+    forms: list[SlotForm] = []
+    for item in operations:
+        operation = item.operation
+        # Until PRON lodstreck semantics are audited, never guess a '-' form.
+        if operation.kind is FormOperationKind.REPLACE_TAIL:
+            return None
+        written = apply_form_operation(lemma, operation)
+        if written is None:
+            return None
+        forms.append(
+            SlotForm(
+                item.slot,
+                written.casefold(),
+                item.token,
+                "shared_pronoun",
+                item.alternative_relation or "",
+            )
+        )
+    return forms
 
 
 def interpret_pronoun_row(record: Mapping[str, Any]) -> LexemeSlots | None:
@@ -93,27 +123,23 @@ def interpret_pronoun_row(record: Mapping[str, Any]) -> LexemeSlots | None:
         )
 
     assigned = interpret_single_slot_sequence(text, _PRONOUN_GRAMMAR)
-    if assigned is None:
-        return None
+    rule = "shared_pronoun_slots"
+    operation_groups: list[tuple[SlotOperation, ...]] = []
+    if assigned is not None:
+        operation_groups.append(assigned)
+    else:
+        branches = interpret_slot_branches(text, _PRONOUN_GRAMMAR)
+        if branches is None:
+            return None
+        operation_groups.extend(branch.operations for branch in branches)
+        rule = "shared_pronoun_branches"
 
     forms: list[SlotForm] = []
-    for item in assigned:
-        operation = item.operation
-        # Until PRON lodstreck semantics are audited, never guess a '-' form.
-        if operation.kind is FormOperationKind.REPLACE_TAIL:
+    for operations in operation_groups:
+        realized = _realize_operations(lemma, operations)
+        if realized is None:
             return None
-        written = apply_form_operation(lemma, operation)
-        if written is None:
-            return None
-        forms.append(
-            SlotForm(
-                item.slot,
-                written.casefold(),
-                item.token,
-                "shared_pronoun",
-                item.alternative_relation or "",
-            )
-        )
+        forms.extend(realized)
 
     return build_lexeme_slots(
         lemma=lemma,
@@ -121,7 +147,7 @@ def interpret_pronoun_row(record: Mapping[str, Any]) -> LexemeSlots | None:
         notation=text,
         forms=forms,
         metadata={
-            "rule": "shared_pronoun_slots",
+            "rule": rule,
             "truncated": "yes" if is_truncated_inflection_source(dict(record)) else "no",
         },
     )
