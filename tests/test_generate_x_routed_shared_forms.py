@@ -104,6 +104,88 @@ class GenerateXRoutedSharedFormsTests(unittest.TestCase):
         words = {form["written_form"] for form in row["forms"]}
         self.assertTrue({"ansatsvis", "ansatsvist", "ansatsvisa"} <= words)
 
+    def test_hv_comparative_relation_is_explicit_form_not_new_paradigm(self) -> None:
+        records = [
+            {
+                "normaliserat_ord": "få",
+                "ord": "få",
+                "stycke": "få",
+                "ordkl": "adj.",
+                "text": "färre färst",
+                "upos": "ADJ",
+            },
+            {
+                "normaliserat_ord": "få",
+                "ord": "färre",
+                "stycke": "färre",
+                "ordkl": "(hv) <i>komp.</i>",
+                "text": "komp.",
+                "upos": "X",
+            },
+        ]
+        rows, summary = generate_rows(records)
+        self.assertEqual(1, summary["generated_records"])
+        self.assertEqual(1, summary["relation_only_records"])
+        self.assertEqual(0, summary["failed_records"])
+        row = self._row_by_source_ord(rows, "färre")
+        self.assertTrue(row["relation_only"])
+        self.assertEqual(
+            [("comparative", "färre")],
+            [(form["slot"], form["written_form"]) for form in row["forms"]],
+        )
+
+    def test_hv_noun_explicit_definite_plural_replacement_is_safe(self) -> None:
+        records = [
+            {
+                "normaliserat_ord": "kyrkobesökare",
+                "ord": "kyrkobesökare",
+                "stycke": "kyrkobesökare",
+                "ordkl": "subst.",
+                "text": "+n; pl. +, best. pl. -besökarna",
+                "upos": "NOUN",
+            },
+            {
+                "normaliserat_ord": "kyrkobesökare",
+                "ord": "kyrkbesökare",
+                "stycke": "kyrkbesökare",
+                "ordkl": "(hv) <i>+n; pl. +, best. pl. -besökarna</i>",
+                "text": "+n; pl. +, best. pl. -besökarna",
+                "upos": "X",
+            },
+        ]
+        rows, summary = generate_rows(records)
+        self.assertEqual(0, summary["failed_records"])
+        row = self._row_by_source_ord(rows, "kyrkbesökare")
+        words = {form["written_form"] for form in row["forms"]}
+        self.assertTrue(
+            {"kyrkbesökare", "kyrkbesökaren", "kyrkbesökarna"} <= words
+        )
+
+    def test_split_replacement_payload_is_normalized_for_routed_noun(self) -> None:
+        records = [
+            {
+                "normaliserat_ord": "sidoroder",
+                "ord": "sidoroder",
+                "stycke": "sidoroder",
+                "ordkl": "subst.",
+                "text": "-rodret; pl. +, best. pl.- rodren",
+                "upos": "NOUN",
+            },
+            {
+                "normaliserat_ord": "sidoroder",
+                "ord": "sidroder",
+                "stycke": "sidroder",
+                "ordkl": "(hv) <i>-rodret; pl. +, best. pl.- rodren</i>",
+                "text": "-rodret; pl. +, best. pl.- rodren",
+                "upos": "X",
+            },
+        ]
+        rows, summary = generate_rows(records)
+        self.assertEqual(0, summary["failed_records"])
+        row = self._row_by_source_ord(rows, "sidroder")
+        words = {form["written_form"] for form in row["forms"]}
+        self.assertTrue({"sidroder", "sidrodret", "sidrodren"} <= words)
+
 
 if __name__ == "__main__":
     unittest.main()
