@@ -32,6 +32,7 @@ class ExportVerbFormsTests(unittest.TestCase):
         words, report = build_verb_forms(path)
 
         self.assertEqual("SAOL14", report["source"])
+        self.assertEqual("shared_saol", report["row_interpreter"])
         self.assertFalse(report["include_saldo"])
         self.assertFalse(report["include_validated_imperatives"])
         self.assertIn("skriva", words)
@@ -42,6 +43,27 @@ class ExportVerbFormsTests(unittest.TestCase):
         self.assertIn("skrivna", words)
         self.assertIn("skriver", words)
         self.assertNotIn("saldo", report["unique_forms_by_provenance"])
+
+    def test_shared_export_uses_saol_lodstreck(self) -> None:
+        path = self.write_jsonl([
+            {
+                "normaliserat_ord": "handha",
+                "text": "-hade, -haft, -havd -haft -havda, pres. -har",
+                "stycke": "hand|ha",
+                "upos": "VERB",
+                "ordkl": "v.",
+            }
+        ])
+
+        words, report = build_verb_forms(path)
+
+        self.assertEqual("shared_saol", report["row_interpreter"])
+        self.assertIn("handhade", words)
+        self.assertIn("handhaft", words)
+        self.assertIn("handhavd", words)
+        self.assertIn("handhavda", words)
+        self.assertIn("handhar", words)
+        self.assertNotIn("hade", words)
 
     def test_includes_explicit_saol_imperative_without_saldo(self) -> None:
         path = self.write_jsonl([
