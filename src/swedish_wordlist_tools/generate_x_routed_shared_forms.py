@@ -18,16 +18,8 @@ DEFAULT_JSONL = Path("reports/saol14-x-routed-shared-forms.jsonl")
 DEFAULT_SUMMARY = Path("reports/saol14-x-routed-shared-forms-summary.json")
 DEFAULT_TEXT = Path("reports/saol14-x-routed-shared-forms.txt")
 
-_CANONICAL_ORDKL = {
-    "NOUN": "subst.",
-    "ADJ": "adj.",
-    "VERB": "verb",
-    "PRON": "pron.",
-}
-_ADJ_RELATION_SLOTS = {
-    "komp.": "comparative",
-    "superl.": "superlative",
-}
+_CANONICAL_ORDKL = {"NOUN": "subst.", "ADJ": "adj.", "VERB": "verb", "PRON": "pron."}
+_ADJ_RELATION_SLOTS = {"komp.": "comparative", "superl.": "superlative"}
 
 
 def _target_from_route(route: str) -> str | None:
@@ -36,10 +28,13 @@ def _target_from_route(route: str) -> str | None:
     return route[len("route_") :].split("_shared_", 1)[0]
 
 
+def _is_hv_route(route: str) -> bool:
+    return "_from_hv_" in route or route.endswith("_from_hv_sibling")
+
+
 def _routed_base(record: dict[str, Any], route: str) -> str:
     """Return the printed spelling whose inflection notation belongs to this row."""
-
-    if "_from_hv_sibling" in route:
+    if _is_hv_route(route):
         written = clean_saol_word(record.get("ord"))
         if written:
             return written
@@ -64,9 +59,8 @@ def routed_record(record: dict[str, Any], route: str, target: str) -> dict[str, 
 
 
 def _generate_direct_hv_form(record: dict[str, Any], route: str, target: str) -> dict[str, Any] | None:
-    """Preserve a textless (hv) row as the explicit printed form it represents."""
-
-    if _primary_text(record) or "_from_hv_sibling" not in route:
+    """Preserve a textless, structurally routed (hv) row as its printed form."""
+    if _primary_text(record) or not _is_hv_route(route):
         return None
     written = clean_saol_word(record.get("ord"))
     if not written:
@@ -86,11 +80,7 @@ def _generate_direct_hv_form(record: dict[str, Any], route: str, target: str) ->
 
 def _generate_relation_row(record: dict[str, Any], route: str, target: str) -> dict[str, Any] | None:
     """Return a direct form when an (hv) row labels its printed spelling's role."""
-
-    # The routing suffix describes how the class was established, not whether
-    # the row is a relation.  Once the printed form has resolved a homonym we
-    # can still have notation such as ``komp.`` on that same row (färre -> få).
-    if target != "ADJ" or "_from_hv_sibling" not in route:
+    if target != "ADJ" or not _is_hv_route(route):
         return None
     notation = " ".join(_primary_text(record).casefold().split())
     slot = _ADJ_RELATION_SLOTS.get(notation)
@@ -184,9 +174,7 @@ def generate_rows(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any
 
     unique_forms = {
         str(form.get("written_form") or "").casefold()
-        for row in rows
-        for form in row["forms"]
-        if form.get("written_form")
+        for row in rows for form in row["forms"] if form.get("written_form")
     }
     summary = {
         "routable_records": sum(route_counts.values()),
@@ -204,21 +192,16 @@ def generate_rows(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any
 
 def render_text(summary: dict[str, Any]) -> str:
     lines = [
-        "SAOL14 X: verklig shared-generering efter routing",
-        "",
+        "SAOL14 X: verklig shared-generering efter routing", "",
         "Routade X-rader med notation körs genom samma NOUN/ADJ/VERB-shared-generator",
         "som den verifierade huvudordklassen. Textlösa (hv)-rader är redan explicit",
-        "formbevis och bevaras därför direkt i den ordklass som routingen fastställt.",
-        "Homonyma fall routas bara när den tryckta formen finns i exakt en syskonordklass.",
-        "",
-        f"Routbara poster: {summary['routable_records']}",
+        "formbevis och bevaras därför direkt när routingen fastställt rätt huvudpost/ordklass.",
+        "", f"Routbara poster: {summary['routable_records']}",
         f"Genererade poster: {summary['generated_records']}",
         f"Varav direkta/relationsposter: {summary['relation_only_records']}",
         f"Misslyckade poster: {summary['failed_records']}",
         f"Genererade formrader: {summary['generated_form_rows']}",
-        f"Unika skrivna former: {summary['unique_written_forms']}",
-        "",
-        "Genererade per målordklass:",
+        f"Unika skrivna former: {summary['unique_written_forms']}", "", "Genererade per målordklass:",
     ]
     for target, count in summary["generated_by_target"].items():
         lines.append(f"  {count:4d}  {target}")
@@ -227,10 +210,7 @@ def render_text(summary: dict[str, Any]) -> str:
         lines.append("  (inga)")
     else:
         for row in summary["failed"]:
-            lines.append(
-                f"  {row['lemma']} ({row['homonr']}) | ord='{row['ord']}' | "
-                f"target={row['target_upos']} | text='{row['text']}'"
-            )
+            lines.append(f"  {row['lemma']} ({row['homonr']}) | ord='{row['ord']}' | target={row['target_upos']} | text='{row['text']}'")
     return "\n".join(lines) + "\n"
 
 
@@ -248,7 +228,6 @@ def main() -> None:
     parser.add_argument("--summary", type=Path, default=DEFAULT_SUMMARY)
     parser.add_argument("--text", type=Path, default=DEFAULT_TEXT)
     args = parser.parse_args()
-
     rows, summary = generate_rows(read_jsonl(args.source))
     write_jsonl(args.jsonl, rows)
     args.summary.parent.mkdir(parents=True, exist_ok=True)
