@@ -6,11 +6,18 @@ from pathlib import Path
 
 from .jsonl import read_jsonl
 from .pronoun_shared_interpreter import interpret_pronoun_row
-from .saol_source_policy import is_truncated_inflection_source, raw_inflection_text
+from .saol_source_policy import is_truncated_inflection_source
 
 DEFAULT_SOURCE = Path("data/raw/saol14-faksimil.jsonl")
 DEFAULT_TEXT = Path("reports/saol14-pronoun-shared-coverage.txt")
 DEFAULT_JSON = Path("reports/saol14-pronoun-shared-coverage.json")
+
+
+def _primary_text(record) -> str:
+    value = record.get("text")
+    if value is None or str(value) == "(null)":
+        return ""
+    return str(value).strip()
 
 
 def analyze(records):
@@ -20,7 +27,7 @@ def analyze(records):
         if str(record.get("upos") or "").upper() != "PRON":
             continue
         total += 1
-        text = raw_inflection_text(record)
+        text = _primary_text(record)
         if not text:
             continue
         text_records += 1
@@ -41,6 +48,7 @@ def analyze(records):
     return {
         "pronoun_records": total,
         "text_records": text_records,
+        "no_text_records": total - text_records,
         "truncated_records": truncated,
         "shared_records": interpreted,
         "remaining_records": text_records - interpreted,
@@ -53,11 +61,14 @@ def render_text(report):
     lines = [
         "SAOL14 PRON: första shared-täckningen",
         "",
+        "Endast SAOL:s primära textfält räknas som böjningskälla. Poster utan",
+        "text hålls separat och kompletteras inte från presentationsnotation.",
         "Konservativt första pass: explicita former, +operationer, kända etiketter",
         "och alternativ tolkas. '-' lämnas tills lodstrecksbasen är verifierad.",
         "",
         f"PRON-poster: {report['pronoun_records']}",
         f"Med textfält: {report['text_records']}",
+        f"Utan textfält: {report['no_text_records']}",
         f"Trunkerade: {report['truncated_records']}",
         f"Shared tolkade: {report['shared_records']} ({report['coverage_percent']:.2f} %)",
         f"Kvarvarande struktur: {report['remaining_records']}",
@@ -88,6 +99,7 @@ def main() -> None:
     args.json.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"PRON-poster: {report['pronoun_records']}")
     print(f"Med textfält: {report['text_records']}")
+    print(f"Utan textfält: {report['no_text_records']}")
     print(f"Shared tolkade: {report['shared_records']} ({report['coverage_percent']:.2f} %)")
     print(f"Kvarvarande struktur: {report['remaining_records']}")
     print(f"Text: {args.text}")
