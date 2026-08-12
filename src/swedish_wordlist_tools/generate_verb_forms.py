@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .jsonl import read_jsonl
+from .saol_variant_base import prepare_printed_variant_record
 from .verb_shared_lexeme import interpret_shared_playable_verb_slots
 
 DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
@@ -19,7 +20,8 @@ def _value(record: dict[str, Any], key: str) -> str:
 
 
 def generated_row(record: dict[str, Any]) -> dict[str, Any] | None:
-    slots = interpret_shared_playable_verb_slots(record)
+    prepared = prepare_printed_variant_record(record)
+    slots = interpret_shared_playable_verb_slots(prepared)
     if slots is None:
         return None
 
@@ -40,12 +42,14 @@ def generated_row(record: dict[str, Any]) -> dict[str, Any] | None:
         "homonym_number": _value(record, "homonr"),
         "source_truncated": slots.metadata.get("source_truncated") == "true",
         "source_notation": _value(record, "text"),
-        "stycke": _value(record, "stycke"),
+        "stycke": _value(prepared, "stycke"),
         "ordkl": _value(record, "ordkl"),
         "source": _value(record, "source"),
+        "variant_base": _value(prepared, "_saol_variant_base"),
         "forms": forms,
         "source_record": {
             "normaliserat_ord": record.get("normaliserat_ord"),
+            "ord": record.get("ord"),
             "homonr": record.get("homonr"),
             "ordkl": record.get("ordkl"),
             "stycke": record.get("stycke"),
@@ -88,35 +92,20 @@ def main() -> None:
     summary = {
         "generated_records": len(rows),
         "generated_forms": sum(len(row["forms"]) for row in rows),
-        "unique_written_forms": len(
-            {
-                form["written_form"]
-                for row in rows
-                for form in row["forms"]
-                if form["written_form"]
-            }
-        ),
-        "truncated_records": sum(1 for row in rows if row["source_truncated"]),
+        "variant_base_records": sum(1 for row in rows if row.get("variant_base")),
         "artifact": str(args.jsonl),
         "note": (
-            "Canonical structured verb-form artifact generated from the shared SAOL "
-            "interpreter. Truncated 49/50-character rows contain only safely visible "
-            "forms; missing continuation is never guessed."
+            "Canonical shared verb-form artifact. Full word-class variant rows are "
+            "inflected from their printed ord spelling when it differs from normaliserat_ord."
         ),
     }
     write_jsonl(args.jsonl, rows)
     args.summary.parent.mkdir(parents=True, exist_ok=True)
-    args.summary.write_text(
-        json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-
+    args.summary.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"Genererade verbposter: {summary['generated_records']}")
-    print(f"Genererade formrader: {summary['generated_forms']}")
-    print(f"Unika skrivna former: {summary['unique_written_forms']}")
-    print(f"Trunkerade poster: {summary['truncated_records']}")
+    print(f"Genererade former: {summary['generated_forms']}")
+    print(f"Variantbasposter: {summary['variant_base_records']}")
     print(f"JSONL: {args.jsonl}")
-    print(f"Sammanfattning: {args.summary}")
 
 
 if __name__ == "__main__":
