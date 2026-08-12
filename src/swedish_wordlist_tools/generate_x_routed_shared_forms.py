@@ -39,7 +39,7 @@ def _target_from_route(route: str) -> str | None:
 def _routed_base(record: dict[str, Any], route: str) -> str:
     """Return the printed spelling whose inflection notation belongs to this row."""
 
-    if route.endswith("_from_hv_sibling"):
+    if "_from_hv_sibling" in route:
         written = clean_saol_word(record.get("ord"))
         if written:
             return written
@@ -63,15 +63,38 @@ def routed_record(record: dict[str, Any], route: str, target: str) -> dict[str, 
     return prepared
 
 
-def _generate_relation_row(record: dict[str, Any], route: str, target: str) -> dict[str, Any] | None:
-    """Return a direct form for an X row that labels its printed spelling's role.
+def _generate_direct_hv_form(record: dict[str, Any], route: str, target: str) -> dict[str, Any] | None:
+    """Preserve a textless (hv) row as the explicit printed form it represents.
 
-    Some ``(hv)`` rows do not contain a paradigm at all.  Instead the printed
-    alternative itself is assigned a grammatical role, e.g. ``färre`` with
-    notation ``komp.`` under adjective ``få``.  Such a row is explicit form
-    evidence and must not be fed to the target paradigm parser as if ``färre``
-    were a new adjective lemma to inflect.
+    Such rows contain no paradigm to interpret.  Routing has already established
+    the target class from sibling evidence; for homonyms the ``_sibling_form``
+    route additionally establishes the class by finding the printed form in
+    exactly one sibling class's SAOL inflection text.  The safe operation here
+    is therefore to keep that printed form, not to invent an inflection paradigm.
     """
+
+    if _primary_text(record) or "_from_hv_sibling" not in route:
+        return None
+    written = clean_saol_word(record.get("ord"))
+    if not written:
+        return None
+    return {
+        "lemma": written,
+        "forms": [
+            {
+                "written_form": written,
+                "slot": "explicit_hv_form",
+                "provenance": "explicit_hv_form",
+                "source_token": "",
+                "operation_base": written,
+            }
+        ],
+        "relation_only": True,
+    }
+
+
+def _generate_relation_row(record: dict[str, Any], route: str, target: str) -> dict[str, Any] | None:
+    """Return a direct form for an X row that labels its printed spelling's role."""
 
     if target != "ADJ" or not route.endswith("_from_hv_sibling"):
         return None
@@ -84,15 +107,13 @@ def _generate_relation_row(record: dict[str, Any], route: str, target: str) -> d
         return None
     return {
         "lemma": base,
-        "forms": [
-            {
-                "written_form": base,
-                "slot": slot,
-                "provenance": "explicit_hv_relation",
-                "source_token": notation,
-                "operation_base": base,
-            }
-        ],
+        "forms": [{
+            "written_form": base,
+            "slot": slot,
+            "provenance": "explicit_hv_relation",
+            "source_token": notation,
+            "operation_base": base,
+        }],
         "relation_only": True,
     }
 
@@ -123,7 +144,7 @@ def generate_rows(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any
     failed: list[dict[str, Any]] = []
 
     for source in materialized:
-        if str(source.get("upos") or "").upper() != "X" or not _primary_text(source):
+        if str(source.get("upos") or "").upper() != "X":
             continue
         route, evidence = classify_x_record(source, siblings_by_key)
         target = _target_from_route(route)
@@ -131,10 +152,12 @@ def generate_rows(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any
             continue
         route_counts[route] += 1
 
-        generated = _generate_relation_row(source, route, target)
-        if generated is not None:
+        generated = _generate_direct_hv_form(source, route, target)
+        if generated is None:
+            generated = _generate_relation_row(source, route, target)
+        if generated is not None and generated.get("relation_only"):
             relation_only += 1
-        else:
+        elif generated is None:
             prepared = routed_record(source, route, target)
             generated = _generate_target_row(prepared, target) if prepared is not None else None
 
@@ -167,9 +190,7 @@ def generate_rows(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any
 
     unique_forms = {
         str(form.get("written_form") or "").casefold()
-        for row in rows
-        for form in row["forms"]
-        if form.get("written_form")
+        for row in rows for form in row["forms"] if form.get("written_form")
     }
     summary = {
         "routable_records": sum(route_counts.values()),
@@ -187,21 +208,17 @@ def generate_rows(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any
 
 def render_text(summary: dict[str, Any]) -> str:
     lines = [
-        "SAOL14 X: verklig shared-generering efter routing",
-        "",
-        "Routade X-rader rebases på sin tryckta ordform när raden är en (hv)-variant",
-        "och körs därefter genom exakt samma NOUN/ADJ/VERB-shared-generator som",
-        "den verifierade huvudordklassen. X-rader som explicit märker den tryckta",
-        "formen med en grammatisk roll (t.ex. komp.) bevaras som relationsformer",
-        "utan att behandlas som ett nytt paradigm.",
-        "",
+        "SAOL14 X: verklig shared-generering efter routing", "",
+        "Routade X-rader med notation körs genom samma NOUN/ADJ/VERB-shared-generator",
+        "som den verifierade huvudordklassen. Textlösa (hv)-rader är redan explicit",
+        "formbevis och bevaras därför direkt i den ordklass som routingen fastställt.",
+        "Homonyma fall routas bara när den tryckta formen finns i exakt en syskonordklass.", "",
         f"Routbara poster: {summary['routable_records']}",
         f"Genererade poster: {summary['generated_records']}",
-        f"Varav rena relationsposter: {summary['relation_only_records']}",
+        f"Varav direkta/relationsposter: {summary['relation_only_records']}",
         f"Misslyckade poster: {summary['failed_records']}",
         f"Genererade formrader: {summary['generated_form_rows']}",
-        f"Unika skrivna former: {summary['unique_written_forms']}",
-        "",
+        f"Unika skrivna former: {summary['unique_written_forms']}", "",
         "Genererade per målordklass:",
     ]
     for target, count in summary["generated_by_target"].items():
@@ -240,7 +257,7 @@ def main() -> None:
     args.text.write_text(render_text(summary), encoding="utf-8")
     print(f"Routbara X-poster: {summary['routable_records']}")
     print(f"Genererade X-poster via shared: {summary['generated_records']}")
-    print(f"Varav rena relationsposter: {summary['relation_only_records']}")
+    print(f"Varav direkta/relationsposter: {summary['relation_only_records']}")
     print(f"Misslyckade routade poster: {summary['failed_records']}")
     print(f"Genererade formrader: {summary['generated_form_rows']}")
     print(f"Unika skrivna former: {summary['unique_written_forms']}")
