@@ -16,7 +16,7 @@ from .compare_sources import read_saldo
 from .jsonl import read_jsonl
 from .saldo_verb_fallback import add_saldo_attested_forms
 from .verb_compound_heads import borrow_compound_verb_slots, build_simple_verb_paradigm_index
-from .verb_game_fallback import interpret_playable_verb_slots
+from .verb_shared_lexeme import interpret_shared_playable_verb_slots
 from .verb_slot_schema import add_explicit_verb_row_slots
 
 DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
@@ -75,7 +75,7 @@ def build_verb_forms(
     interpreted = {
         id(record): (
             add_explicit_verb_row_slots(record, slots)
-            if (slots := interpret_playable_verb_slots(record)) is not None
+            if (slots := interpret_shared_playable_verb_slots(record)) is not None
             else None
         )
         for record in records
@@ -132,6 +132,7 @@ def build_verb_forms(
     source = "SAOL14+SALDO" if include_saldo else "SAOL14"
     report: dict[str, Any] = {
         "source": source,
+        "row_interpreter": "shared_saol",
         "include_saldo": include_saldo,
         "include_validated_imperatives": include_validated_imperatives,
         "imperative_validation_source": "SALDO" if include_validated_imperatives else None,
@@ -171,7 +172,7 @@ def write_export(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Export playable verb forms; SAOL14 only by default"
+        description="Export playable verb forms from the shared SAOL14 interpreter"
     )
     parser.add_argument("saol", nargs="?", type=Path, default=DEFAULT_SAOL)
     parser.add_argument("--include-saldo", action="store_true")
@@ -193,6 +194,7 @@ def main() -> None:
     )
     write_export(words, report, args.output, args.report)
     print(f"Källa: {report['source']}")
+    print(f"Radtolkare: {report['row_interpreter']}")
     print(f"Verbposter: {report['verb_records']}")
     print(f"Tolkade poster: {report['interpreted_records']}")
     print(f"Unika spelbara verbformer: {report['unique_playable_forms']}")
