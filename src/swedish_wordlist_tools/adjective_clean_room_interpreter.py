@@ -204,15 +204,23 @@ def interpret_shared_rich_labelled_adjective_slots(
     operations = interpret_single_slot_sequence(raw_text, _RICH_LABELLED_GRAMMAR)
     if operations is None:
         return None
-    expected = (
-        "neuter_singular",
-        "masculine_definite",
-        "definite_or_plural",
-        "definite_or_plural",
-        "comparative",
-        "superlative",
-    )
-    if tuple(item.slot for item in operations) != expected:
+    slot_pattern = tuple(item.slot for item in operations)
+    allowed_patterns = {
+        (
+            "neuter_singular",
+            "masculine_definite",
+            "definite_or_plural",
+            "definite_or_plural",
+            "comparative",
+            "superlative",
+        ),
+        (
+            "neuter_singular",
+            "definite_or_plural",
+            "definite_or_plural",
+        ),
+    }
+    if slot_pattern not in allowed_patterns:
         return None
 
     forms: list[AdjectiveForm] = [AdjectiveForm(lemma, "common_singular")]
