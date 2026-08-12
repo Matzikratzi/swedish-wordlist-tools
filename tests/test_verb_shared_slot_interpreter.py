@@ -102,6 +102,15 @@ class VerbSharedSlotInterpreterTests(unittest.TestCase):
         self.assertTrue(is_structurally_uninflected_verb("ingen: böjning:"))
         self.assertEqual((), interpret_verb_sequence("ingen: böjning:"))
 
+    def test_unknown_colon_marker_rejects_complete_verb_branch(self) -> None:
+        self.assertIsNone(interpret_verb_sequence("unknown syntax: anfa"))
+
+    def test_known_usage_colon_markers_remain_transparent(self) -> None:
+        self.assertEqual(
+            (("preterite", "+de", "append"), ("supine", "+t", "append")),
+            self._rich_pairs("+de el. i: ett: uttryck: +t"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
