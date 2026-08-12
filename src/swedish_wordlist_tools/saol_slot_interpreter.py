@@ -32,6 +32,7 @@ class SlotGrammar:
     punctuation: frozenset[str] = frozenset({",", ";"})
     require_marker: bool = False
     bare_label_as_unchanged: bool = False
+    allow_generic_editorial_markers: bool = True
 
 
 _EDITORIAL_USAGE_MARKERS = frozenset({
@@ -69,7 +70,10 @@ def assign_slots_with_grammar(
         lower = _clean_token(token)
         if token in grammar.punctuation:
             continue
-        if lower in grammar.transparent_markers or is_editorial_usage_marker(token):
+        if lower in grammar.transparent_markers or (
+            grammar.allow_generic_editorial_markers
+            and is_editorial_usage_marker(token)
+        ):
             saw_marker = True
             continue
         if lower in grammar.alternative_markers:
