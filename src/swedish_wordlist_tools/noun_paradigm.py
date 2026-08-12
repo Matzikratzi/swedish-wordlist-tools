@@ -32,6 +32,10 @@ _EXPLICIT_PLURAL_USE_RE = re.compile(
     r"\bpl\.\s*(?:anv\.|används:)\s*",
     re.IGNORECASE,
 )
+_EXPLICIT_DEFINITE_PLURAL_REPLACEMENT_RE = re.compile(
+    r"\bbest\.\s*pl\.\s*-\s*[^\s;,_]+",
+    re.IGNORECASE,
+)
 
 
 def _genitive(form: str) -> str:
@@ -195,7 +199,11 @@ def _has_unmarked_replacement(row: InterpretedRow) -> bool:
 
 
 def _replacement_is_explicit_plural_use(record: dict[str, Any]) -> bool:
-    return _EXPLICIT_PLURAL_USE_RE.search(str(record.get("text", ""))) is not None
+    text = str(record.get("text", ""))
+    return (
+        _EXPLICIT_PLURAL_USE_RE.search(text) is not None
+        or _EXPLICIT_DEFINITE_PLURAL_REPLACEMENT_RE.search(text) is not None
+    )
 
 
 def _has_usable_compound_bar(record: dict[str, Any], lemma: str) -> bool:
