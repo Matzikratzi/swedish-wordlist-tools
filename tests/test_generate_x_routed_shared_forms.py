@@ -106,6 +106,23 @@ class GenerateXRoutedSharedFormsTests(unittest.TestCase):
         self.assertEqual("PRON", rows[0]["target_upos"])
         self.assertEqual("mig", rows[0]["forms"][0]["written_form"])
 
+    def test_textless_homonym_number_variant_is_preserved_directly(self) -> None:
+        records = [
+            {"normaliserat_ord":"karcinogen","homonr":"1","ord":"karcinogen","ordkl":"adj. <i>+t +a</i>","text":"+t +a","upos":"ADJ"},
+            {"normaliserat_ord":"karcinogen","homonr":"2","ord":"karcinogen","ordkl":"s. <i>+en +er</i>","text":"+en +er","upos":"NOUN"},
+            {"normaliserat_ord":"karcinogen","homonr":"1","ord":"carcinogen","ordkl":"(hv)","text":None,"upos":"X"},
+            {"normaliserat_ord":"karcinogen","homonr":"2","ord":"carcinogen","ordkl":"(hv)","text":None,"upos":"X"},
+        ]
+        rows, summary = generate_rows(records)
+        self.assertEqual(2, summary["generated_records"])
+        self.assertEqual(0, summary["failed_records"])
+        self.assertEqual(2, summary["relation_only_records"])
+        targets = {row["target_upos"] for row in rows}
+        self.assertEqual({"ADJ", "NOUN"}, targets)
+        for row in rows:
+            self.assertEqual(["carcinogen"], [f["written_form"] for f in row["forms"]])
+            self.assertEqual("explicit_hv_form", row["forms"][0]["slot"])
+
 
 if __name__ == "__main__":
     unittest.main()
