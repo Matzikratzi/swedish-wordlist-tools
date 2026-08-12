@@ -64,14 +64,7 @@ def routed_record(record: dict[str, Any], route: str, target: str) -> dict[str, 
 
 
 def _generate_direct_hv_form(record: dict[str, Any], route: str, target: str) -> dict[str, Any] | None:
-    """Preserve a textless (hv) row as the explicit printed form it represents.
-
-    Such rows contain no paradigm to interpret.  Routing has already established
-    the target class from sibling evidence; for homonyms the ``_sibling_form``
-    route additionally establishes the class by finding the printed form in
-    exactly one sibling class's SAOL inflection text.  The safe operation here
-    is therefore to keep that printed form, not to invent an inflection paradigm.
-    """
+    """Preserve a textless (hv) row as the explicit printed form it represents."""
 
     if _primary_text(record) or "_from_hv_sibling" not in route:
         return None
@@ -80,23 +73,24 @@ def _generate_direct_hv_form(record: dict[str, Any], route: str, target: str) ->
         return None
     return {
         "lemma": written,
-        "forms": [
-            {
-                "written_form": written,
-                "slot": "explicit_hv_form",
-                "provenance": "explicit_hv_form",
-                "source_token": "",
-                "operation_base": written,
-            }
-        ],
+        "forms": [{
+            "written_form": written,
+            "slot": "explicit_hv_form",
+            "provenance": "explicit_hv_form",
+            "source_token": "",
+            "operation_base": written,
+        }],
         "relation_only": True,
     }
 
 
 def _generate_relation_row(record: dict[str, Any], route: str, target: str) -> dict[str, Any] | None:
-    """Return a direct form for an X row that labels its printed spelling's role."""
+    """Return a direct form when an (hv) row labels its printed spelling's role."""
 
-    if target != "ADJ" or not route.endswith("_from_hv_sibling"):
+    # The routing suffix describes how the class was established, not whether
+    # the row is a relation.  Once the printed form has resolved a homonym we
+    # can still have notation such as ``komp.`` on that same row (färre -> få).
+    if target != "ADJ" or "_from_hv_sibling" not in route:
         return None
     notation = " ".join(_primary_text(record).casefold().split())
     slot = _ADJ_RELATION_SLOTS.get(notation)
@@ -190,7 +184,9 @@ def generate_rows(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any
 
     unique_forms = {
         str(form.get("written_form") or "").casefold()
-        for row in rows for form in row["forms"] if form.get("written_form")
+        for row in rows
+        for form in row["forms"]
+        if form.get("written_form")
     }
     summary = {
         "routable_records": sum(route_counts.values()),
@@ -208,17 +204,20 @@ def generate_rows(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any
 
 def render_text(summary: dict[str, Any]) -> str:
     lines = [
-        "SAOL14 X: verklig shared-generering efter routing", "",
+        "SAOL14 X: verklig shared-generering efter routing",
+        "",
         "Routade X-rader med notation körs genom samma NOUN/ADJ/VERB-shared-generator",
         "som den verifierade huvudordklassen. Textlösa (hv)-rader är redan explicit",
         "formbevis och bevaras därför direkt i den ordklass som routingen fastställt.",
-        "Homonyma fall routas bara när den tryckta formen finns i exakt en syskonordklass.", "",
+        "Homonyma fall routas bara när den tryckta formen finns i exakt en syskonordklass.",
+        "",
         f"Routbara poster: {summary['routable_records']}",
         f"Genererade poster: {summary['generated_records']}",
         f"Varav direkta/relationsposter: {summary['relation_only_records']}",
         f"Misslyckade poster: {summary['failed_records']}",
         f"Genererade formrader: {summary['generated_form_rows']}",
-        f"Unika skrivna former: {summary['unique_written_forms']}", "",
+        f"Unika skrivna former: {summary['unique_written_forms']}",
+        "",
         "Genererade per målordklass:",
     ]
     for target, count in summary["generated_by_target"].items():
