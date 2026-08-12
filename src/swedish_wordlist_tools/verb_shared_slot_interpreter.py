@@ -66,8 +66,16 @@ VERB_GRAMMAR = SlotGrammar(
         "ibl.",
         "obrukl.",
         "finl.",
+        "ett:",
+        "uttryck:",
+        "vissa:",
+        "konjunktiv:",
+        "saknas:",
+        "ingen:",
+        "böjning:",
     }),
     bare_label_as_unchanged=True,
+    allow_generic_editorial_markers=False,
 )
 
 
