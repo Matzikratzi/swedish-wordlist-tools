@@ -60,6 +60,11 @@ def classes_from_record(record: dict[str, Any]) -> tuple[str, ...]:
 def record_for_class(record: dict[str, Any], target_upos: str) -> dict[str, Any]:
     """Return a class-specific view of a possibly mixed SAOL row.
 
+    Single-class rows keep their original ``ordkl`` verbatim so downstream
+    interpreters can still see notation carried there (for example
+    ``adv. <i>komp. +re, superl. +st</i>``).  Only genuinely mixed heads need a
+    synthetic single-class head.
+
     SAOL puts the inflection notation after the whole mixed head.  In the only
     inflected mixed family in SAOL14, ``adv. och adj. +t +a``, that notation
     belongs to the adjective role.  The adverb role is the printed lemma only.
@@ -72,8 +77,15 @@ def record_for_class(record: dict[str, Any], target_upos: str) -> dict[str, Any]
     if target_upos not in classes:
         return copied
 
-    # Give downstream single-class interpreters an unambiguous head.
     copied["upos"] = target_upos
+
+    # A single-class row is already unambiguous.  Preserve its complete ordkl
+    # field, including any notation after the head.
+    if len(classes) <= 1:
+        return copied
+
+    # Give downstream single-class interpreters an unambiguous head only for
+    # genuinely mixed rows.
     copied["ordkl"] = {
         "NOUN": "s.",
         "VERB": "v.",
