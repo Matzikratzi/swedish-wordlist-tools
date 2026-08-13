@@ -177,7 +177,6 @@ def _hv_fallback_rows(
                 continue
             seen_candidates.add(key)
 
-            # Real-row or proven routed evidence means this is not an hv-only fallback.
             if key in classified or key in explicit_real:
                 continue
             if " " not in written and key in mentioned_real:
@@ -202,10 +201,6 @@ def _hv_fallback_rows(
                 "provenance": {"hv_only_fallback"},
             }
 
-    # Historically, UNKNOWN candidates were computed before PRON/NUM/ADV were
-    # added to production. Preserve that summary meaning without rerunning the
-    # expensive old audit: only overlaps supplied exclusively by the newer
-    # classes count as suppressed UNKNOWN candidates.
     overlap_keys: set[str] = set()
     for record in hv_records:
         source_id = _record_id(record)
@@ -256,12 +251,14 @@ def build_rows(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any]],
                 provenance = str(form.get("provenance") or form.get("source_stage") or form.get("kind") or "")
                 _add_classified_form(classified, written, upos, source_id, provenance)
 
-    x_rows, routed_context_omitted = _integrate_routed_x_forms(materialized, classified)
+    x_rows, _routed_context_omitted = _integrate_routed_x_forms(materialized, classified)
 
     unknown_rows, unknown_candidates, unknown_suppressed, fallback_context_omitted = _hv_fallback_rows(
         materialized, classified, x_rows
     )
-    context_omitted = routed_context_omitted + fallback_context_omitted
+    # The fallback pass sees every hv candidate, including context forms already
+    # rejected during routed-X integration, so adding both counts would double-count.
+    context_omitted = fallback_context_omitted
 
     rows: list[dict[str, Any]] = []
     for row in (*classified.values(), *unknown_rows.values()):
