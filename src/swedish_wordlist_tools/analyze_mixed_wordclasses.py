@@ -7,43 +7,11 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .jsonl import read_jsonl
+from .saol_wordclasses import classes_from_head, ordkl_head
 
 DEFAULT_SOURCE = Path("data/raw/saol14-faksimil.jsonl")
 DEFAULT_TEXT = Path("reports/saol14-mixed-wordclasses.txt")
 DEFAULT_JSON = Path("reports/saol14-mixed-wordclasses.json")
-
-MARKERS = (
-    ("NOUN", ("subst", "substantiv", "s.")),
-    ("VERB", ("verb", "v.", "rxv", "ptv")),
-    ("ADJ", ("adj", "adjektiv")),
-    ("ADV", ("adv",)),
-    ("PRON", ("pron",)),
-    ("NUM", ("räkn", "räkneord")),
-    ("PROPN", ("namn",)),
-    ("INTJ", ("interj",)),
-    ("ADP", ("prep",)),
-    ("CCONJ", ("samordnande", "konj")),
-    ("SCONJ", ("underordnande", "subj")),
-)
-
-
-def _head(record: dict[str, Any]) -> str:
-    return str(record.get("ordkl") or "").split("<", 1)[0].strip().casefold()
-
-
-def classes_from_head(head: str) -> tuple[str, ...]:
-    classes: list[str] = []
-    for upos, markers in MARKERS:
-        for marker in markers:
-            if marker in {"s.", "v."}:
-                import re
-                if re.search(rf"(?:^|\s){re.escape(marker)}(?:\s|$)", head):
-                    classes.append(upos)
-                    break
-            elif marker in head:
-                classes.append(upos)
-                break
-    return tuple(dict.fromkeys(classes))
 
 
 def analyze(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
@@ -52,7 +20,7 @@ def analyze(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
     combo_counts: Counter[str] = Counter()
     examples: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for record in records:
-        head = _head(record)
+        head = ordkl_head(record)
         if not head:
             continue
         classes = classes_from_head(head)
