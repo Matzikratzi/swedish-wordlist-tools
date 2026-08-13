@@ -35,6 +35,10 @@ def classes_from_head(head: str) -> tuple[str, ...]:
         add("PRON")
     if re.search(r"(?:^|\s)(?:räkn\.|räkneord)(?=\s|$)", head):
         add("NUM")
+    if re.search(r"(?:^|\s)(?:best\.|obest\.)\s+artikel(?=\s|$)", head):
+        add("DET")
+    if re.search(r"(?:^|\s)infinitivmärke(?=\s|$)", head):
+        add("PART")
     if re.search(r"(?:^|\s)namn(?=\s|$)", head):
         add("PROPN")
     if re.search(r"(?:^|\s)interj\.(?=\s|$)", head):
@@ -93,6 +97,8 @@ def record_for_class(record: dict[str, Any], target_upos: str) -> dict[str, Any]
         "ADV": "adv.",
         "PRON": "pron.",
         "NUM": "räkn.",
+        "DET": "best. artikel",
+        "PART": "infinitivmärke",
         "ADP": "prep.",
         "SCONJ": "subj.",
         "CCONJ": "konj.",
