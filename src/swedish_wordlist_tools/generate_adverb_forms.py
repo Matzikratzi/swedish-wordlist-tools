@@ -46,8 +46,6 @@ def _add_form(forms: list[dict[str, Any]], seen: set[str], written: str, slot: s
 
 
 def _explicit_words(text: str) -> list[str]:
-    # Remove operation tokens as whole units before lexical tokenization; +re
-    # and +st are instructions, not the words "re" and "st".
     lexical_text = _OPERATION_RE.sub(" ", text)
     words: list[str] = []
     for token in _WORD_RE.findall(lexical_text):
@@ -56,6 +54,24 @@ def _explicit_words(text: str) -> list[str]:
             continue
         words.append(token)
     return words
+
+
+def _adverb_notation(record: dict[str, Any], prepared: dict[str, Any]) -> str:
+    """Return only notation that is actually attached to an ADV entry.
+
+    The raw SAOL export has a large class of exact ``ordkl='adv.'`` rows and
+    those are lemma-only entries (their text is null in the source data).  Do
+    not let an injected or inherited text value turn such a row into an
+    inflection paradigm.  Rows whose ordkl itself carries printed notation,
+    e.g. ``adv. <i>komp. +re, superl. +st</i>``, may contribute exactly those
+    visible comparison forms.  Mixed ADJ+ADV rows are already specialized by
+    ``record_for_class`` so adjective-only +t/+a notation is absent here.
+    """
+
+    raw_ordkl = str(record.get("ordkl") or "").strip().casefold()
+    if raw_ordkl == "adv.":
+        return ""
+    return _value(prepared, "text")
 
 
 def generated_row(record: dict[str, Any]) -> dict[str, Any] | None:
@@ -67,22 +83,20 @@ def generated_row(record: dict[str, Any]) -> dict[str, Any] | None:
     lemma = clean_saol_word(prepared.get("normaliserat_ord")) or clean_saol_word(prepared.get("ord"))
     if not lemma:
         return None
-    text = _value(prepared, "text")
+    text = _adverb_notation(record, prepared)
     forms: list[dict[str, Any]] = []
     seen: set[str] = set()
     _add_form(forms, seen, lemma, "lemma", "")
 
-    # Pure ADV rows may carry comparison notation. Mixed ADJ+ADV rows are
-    # specialized by record_for_class(): their +t/+a belongs to ADJ and the
-    # ADV view has no inflection text.
+    # Adverbs have no general inflection paradigm.  Only explicitly printed
+    # comparison notation is interpreted here.
     for token in _OPERATION_RE.findall(text):
         operation = parse_form_operation(token)
         if operation is None:
             continue
         written = apply_form_operation(lemma, operation)
         if written:
-            slot = "comparative_or_superlative" if any(label in text.casefold() for label in ("komp.", "superl.")) else "inflected"
-            _add_form(forms, seen, written, slot, token)
+            _add_form(forms, seen, written, "comparative_or_superlative", token)
 
     if text:
         for written in _explicit_words(text):
