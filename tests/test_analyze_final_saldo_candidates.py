@@ -32,10 +32,15 @@ class AnalyzeFinalSaldoCandidatesTests(unittest.TestCase):
         self.assertEqual(1, report["category_upos"][("CORE_INFLECTION", "VERB")])
         self.assertEqual(1, report["category_msd"][("COMPARISON", "komp nom")])
         self.assertEqual(1, report["category_notation"][("COMPARISON", "+t +a")])
+        self.assertEqual(
+            "abdikerar",
+            report["examples_by_upos"][("CORE_INFLECTION", "VERB")][0]["form"],
+        )
 
         text = render(report)
         self.assertIn("CORE_INFLECTION", text)
         self.assertIn("notation='+de +t'", text)
+        self.assertIn("Exempel VERB:", text)
         self.assertIn("'abderitiskare'", text)
 
 

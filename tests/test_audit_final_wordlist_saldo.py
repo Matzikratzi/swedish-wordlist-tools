@@ -8,6 +8,20 @@ from swedish_wordlist_tools.saldo import SaldoAnalysis, SaldoWordForm
 
 
 class AuditFinalWordlistSaldoTests(unittest.TestCase):
+    def test_excludes_saldo_compound_form_msd_c(self) -> None:
+        analyses = [SaldoAnalysis(
+            entry_id="absorbera..vb.1",
+            upos="VERB",
+            lemmas=frozenset({"absorbera"}),
+            word_forms=(SaldoWordForm("absorber", parse_msd("c")),),
+        )]
+        summary, _only_saol, only_saldo, candidates = audit(
+            ["absorbera"], analyses, {"absorbera": {"VERB"}},
+        )
+        self.assertNotIn("absorber", only_saldo)
+        self.assertEqual([], candidates)
+        self.assertEqual(1, summary["saldo_standalone_forms"])
+
     def test_reports_global_sets_and_same_lemma_candidates_without_filtering(self) -> None:
         analyses = [
             SaldoAnalysis(

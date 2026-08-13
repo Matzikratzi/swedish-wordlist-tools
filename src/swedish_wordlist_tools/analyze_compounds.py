@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .jsonl import read_jsonl
-from .saldo import SaldoAnalysis, read_saldo_analyses
+from .saldo import NON_STANDALONE_MSD, SaldoAnalysis, read_saldo_analyses
 
 DEFAULT_INPUT = Path("reports/saol14-unmatched-analysis.jsonl")
 DEFAULT_SALDO = Path("data/raw/saldom.xml")
@@ -19,7 +19,7 @@ DEFAULT_CSV = Path("reports/saol14-unmatched-compounds.csv")
 DEFAULT_SUMMARY = Path("reports/saol14-unmatched-compounds-summary.json")
 
 _SEPARATOR_RE = re.compile(r"[^\wåäöÅÄÖ]+", re.UNICODE)
-_NON_STANDALONE_MSD = {"ci", "cm", "sms"}
+_NON_STANDALONE_MSD = NON_STANDALONE_MSD
 
 
 def _normalise(value: str) -> str:

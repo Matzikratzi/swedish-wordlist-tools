@@ -22,6 +22,7 @@ SALDO_XML = """<?xml version="1.0" encoding="UTF-8"?>
       <WordForm><feat att="writtenForm" val="abborrpinnen"/><feat att="msd" val="sg def nom"/></WordForm>
       <WordForm><feat att="writtenForm" val="abborrpinnens"/><feat att="msd" val="sg def gen"/></WordForm>
       <WordForm><feat att="writtenForm" val="abborrpinn"/><feat att="msd" val="ci"/></WordForm>
+      <WordForm><feat att="writtenForm" val="abborrpinnar"/><feat att="msd" val="c"/></WordForm>
       <WordForm><feat att="writtenForm" val="abborrpinn"/><feat att="msd" val="cm"/></WordForm>
       <WordForm><feat att="writtenForm" val="abborrpinn-"/><feat att="msd" val="sms"/></WordForm>
     </LexicalEntry>
@@ -68,6 +69,7 @@ class GameWordlistTests(unittest.TestCase):
         self.assertIn("abbé", allowed)
         self.assertIn("abbén", allowed)
         self.assertNotIn("abborrpinn", allowed)
+        self.assertNotIn("abborrpinnar", allowed)
         self.assertNotIn("abborrpinn-", allowed)
 
     def test_reads_canonical_adjective_artifact(self) -> None:

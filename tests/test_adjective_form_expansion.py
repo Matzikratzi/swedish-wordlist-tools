@@ -33,6 +33,33 @@ class AdjectiveFormExpansionTests(unittest.TestCase):
         )
         self.assertIs(slots, expand_adjective_forms(slots))
 
+    def test_structural_labelled_positive_expands_to_masculine_e(self) -> None:
+        slots = AdjectiveSlots(
+            lemma="abrupt",
+            forms=(
+                AdjectiveForm("abrupt", "common_singular"),
+                AdjectiveForm("abrupt", "neuter_singular"),
+                AdjectiveForm("abrupta", "definite_or_plural"),
+            ),
+            rule="structural_labelled_positive_slots",
+        )
+        expanded = expand_adjective_forms(slots)
+        self.assertEqual(("abrupte",), tuple(
+            form.written_form for form in expanded.forms
+            if form.slot == "masculine_definite"
+        ))
+
+    def test_plural_only_structural_row_does_not_license_masculine_e(self) -> None:
+        slots = AdjectiveSlots(
+            lemma="anhörig",
+            forms=(
+                AdjectiveForm("anhörig", "common_singular"),
+                AdjectiveForm("anhöriga", "definite_or_plural"),
+            ),
+            rule="structural_labelled_positive_slots",
+        )
+        self.assertIs(slots, expand_adjective_forms(slots))
+
     def test_superlative_st_expands_to_definite_and_masculine_forms(self) -> None:
         slots = AdjectiveSlots(
             lemma="liten",

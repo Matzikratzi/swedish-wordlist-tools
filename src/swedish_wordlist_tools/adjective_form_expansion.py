@@ -12,6 +12,7 @@ _MASCULINE_E_RULES = frozenset({
     "positive_with_explicit_comparison",
     "generic_explicit_slots",
     "shared_positive_atoms",
+    "structural_labelled_positive_slots",
 })
 
 
@@ -43,7 +44,8 @@ def expand_adjective_forms(slots: AdjectiveSlots) -> AdjectiveSlots:
     forms = list(slots.forms)
     seen = {(form.written_form, form.slot) for form in forms}
 
-    if slots.rule in _MASCULINE_E_RULES:
+    has_neuter = any(form.slot == "neuter_singular" for form in slots.forms)
+    if slots.rule in _MASCULINE_E_RULES and has_neuter:
         for form in slots.forms:
             if form.slot != "definite_or_plural" or not form.written_form.endswith("a"):
                 continue

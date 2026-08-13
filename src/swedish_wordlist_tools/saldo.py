@@ -18,6 +18,10 @@ SALDO_POS_TO_UPOS = {
     "hd": "DET", "ie": "PART", "pc": "ADJ", "al": "X",
 }
 
+# Citation and compound-building material, not standalone written words.
+# See docs/saldo-msd.md.
+NON_STANDALONE_MSD = frozenset({"c", "ci", "cm", "sms"})
+
 
 @dataclass(frozen=True)
 class SaldoWordForm:

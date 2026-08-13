@@ -9,7 +9,7 @@ from typing import Any, Iterable
 from .artifact_paths import SAOL14_GAMEWORDS
 from .build_final_wordlist import normalise_game_word, rejection_reason
 from .jsonl import read_jsonl
-from .saldo import SaldoAnalysis, read_saldo_analyses
+from .saldo import NON_STANDALONE_MSD, SaldoAnalysis, read_saldo_analyses
 from .saol_surface import clean_saol_word
 from .saol_wordclasses import classes_from_record
 
@@ -52,7 +52,7 @@ def saldo_standalone_index(
         items.extend(
             (form.written_form, str(form.msd))
             for form in analysis.word_forms
-            if str(form.msd).casefold() not in {"ci", "cm", "sms"}
+            if str(form.msd).casefold() not in NON_STANDALONE_MSD
         )
         for raw_form, msd in items:
             word = _playable(raw_form)

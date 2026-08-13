@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .artifact_paths import SAOL14_ADJECTIVE_FORMS
-from .saldo import read_saldo_analyses
+from .saldo import NON_STANDALONE_MSD, read_saldo_analyses
 
 DEFAULT_INPUT = Path("data/processed/saol14-saldo-forms.txt")
 DEFAULT_SALDO = Path("data/raw/saldom.xml")
@@ -29,7 +29,7 @@ def standalone_saldo_forms(path: Path) -> set[str]:
         for analysis in analyses:
             result.update(analysis.lemmas)
             for form in analysis.word_forms:
-                if str(form.msd).casefold() not in {"ci", "cm", "sms"}:
+                if str(form.msd).casefold() not in NON_STANDALONE_MSD:
                     result.add(form.written_form)
     return result
 

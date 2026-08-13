@@ -35,6 +35,7 @@ def analyze(
     category_msd: Counter[tuple[str, str]] = Counter()
     category_notation: Counter[tuple[str, str]] = Counter()
     examples: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    examples_by_upos: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
 
     for row in materialized:
         category = str(row.get("primary_category") or "<tom>")
@@ -47,6 +48,10 @@ def analyze(
             category_notation[(category, notation)] += 1
         if len(examples[category]) < examples_per_group:
             examples[category].append(row)
+        for upos in _values(row, "upos"):
+            key = (category, upos)
+            if len(examples_by_upos[key]) < examples_per_group:
+                examples_by_upos[key].append(row)
 
     return {
         "candidate_count": len(materialized),
@@ -55,6 +60,7 @@ def analyze(
         "category_msd": category_msd,
         "category_notation": category_notation,
         "examples": dict(examples),
+        "examples_by_upos": dict(examples_by_upos),
     }
 
 
@@ -107,9 +113,15 @@ def render(report: dict[str, Any], top: int = 30) -> str:
         lines.extend(_section_counter("Vanligaste SALDO-MSD:", report["category_msd"], category, top))
         lines.append("")
         lines.extend(_section_counter("Vanligaste SAOL-notationer:", report["category_notation"], category, top))
-        lines.extend(["", "Exempel:"])
-        for row in report["examples"].get(category, []):
-            lines.extend(_example_lines(row))
+        upos_values = Counter({
+            upos: count
+            for (group, upos), count in report["category_upos"].items()
+            if group == category
+        })
+        for upos, _upos_count in upos_values.most_common():
+            lines.extend(["", f"Exempel {upos}:"])
+            for row in report["examples_by_upos"].get((category, upos), []):
+                lines.extend(_example_lines(row))
     return "\n".join(lines) + "\n"
 
 
