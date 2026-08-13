@@ -7,15 +7,15 @@ import sys
 from pathlib import Path
 from typing import Callable, Sequence
 
-from .artifact_paths import SAOL14_ADJECTIVE_FORMS, SAOL14_GAMEWORDS
+from .artifact_paths import SAOL14_ADJECTIVE_FORMS
 
 DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
 DEFAULT_ADJECTIVES = SAOL14_ADJECTIVE_FORMS
 DEFAULT_ADJECTIVE_SUMMARY = Path("reports/saol14-adjective-forms-summary.json")
 DEFAULT_INPUT = Path("data/processed/saol14-saldo-forms.txt")
 DEFAULT_SALDO = Path("data/raw/saldom.xml")
-DEFAULT_OUTPUT = SAOL14_GAMEWORDS
-DEFAULT_GAME_REPORT = Path("reports/saol14-game-words.json")
+DEFAULT_OUTPUT = Path("data/processed/legacy-saol14-saldo-filtered-gamewords.txt")
+DEFAULT_GAME_REPORT = Path("reports/legacy-saol14-saldo-filtered-gamewords.json")
 DEFAULT_AUDIT_TEXT = Path("reports/saol14-game-adjective-integration-audit.txt")
 DEFAULT_AUDIT_JSON = Path("reports/saol14-game-adjective-integration-audit.json")
 DEFAULT_ADDED_WORDS = Path("reports/saol14-game-adjective-added-words.txt")
@@ -104,8 +104,8 @@ def summary_lines(report: dict[str, object], args: argparse.Namespace) -> list[s
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Build the canonical adjective artifact, export the game wordlist, and "
-            "fail if the adjective integration audit is not clean"
+            "LEGACY: build the historical SALDO-filtered adjective integration "
+            "artifact. This is not the canonical SAOL14 game-word pipeline."
         )
     )
     parser.add_argument("--saol", type=Path, default=DEFAULT_SAOL)

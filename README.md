@@ -62,6 +62,50 @@ Clean-room-specifikationen är idag tillräckligt frusen för relationsmateriali
 
 ## Viktiga artefakter
 
+### Kanonisk spelordlista
+
+Den officiella spelordlistan byggs reproducerbart med:
+
+```bash
+python -m swedish_wordlist_tools.build_final_wordlist_pipeline
+```
+
+Efter `python -m pip install -e .` finns samma kommando även som
+`saol14-build-final-wordlist`.
+
+Kommandot kör tre avgränsade steg:
+
+1. bygger den gemensamma, proveniensförsedda SAOL14-ordlistan,
+2. normaliserar till NFC och gemener, kräver minst två bokstäver och deduplicerar,
+3. jämför den färdiga listan globalt med `saldom.xml` som en separat audit.
+
+Den kanoniska outputen är:
+
+```text
+data/processed/saol14-gamewords.txt
+```
+
+SALDO läses först efter att filen har skrivits och kan därför varken lägga till,
+ta bort eller godkänna former. Skillnaderna hamnar i:
+
+```text
+reports/saol14-gamewords-vs-saldo.txt
+reports/saol14-gamewords-only-saol14.txt
+reports/saol14-gamewords-only-saldo.txt
+reports/saol14-gamewords-saldo-review-candidates.jsonl
+```
+
+Den fullständiga bygg- och dedupliceringsredovisningen finns i
+`reports/saol14-gamewords-summary.json`. Alla bortfiltrerade SAOL-rader, med
+orsak och proveniens, finns i `reports/saol14-gamewords-rejected.jsonl`. Den
+normaliserade ordlistan med bibehållen proveniens finns i
+`reports/saol14-gamewords.jsonl`.
+
+De äldre kommandona `saol14-game-wordlist-legacy` och
+`saol14-build-game-wordlist-legacy` skapar historiska SALDO-filtrerade
+diagnostikartefakter under `legacy-*`. De är inte en alternativ väg till den
+officiella filen.
+
 Den kanoniska NOUN-generatorn skriver:
 
 ```text

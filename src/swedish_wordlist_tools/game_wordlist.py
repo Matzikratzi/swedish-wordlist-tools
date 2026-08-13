@@ -6,14 +6,14 @@ import unicodedata
 from pathlib import Path
 from typing import Any, Iterable
 
-from .artifact_paths import SAOL14_ADJECTIVE_FORMS, SAOL14_GAMEWORDS
+from .artifact_paths import SAOL14_ADJECTIVE_FORMS
 from .saldo import read_saldo_analyses
 
 DEFAULT_INPUT = Path("data/processed/saol14-saldo-forms.txt")
 DEFAULT_SALDO = Path("data/raw/saldom.xml")
 DEFAULT_ADJECTIVE_FORMS = SAOL14_ADJECTIVE_FORMS
-DEFAULT_OUTPUT = SAOL14_GAMEWORDS
-DEFAULT_REPORT = Path("reports/saol14-game-words.json")
+DEFAULT_OUTPUT = Path("data/processed/legacy-saol14-saldo-filtered-gamewords.txt")
+DEFAULT_REPORT = Path("reports/legacy-saol14-saldo-filtered-gamewords.json")
 
 
 def normalise_game_word(value: str) -> str | None:
@@ -101,7 +101,7 @@ def build_game_wordlist(
     report_path: Path = DEFAULT_REPORT,
     adjective_forms_path: Path = DEFAULT_ADJECTIVE_FORMS,
 ) -> dict[str, object]:
-    """Build the game list while preserving the historic four positional arguments."""
+    """Build the legacy SALDO-filtered list; not the canonical SAOL14 artifact."""
 
     saldo_forms = standalone_saldo_forms(saldo_path)
     adjective_forms = canonical_adjective_forms(adjective_forms_path)
@@ -129,8 +129,8 @@ def build_game_wordlist(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Build a tile-game wordlist from verified SAOL/SALDO forms and the "
-            "canonical SAOL adjective-form artifact"
+            "LEGACY: build a SALDO-filtered diagnostic list. This command does not "
+            "produce the canonical SAOL14 game-word artifact."
         )
     )
     parser.add_argument("input", nargs="?", type=Path, default=DEFAULT_INPUT)
