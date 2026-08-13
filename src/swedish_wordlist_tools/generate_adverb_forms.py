@@ -6,11 +6,11 @@ import re
 from pathlib import Path
 from typing import Any, Iterable
 
-from .compare_sources import _saol_upos
 from .jsonl import read_jsonl
 from .saol_notation import apply_form_operation, parse_form_operation
 from .saol_surface import clean_saol_word
 from .saol_variant_base import prepare_printed_variant_record
+from .saol_wordclasses import classes_from_record, record_for_class
 
 DEFAULT_SOURCE = Path("data/raw/saol14-faksimil.jsonl")
 DEFAULT_JSONL = Path("reports/saol14-adverb-forms.jsonl")
@@ -18,8 +18,8 @@ DEFAULT_SUMMARY = Path("reports/saol14-adverb-forms-summary.json")
 
 _TRUNCATION_LENGTH = 49
 _WORD_RE = re.compile(r"[A-Za-zÅÄÖåäöÉéÜü-]+")
-_OPERATION_TOKEN_RE = re.compile(r"(?<!\S)[+-][^\s,;_]+")
 _EDITORIAL = {"komp", "superl", "el", "som", "anv", "vard", "ibl", "i"}
+_OPERATION_RE = re.compile(r"(?<!\S)[+-][^\s,;_]+")
 
 
 def _value(record: dict[str, Any], key: str) -> str:
@@ -46,10 +46,9 @@ def _add_form(forms: list[dict[str, Any]], seen: set[str], written: str, slot: s
 
 
 def _explicit_words(text: str) -> list[str]:
-    # Operation tokens are notation, not printed word forms.  Remove the whole
-    # token before lexical tokenization; otherwise ``+re`` and ``+st`` would be
-    # seen as the bare words ``re`` and ``st`` after _WORD_RE strips ``+``.
-    lexical_text = _OPERATION_TOKEN_RE.sub(" ", text)
+    # Remove operation tokens as whole units before lexical tokenization; +re
+    # and +st are instructions, not the words "re" and "st".
+    lexical_text = _OPERATION_RE.sub(" ", text)
     words: list[str] = []
     for token in _WORD_RE.findall(lexical_text):
         folded = token.casefold().rstrip(".")
@@ -60,10 +59,11 @@ def _explicit_words(text: str) -> list[str]:
 
 
 def generated_row(record: dict[str, Any]) -> dict[str, Any] | None:
-    if _saol_upos(record) != "ADV":
+    if "ADV" not in classes_from_record(record):
         return None
 
-    prepared = prepare_printed_variant_record(record)
+    class_record = record_for_class(record, "ADV")
+    prepared = prepare_printed_variant_record(class_record)
     lemma = clean_saol_word(prepared.get("normaliserat_ord")) or clean_saol_word(prepared.get("ord"))
     if not lemma:
         return None
@@ -72,9 +72,10 @@ def generated_row(record: dict[str, Any]) -> dict[str, Any] | None:
     seen: set[str] = set()
     _add_form(forms, seen, lemma, "lemma", "")
 
-    # Generic operations, used by the regular +t/+a adverb rows and by
-    # comparative/superlative suffix notation such as +re/+st.
-    for token in _OPERATION_TOKEN_RE.findall(text):
+    # Pure ADV rows may carry comparison notation. Mixed ADJ+ADV rows are
+    # specialized by record_for_class(): their +t/+a belongs to ADJ and the
+    # ADV view has no inflection text.
+    for token in _OPERATION_RE.findall(text):
         operation = parse_form_operation(token)
         if operation is None:
             continue
@@ -83,11 +84,6 @@ def generated_row(record: dict[str, Any]) -> dict[str, Any] | None:
             slot = "comparative_or_superlative" if any(label in text.casefold() for label in ("komp.", "superl.")) else "inflected"
             _add_form(forms, seen, written, slot, token)
 
-    # The remaining non-empty ADV notation consists of explicitly printed
-    # comparison forms (längre längst, bättre bäst, värre värst, etc.).
-    # Editorial prose and operation tokens are removed, but every surviving
-    # word is directly printed evidence in SAOL.  On truncated rows we still
-    # keep only what is visible.
     if text:
         for written in _explicit_words(text):
             if written.casefold() == lemma.casefold():
@@ -110,7 +106,7 @@ def generated_row(record: dict[str, Any]) -> dict[str, Any] | None:
 def build_rows(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for record in records:
-        if _saol_upos(record) != "ADV":
+        if "ADV" not in classes_from_record(record):
             continue
         row = generated_row(record)
         if row is not None:
