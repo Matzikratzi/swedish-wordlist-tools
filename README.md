@@ -101,6 +101,13 @@ reports/saol14-gamewords-only-saldo.txt
 reports/saol14-gamewords-saldo-review-candidates.jsonl
 ```
 
+Gruppera granskningskön efter kategori, ordklass, SALDO-MSD och den faktiska
+SAOL-notationen med:
+
+```bash
+python -m swedish_wordlist_tools.analyze_final_saldo_candidates
+```
+
 Den fullständiga bygg- och dedupliceringsredovisningen finns i
 `reports/saol14-gamewords-summary.json`. Alla bortfiltrerade SAOL-rader, med
 orsak och proveniens, finns i `reports/saol14-gamewords-rejected.jsonl`. Den
