@@ -6,6 +6,31 @@ from swedish_wordlist_tools.generate_verb_forms import generated_row
 
 
 class GenerateVerbFormsTests(unittest.TestCase):
+    def test_expands_safe_compound_second_conjugation_core_forms(self) -> None:
+        row = generated_row(
+            {
+                "normaliserat_ord": "anställa",
+                "text": "-ställde -ställt",
+                "stycke": "an|ställa",
+                "upos": "VERB",
+                "ordkl": "v.",
+            }
+        )
+        self.assertIsNotNone(row)
+        assert row is not None
+        generated = {
+            (form["slot"], form["written_form"], form["detail"])
+            for form in row["forms"]
+        }
+        self.assertIn(
+            ("present", "anställer", "stem_preserving_second_conjugation"),
+            generated,
+        )
+        self.assertIn(
+            ("imperative", "anställ", "stem_preserving_second_conjugation"),
+            generated,
+        )
+
     def test_generates_structured_shared_forms(self) -> None:
         row = generated_row(
             {

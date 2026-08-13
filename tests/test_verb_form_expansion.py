@@ -3,7 +3,10 @@ from __future__ import annotations
 import unittest
 
 from swedish_wordlist_tools.lexeme_slots import LexemeSlots, SlotForm
-from swedish_wordlist_tools.verb_form_expansion import expand_regular_first_conjugation
+from swedish_wordlist_tools.verb_form_expansion import (
+    expand_regular_first_conjugation,
+    expand_stem_preserving_second_conjugation,
+)
 
 
 class VerbFormExpansionTests(unittest.TestCase):
@@ -37,6 +40,59 @@ class VerbFormExpansionTests(unittest.TestCase):
         for notation in ("-de -t", "+de +t, pres. +r", ""):
             slots = LexemeSlots("x", "VERB", notation, ())
             self.assertIs(slots, expand_regular_first_conjugation(slots))
+
+    def test_adds_core_forms_for_stem_preserving_second_conjugation(self) -> None:
+        for lemma, preterite, supine, present, imperative in (
+            ("anställa", "anställde", "anställt", "anställer", "anställ"),
+            ("avläsa", "avläste", "avläst", "avläser", "avläs"),
+        ):
+            with self.subTest(lemma=lemma):
+                slots = LexemeSlots(
+                    lemma=lemma,
+                    upos="VERB",
+                    notation=f"{preterite} {supine}",
+                    forms=(
+                        SlotForm("infinitive", lemma, "lemma"),
+                        SlotForm("preterite", preterite, "source"),
+                        SlotForm("supine", supine, "source"),
+                    ),
+                )
+                expanded = expand_stem_preserving_second_conjugation(slots)
+                self.assertEqual((present,), expanded.forms_for("present"))
+                self.assertEqual((imperative,), expanded.forms_for("imperative"))
+                self.assertEqual(
+                    {"stem_preserving_second_conjugation"},
+                    {form.provenance_detail for form in expanded.forms[3:]},
+                )
+
+    def test_leaves_unsafe_second_conjugation_cases_untouched(self) -> None:
+        cases = (
+            LexemeSlots(
+                "ta",
+                "VERB",
+                "tog tagit",
+                (SlotForm("preterite", "tog", "tog"), SlotForm("supine", "tagit", "tagit")),
+            ),
+            LexemeSlots(
+                "känna",
+                "VERB",
+                "kände känt",
+                (SlotForm("preterite", "kände", "kände"), SlotForm("supine", "känt", "känt")),
+            ),
+            LexemeSlots(
+                "anställa",
+                "VERB",
+                "-ställde -ställt",
+                (
+                    SlotForm("preterite", "anställde", "-ställde"),
+                    SlotForm("supine", "anställt", "-ställt"),
+                ),
+                {"source_truncated": "true"},
+            ),
+        )
+        for slots in cases:
+            with self.subTest(lemma=slots.lemma, metadata=slots.metadata):
+                self.assertIs(slots, expand_stem_preserving_second_conjugation(slots))
 
 
 if __name__ == "__main__":
