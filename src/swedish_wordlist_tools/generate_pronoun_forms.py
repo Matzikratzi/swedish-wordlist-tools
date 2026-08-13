@@ -16,10 +16,11 @@ DEFAULT_SOURCE = Path("data/raw/saol14-faksimil.jsonl")
 DEFAULT_JSONL = Path("reports/saol14-pronoun-forms.jsonl")
 DEFAULT_SUMMARY = Path("reports/saol14-pronoun-forms-summary.json")
 
-# The export repeatedly cuts fields at 50 characters.  We may safely retain
-# forms already printed before that boundary, but must not call the paradigm
-# complete.
-_TRUNCATION_LENGTH = 50
+# The export cuts long fields around the 49/50-character boundary.  Both are
+# observed in real truncated PRON rows (for example jag=49 and den=50).  Forms
+# already printed before that boundary are safe to retain, but the paradigm
+# must not be called complete.
+_TRUNCATION_LENGTH = 49
 _LABELLED_FORM_RE = re.compile(
     r"(?:^|[;,])\s*(?P<label>gen\.|objektsform:|n\.|pl\.|mask\.|best\.)\s*(?P<form>[A-Za-zÅÄÖåäöÉéÜü-]+)",
     re.IGNORECASE,
