@@ -13,6 +13,7 @@ from .jsonl import read_jsonl
 from .saol_adjective_variants import prepare_adjective_variant_records
 from .saol_boundaries import restore_replacement_bar_prefix
 from .saol_source_corrections import apply_saol_source_corrections
+from .saol_variant_base import prepare_printed_variant_record
 
 DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
 DEFAULT_JSONL = Path("reports/saol14-adjective-forms.jsonl")
@@ -20,14 +21,15 @@ DEFAULT_SUMMARY = Path("reports/saol14-adjective-forms-summary.json")
 
 
 def generated_row(record: dict[str, Any]) -> dict[str, Any] | None:
-    corrected = apply_saol_source_corrections(record)
+    prepared = prepare_printed_variant_record(record)
+    corrected = apply_saol_source_corrections(prepared)
     slots = interpret_adjective_row(corrected)
     if slots is None:
         return None
     slots = expand_adjective_forms(slots)
 
     lemma = slots.lemma
-    stycke = _value(record, "stycke")
+    stycke = _value(prepared, "stycke")
     notation = _value(corrected, "text")
     forms = []
     for form in slots.forms:
@@ -75,7 +77,8 @@ def generated_row(record: dict[str, Any]) -> dict[str, Any] | None:
         "rule": slots.rule,
         "variant_evidence": _value(record, "_saol_variant_evidence"),
         "alternative_lemma": _value(record, "_saol_alternative_lemma"),
-        "source_correction_applied": corrected is not record,
+        "variant_base": _value(prepared, "_saol_variant_base"),
+        "source_correction_applied": corrected is not prepared,
         "source_notation": _value(record, "text"),
         "effective_notation": notation,
         "stycke": stycke,
@@ -84,6 +87,7 @@ def generated_row(record: dict[str, Any]) -> dict[str, Any] | None:
         "forms": forms,
         "source_record": {
             "normaliserat_ord": record.get("normaliserat_ord"),
+            "ord": record.get("ord"),
             "homonr": record.get("homonr"),
             "ordkl": record.get("ordkl"),
             "stycke": record.get("stycke"),
@@ -130,25 +134,22 @@ def main() -> None:
         "generated_forms": sum(len(row["forms"]) for row in rows),
         "explicit_hv_variant_records": len(explicit_variant_rows),
         "explicit_hv_variant_lemmas": sorted({row["lemma"] for row in explicit_variant_rows}),
-        "source_corrections_applied": sum(
-            1 for row in rows if row["source_correction_applied"]
-        ),
+        "variant_base_records": sum(1 for row in rows if row.get("variant_base")),
+        "source_corrections_applied": sum(1 for row in rows if row["source_correction_applied"]),
         "artifact": str(args.jsonl),
         "note": (
-            "This is the canonical generated adjective-form artifact. Each form stores "
-            "its provenance, source SAOL token, and operation base. Validators must "
-            "consume it and must not run the adjective interpreter again."
+            "This is the canonical generated adjective-form artifact. Full word-class "
+            "variant rows are inflected from their printed ord spelling when it differs "
+            "from normaliserat_ord."
         ),
     }
     write_jsonl(args.jsonl, rows)
     args.summary.parent.mkdir(parents=True, exist_ok=True)
-    args.summary.write_text(
-        json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    args.summary.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"Genererade adjektivposter: {summary['generated_records']}")
     print(f"Genererade former: {summary['generated_forms']}")
     print(f"Explicita (hv)-variantposter: {summary['explicit_hv_variant_records']}")
+    print(f"Variantbasposter: {summary['variant_base_records']}")
     if summary["explicit_hv_variant_lemmas"]:
         print("Explicita (hv)-variantlemma: " + ", ".join(summary["explicit_hv_variant_lemmas"]))
     print(f"JSONL: {args.jsonl}")
