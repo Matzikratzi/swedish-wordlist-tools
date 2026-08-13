@@ -52,6 +52,60 @@ def _generated_classified_row(record: dict[str, Any], upos: str) -> dict[str, An
     return generated_real_shared_row(class_record)
 
 
+def _add_classified_form(
+    classified: dict[str, dict[str, Any]],
+    written: str,
+    upos: str,
+    source_id: str,
+    provenance: str,
+) -> None:
+    if (
+        not written
+        or " " in written
+        or written.startswith("-")
+        or written.endswith("-")
+    ):
+        return
+    key = _key(written)
+    row = classified.setdefault(key, {
+        "form": written,
+        "classification": "CLASSIFIED",
+        "upos": set(),
+        "source_record_ids": set(),
+        "provenance": set(),
+    })
+    row["upos"].add(upos)
+    if source_id:
+        row["source_record_ids"].add(source_id)
+    if provenance:
+        row["provenance"].add(provenance)
+
+
+def _integrate_routed_x_forms(
+    materialized: list[dict[str, Any]],
+    classified: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Add structurally routed X/(hv) forms as classified production forms.
+
+    generate_x_rows has already established the target word class from the
+    normalized article, explicit homonym reference, printed-form evidence, or
+    an unambiguous sibling class.  Once that routing is proven, the generated
+    form must not fall back to UNKNOWN merely because its spelling differs from
+    the target article's lemma.
+    """
+    x_rows, _summary = generate_x_rows(materialized)
+    for row in x_rows:
+        upos = str(row.get("target_upos") or "")
+        if upos not in _SHARED_CLASSES:
+            continue
+        source_id = str(row.get("source_record_id") or "")
+        for form in row.get("forms", []):
+            written = clean_saol_word(form.get("written_form"))
+            provenance = str(form.get("provenance") or "x_routed_shared")
+            _add_classified_form(classified, written, upos, source_id, provenance)
+    return x_rows
+
+
 def _real_text_word_index(records: Iterable[dict[str, Any]]) -> set[str]:
     words: set[str] = set()
     for record in records:
@@ -66,6 +120,7 @@ def _real_text_word_index(records: Iterable[dict[str, Any]]) -> set[str]:
 def _hv_fallback_rows(
     materialized: list[dict[str, Any]],
     classified: dict[str, dict[str, Any]],
+    x_rows: list[dict[str, Any]] | None = None,
 ) -> tuple[dict[str, dict[str, Any]], int, int, int]:
     """Find hv fallbacks while reusing the already generated production forms."""
 
@@ -80,7 +135,8 @@ def _hv_fallback_rows(
             explicit_real.add(_key(printed))
 
     mentioned_real = _real_text_word_index(materialized)
-    x_rows, _summary = generate_x_rows(materialized)
+    if x_rows is None:
+        x_rows, _summary = generate_x_rows(materialized)
     routed_by_source: dict[str, set[str]] = defaultdict(set)
     for row in x_rows:
         source_id = str(row.get("source_record_id") or "")
@@ -109,7 +165,7 @@ def _hv_fallback_rows(
                 continue
             seen_candidates.add(key)
 
-            # Real-row evidence means this is not an hv-only fallback.
+            # Real-row or proven routed evidence means this is not an hv-only fallback.
             if key in classified or key in explicit_real:
                 continue
             if " " not in written and key in mentioned_real:
@@ -135,7 +191,7 @@ def _hv_fallback_rows(
             }
 
     # Historically, UNKNOWN candidates were computed before PRON/NUM/ADV were
-    # added to production.  Preserve that summary meaning without rerunning the
+    # added to production. Preserve that summary meaning without rerunning the
     # expensive old audit: only overlaps supplied exclusively by the newer
     # classes count as suppressed UNKNOWN candidates.
     overlap_keys: set[str] = set()
@@ -185,25 +241,13 @@ def build_rows(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any]],
             source_id = _record_id(record)
             for form in generated.get("forms", []):
                 written = clean_saol_word(form.get("written_form"))
-                if not written or " " in written or written.startswith("-") or written.endswith("-"):
-                    continue
-                key = _key(written)
-                row = classified.setdefault(key, {
-                    "form": written,
-                    "classification": "CLASSIFIED",
-                    "upos": set(),
-                    "source_record_ids": set(),
-                    "provenance": set(),
-                })
-                row["upos"].add(upos)
-                if source_id:
-                    row["source_record_ids"].add(source_id)
                 provenance = str(form.get("provenance") or form.get("source_stage") or form.get("kind") or "")
-                if provenance:
-                    row["provenance"].add(provenance)
+                _add_classified_form(classified, written, upos, source_id, provenance)
+
+    x_rows = _integrate_routed_x_forms(materialized, classified)
 
     unknown_rows, unknown_candidates, unknown_suppressed, context_omitted = _hv_fallback_rows(
-        materialized, classified
+        materialized, classified, x_rows
     )
 
     rows: list[dict[str, Any]] = []
