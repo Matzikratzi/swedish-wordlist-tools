@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections import Counter
+import re
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable
 
-from .analyze_x_routing import _is_hv
-from .classify_hv_only import CONTEXT_ONLY, UNKNOWN_WORD, analyze as classify_hv_only
+from .analyze_x_routing import _is_hv, _primary_text
+from .classify_hv_only import CONTEXT_ONLY, UNKNOWN_WORD, classify_case
 from .compare_sources import _is_affix_entry
 from .generate_adverb_forms import generated_row as generated_adverb_row
 from .generate_numeral_forms import generated_row as generated_numeral_row
 from .generate_pronoun_forms import generated_row as generated_pronoun_row
 from .generate_real_shared_forms import generated_real_shared_row
+from .generate_x_routed_shared_forms import generate_rows as generate_x_rows
 from .jsonl import read_jsonl
 from .saol_surface import clean_saol_word
 from .saol_wordclasses import classes_from_record, record_for_class
@@ -23,6 +25,7 @@ DEFAULT_JSONL = Path("reports/saol14-shared-wordlist.jsonl")
 DEFAULT_SUMMARY = Path("reports/saol14-shared-wordlist-summary.json")
 
 _SHARED_CLASSES = frozenset({"NOUN", "ADJ", "VERB", "PRON", "NUM", "ADV"})
+_TEXT_WORD_RE = re.compile(r"[0-9A-Za-zÅÄÖåäöÉéÜü-]+")
 
 
 def _key(value: str) -> str:
@@ -31,6 +34,10 @@ def _key(value: str) -> str:
 
 def _lemma(record: dict[str, Any]) -> str:
     return clean_saol_word(record.get("ord")) or clean_saol_word(record.get("normaliserat_ord"))
+
+
+def _record_id(record: dict[str, Any]) -> str:
+    return str(record.get("id") or record.get("subnr") or record.get("urspr_lopnr") or "")
 
 
 def _generated_classified_row(record: dict[str, Any], upos: str) -> dict[str, Any] | None:
@@ -42,6 +49,137 @@ def _generated_classified_row(record: dict[str, Any], upos: str) -> dict[str, An
     if upos == "ADV":
         return generated_adverb_row(class_record)
     return generated_real_shared_row(class_record)
+
+
+def _real_text_word_index(records: Iterable[dict[str, Any]]) -> set[str]:
+    """Index single printed words mentioned in real-row text once.
+
+    UNKNOWN fallback candidates are single words.  Tokenizing all real text once
+    avoids the old hv audit's repeated full-corpus regex scans.
+    """
+
+    words: set[str] = set()
+    for record in records:
+        if _is_hv(record):
+            continue
+        text = _primary_text(record)
+        if not text:
+            continue
+        words.update(token.casefold() for token in _TEXT_WORD_RE.findall(text))
+    return words
+
+
+def _hv_fallback_rows(
+    materialized: list[dict[str, Any]],
+    classified: dict[str, dict[str, Any]],
+) -> tuple[dict[str, dict[str, Any]], int, int, int]:
+    """Find remaining hv-only words without regenerating all real paradigms.
+
+    ``classified`` already contains every form generated from the production
+    classes, so rerunning ``audit_ignore_hv`` here would duplicate the expensive
+    NOUN/ADJ/VERB generation.  We only need to generate the small X-routed side,
+    then compare its forms with classified forms, explicit real rows and a
+    one-time text-word index.
+    """
+
+    explicit_real: set[str] = set()
+    hv_records: list[dict[str, Any]] = []
+    hv_by_id: dict[str, dict[str, Any]] = {}
+    for record in materialized:
+        if _is_hv(record):
+            hv_records.append(record)
+            source_id = _record_id(record)
+            if source_id:
+                hv_by_id[source_id] = record
+            continue
+        printed = clean_saol_word(record.get("ord")) or clean_saol_word(record.get("stycke"))
+        if printed:
+            explicit_real.add(_key(printed))
+
+    mentioned_real = _real_text_word_index(materialized)
+    x_rows, _summary = generate_x_rows(materialized)
+    routed_by_source: dict[str, set[str]] = defaultdict(set)
+    for row in x_rows:
+        source_id = str(row.get("source_record_id") or "")
+        for form in row.get("forms", []):
+            written = clean_saol_word(form.get("written_form"))
+            if written:
+                routed_by_source[source_id].add(written)
+
+    unknown_candidates = 0
+    unknown_suppressed = 0
+    context_omitted = 0
+    unknown_rows: dict[str, dict[str, Any]] = {}
+    seen_candidates: set[str] = set()
+
+    for record in hv_records:
+        source_id = _record_id(record)
+        forms = set(routed_by_source.get(source_id, set()))
+        printed = clean_saol_word(record.get("ord")) or clean_saol_word(record.get("stycke"))
+        if printed:
+            forms.add(printed)
+
+        for written in forms:
+            if not written or " " in written or written.startswith("-") or written.endswith("-"):
+                continue
+            key = _key(written)
+            if key in seen_candidates:
+                continue
+            seen_candidates.add(key)
+
+            # Any real-row evidence means this is not an UNKNOWN fallback.
+            if key in classified or key in explicit_real or key in mentioned_real:
+                continue
+
+            classification, _reason = classify_case({
+                "form": written,
+                "hv_lemma": clean_saol_word(record.get("normaliserat_ord")),
+            })
+            if classification == CONTEXT_ONLY:
+                context_omitted += 1
+                continue
+            if classification != UNKNOWN_WORD:
+                continue
+
+            unknown_candidates += 1
+            if key in classified:
+                unknown_suppressed += 1
+                continue
+            unknown_rows[key] = {
+                "form": written,
+                "classification": "UNKNOWN_WORD",
+                "upos": {"X"},
+                "source_record_ids": {source_id} - {""},
+                "provenance": {"hv_only_fallback"},
+            }
+
+    # Keep the historical summary meaning: candidates include UNKNOWN forms that
+    # are later suppressed by a classified production form.  With the fast path
+    # those are already visible in classified, so count the overlapping routed
+    # hv forms separately.
+    overlap_keys: set[str] = set()
+    for record in hv_records:
+        source_id = _record_id(record)
+        forms = set(routed_by_source.get(source_id, set()))
+        printed = clean_saol_word(record.get("ord")) or clean_saol_word(record.get("stycke"))
+        if printed:
+            forms.add(printed)
+        for written in forms:
+            if not written or " " in written or written.startswith("-") or written.endswith("-"):
+                continue
+            key = _key(written)
+            if key not in classified:
+                continue
+            classification, _reason = classify_case({
+                "form": written,
+                "hv_lemma": clean_saol_word(record.get("normaliserat_ord")),
+            })
+            if classification == UNKNOWN_WORD:
+                overlap_keys.add(key)
+    unknown_suppressed = len(overlap_keys)
+    unknown_candidates += unknown_suppressed
+
+    return unknown_rows, unknown_candidates, unknown_suppressed, context_omitted
 
 
 def build_rows(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -68,7 +206,7 @@ def build_rows(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any]],
             generated = _generated_classified_row(record, upos)
             if generated is None:
                 continue
-            source_id = str(record.get("id") or record.get("subnr") or record.get("urspr_lopnr") or "")
+            source_id = _record_id(record)
             for form in generated.get("forms", []):
                 written = clean_saol_word(form.get("written_form"))
                 if not written or " " in written or written.startswith("-") or written.endswith("-"):
@@ -88,35 +226,9 @@ def build_rows(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any]],
                 if provenance:
                     row["provenance"].add(provenance)
 
-    hv_report = classify_hv_only(materialized)
-    unknown_candidates = 0
-    unknown_suppressed = 0
-    context_omitted = 0
-    unknown_rows: dict[str, dict[str, Any]] = {}
-    for row in hv_report["rows"]:
-        classification = row["classification"]
-        written = clean_saol_word(row.get("form"))
-        if not written or " " in written or written.startswith("-") or written.endswith("-"):
-            if classification == CONTEXT_ONLY:
-                context_omitted += 1
-            continue
-        key = _key(written)
-        if classification == CONTEXT_ONLY:
-            context_omitted += 1
-            continue
-        if classification != UNKNOWN_WORD:
-            continue
-        unknown_candidates += 1
-        if key in classified:
-            unknown_suppressed += 1
-            continue
-        unknown_rows.setdefault(key, {
-            "form": written,
-            "classification": "UNKNOWN_WORD",
-            "upos": {"X"},
-            "source_record_ids": {str(row.get("hv_record_id") or "")} - {""},
-            "provenance": {"hv_only_fallback"},
-        })
+    unknown_rows, unknown_candidates, unknown_suppressed, context_omitted = _hv_fallback_rows(
+        materialized, classified
+    )
 
     rows: list[dict[str, Any]] = []
     for row in (*classified.values(), *unknown_rows.values()):
