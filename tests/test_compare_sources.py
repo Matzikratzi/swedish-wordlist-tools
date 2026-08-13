@@ -1,0 +1,159 @@
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import json
+import unittest
+
+from swedish_wordlist_tools.compare_sources import compare_sources, read_saldo
+
+
+SALDO_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<LexicalResource xmlns="urn:test">
+  <Lexicon>
+    <LexicalEntry id="abakus..nn.1">
+      <Lemma><FormRepresentation><feat att="writtenForm" val="abakus"/></FormRepresentation></Lemma>
+      <WordForm><FormRepresentation><feat att="writtenForm" val="abakusen"/></FormRepresentation></WordForm>
+      <WordForm><FormRepresentation><feat att="writtenForm" val="abakuser"/></FormRepresentation></WordForm>
+    </LexicalEntry>
+    <LexicalEntry id="fil..nn.1">
+      <Lemma><FormRepresentation><feat att="writtenForm" val="fil"/></FormRepresentation></Lemma>
+      <WordForm><FormRepresentation><feat att="writtenForm" val="filen"/></FormRepresentation></WordForm>
+    </LexicalEntry>
+    <LexicalEntry id="fil..vb.1">
+      <Lemma><FormRepresentation><feat att="writtenForm" val="fil"/></FormRepresentation></Lemma>
+      <WordForm><FormRepresentation><feat att="writtenForm" val="filar"/></FormRepresentation></WordForm>
+      <WordForm><FormRepresentation><feat att="writtenForm" val="filade"/></FormRepresentation></WordForm>
+    </LexicalEntry>
+    <LexicalEntry id="ack..in.1">
+      <Lemma><FormRepresentation><feat att="writtenForm" val="ack"/></FormRepresentation></Lemma>
+    </LexicalEntry>
+    <LexicalEntry id="afrika..pm.1">
+      <Lemma><FormRepresentation><feat att="writtenForm" val="Afrika"/></FormRepresentation></Lemma>
+      <WordForm><FormRepresentation><feat att="writtenForm" val="Afrikas"/></FormRepresentation></WordForm>
+    </LexicalEntry>
+    <LexicalEntry id="adressera_sig">
+      <Lemma><FormRepresentation><feat att="writtenForm" val="adressera sig"/></FormRepresentation></Lemma>
+      <WordForm><FormRepresentation><feat att="writtenForm" val="adressera"/></FormRepresentation></WordForm>
+      <WordForm><FormRepresentation><feat att="writtenForm" val="adresserade"/></FormRepresentation></WordForm>
+    </LexicalEntry>
+    <LexicalEntry id="akne..nn.1">
+      <Lemma><FormRepresentation><feat att="writtenForm" val="akne"/></FormRepresentation></Lemma>
+      <WordForm><FormRepresentation><feat att="writtenForm" val="aknen"/></FormRepresentation></WordForm>
+    </LexicalEntry>
+    <LexicalEntry id="kvist..nn.1">
+      <Lemma><FormRepresentation><feat att="writtenForm" val="kvist"/></FormRepresentation></Lemma>
+      <WordForm><FormRepresentation><feat att="writtenForm" val="kvisten"/></FormRepresentation></WordForm>
+    </LexicalEntry>
+    <LexicalEntry id="oklar..nn.1">
+      <Lemma><FormRepresentation><feat att="writtenForm" val="oklar"/></FormRepresentation></Lemma>
+      <WordForm><FormRepresentation><feat att="writtenForm" val="oklaren"/></FormRepresentation></WordForm>
+    </LexicalEntry>
+    <LexicalEntry id="saldo-only..nn.1">
+      <Lemma><FormRepresentation><feat att="writtenForm" val="saldoord"/></FormRepresentation></Lemma>
+      <WordForm><FormRepresentation><feat att="writtenForm" val="saldoordet"/></FormRepresentation></WordForm>
+    </LexicalEntry>
+  </Lexicon>
+</LexicalResource>
+"""
+
+SAOL_JSONL = """{"id":"1","normaliserat_ord":"abakus","text":"+en +er","upos":"NOUN","ordkl":"subst."}
+{"id":"2","normaliserat_ord":"fil","text":"+ar +ade","upos":"NOUN","ordkl":"verb","homonr":"2"}
+{"id":"3","normaliserat_ord":"ack","text":"(null)","upos":"X","ordkl":"interj."}
+{"id":"4","normaliserat_ord":"Afrika","text":"(null)","upos":"X","ordkl":"namn"}
+{"id":"5","normaliserat_ord":"adressera sig","text":"+de +t","upos":"VERB","ordkl":"rxv."}
+{"id":"6","normaliserat_ord":"akne","text":"+n","upos":"X","ordkl":"(hv)"}
+{"id":"7","normaliserat_ord":"kvisten","text":"","upos":"NOUN","ordkl":"s."}
+{"id":"8","normaliserat_ord":"oklar","text":"","upos":"ADJ","ordkl":"adj."}
+{"id":"9","normaliserat_ord":"saolord","text":"+et; pl. +","upos":"NOUN","ordkl":"s."}
+{"id":"10","normaliserat_ord":"-aktig","text":"+t +a","upos":"ADJ","ordkl":"adjektiviskt slutled"}
+{"id":"11","normaliserat_ord":"förled-","text":"","upos":"X","ordkl":"i sms."}
+"""
+
+
+class CompareSourcesTests(unittest.TestCase):
+    def test_reads_namespaced_saldo_analyses_and_word_classes(self) -> None:
+        with TemporaryDirectory() as directory:
+            saldo_path = Path(directory) / "saldo.xml"
+            saldo_path.write_text(SALDO_XML, encoding="utf-8")
+            saldo = read_saldo(saldo_path)
+
+        self.assertEqual(len(saldo["fil"]), 2)
+        by_pos = {analysis["upos"]: analysis for analysis in saldo["fil"]}
+        self.assertEqual(by_pos["NOUN"]["forms"], {"fil", "filen"})
+        self.assertEqual(by_pos["VERB"]["forms"], {"fil", "filar", "filade"})
+        self.assertEqual(saldo["adressera sig"][0]["upos"], "")
+
+    def test_builds_target_with_safe_fallbacks_and_filters_affixes(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            saol_path = root / "saol.jsonl"
+            saldo_path = root / "saldo.xml"
+            target = root / "target.txt"
+            saol_only = root / "saol-only.jsonl"
+            ambiguous = root / "ambiguous.jsonl"
+            saldo_only = root / "saldo-only.jsonl"
+            report_path = root / "report.json"
+            saol_path.write_text(SAOL_JSONL, encoding="utf-8")
+            saldo_path.write_text(SALDO_XML, encoding="utf-8")
+
+            report = compare_sources(
+                saol_path,
+                saldo_path,
+                target,
+                saol_only,
+                ambiguous,
+                saldo_only,
+                report_path,
+            )
+
+            target_forms = target.read_text(encoding="utf-8").splitlines()
+            saol_rows = [json.loads(line) for line in saol_only.read_text(encoding="utf-8").splitlines()]
+            ambiguous_rows = [
+                json.loads(line) for line in ambiguous.read_text(encoding="utf-8").splitlines()
+            ]
+            saldo_rows = [json.loads(line) for line in saldo_only.read_text(encoding="utf-8").splitlines()]
+
+        self.assertEqual(
+            target_forms,
+            [
+                "abakus",
+                "abakusen",
+                "abakuser",
+                "ack",
+                "adressera",
+                "adressera sig",
+                "adresserade",
+                "Afrika",
+                "Afrikas",
+                "akne",
+                "aknen",
+                "fil",
+                "filade",
+                "filar",
+                "kvist",
+                "kvisten",
+            ],
+        )
+        self.assertNotIn("filen", target_forms)
+        self.assertNotIn("-aktig", target_forms)
+        self.assertNotIn("förled-", target_forms)
+        self.assertEqual(saol_rows[0]["lemma"], "saolord")
+        self.assertEqual(saol_rows[0]["reason"], "no_saldo_lemma_or_unique_form")
+        self.assertEqual(ambiguous_rows[0]["lemma"], "oklar")
+        self.assertEqual(ambiguous_rows[0]["saldo_word_classes"], ["NOUN"])
+        self.assertEqual(saldo_rows[0]["lemmas"], ["saldoord"])
+        self.assertNotIn("kvist", [row["lemmas"][0] for row in saldo_rows])
+        self.assertEqual(report["saol_source_records"], 11)
+        self.assertEqual(report["saol_filtered_affix_records"], 2)
+        self.assertEqual(report["saol_compared_records"], 9)
+        self.assertEqual(report["saol_matched_records"], 7)
+        self.assertEqual(report["saol_unknown_pos_matched_records"], 1)
+        self.assertEqual(report["saol_inferred_pos_matched_records"], 1)
+        self.assertEqual(report["saol_form_matched_records"], 1)
+        self.assertEqual(report["saol_only_records"], 1)
+        self.assertEqual(report["ambiguous_records"], 1)
+        self.assertEqual(report["saldo_only_lemmas"], 1)
+        self.assertEqual(report["target_unique_forms"], 16)
+
+
+if __name__ == "__main__":
+    unittest.main()

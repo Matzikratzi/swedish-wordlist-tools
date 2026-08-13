@@ -1,0 +1,240 @@
+from __future__ import annotations
+
+import re
+from dataclasses import replace
+from typing import Any
+
+from .inflect import GeneratedEntry, GeneratedWordForm
+from .msd import parse_msd
+from .noun_source_errors import noun_lemma_only_source_error
+from .noun_truncated_shared import interpret_truncated_noun_row
+from .saol_notation import FormOperationKind, parse_form_operation
+from .saol_row_interpreter import InterpretedRow, compound_parts, interpret_noun_row
+from .saol_source_policy import is_truncated_inflection_source
+
+_CI = parse_msd("ci")
+_SG_INDEF_GEN = parse_msd("sg indef gen")
+_SG_DEF_NOM = parse_msd("sg def nom")
+_SG_DEF_GEN = parse_msd("sg def gen")
+_PL_INDEF_NOM = parse_msd("pl indef nom")
+_PL_INDEF_GEN = parse_msd("pl indef gen")
+_PL_DEF_NOM = parse_msd("pl def nom")
+_PL_DEF_GEN = parse_msd("pl def gen")
+
+_SLOT_MSD = {
+    "lemma": _CI,
+    "sg_def": _SG_DEF_NOM,
+    "pl_indef": _PL_INDEF_NOM,
+    "pl_def": _PL_DEF_NOM,
+}
+
+_EXPLICIT_PLURAL_USE_RE = re.compile(
+    r"\bpl\.\s*(?:anv\.|används:)\s*",
+    re.IGNORECASE,
+)
+_EXPLICIT_DEFINITE_PLURAL_REPLACEMENT_RE = re.compile(
+    r"\bbest\.\s*pl\.\s*-\s*[^\s;,_]+",
+    re.IGNORECASE,
+)
+
+
+def _genitive(form: str) -> str:
+    return form if form.casefold().endswith(("s", "x", "z")) else form + "s"
+
+
+def _entry_from_interpreted_row(row: InterpretedRow) -> GeneratedEntry:
+    forms: list[GeneratedWordForm] = []
+    seen: set[tuple[str, str]] = set()
+    for key_form in row.key_forms:
+        msd = _SLOT_MSD.get(key_form.slot)
+        if msd is None:
+            continue
+        marker = (key_form.written_form, str(msd))
+        if marker in seen:
+            continue
+        seen.add(marker)
+        kind = "lemma" if key_form.slot == "lemma" else "interpreted_slot"
+        forms.append(GeneratedWordForm(key_form.written_form, msd, kind))
+    return GeneratedEntry(
+        lemma=row.lemma,
+        pattern=row.pattern,
+        word_forms=tuple(forms),
+        pattern_group="interpreted noun slots",
+    )
+
+
+def _lemma_only_entry(record: dict[str, Any], reason: str) -> GeneratedEntry | None:
+    lemma = str(record.get("normaliserat_ord", "")).strip()
+    if not lemma:
+        return None
+    return GeneratedEntry(
+        lemma=lemma,
+        pattern=f"(source error: {reason})",
+        word_forms=(GeneratedWordForm(lemma, _CI, "lemma"),),
+        pattern_group="source-error lemma only",
+    )
+
+
+def _merge_forms(
+    entry: GeneratedEntry,
+    additions: tuple[GeneratedWordForm, ...],
+) -> GeneratedEntry:
+    seen: set[tuple[str, str | None]] = set()
+    word_forms: list[GeneratedWordForm] = []
+    for word_form in (*entry.word_forms, *additions):
+        marker = (
+            word_form.written_form,
+            str(word_form.msd) if word_form.msd is not None else None,
+        )
+        if word_form.written_form and marker not in seen:
+            seen.add(marker)
+            word_forms.append(word_form)
+    return replace(entry, word_forms=tuple(word_forms))
+
+
+def _forms_for_msd(entry: GeneratedEntry, wanted: str) -> tuple[str, ...]:
+    wanted_msd = parse_msd(wanted).casefold()
+    return tuple(
+        form.written_form
+        for form in entry.word_forms
+        if form.msd is not None and form.msd.casefold() == wanted_msd
+    )
+
+
+def _derive_definite_plural(
+    lemma: str,
+    singular_definites: tuple[str, ...],
+    plural: str,
+) -> str | None:
+    folded_plural = plural.casefold()
+    folded_lemma = lemma.casefold()
+    folded_singulars = tuple(form.casefold() for form in singular_definites)
+    neuter = any(form.endswith("t") for form in folded_singulars)
+
+    if folded_plural == folded_lemma:
+        if neuter:
+            return lemma + ("n" if folded_lemma.endswith("e") else "en")
+        if any(form == folded_lemma + "en" for form in folded_singulars):
+            return plural + "en"
+        if any(form == folded_lemma + "n" for form in folded_singulars):
+            return plural + "na"
+        return None
+
+    if folded_plural.endswith("r"):
+        return plural + "na"
+    if folded_plural.endswith("en"):
+        return plural + "a"
+    if folded_plural.endswith("n") and neuter:
+        return plural + "a"
+    if folded_plural.endswith(("a", "i")):
+        return plural
+    if folded_plural.endswith(("gäss", "löss", "möss", "män")):
+        return plural + "en"
+    if folded_plural.endswith("s"):
+        return None
+    return None
+
+
+def _complete_from_slots(
+    entry: GeneratedEntry,
+    *,
+    derive_missing_plural_definite: bool = True,
+) -> GeneratedEntry:
+    lemmas = _forms_for_msd(entry, "ci") or (entry.lemma,)
+    primary_lemma = lemmas[0]
+    singular_definites = _forms_for_msd(entry, "sg def nom")
+    plural_indefinites = _forms_for_msd(entry, "pl indef nom")
+    explicit_plural_definites = _forms_for_msd(entry, "pl def nom")
+
+    additions: list[GeneratedWordForm] = []
+    for lemma in lemmas:
+        additions.extend(
+            (
+                GeneratedWordForm(lemma, _CI, "lemma"),
+                GeneratedWordForm(_genitive(lemma), _SG_INDEF_GEN, "derived_genitive"),
+            )
+        )
+
+    for singular in singular_definites:
+        additions.extend(
+            (
+                GeneratedWordForm(singular, _SG_DEF_NOM, "interpreted_slot"),
+                GeneratedWordForm(_genitive(singular), _SG_DEF_GEN, "derived_genitive"),
+            )
+        )
+
+    for plural in plural_indefinites:
+        additions.extend(
+            (
+                GeneratedWordForm(plural, _PL_INDEF_NOM, "interpreted_slot"),
+                GeneratedWordForm(_genitive(plural), _PL_INDEF_GEN, "derived_genitive"),
+            )
+        )
+
+    plural_definites = list(explicit_plural_definites)
+    if derive_missing_plural_definite and not plural_definites and singular_definites:
+        for plural in plural_indefinites:
+            derived = _derive_definite_plural(primary_lemma, singular_definites, plural)
+            if derived is not None:
+                plural_definites.append(derived)
+
+    for plural_definite in plural_definites:
+        additions.extend(
+            (
+                GeneratedWordForm(plural_definite, _PL_DEF_NOM, "derived_definite_plural"),
+                GeneratedWordForm(_genitive(plural_definite), _PL_DEF_GEN, "derived_genitive"),
+            )
+        )
+
+    return _merge_forms(entry, tuple(additions))
+
+
+def _has_unmarked_replacement(row: InterpretedRow) -> bool:
+    return any(
+        operation is not None and operation.kind is FormOperationKind.REPLACE_TAIL
+        for form in row.key_forms
+        if form.slot != "lemma"
+        for operation in (parse_form_operation(form.source),)
+    )
+
+
+def _replacement_is_explicit_plural_use(record: dict[str, Any]) -> bool:
+    text = str(record.get("text", ""))
+    return (
+        _EXPLICIT_PLURAL_USE_RE.search(text) is not None
+        or _EXPLICIT_DEFINITE_PLURAL_REPLACEMENT_RE.search(text) is not None
+    )
+
+
+def _has_usable_compound_bar(record: dict[str, Any], lemma: str) -> bool:
+    return compound_parts(record, lemma) is not None
+
+
+def complete_noun_entry(
+    record: dict[str, Any],
+    entry: GeneratedEntry | None,
+) -> GeneratedEntry | None:
+    if str(record.get("upos", "")).upper() != "NOUN":
+        return entry
+
+    source_error = noun_lemma_only_source_error(record)
+    if source_error is not None:
+        return _lemma_only_entry(record, source_error)
+
+    truncated = is_truncated_inflection_source(record)
+    row = interpret_truncated_noun_row(record) if truncated else interpret_noun_row(record)
+    if row is None:
+        return None
+
+    if (
+        _has_unmarked_replacement(row)
+        and not _has_usable_compound_bar(record, row.lemma)
+        and not _replacement_is_explicit_plural_use(record)
+    ):
+        return None
+
+    interpreted = _entry_from_interpreted_row(row)
+    return _complete_from_slots(
+        interpreted,
+        derive_missing_plural_definite=not truncated,
+    )

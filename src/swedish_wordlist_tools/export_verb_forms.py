@@ -1,0 +1,210 @@
+from __future__ import annotations
+
+import argparse
+import json
+from collections import Counter
+from pathlib import Path
+from typing import Any, Iterable
+
+from .analyze_imperatives import (
+    _is_imperative_label,
+    explicit_saol_imperatives,
+    generate_imperative,
+    read_saldo_form_labels,
+)
+from .compare_sources import read_saldo
+from .jsonl import read_jsonl
+from .saldo_verb_fallback import add_saldo_attested_forms
+from .verb_compound_heads import borrow_compound_verb_slots, build_simple_verb_paradigm_index
+from .verb_shared_lexeme import interpret_shared_playable_verb_slots
+from .verb_slot_schema import add_explicit_verb_row_slots
+
+DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
+DEFAULT_SALDO = Path("data/raw/saldom.xml")
+DEFAULT_OUTPUT = Path("data/processed/saol14-verb-forms.txt")
+DEFAULT_REPORT = Path("reports/saol14-verb-forms.json")
+
+# These are ordinary playable forms explicitly attested by SAOL's own (hv)
+# reference records but absent from the compact verb row. Keep this deliberately
+# small and reviewed rather than importing all reference spellings.
+_REVIEWED_HV_VERB_FORMS = {("spörja", "spörs")}
+
+
+def _normalise_word(value: str) -> str | None:
+    word = value.strip().casefold()
+    if not word or len(word) < 2 or not word.isalpha():
+        return None
+    return word
+
+
+def _plain_hv_word(value: object) -> str:
+    import html
+    import re
+
+    text = html.unescape(str(value or ""))
+    text = re.sub(r"<sup\b[^>]*>.*?</sup>", "", text, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<[^>]+>", "", text)
+    return text.replace("·", "").strip().casefold()
+
+
+def _reviewed_hv_forms(all_records: list[dict[str, Any]]) -> set[str]:
+    result: set[str] = set()
+    for record in all_records:
+        if str(record.get("ordkl") or "").strip().casefold() != "(hv)":
+            continue
+        lemma = _plain_hv_word(record.get("normaliserat_ord"))
+        form = _plain_hv_word(record.get("ord")) or _plain_hv_word(record.get("stycke"))
+        if (lemma, form) in _REVIEWED_HV_VERB_FORMS:
+            result.add(form)
+    return result
+
+
+def build_verb_forms(
+    saol_path: Path = DEFAULT_SAOL,
+    *,
+    include_saldo: bool = False,
+    include_validated_imperatives: bool = False,
+    saldo_path: Path = DEFAULT_SALDO,
+) -> tuple[list[str], dict[str, Any]]:
+    all_records = list(read_jsonl(saol_path))
+    records = [
+        record
+        for record in all_records
+        if str(record.get("upos", "")).upper() == "VERB"
+    ]
+    interpreted = {
+        id(record): (
+            add_explicit_verb_row_slots(record, slots)
+            if (slots := interpret_shared_playable_verb_slots(record)) is not None
+            else None
+        )
+        for record in records
+    }
+    head_index = build_simple_verb_paradigm_index(records, interpreted)
+    saldo = read_saldo(saldo_path) if include_saldo else {}
+    saldo_labels = (
+        read_saldo_form_labels(saldo_path)[0]
+        if include_validated_imperatives
+        else {}
+    )
+
+    words: set[str] = set()
+    provenance_words: dict[str, set[str]] = {}
+    record_counts: Counter[str] = Counter()
+
+    def add_word(value: str, provenance: str) -> None:
+        word = _normalise_word(value)
+        if word is None:
+            return
+        words.add(word)
+        provenance_words.setdefault(provenance, set()).add(word)
+
+    for record in records:
+        slots = interpreted[id(record)]
+        slots = borrow_compound_verb_slots(record, head_index, slots)
+        if slots is None:
+            continue
+        if include_saldo:
+            slots = add_saldo_attested_forms(
+                slots,
+                saldo.get(slots.lemma.casefold(), ()),
+            )
+
+        record_counts["interpreted"] += 1
+        for form in slots.forms:
+            add_word(form.written_form, form.provenance)
+
+        for imperative in explicit_saol_imperatives(record):
+            add_word(imperative, "explicit_saol_imperative")
+
+        if include_validated_imperatives:
+            lemma = str(record.get("normaliserat_ord") or "").strip()
+            candidate, _rule = generate_imperative(lemma, slots)
+            if candidate:
+                labels = saldo_labels.get(lemma.casefold(), {}).get(candidate.casefold(), set())
+                if any(_is_imperative_label(label) for label in labels):
+                    add_word(candidate, "saldo_validated_imperative")
+
+    for form in _reviewed_hv_forms(all_records):
+        add_word(form, "reviewed_hv_inflection")
+
+    ordered = sorted(words)
+    source = "SAOL14+SALDO" if include_saldo else "SAOL14"
+    report: dict[str, Any] = {
+        "source": source,
+        "row_interpreter": "shared_saol",
+        "include_saldo": include_saldo,
+        "include_validated_imperatives": include_validated_imperatives,
+        "imperative_validation_source": "SALDO" if include_validated_imperatives else None,
+        "verb_records": len(records),
+        "interpreted_records": record_counts["interpreted"],
+        "unique_playable_forms": len(ordered),
+        "unique_forms_by_provenance": {
+            source_name: len(values)
+            for source_name, values in sorted(provenance_words.items())
+        },
+    }
+    if include_saldo:
+        saol_words = set().union(
+            *(values for source_name, values in provenance_words.items() if source_name != "saldo")
+        ) if any(source_name != "saldo" for source_name in provenance_words) else set()
+        saldo_words = provenance_words.get("saldo", set())
+        report["saldo_only_unique_forms"] = len(saldo_words - saol_words)
+        report["saldo_forms_already_in_saol"] = len(saldo_words & saol_words)
+    return ordered, report
+
+
+def write_export(
+    words: Iterable[str],
+    report: dict[str, Any],
+    output_path: Path,
+    report_path: Path,
+) -> None:
+    values = list(words)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n".join(values) + ("\n" if values else ""), encoding="utf-8")
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Export playable verb forms from the shared SAOL14 interpreter"
+    )
+    parser.add_argument("saol", nargs="?", type=Path, default=DEFAULT_SAOL)
+    parser.add_argument("--include-saldo", action="store_true")
+    parser.add_argument(
+        "--include-validated-imperatives",
+        action="store_true",
+        help="include SAOL-derived imperative candidates confirmed as imperative by SALDO MSD",
+    )
+    parser.add_argument("--saldo", type=Path, default=DEFAULT_SALDO)
+    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
+    args = parser.parse_args()
+
+    words, report = build_verb_forms(
+        args.saol,
+        include_saldo=args.include_saldo,
+        include_validated_imperatives=args.include_validated_imperatives,
+        saldo_path=args.saldo,
+    )
+    write_export(words, report, args.output, args.report)
+    print(f"Källa: {report['source']}")
+    print(f"Radtolkare: {report['row_interpreter']}")
+    print(f"Verbposter: {report['verb_records']}")
+    print(f"Tolkade poster: {report['interpreted_records']}")
+    print(f"Unika spelbara verbformer: {report['unique_playable_forms']}")
+    if args.include_validated_imperatives:
+        print("Regelgenererade imperativ: endast SALDO-MSD-validerade")
+    if args.include_saldo:
+        print(f"Endast från SALDO: {report['saldo_only_unique_forms']}")
+    print(f"Utdata: {args.output}")
+    print(f"Rapport: {args.report}")
+
+
+if __name__ == "__main__":
+    main()
