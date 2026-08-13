@@ -57,6 +57,22 @@ class BuildSharedWordlistTests(unittest.TestCase):
         self.assertEqual(1, summary["unknown_suppressed_by_classified_duplicate"])
         self.assertIn("NUM", summary["classes"])
 
+    def test_mixed_adv_adj_keeps_adv_lemma_but_inflects_only_adjective_role(self) -> None:
+        records = [
+            {"id":"a1","normaliserat_ord":"delvis","ord":"delvis","stycke":"del·vis","ordkl":"adv. och adj. <i>+t +a</i>","text":"+t +a","upos":"X"},
+        ]
+        rows, _summary = build_rows(records)
+        forms = {row["form"]: row for row in rows}
+        self.assertEqual(["ADJ", "ADV"], forms["delvis"]["upos"])
+        self.assertEqual(["ADJ"], forms["delvist"]["upos"])
+        self.assertEqual(["ADJ"], forms["delvisa"]["upos"])
+
+    def test_bound_adverbial_suffix_is_not_a_playable_word(self) -> None:
+        rows, _summary = build_rows([
+            {"id":"x1","normaliserat_ord":"-ledes","ord":"-ledes","stycke":"-led·es","ordkl":"adverbiellt slutled","text":None,"upos":"X"},
+        ])
+        self.assertEqual([], rows)
+
 
 if __name__ == "__main__":
     unittest.main()
