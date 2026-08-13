@@ -18,6 +18,7 @@ DEFAULT_SUMMARY = Path("reports/saol14-adverb-forms-summary.json")
 
 _TRUNCATION_LENGTH = 49
 _WORD_RE = re.compile(r"[A-Za-zÅÄÖåäöÉéÜü-]+")
+_OPERATION_TOKEN_RE = re.compile(r"(?<!\S)[+-][^\s,;_]+")
 _EDITORIAL = {"komp", "superl", "el", "som", "anv", "vard", "ibl", "i"}
 
 
@@ -45,12 +46,14 @@ def _add_form(forms: list[dict[str, Any]], seen: set[str], written: str, slot: s
 
 
 def _explicit_words(text: str) -> list[str]:
+    # Operation tokens are notation, not printed word forms.  Remove the whole
+    # token before lexical tokenization; otherwise ``+re`` and ``+st`` would be
+    # seen as the bare words ``re`` and ``st`` after _WORD_RE strips ``+``.
+    lexical_text = _OPERATION_TOKEN_RE.sub(" ", text)
     words: list[str] = []
-    for token in _WORD_RE.findall(text):
+    for token in _WORD_RE.findall(lexical_text):
         folded = token.casefold().rstrip(".")
         if folded in _EDITORIAL:
-            continue
-        if token.startswith(("+", "-")):
             continue
         words.append(token)
     return words
@@ -71,7 +74,7 @@ def generated_row(record: dict[str, Any]) -> dict[str, Any] | None:
 
     # Generic operations, used by the regular +t/+a adverb rows and by
     # comparative/superlative suffix notation such as +re/+st.
-    for token in re.findall(r"(?<!\S)[+-][^\s,;_]+", text):
+    for token in _OPERATION_TOKEN_RE.findall(text):
         operation = parse_form_operation(token)
         if operation is None:
             continue
@@ -82,8 +85,9 @@ def generated_row(record: dict[str, Any]) -> dict[str, Any] | None:
 
     # The remaining non-empty ADV notation consists of explicitly printed
     # comparison forms (längre längst, bättre bäst, värre värst, etc.).
-    # Editorial prose is removed, but every surviving word is directly printed
-    # evidence in SAOL.  On truncated rows we still keep only what is visible.
+    # Editorial prose and operation tokens are removed, but every surviving
+    # word is directly printed evidence in SAOL.  On truncated rows we still
+    # keep only what is visible.
     if text:
         for written in _explicit_words(text):
             if written.casefold() == lemma.casefold():
