@@ -20,21 +20,15 @@ DEFAULT_SOURCE = Path("data/raw/saol14-faksimil.jsonl")
 DEFAULT_TEXT = Path("reports/saol14-ignore-hv-audit.txt")
 DEFAULT_JSON = Path("reports/saol14-ignore-hv-audit.json")
 
+_TEXT_TOKEN_RE = re.compile(r"[0-9A-Za-zÅÄÖåäöÉéÜü]+(?:-[0-9A-Za-zÅÄÖåäöÉéÜü]+)*")
+
 
 def _key(value: str) -> str:
     return value.casefold().strip()
 
 
 def _real_generation_record(record: dict[str, Any]) -> dict[str, Any]:
-    """Use a real row's printed spelling as inflection base when it is a variant.
-
-    SAOL can export a full word-class row whose ``normaliserat_ord`` points to
-    the canonical spelling while ``ord`` contains the spelling that the row's
-    own notation actually belongs to.  The homonr=0 annexion row is the
-    canonical example: normaliserat_ord=annektion, ord=annexion, text=+en +er.
-    For this audit we must therefore test what that row itself can generate,
-    rather than silently re-inflecting the normalized spelling.
-    """
+    """Use a real row's printed spelling as inflection base when it is a variant."""
 
     printed = clean_saol_word(record.get("ord"))
     normalized = clean_saol_word(record.get("normaliserat_ord"))
@@ -66,10 +60,38 @@ def _generated_real_forms(record: dict[str, Any]) -> set[str]:
     }
 
 
-def _text_mentions(text: str, form: str) -> bool:
-    if not text or not form:
-        return False
-    return re.search(rf"(?<!\w){re.escape(form)}(?!\w)", text, re.IGNORECASE) is not None
+def _build_text_index(
+    real_texts: list[tuple[dict[str, Any], str]],
+    candidate_forms: set[str],
+) -> dict[str, list[dict[str, Any]]]:
+    """Index text mentions once instead of rescanning every text for every hv form.
+
+    Most hv forms are single lexical words.  Those can be matched exactly by
+    token and indexed in one pass over the exported text.  The very small
+    remainder containing whitespace is checked separately with the original
+    boundary regex so behaviour is preserved without an O(forms*texts) scan.
+    """
+
+    single = {form for form in candidate_forms if form and not re.search(r"\s", form)}
+    multi = {form for form in candidate_forms if form and re.search(r"\s", form)}
+    index: dict[str, list[dict[str, Any]]] = defaultdict(list)
+
+    for record, text in real_texts:
+        seen_tokens = {_key(match.group(0)) for match in _TEXT_TOKEN_RE.finditer(text)}
+        for token in seen_tokens & single:
+            index[token].append(record)
+
+    if multi:
+        compiled = {
+            form: re.compile(rf"(?<!\w){re.escape(form)}(?!\w)", re.IGNORECASE)
+            for form in multi
+        }
+        for record, text in real_texts:
+            for form, pattern in compiled.items():
+                if pattern.search(text):
+                    index[form].append(record)
+
+    return dict(index)
 
 
 def analyze(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
@@ -97,6 +119,22 @@ def analyze(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
         source_id = str(row.get("source_record_id") or "")
         routed_by_source[source_id].append(row)
 
+    # Collect every form that the later audit loop can ask about, then build
+    # one text index for exactly those forms.
+    candidate_forms: set[str] = set()
+    for record in hv_records:
+        source_id = str(record.get("id") or record.get("subnr") or record.get("urspr_lopnr") or "")
+        for row in routed_by_source.get(source_id, []):
+            for form in row.get("forms", []):
+                written = clean_saol_word(form.get("written_form"))
+                if written:
+                    candidate_forms.add(_key(written))
+        printed = clean_saol_word(record.get("ord")) or clean_saol_word(record.get("stycke"))
+        if printed:
+            candidate_forms.add(_key(printed))
+
+    text_mentions = _build_text_index(real_texts, candidate_forms)
+
     cases: list[dict[str, Any]] = []
     counts: Counter[str] = Counter()
     unique_hv_forms: set[str] = set()
@@ -119,7 +157,7 @@ def analyze(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
             unique_hv_forms.add(key)
             explicit_sources = explicit_real.get(key, [])
             generated_sources = generated_real.get(key, [])
-            text_sources = [r for r, text in real_texts if _text_mentions(text, form)]
+            text_sources = text_mentions.get(key, [])
             if explicit_sources:
                 status = "explicit_real_row"
                 sources = explicit_sources
