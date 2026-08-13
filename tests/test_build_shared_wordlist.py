@@ -34,10 +34,6 @@ class BuildSharedWordlistTests(unittest.TestCase):
         self.assertEqual("CLASSIFIED", forms["annexioner"]["classification"])
 
     def test_pronoun_generated_form_suppresses_hv_unknown(self) -> None:
-        # ``alla`` is generated structurally from +a and is not literally
-        # present in the PRON row's text.  Without PRON generation the (hv)
-        # row is therefore a genuine UNKNOWN fallback candidate; with PRON
-        # generation the classified form must take precedence.
         records = [
             {"id":"p1","normaliserat_ord":"all","ord":"all","stycke":"all","ordkl":"pron.","text":"+t +a","upos":"PRON"},
             {"id":"x1","normaliserat_ord":"all","ord":"alla","stycke":"alla","ordkl":"(hv)","text":None,"upos":"X"},
@@ -48,6 +44,18 @@ class BuildSharedWordlistTests(unittest.TestCase):
         self.assertEqual(["PRON"], forms["alla"]["upos"])
         self.assertEqual(1, summary["unknown_suppressed_by_classified_duplicate"])
         self.assertIn("PRON", summary["classes"])
+
+    def test_numeral_generated_form_suppresses_hv_unknown(self) -> None:
+        records = [
+            {"id":"m1","normaliserat_ord":"femtioen","ord":"femtioen","stycke":"femtioen","ordkl":"räkn.","text":"vid: uppräkning: ibl. femti(o)ett","upos":"NUM"},
+            {"id":"x1","normaliserat_ord":"femtioen","ord":"femtioett","stycke":"femtioett","ordkl":"(hv)","text":None,"upos":"X"},
+        ]
+        rows, summary = build_rows(records)
+        forms = {row["form"]: row for row in rows}
+        self.assertEqual("CLASSIFIED", forms["femtioett"]["classification"])
+        self.assertEqual(["NUM"], forms["femtioett"]["upos"])
+        self.assertEqual(1, summary["unknown_suppressed_by_classified_duplicate"])
+        self.assertIn("NUM", summary["classes"])
 
 
 if __name__ == "__main__":
