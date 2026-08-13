@@ -73,6 +73,29 @@ class BuildSharedWordlistTests(unittest.TestCase):
         ])
         self.assertEqual([], rows)
 
+    def test_lemma_only_classes_add_only_the_printed_word(self) -> None:
+        records = [
+            {"id":"p1","normaliserat_ord":"bakom","ord":"bak|om","stycke":"bak|om","ordkl":"prep.","text":None,"upos":"ADP"},
+            {"id":"i1","normaliserat_ord":"adjö","ord":"adjö","stycke":"adjö","ordkl":"interj.","text":None,"upos":"INTJ"},
+            {"id":"n1","normaliserat_ord":"Afrika","ord":"Afrika","stycke":"Afrika","ordkl":"namn","text":None,"upos":"PROPN"},
+        ]
+        rows, summary = build_rows(records)
+        forms = {row["form"]: row for row in rows}
+        self.assertEqual(["ADP"], forms["bakom"]["upos"])
+        self.assertEqual(["INTJ"], forms["adjö"]["upos"])
+        self.assertEqual(["PROPN"], forms["Afrika"]["upos"])
+        self.assertEqual({"ADP", "INTJ", "PROPN"}, set(summary["classes"]) & {"ADP", "INTJ", "PROPN"})
+
+    def test_mixed_adp_sconj_keeps_both_roles_and_sms_entry_is_omitted(self) -> None:
+        records = [
+            {"id":"m1","normaliserat_ord":"alltsedan","ord":"allt|sed·an","stycke":"allt|sed·an","ordkl":"prep. och subj.","text":None,"upos":"X"},
+            {"id":"x1","normaliserat_ord":"super","ord":"super","stycke":"super","ordkl":"i sms.","text":None,"upos":"X"},
+        ]
+        rows, _summary = build_rows(records)
+        forms = {row["form"]: row for row in rows}
+        self.assertEqual(["ADP", "SCONJ"], forms["alltsedan"]["upos"])
+        self.assertNotIn("super", forms)
+
 
 if __name__ == "__main__":
     unittest.main()
