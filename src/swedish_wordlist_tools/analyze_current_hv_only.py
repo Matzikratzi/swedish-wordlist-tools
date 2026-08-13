@@ -6,53 +6,38 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable
 
-from .analyze_x_routing import _is_hv
+from .build_shared_wordlist import build_rows
 from .classify_hv_only import analyze as classify_hv_only
-from .generate_adverb_forms import generated_row as generated_adverb_row
-from .generate_numeral_forms import generated_row as generated_numeral_row
-from .generate_pronoun_forms import generated_row as generated_pronoun_row
 from .jsonl import read_jsonl
 from .saol_surface import clean_saol_word
-from .saol_wordclasses import classes_from_record, record_for_class
 
 DEFAULT_SOURCE = Path("data/raw/saol14-faksimil.jsonl")
 DEFAULT_TEXT = Path("reports/saol14-current-hv-only.txt")
 DEFAULT_JSON = Path("reports/saol14-current-hv-only.json")
-_EXTRA_CLASSES = frozenset({"PRON", "NUM", "ADV"})
 
 
 def _key(value: Any) -> str:
     return clean_saol_word(value).casefold().strip()
 
 
-def _extra_shared_forms(records: Iterable[dict[str, Any]]) -> dict[str, set[str]]:
+def _current_shared_forms(records: Iterable[dict[str, Any]]) -> dict[str, set[str]]:
+    """Return every form classified by the production shared-wordlist builder."""
+
     forms: dict[str, set[str]] = defaultdict(set)
-    for record in records:
-        if _is_hv(record):
+    rows, _summary = build_rows(records)
+    for row in rows:
+        if row.get("classification") != "CLASSIFIED":
             continue
-        for upos in classes_from_record(record):
-            if upos not in _EXTRA_CLASSES:
-                continue
-            class_record = record_for_class(record, upos)
-            if upos == "PRON":
-                row = generated_pronoun_row(class_record)
-            elif upos == "NUM":
-                row = generated_numeral_row(class_record)
-            else:
-                row = generated_adverb_row(class_record)
-            if row is None:
-                continue
-            for form in row.get("forms", []):
-                written = clean_saol_word(form.get("written_form"))
-                if written:
-                    forms[_key(written)].add(upos)
+        written = clean_saol_word(row.get("form"))
+        if written:
+            forms[_key(written)].update(str(upos) for upos in row.get("upos", []))
     return forms
 
 
 def analyze(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
     materialized = [dict(record) for record in records]
     historical = classify_hv_only(materialized)
-    extra_forms = _extra_shared_forms(materialized)
+    current_forms = _current_shared_forms(materialized)
 
     recovered: list[dict[str, Any]] = []
     remaining: list[dict[str, Any]] = []
@@ -61,7 +46,7 @@ def analyze(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
 
     for row in historical["rows"]:
         key = _key(row.get("form"))
-        recovered_by = extra_forms.get(key, set())
+        recovered_by = current_forms.get(key, set())
         if recovered_by:
             recovered.append({
                 "form": row.get("form"),
@@ -79,6 +64,8 @@ def analyze(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
     remaining.sort(key=lambda row: (str(row.get("classification")), str(row.get("form")).casefold()))
     return {
         "historical_hv_only": len(historical["rows"]),
+        "recovered_by_current_shared": len(recovered),
+        # Compatibility for callers of the earlier PRON/NUM/ADV-only audit.
         "recovered_by_current_extra_shared": len(recovered),
         "recovered_by_class": dict(sorted(class_counts.items())),
         "current_hv_only": len(remaining),
@@ -92,12 +79,12 @@ def render_text(report: dict[str, Any]) -> str:
     lines = [
         "SAOL14: hv-only jämfört med nuvarande shared-generatorer",
         "",
-        "Den äldre hv-auditen verifierar NOUN/ADJ/VERB. Här jämförs dess restmängd",
-        "också mot dagens PRON/NUM/ADV-generatorer. Formen är verkligt hv-only först",
-        "om ingen av dessa generatorer återfinner den.",
+        "Den äldre hv-auditens restmängd jämförs här direkt mot de former som",
+        "dagens produktionsbuilder klassificerar. Formen är verkligt hv-only först",
+        "om den inte återfinns som CLASSIFIED i den färdiga ordlistan.",
         "",
         f"Historiskt hv-only: {report['historical_hv_only']}",
-        f"Återfunna av PRON/NUM/ADV: {report['recovered_by_current_extra_shared']}",
+        f"Återfunna av nuvarande shared-builder: {report['recovered_by_current_shared']}",
         f"Verkligt hv-only nu: {report['current_hv_only']}",
         "Återfunna per klass:",
     ]
@@ -107,7 +94,7 @@ def render_text(report: dict[str, Any]) -> str:
     for gap, count in report["remaining_gap_hypotheses"].items():
         lines.append(f"  {count:4d}  {gap}")
 
-    lines.extend(["", "=" * 78, "ÅTERFUNNA AV NUVARANDE SHARED"])
+    lines.extend(["", "=" * 78, "ÅTERFUNNA AV NUVARANDE SHARED-BUILDER"])
     for row in report["recovered"]:
         lines.append(
             f"  {row['form']!r} <- hv {row['hv_lemma']} | {','.join(row['recovered_by'])}"
@@ -134,7 +121,7 @@ def main() -> None:
     args.text.write_text(render_text(report), encoding="utf-8")
     args.json.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"Historiskt hv-only: {report['historical_hv_only']}")
-    print(f"Återfunna av PRON/NUM/ADV: {report['recovered_by_current_extra_shared']}")
+    print(f"Återfunna av nuvarande shared-builder: {report['recovered_by_current_shared']}")
     print(f"Verkligt hv-only nu: {report['current_hv_only']}")
     print(f"Text: {args.text}")
     print(f"JSON: {args.json}")
