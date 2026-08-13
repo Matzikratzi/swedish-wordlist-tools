@@ -25,6 +25,7 @@ DEFAULT_JSONL = Path("reports/saol14-shared-wordlist.jsonl")
 DEFAULT_SUMMARY = Path("reports/saol14-shared-wordlist-summary.json")
 
 _SHARED_CLASSES = frozenset({"NOUN", "ADJ", "VERB", "PRON", "NUM", "ADV"})
+_OLD_HV_AUDIT_CLASSES = frozenset({"NOUN", "ADJ", "VERB"})
 _TEXT_WORD_RE = re.compile(r"[0-9A-Za-zÅÄÖåäöÉéÜü-]+")
 
 
@@ -52,20 +53,13 @@ def _generated_classified_row(record: dict[str, Any], upos: str) -> dict[str, An
 
 
 def _real_text_word_index(records: Iterable[dict[str, Any]]) -> set[str]:
-    """Index single printed words mentioned in real-row text once.
-
-    UNKNOWN fallback candidates are single words.  Tokenizing all real text once
-    avoids the old hv audit's repeated full-corpus regex scans.
-    """
-
     words: set[str] = set()
     for record in records:
         if _is_hv(record):
             continue
         text = _primary_text(record)
-        if not text:
-            continue
-        words.update(token.casefold() for token in _TEXT_WORD_RE.findall(text))
+        if text:
+            words.update(token.casefold() for token in _TEXT_WORD_RE.findall(text))
     return words
 
 
@@ -73,24 +67,13 @@ def _hv_fallback_rows(
     materialized: list[dict[str, Any]],
     classified: dict[str, dict[str, Any]],
 ) -> tuple[dict[str, dict[str, Any]], int, int, int]:
-    """Find remaining hv-only words without regenerating all real paradigms.
-
-    ``classified`` already contains every form generated from the production
-    classes, so rerunning ``audit_ignore_hv`` here would duplicate the expensive
-    NOUN/ADJ/VERB generation.  We only need to generate the small X-routed side,
-    then compare its forms with classified forms, explicit real rows and a
-    one-time text-word index.
-    """
+    """Find hv fallbacks while reusing the already generated production forms."""
 
     explicit_real: set[str] = set()
     hv_records: list[dict[str, Any]] = []
-    hv_by_id: dict[str, dict[str, Any]] = {}
     for record in materialized:
         if _is_hv(record):
             hv_records.append(record)
-            source_id = _record_id(record)
-            if source_id:
-                hv_by_id[source_id] = record
             continue
         printed = clean_saol_word(record.get("ord")) or clean_saol_word(record.get("stycke"))
         if printed:
@@ -107,7 +90,6 @@ def _hv_fallback_rows(
                 routed_by_source[source_id].add(written)
 
     unknown_candidates = 0
-    unknown_suppressed = 0
     context_omitted = 0
     unknown_rows: dict[str, dict[str, Any]] = {}
     seen_candidates: set[str] = set()
@@ -120,15 +102,17 @@ def _hv_fallback_rows(
             forms.add(printed)
 
         for written in forms:
-            if not written or " " in written or written.startswith("-") or written.endswith("-"):
+            if not written or written.startswith("-") or written.endswith("-"):
                 continue
             key = _key(written)
             if key in seen_candidates:
                 continue
             seen_candidates.add(key)
 
-            # Any real-row evidence means this is not an UNKNOWN fallback.
-            if key in classified or key in explicit_real or key in mentioned_real:
+            # Real-row evidence means this is not an hv-only fallback.
+            if key in classified or key in explicit_real:
+                continue
+            if " " not in written and key in mentioned_real:
                 continue
 
             classification, _reason = classify_case({
@@ -138,13 +122,10 @@ def _hv_fallback_rows(
             if classification == CONTEXT_ONLY:
                 context_omitted += 1
                 continue
-            if classification != UNKNOWN_WORD:
+            if classification != UNKNOWN_WORD or " " in written:
                 continue
 
             unknown_candidates += 1
-            if key in classified:
-                unknown_suppressed += 1
-                continue
             unknown_rows[key] = {
                 "form": written,
                 "classification": "UNKNOWN_WORD",
@@ -153,10 +134,10 @@ def _hv_fallback_rows(
                 "provenance": {"hv_only_fallback"},
             }
 
-    # Keep the historical summary meaning: candidates include UNKNOWN forms that
-    # are later suppressed by a classified production form.  With the fast path
-    # those are already visible in classified, so count the overlapping routed
-    # hv forms separately.
+    # Historically, UNKNOWN candidates were computed before PRON/NUM/ADV were
+    # added to production.  Preserve that summary meaning without rerunning the
+    # expensive old audit: only overlaps supplied exclusively by the newer
+    # classes count as suppressed UNKNOWN candidates.
     overlap_keys: set[str] = set()
     for record in hv_records:
         source_id = _record_id(record)
@@ -168,7 +149,10 @@ def _hv_fallback_rows(
             if not written or " " in written or written.startswith("-") or written.endswith("-"):
                 continue
             key = _key(written)
-            if key not in classified:
+            classified_row = classified.get(key)
+            if classified_row is None or key in explicit_real or key in mentioned_real:
+                continue
+            if set(classified_row["upos"]) & _OLD_HV_AUDIT_CLASSES:
                 continue
             classification, _reason = classify_case({
                 "form": written,
@@ -176,21 +160,13 @@ def _hv_fallback_rows(
             })
             if classification == UNKNOWN_WORD:
                 overlap_keys.add(key)
+
     unknown_suppressed = len(overlap_keys)
     unknown_candidates += unknown_suppressed
-
     return unknown_rows, unknown_candidates, unknown_suppressed, context_omitted
 
 
 def build_rows(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Build the current production word set from verified shared classes.
-
-    Mixed SAOL rows may contribute more than one word class for the printed
-    lemma. Class-specific views ensure that notation is consumed only by the
-    role it belongs to. Bound forms/affixes are excluded because the target is
-    a list of complete playable words.
-    """
-
     materialized = [dict(record) for record in records]
     classified: dict[str, dict[str, Any]] = {}
 
@@ -257,12 +233,10 @@ def build_rows(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any]],
 def write_outputs(rows: list[dict[str, Any]], summary: dict[str, Any], words_path: Path, jsonl_path: Path, summary_path: Path) -> None:
     words_path.parent.mkdir(parents=True, exist_ok=True)
     words_path.write_text("\n".join(str(row["form"]) for row in rows) + "\n", encoding="utf-8")
-
     jsonl_path.parent.mkdir(parents=True, exist_ok=True)
     with jsonl_path.open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
-
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
