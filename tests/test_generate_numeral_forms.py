@@ -16,7 +16,7 @@ class GenerateNumeralFormsTests(unittest.TestCase):
 
     def test_parenthetical_o_is_expanded(self) -> None:
         row = generated_row({"normaliserat_ord":"femtioen","ord":"femtioen","upos":"NUM","text":"vid: uppräkning: ibl. femti(o)ett"})
-        self.assertEqual({"femtioen","femtioett"}, {form["written_form"] for form in row["forms"]})
+        self.assertEqual({"femtioen","femtiett","femtioett"}, {form["written_form"] for form in row["forms"]})
 
     def test_null_text_is_lemma_only(self) -> None:
         row = generated_row({"normaliserat_ord":"fem","ord":"fem","upos":"NUM","text":"(null)"})
