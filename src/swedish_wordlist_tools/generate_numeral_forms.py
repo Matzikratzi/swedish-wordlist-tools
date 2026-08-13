@@ -8,6 +8,7 @@ from typing import Any, Iterable
 
 from .compare_sources import _saol_upos
 from .jsonl import read_jsonl
+from .saol_notation import expand_optional_form_token
 from .saol_surface import clean_saol_word
 from .saol_variant_base import prepare_printed_variant_record
 
@@ -24,18 +25,6 @@ def _value(record: dict[str, Any], key: str) -> str:
     if value is None or str(value).strip().casefold() in {"", "(null)", "null"}:
         return ""
     return str(value).strip()
-
-
-def _expand_parenthetical_o(form: str) -> str:
-    """Expand SAOL's optional-o notation to the explicitly intended full form.
-
-    Numeral rows such as ``femti(o)ett`` and ``tretti(o)förste`` describe the
-    written alternatives that are already represented by the corresponding
-    -en/-första lemma.  For the additional form contributed by this notation,
-    the parenthetical ``(o)`` is included: ``femtioett``, ``trettioförste``.
-    """
-
-    return form.replace("(o)", "o")
 
 
 def generated_row(record: dict[str, Any]) -> dict[str, Any] | None:
@@ -68,13 +57,15 @@ def generated_row(record: dict[str, Any]) -> dict[str, Any] | None:
             candidate = match.group(1).strip()
             slot = "counting_variant"
         elif text and not any(ch in text for ch in ";,:+") and " " not in text:
-            # Compact rows such as ``halvtannat`` are just one explicit form.
             candidate = text
             slot = "explicit_form"
 
     if candidate:
-        written = clean_saol_word(_expand_parenthetical_o(candidate))
-        if written and " " not in written and written.casefold() not in seen:
+        for variant in expand_optional_form_token(candidate):
+            written = clean_saol_word(variant)
+            if not written or " " in written or written.casefold() in seen:
+                continue
+            seen.add(written.casefold())
             forms.append({
                 "written_form": written,
                 "slot": slot,
