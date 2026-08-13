@@ -33,15 +33,19 @@ class BuildSharedWordlistTests(unittest.TestCase):
         self.assertEqual("CLASSIFIED", forms["annexionen"]["classification"])
         self.assertEqual("CLASSIFIED", forms["annexioner"]["classification"])
 
-    def test_pronoun_form_suppresses_hv_unknown(self) -> None:
+    def test_pronoun_generated_form_suppresses_hv_unknown(self) -> None:
+        # ``alla`` is generated structurally from +a and is not literally
+        # present in the PRON row's text.  Without PRON generation the (hv)
+        # row is therefore a genuine UNKNOWN fallback candidate; with PRON
+        # generation the classified form must take precedence.
         records = [
-            {"id":"p1","normaliserat_ord":"jag","ord":"jag","stycke":"jag","ordkl":"pron.","text":"sing. objektsform: mig uttalat: och: också: vard.","upos":"PRON"},
-            {"id":"x1","normaliserat_ord":"jag","ord":"mig","stycke":"mig","ordkl":"(hv)","text":None,"upos":"X"},
+            {"id":"p1","normaliserat_ord":"all","ord":"all","stycke":"all","ordkl":"pron.","text":"+t +a","upos":"PRON"},
+            {"id":"x1","normaliserat_ord":"all","ord":"alla","stycke":"alla","ordkl":"(hv)","text":None,"upos":"X"},
         ]
         rows, summary = build_rows(records)
         forms = {row["form"]: row for row in rows}
-        self.assertEqual("CLASSIFIED", forms["mig"]["classification"])
-        self.assertEqual(["PRON"], forms["mig"]["upos"])
+        self.assertEqual("CLASSIFIED", forms["alla"]["classification"])
+        self.assertEqual(["PRON"], forms["alla"]["upos"])
         self.assertEqual(1, summary["unknown_suppressed_by_classified_duplicate"])
         self.assertIn("PRON", summary["classes"])
 
