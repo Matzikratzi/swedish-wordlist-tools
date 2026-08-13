@@ -97,5 +97,21 @@ class BuildSharedWordlistTests(unittest.TestCase):
         self.assertNotIn("super", forms)
 
 
+    def test_articles_and_infinitive_marker_keep_explicit_classification(self) -> None:
+        records = [
+            {"id":"d1","normaliserat_ord":"den","ord":"den","stycke":"den","ordkl":"best. artikel","text":"n. det; pl. de, vard. dom [dåm>]","upos":"X"},
+            {"id":"e1","normaliserat_ord":"en","ord":"en","stycke":"en","ordkl":"obest. artikel","text":"n. ett","upos":"X"},
+            {"id":"h1","normaliserat_ord":"hin","ord":"hin","stycke":"hin","ordkl":"best. artikel","text":None,"upos":"X"},
+            {"id":"a1","normaliserat_ord":"att","ord":"att","stycke":"att","ordkl":"infinitivmärke","text":None,"upos":"X"},
+        ]
+        rows, summary = build_rows(records)
+        forms = {row["form"]: row for row in rows}
+        for form in ("den", "det", "de", "dom", "en", "ett", "hin"):
+            self.assertEqual(["DET"], forms[form]["upos"])
+        self.assertEqual(["PART"], forms["att"]["upos"])
+        self.assertNotIn("dåm", forms)
+        self.assertEqual({"DET", "PART"}, set(summary["classes"]) & {"DET", "PART"})
+
+
 if __name__ == "__main__":
     unittest.main()
