@@ -11,6 +11,7 @@ from .analyze_x_routing import _is_hv, _primary_text
 from .classify_hv_only import CONTEXT_ONLY, UNKNOWN_WORD, classify_case
 from .compare_sources import _is_affix_entry
 from .generate_adverb_forms import generated_row as generated_adverb_row
+from .generate_function_word_forms import generated_row as generated_function_word_row
 from .generate_numeral_forms import generated_row as generated_numeral_row
 from .generate_pronoun_forms import generated_row as generated_pronoun_row
 from .generate_real_shared_forms import generated_real_shared_row
@@ -25,7 +26,11 @@ DEFAULT_JSONL = Path("reports/saol14-shared-wordlist.jsonl")
 DEFAULT_SUMMARY = Path("reports/saol14-shared-wordlist-summary.json")
 
 _LEMMA_ONLY_CLASSES = frozenset({"ADP", "CCONJ", "INTJ", "PROPN", "SCONJ"})
-_SHARED_CLASSES = frozenset({"NOUN", "ADJ", "VERB", "PRON", "NUM", "ADV"}) | _LEMMA_ONLY_CLASSES
+SHARED_CLASSES = (
+    frozenset({"NOUN", "ADJ", "VERB", "PRON", "NUM", "ADV", "DET", "PART"})
+    | _LEMMA_ONLY_CLASSES
+)
+_SHARED_CLASSES = SHARED_CLASSES
 _OLD_HV_AUDIT_CLASSES = frozenset({"NOUN", "ADJ", "VERB"})
 _TEXT_WORD_RE = re.compile(r"[0-9A-Za-zÅÄÖåäöÉéÜü-]+")
 
@@ -64,6 +69,8 @@ def _generated_classified_row(record: dict[str, Any], upos: str) -> dict[str, An
         return generated_numeral_row(class_record)
     if upos == "ADV":
         return generated_adverb_row(class_record)
+    if upos in {"DET", "PART"}:
+        return generated_function_word_row(class_record)
     return generated_real_shared_row(class_record)
 
 
