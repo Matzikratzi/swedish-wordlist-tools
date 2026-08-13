@@ -33,6 +33,18 @@ class BuildSharedWordlistTests(unittest.TestCase):
         self.assertEqual("CLASSIFIED", forms["annexionen"]["classification"])
         self.assertEqual("CLASSIFIED", forms["annexioner"]["classification"])
 
+    def test_pronoun_form_suppresses_hv_unknown(self) -> None:
+        records = [
+            {"id":"p1","normaliserat_ord":"jag","ord":"jag","stycke":"jag","ordkl":"pron.","text":"sing. objektsform: mig uttalat: och: också: vard.","upos":"PRON"},
+            {"id":"x1","normaliserat_ord":"jag","ord":"mig","stycke":"mig","ordkl":"(hv)","text":None,"upos":"X"},
+        ]
+        rows, summary = build_rows(records)
+        forms = {row["form"]: row for row in rows}
+        self.assertEqual("CLASSIFIED", forms["mig"]["classification"])
+        self.assertEqual(["PRON"], forms["mig"]["upos"])
+        self.assertEqual(1, summary["unknown_suppressed_by_classified_duplicate"])
+        self.assertIn("PRON", summary["classes"])
+
 
 if __name__ == "__main__":
     unittest.main()
