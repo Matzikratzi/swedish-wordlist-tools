@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+from swedish_wordlist_tools.analyze_adverb_oftare import analyze as analyze_ofta_family
 from swedish_wordlist_tools.generate_adverb_forms import generated_row
 
 
@@ -41,6 +42,15 @@ class GenerateAdverbFormsTests(unittest.TestCase):
         self.assertTrue({"nära","närmare","närmre","närmast","närm"} <= forms)
         self.assertTrue(row["source_truncated"])
         self.assertFalse(row["paradigm_complete"])
+
+    def test_ofta_family_audit_finds_hv_only_comparative(self) -> None:
+        report = analyze_ofta_family([
+            {"id":"a1","normaliserat_ord":"ofta","ord":"ofta","ordkl":"adv.","text":None,"upos":"ADV"},
+            {"id":"x1","normaliserat_ord":"ofta","ord":"oftare","ordkl":"(hv)","text":None,"upos":"X"},
+            {"id":"a2","normaliserat_ord":"oftast","ord":"oftast","ordkl":"adv.","text":None,"upos":"ADV"},
+        ])
+        self.assertEqual(3, len(report["matching_records"]))
+        self.assertEqual("oftare", report["hv_only_rows"][0]["form"])
 
 
 if __name__ == "__main__":
