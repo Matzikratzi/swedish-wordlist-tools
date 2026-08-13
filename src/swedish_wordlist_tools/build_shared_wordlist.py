@@ -84,26 +84,38 @@ def _add_classified_form(
 def _integrate_routed_x_forms(
     materialized: list[dict[str, Any]],
     classified: dict[str, dict[str, Any]],
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], int]:
     """Add structurally routed X/(hv) forms as classified production forms.
 
     generate_x_rows has already established the target word class from the
     normalized article, explicit homonym reference, printed-form evidence, or
-    an unambiguous sibling class.  Once that routing is proven, the generated
-    form must not fall back to UNKNOWN merely because its spelling differs from
-    the target article's lemma.
+    an unambiguous sibling class. Once that routing is proven, a standalone
+    generated form is classified directly. Multiword/context fragments still
+    pass through the same structural CONTEXT_ONLY guard as the hv fallback.
     """
     x_rows, _summary = generate_x_rows(materialized)
+    source_by_id = {_record_id(record): record for record in materialized if _record_id(record)}
+    omitted_context: set[tuple[str, str]] = set()
+
     for row in x_rows:
         upos = str(row.get("target_upos") or "")
         if upos not in _SHARED_CLASSES:
             continue
         source_id = str(row.get("source_record_id") or "")
+        source = source_by_id.get(source_id)
         for form in row.get("forms", []):
             written = clean_saol_word(form.get("written_form"))
+            if source is not None and _is_hv(source):
+                classification, _reason = classify_case({
+                    "form": written,
+                    "hv_lemma": clean_saol_word(source.get("normaliserat_ord")),
+                })
+                if classification == CONTEXT_ONLY:
+                    omitted_context.add((source_id, _key(written)))
+                    continue
             provenance = str(form.get("provenance") or "x_routed_shared")
             _add_classified_form(classified, written, upos, source_id, provenance)
-    return x_rows
+    return x_rows, len(omitted_context)
 
 
 def _real_text_word_index(records: Iterable[dict[str, Any]]) -> set[str]:
@@ -244,11 +256,12 @@ def build_rows(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any]],
                 provenance = str(form.get("provenance") or form.get("source_stage") or form.get("kind") or "")
                 _add_classified_form(classified, written, upos, source_id, provenance)
 
-    x_rows = _integrate_routed_x_forms(materialized, classified)
+    x_rows, routed_context_omitted = _integrate_routed_x_forms(materialized, classified)
 
-    unknown_rows, unknown_candidates, unknown_suppressed, context_omitted = _hv_fallback_rows(
+    unknown_rows, unknown_candidates, unknown_suppressed, fallback_context_omitted = _hv_fallback_rows(
         materialized, classified, x_rows
     )
+    context_omitted = routed_context_omitted + fallback_context_omitted
 
     rows: list[dict[str, Any]] = []
     for row in (*classified.values(), *unknown_rows.values()):
