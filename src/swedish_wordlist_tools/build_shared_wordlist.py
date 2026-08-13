@@ -8,13 +8,14 @@ from typing import Any, Iterable
 
 from .analyze_x_routing import _is_hv
 from .classify_hv_only import CONTEXT_ONLY, UNKNOWN_WORD, analyze as classify_hv_only
-from .compare_sources import _saol_upos
+from .compare_sources import _is_affix_entry
 from .generate_adverb_forms import generated_row as generated_adverb_row
 from .generate_numeral_forms import generated_row as generated_numeral_row
 from .generate_pronoun_forms import generated_row as generated_pronoun_row
 from .generate_real_shared_forms import generated_real_shared_row
 from .jsonl import read_jsonl
 from .saol_surface import clean_saol_word
+from .saol_wordclasses import classes_from_record, record_for_class
 
 DEFAULT_SOURCE = Path("data/raw/saol14-faksimil.jsonl")
 DEFAULT_WORDS = Path("data/processed/saol14-shared-wordlist.txt")
@@ -28,23 +29,28 @@ def _key(value: str) -> str:
     return value.casefold().strip()
 
 
+def _lemma(record: dict[str, Any]) -> str:
+    return clean_saol_word(record.get("ord")) or clean_saol_word(record.get("normaliserat_ord"))
+
+
 def _generated_classified_row(record: dict[str, Any], upos: str) -> dict[str, Any] | None:
+    class_record = record_for_class(record, upos)
     if upos == "PRON":
-        return generated_pronoun_row(record)
+        return generated_pronoun_row(class_record)
     if upos == "NUM":
-        return generated_numeral_row(record)
+        return generated_numeral_row(class_record)
     if upos == "ADV":
-        return generated_adverb_row(record)
-    return generated_real_shared_row(record)
+        return generated_adverb_row(class_record)
+    return generated_real_shared_row(class_record)
 
 
 def build_rows(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Build the current production word set from verified shared classes.
 
-    Classified forms from real NOUN/ADJ/VERB/PRON/NUM/ADV rows have authority.
-    Forms that survive only via an (hv) row are included as UNKNOWN_WORD only
-    when no classified form with the same written spelling exists.
-    CONTEXT_ONLY rows never enter the word list.
+    Mixed SAOL rows may contribute more than one word class for the printed
+    lemma. Class-specific views ensure that notation is consumed only by the
+    role it belongs to. Bound forms/affixes are excluded because the target is
+    a list of complete playable words.
     """
 
     materialized = [dict(record) for record in records]
@@ -53,31 +59,34 @@ def build_rows(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any]],
     for record in materialized:
         if _is_hv(record):
             continue
-        upos = _saol_upos(record)
-        if upos not in _SHARED_CLASSES:
+        lemma = _lemma(record)
+        if not lemma or _is_affix_entry(record, lemma):
             continue
-        generated = _generated_classified_row(record, upos)
-        if generated is None:
-            continue
-        source_id = str(record.get("id") or record.get("subnr") or record.get("urspr_lopnr") or "")
-        for form in generated.get("forms", []):
-            written = clean_saol_word(form.get("written_form"))
-            if not written or " " in written:
+        for upos in classes_from_record(record):
+            if upos not in _SHARED_CLASSES:
                 continue
-            key = _key(written)
-            row = classified.setdefault(key, {
-                "form": written,
-                "classification": "CLASSIFIED",
-                "upos": set(),
-                "source_record_ids": set(),
-                "provenance": set(),
-            })
-            row["upos"].add(upos)
-            if source_id:
-                row["source_record_ids"].add(source_id)
-            provenance = str(form.get("provenance") or form.get("source_stage") or form.get("kind") or "")
-            if provenance:
-                row["provenance"].add(provenance)
+            generated = _generated_classified_row(record, upos)
+            if generated is None:
+                continue
+            source_id = str(record.get("id") or record.get("subnr") or record.get("urspr_lopnr") or "")
+            for form in generated.get("forms", []):
+                written = clean_saol_word(form.get("written_form"))
+                if not written or " " in written or written.startswith("-") or written.endswith("-"):
+                    continue
+                key = _key(written)
+                row = classified.setdefault(key, {
+                    "form": written,
+                    "classification": "CLASSIFIED",
+                    "upos": set(),
+                    "source_record_ids": set(),
+                    "provenance": set(),
+                })
+                row["upos"].add(upos)
+                if source_id:
+                    row["source_record_ids"].add(source_id)
+                provenance = str(form.get("provenance") or form.get("source_stage") or form.get("kind") or "")
+                if provenance:
+                    row["provenance"].add(provenance)
 
     hv_report = classify_hv_only(materialized)
     unknown_candidates = 0
@@ -87,7 +96,7 @@ def build_rows(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any]],
     for row in hv_report["rows"]:
         classification = row["classification"]
         written = clean_saol_word(row.get("form"))
-        if not written or " " in written:
+        if not written or " " in written or written.startswith("-") or written.endswith("-"):
             if classification == CONTEXT_ONLY:
                 context_omitted += 1
             continue
