@@ -9,6 +9,7 @@ from typing import Any, Iterable
 from .analyze_x_routing import _is_hv
 from .classify_hv_only import CONTEXT_ONLY, UNKNOWN_WORD, analyze as classify_hv_only
 from .compare_sources import _saol_upos
+from .generate_adverb_forms import generated_row as generated_adverb_row
 from .generate_numeral_forms import generated_row as generated_numeral_row
 from .generate_pronoun_forms import generated_row as generated_pronoun_row
 from .generate_real_shared_forms import generated_real_shared_row
@@ -20,7 +21,7 @@ DEFAULT_WORDS = Path("data/processed/saol14-shared-wordlist.txt")
 DEFAULT_JSONL = Path("reports/saol14-shared-wordlist.jsonl")
 DEFAULT_SUMMARY = Path("reports/saol14-shared-wordlist-summary.json")
 
-_SHARED_CLASSES = frozenset({"NOUN", "ADJ", "VERB", "PRON", "NUM"})
+_SHARED_CLASSES = frozenset({"NOUN", "ADJ", "VERB", "PRON", "NUM", "ADV"})
 
 
 def _key(value: str) -> str:
@@ -32,13 +33,15 @@ def _generated_classified_row(record: dict[str, Any], upos: str) -> dict[str, An
         return generated_pronoun_row(record)
     if upos == "NUM":
         return generated_numeral_row(record)
+    if upos == "ADV":
+        return generated_adverb_row(record)
     return generated_real_shared_row(record)
 
 
 def build_rows(records: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Build the current production word set from verified shared classes.
 
-    Classified forms from real NOUN/ADJ/VERB/PRON/NUM rows have authority.
+    Classified forms from real NOUN/ADJ/VERB/PRON/NUM/ADV rows have authority.
     Forms that survive only via an (hv) row are included as UNKNOWN_WORD only
     when no classified form with the same written spelling exists.
     CONTEXT_ONLY rows never enter the word list.
@@ -154,7 +157,7 @@ def main() -> None:
     rows, summary = build_rows(read_jsonl(args.source))
     write_outputs(rows, summary, args.words, args.jsonl, args.summary)
     print(f"Unika ordformer: {summary['unique_forms']}")
-    print(f"Klassificerade NOUN/ADJ/VERB/PRON/NUM-former: {summary['classified_forms']}")
+    print(f"Klassificerade NOUN/ADJ/VERB/PRON/NUM/ADV-former: {summary['classified_forms']}")
     print(f"UNKNOWN_WORD inkluderade: {summary['unknown_forms_included']}")
     print(f"UNKNOWN dubbletter strukna: {summary['unknown_suppressed_by_classified_duplicate']}")
     print(f"CONTEXT_ONLY utelämnade: {summary['context_only_omitted']}")
