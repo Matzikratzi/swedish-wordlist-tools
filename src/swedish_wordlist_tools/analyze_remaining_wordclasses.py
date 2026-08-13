@@ -6,11 +6,12 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from .analyze_x_routing import _is_hv
+from .build_shared_wordlist import SHARED_CLASSES
 from .jsonl import read_jsonl
 from .saol_surface import clean_saol_word
 from .saol_wordclasses import classes_from_record
 
-INCLUDED = {"NOUN", "ADJ", "VERB", "PRON", "NUM", "ADV"}
+INCLUDED = SHARED_CLASSES
 
 def analyze(records):
     counts = Counter()
