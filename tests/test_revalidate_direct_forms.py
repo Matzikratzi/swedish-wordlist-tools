@@ -35,7 +35,7 @@ class RevalidateDirectFormsTests(unittest.TestCase):
             "stycke": "röd",
             "homonr": "1",
         }
-        self.assertEqual({"röd", "rött", "röda"}, canonical_record_forms(record))
+        self.assertEqual({"röd", "rött", "röda", "röde"}, canonical_record_forms(record))
 
     def test_uses_canonical_verb_generator_for_record_local_fallback(self) -> None:
         record = {

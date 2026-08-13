@@ -105,7 +105,7 @@ def main() -> None:
     print("Kanoniskt SAOL14-bygge och fristående SALDO-audit klara.")
     print(f"Spelord: {gamewords['game_words']}")
     print(f"Bortfiltrerade SAOL-rader: {gamewords['rejected_rows']}")
-    print(f"SALDO-granskningskandidater: {audit['saldo_only_with_exact_saol_lemma_candidates']}")
+    print(f"SALDO-granskningskandidater: {audit['saldo_only_with_exact_saol_lemma_and_upos_candidates']}")
     print(f"Spelordlista: {args.output}")
     print(f"Byggrapport: {args.gamewords_summary}")
     print(f"SALDO-audit: {args.audit_text}")

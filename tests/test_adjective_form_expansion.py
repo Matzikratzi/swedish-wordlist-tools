@@ -7,6 +7,32 @@ from swedish_wordlist_tools.adjective_slots import AdjectiveForm, AdjectiveSlots
 
 
 class AdjectiveFormExpansionTests(unittest.TestCase):
+    def test_regular_positive_expands_to_masculine_definite_e(self) -> None:
+        slots = AdjectiveSlots(
+            lemma="abderitisk",
+            forms=(
+                AdjectiveForm("abderitisk", "common_singular"),
+                AdjectiveForm("abderitiskt", "neuter_singular"),
+                AdjectiveForm("abderitiska", "definite_or_plural"),
+            ),
+            rule="shared_positive_atoms",
+        )
+        expanded = expand_adjective_forms(slots)
+        self.assertEqual(
+            ("abderitisk", "abderitiskt", "abderitiska", "abderitiske"),
+            expanded.written_forms(),
+        )
+        self.assertEqual("masculine_definite", expanded.forms[-1].slot)
+        self.assertEqual("derived_inflection", expanded.forms[-1].provenance)
+
+    def test_limited_or_uninflected_rows_do_not_get_masculine_e(self) -> None:
+        slots = AdjectiveSlots(
+            lemma="rosa",
+            forms=(AdjectiveForm("rosa", "definite_or_plural"),),
+            rule="labelled_limited_paradigm",
+        )
+        self.assertIs(slots, expand_adjective_forms(slots))
+
     def test_superlative_st_expands_to_definite_and_masculine_forms(self) -> None:
         slots = AdjectiveSlots(
             lemma="liten",

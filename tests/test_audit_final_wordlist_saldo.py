@@ -28,14 +28,31 @@ class AuditFinalWordlistSaldoTests(unittest.TestCase):
             ),
         ]
         summary, only_saol, only_saldo, candidates = audit(
-            ["hög", "högt", "högan"], analyses, {"hög"}
+            ["hög", "högt", "högan"], analyses, {"hög": {"ADJ"}}, {
+                "hög": [{"record_id": "1", "upos": ["ADJ"], "ordkl": "adj.", "notation": "+t +a"}],
+            }
         )
 
         self.assertEqual(["högan"], only_saol)
         self.assertEqual(["högre", "saldoord", "saldoordet"], only_saldo)
         self.assertEqual(["högre"], [row["form"] for row in candidates])
+        self.assertEqual("COMPARISON", candidates[0]["primary_category"])
+        self.assertEqual("+t +a", candidates[0]["matching_saol_articles"][0]["notation"])
         self.assertEqual(2, summary["shared_forms"])
         self.assertFalse(summary["affects_game_wordlist"])
+
+    def test_requires_same_word_class_for_review_candidate(self) -> None:
+        analyses = [SaldoAnalysis(
+            entry_id="fil..vb.1",
+            upos="VERB",
+            lemmas=frozenset({"fil"}),
+            word_forms=(SaldoWordForm("filade", parse_msd("pret ind aktiv")),),
+        )]
+        summary, _only_saol, _only_saldo, candidates = audit(
+            ["fil"], analyses, {"fil": {"NOUN"}},
+        )
+        self.assertEqual([], candidates)
+        self.assertEqual(0, summary["saldo_only_with_exact_saol_lemma_and_upos_candidates"])
 
 
 if __name__ == "__main__":

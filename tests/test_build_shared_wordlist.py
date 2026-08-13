@@ -67,6 +67,21 @@ class BuildSharedWordlistTests(unittest.TestCase):
         self.assertEqual(["ADJ"], forms["delvist"]["upos"])
         self.assertEqual(["ADJ"], forms["delvisa"]["upos"])
 
+    def test_compact_paradigms_materialize_safe_general_inflections(self) -> None:
+        records = [
+            {"id":"a1","normaliserat_ord":"abderitisk","ord":"abderitisk","stycke":"abder·it·isk","ordkl":"adj. <i>+t +a</i>","text":"+t +a","upos":"ADJ"},
+            {"id":"v1","normaliserat_ord":"abdikera","ord":"abdikera","stycke":"ab·dik·era","ordkl":"v. <i>+de +t</i>","text":"+de +t","upos":"VERB"},
+        ]
+        rows, _summary = build_rows(records)
+        forms = {row["form"]: row for row in rows}
+        self.assertEqual(["ADJ"], forms["abderitiske"]["upos"])
+        for form in (
+            "abdikerar", "abdikeras", "abdikerades", "abdikerats",
+            "abdikerande", "abdikerad",
+        ):
+            self.assertEqual(["VERB"], forms[form]["upos"])
+            self.assertIn("derived_inflection", forms[form]["provenance"])
+
     def test_bound_adverbial_suffix_is_not_a_playable_word(self) -> None:
         rows, _summary = build_rows([
             {"id":"x1","normaliserat_ord":"-ledes","ord":"-ledes","stycke":"-led·es","ordkl":"adverbiellt slutled","text":None,"upos":"X"},

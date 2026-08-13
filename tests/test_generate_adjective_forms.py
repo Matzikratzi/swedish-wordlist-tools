@@ -18,11 +18,11 @@ class GenerateAdjectiveFormsTests(unittest.TestCase):
         })
         assert row is not None
         self.assertEqual(
-            ["förstfödd", "förstfött", "förstfödda"],
+            ["förstfödd", "förstfött", "förstfödda", "förstfödde"],
             [form["written_form"] for form in row["forms"]],
         )
         self.assertEqual(
-            ["lemma", "replace_tail", "append"],
+            ["lemma", "replace_tail", "append", "derived_inflection"],
             [form["provenance"] for form in row["forms"]],
         )
 
@@ -38,11 +38,11 @@ class GenerateAdjectiveFormsTests(unittest.TestCase):
         })
         assert row is not None
         self.assertEqual(
-            ["glad", "glatt", "glada"],
+            ["glad", "glatt", "glada", "glade"],
             [form["written_form"] for form in row["forms"]],
         )
         self.assertEqual(
-            ["lemma", "append", "append"],
+            ["lemma", "append", "append", "derived_inflection"],
             [form["provenance"] for form in row["forms"]],
         )
 

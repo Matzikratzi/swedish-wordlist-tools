@@ -8,6 +8,7 @@ from typing import Any, Iterable
 from .jsonl import read_jsonl
 from .saol_variant_base import prepare_printed_variant_record
 from .verb_shared_lexeme import interpret_shared_playable_verb_slots
+from .verb_form_expansion import expand_regular_first_conjugation
 
 DEFAULT_SAOL = Path("data/raw/saol14-faksimil.jsonl")
 DEFAULT_JSONL = Path("reports/saol14-verb-forms.jsonl")
@@ -24,6 +25,7 @@ def generated_row(record: dict[str, Any]) -> dict[str, Any] | None:
     slots = interpret_shared_playable_verb_slots(prepared)
     if slots is None:
         return None
+    slots = expand_regular_first_conjugation(slots)
 
     forms = [
         {

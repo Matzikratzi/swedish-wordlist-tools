@@ -79,6 +79,12 @@ Kommandot kör tre avgränsade steg:
 2. normaliserar till NFC och gemener, kräver minst två bokstäver och deduplicerar,
 3. jämför den färdiga listan globalt med `saldom.xml` som en separat audit.
 
+Kompakt SAOL-notation tolkas som paradigm. Exempelvis kompletteras det
+regelbundna första verbparadigmet `+de +t` mekaniskt med presens, passiv,
+imperativ och particip. Regelbundna positiva adjektiv får också den maskulina
+bestämda formen på `-e`. Kompletteringarna bygger endast på SAOL-notation och
+allmän morfologi; de hämtar inga former från SALDO.
+
 Den kanoniska outputen är:
 
 ```text

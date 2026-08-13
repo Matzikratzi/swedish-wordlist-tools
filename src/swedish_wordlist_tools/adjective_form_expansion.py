@@ -3,6 +3,18 @@ from __future__ import annotations
 from .adjective_slots import AdjectiveForm, AdjectiveSlots
 
 
+_MASCULINE_E_RULES = frozenset({
+    "regular_t_a",
+    "unchanged_neuter_a",
+    "regular_tt_a",
+    "regular_t_ma",
+    "positive_with_comparison",
+    "positive_with_explicit_comparison",
+    "generic_explicit_slots",
+    "shared_positive_atoms",
+})
+
+
 def _expanded_superlative_forms(base: str) -> tuple[tuple[str, str], ...]:
     """Return regular definite superlative forms licensed by the surface ending.
 
@@ -30,6 +42,20 @@ def expand_adjective_forms(slots: AdjectiveSlots) -> AdjectiveSlots:
 
     forms = list(slots.forms)
     seen = {(form.written_form, form.slot) for form in forms}
+
+    if slots.rule in _MASCULINE_E_RULES:
+        for form in slots.forms:
+            if form.slot != "definite_or_plural" or not form.written_form.endswith("a"):
+                continue
+            written_form = form.written_form[:-1] + "e"
+            marker = (written_form, "masculine_definite")
+            if marker not in seen:
+                forms.append(AdjectiveForm(
+                    written_form,
+                    "masculine_definite",
+                    provenance="derived_inflection",
+                ))
+                seen.add(marker)
 
     for form in slots.forms:
         if form.slot != "superlative":
