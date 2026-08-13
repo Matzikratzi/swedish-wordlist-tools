@@ -24,7 +24,8 @@ DEFAULT_WORDS = Path("data/processed/saol14-shared-wordlist.txt")
 DEFAULT_JSONL = Path("reports/saol14-shared-wordlist.jsonl")
 DEFAULT_SUMMARY = Path("reports/saol14-shared-wordlist-summary.json")
 
-_SHARED_CLASSES = frozenset({"NOUN", "ADJ", "VERB", "PRON", "NUM", "ADV"})
+_LEMMA_ONLY_CLASSES = frozenset({"ADP", "CCONJ", "INTJ", "PROPN", "SCONJ"})
+_SHARED_CLASSES = frozenset({"NOUN", "ADJ", "VERB", "PRON", "NUM", "ADV"}) | _LEMMA_ONLY_CLASSES
 _OLD_HV_AUDIT_CLASSES = frozenset({"NOUN", "ADJ", "VERB"})
 _TEXT_WORD_RE = re.compile(r"[0-9A-Za-zÅÄÖåäöÉéÜü-]+")
 
@@ -43,6 +44,20 @@ def _record_id(record: dict[str, Any]) -> str:
 
 def _generated_classified_row(record: dict[str, Any], upos: str) -> dict[str, Any] | None:
     class_record = record_for_class(record, upos)
+    if upos in _LEMMA_ONLY_CLASSES:
+        lemma = _lemma(class_record)
+        if not lemma:
+            return None
+        return {
+            "lemma": lemma,
+            "forms": [{
+                "written_form": lemma,
+                "slot": "lemma",
+                "provenance": "lemma_only_wordclass",
+                "source_token": "",
+                "operation_base": lemma,
+            }],
+        }
     if upos == "PRON":
         return generated_pronoun_row(class_record)
     if upos == "NUM":
@@ -306,7 +321,7 @@ def main() -> None:
     rows, summary = build_rows(read_jsonl(args.source))
     write_outputs(rows, summary, args.words, args.jsonl, args.summary)
     print(f"Unika ordformer: {summary['unique_forms']}")
-    print(f"Klassificerade NOUN/ADJ/VERB/PRON/NUM/ADV-former: {summary['classified_forms']}")
+    print(f"Klassificerade former: {summary['classified_forms']}")
     print(f"UNKNOWN_WORD inkluderade: {summary['unknown_forms_included']}")
     print(f"UNKNOWN dubbletter strukna: {summary['unknown_suppressed_by_classified_duplicate']}")
     print(f"CONTEXT_ONLY utelämnade: {summary['context_only_omitted']}")
