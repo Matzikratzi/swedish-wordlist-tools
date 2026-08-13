@@ -28,28 +28,35 @@ def expand_regular_first_conjugation(slots: LexemeSlots) -> LexemeSlots:
     exception.  Genitives of participles are deliberately outside this layer.
     """
 
-    if slots.upos != "VERB" or slots.notation.strip() != "+de +t":
+    if slots.upos != "VERB" or slots.metadata.get("source_truncated") == "true":
         return slots
     lemma = slots.lemma
     if not lemma.endswith("a"):
         return slots
-    preterite = slots.first("preterite")
-    supine = slots.first("supine")
-    if preterite is None or supine is None:
+    preterites = slots.forms_for("preterite")
+    supines = slots.forms_for("supine")
+    stem = lemma[:-1]
+    regular_preterite = lemma + "de"
+    regular_supine = stem + "at"
+    if regular_preterite not in preterites or regular_supine not in supines:
         return slots
 
-    stem = lemma[:-1]
-    additions = (
+    core_additions = (
         SlotForm("present", lemma + "r", "+r", "derived_inflection", "regular_first_conjugation"),
         SlotForm("imperative", lemma, "+", "derived_inflection", "regular_first_conjugation"),
+    )
+    if slots.notation.strip() != "+de +t":
+        return _with_additions(slots, core_additions)
+
+    additions = core_additions + (
         SlotForm("infinitive_passive", lemma + "s", "+s", "derived_inflection", "regular_first_conjugation"),
         SlotForm("present_passive", lemma + "s", "+s", "derived_inflection", "regular_first_conjugation"),
-        SlotForm("preterite_passive", preterite + "s", "+s", "derived_inflection", "regular_first_conjugation"),
-        SlotForm("supine_passive", supine + "s", "+s", "derived_inflection", "regular_first_conjugation"),
+        SlotForm("preterite_passive", regular_preterite + "s", "+s", "derived_inflection", "regular_first_conjugation"),
+        SlotForm("supine_passive", regular_supine + "s", "+s", "derived_inflection", "regular_first_conjugation"),
         SlotForm("present_participle", stem + "ande", "+nde", "derived_inflection", "regular_first_conjugation"),
         SlotForm("perfect_participle_common", stem + "ad", "+d", "derived_inflection", "regular_first_conjugation"),
-        SlotForm("perfect_participle_neuter", supine, "+t", "derived_inflection", "regular_first_conjugation"),
-        SlotForm("perfect_participle_plural", preterite, "+de", "derived_inflection", "regular_first_conjugation"),
+        SlotForm("perfect_participle_neuter", regular_supine, "+t", "derived_inflection", "regular_first_conjugation"),
+        SlotForm("perfect_participle_plural", regular_preterite, "+de", "derived_inflection", "regular_first_conjugation"),
     )
     return _with_additions(slots, additions)
 

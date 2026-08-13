@@ -41,6 +41,36 @@ class VerbFormExpansionTests(unittest.TestCase):
             slots = LexemeSlots("x", "VERB", notation, ())
             self.assertIs(slots, expand_regular_first_conjugation(slots))
 
+    def test_variant_row_gets_only_proven_regular_core_forms(self) -> None:
+        slots = LexemeSlots(
+            "ana",
+            "VERB",
+            "+de el. (i ett uttryck) ante, +t",
+            (
+                SlotForm("infinitive", "ana", "lemma"),
+                SlotForm("preterite", "anade", "+de"),
+                SlotForm("preterite", "ante", "ante"),
+                SlotForm("supine", "anat", "+t"),
+            ),
+        )
+        expanded = expand_regular_first_conjugation(slots)
+        self.assertEqual(("anar",), expanded.forms_for("present"))
+        self.assertEqual(("ana",), expanded.forms_for("imperative"))
+        self.assertEqual((), expanded.forms_for("present_passive"))
+        self.assertEqual((), expanded.forms_for("present_participle"))
+
+    def test_variant_row_must_contain_both_regular_source_forms(self) -> None:
+        slots = LexemeSlots(
+            "ana",
+            "VERB",
+            "ante, anat",
+            (
+                SlotForm("preterite", "ante", "ante"),
+                SlotForm("supine", "anat", "anat"),
+            ),
+        )
+        self.assertIs(slots, expand_regular_first_conjugation(slots))
+
     def test_adds_core_forms_for_stem_preserving_second_conjugation(self) -> None:
         for lemma, preterite, supine, present, imperative in (
             ("anställa", "anställde", "anställt", "anställer", "anställ"),
