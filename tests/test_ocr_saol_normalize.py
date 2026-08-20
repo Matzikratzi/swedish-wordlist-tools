@@ -1,5 +1,6 @@
 from swedish_wordlist_tools.ocr_saol_normalize import (
     article_text_for_match,
+    normalize_headword_structure,
     normalize_text_for_match,
 )
 from swedish_wordlist_tools.ocr_tsv_articles import OcrArticle, OcrLine, OcrWord
@@ -23,6 +24,14 @@ def _word(text: str, line: int, word: int) -> OcrWord:
 def test_normalize_removes_pronunciation_and_word_boundary_marks():
     assert normalize_text_for_match("abro|vink [-vin'k]") == "abrovink"
     assert normalize_text_for_match("abro¦vinsch [-vin'ʃ]") == "abrovinsch"
+    assert normalize_text_for_match("abro·vinsch [-vin'ʃ]") == "abrovinsch"
+
+
+def test_headword_structure_preserves_jsonl_boundary_mark():
+    assert normalize_headword_structure("abro·vink") == "abro·vink"
+    assert normalize_headword_structure("abro·vinsch") == "abro·vinsch"
+    assert normalize_headword_structure("abro|vink [-vin'k]") == "abro·vink"
+    assert normalize_headword_structure("abro¦vinsch [-vin'ʃ]") == "abro·vinsch"
 
 
 def test_normalize_unifies_typographic_dashes():
