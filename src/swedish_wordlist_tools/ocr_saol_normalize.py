@@ -10,9 +10,17 @@ _BRACKETED = re.compile(r"\[[^\]]*\]")
 _WS = re.compile(r"\s+")
 
 # Characters that may appear as SAOL word-boundary/typographic separators or be
-# introduced by OCR for them. They are ignored for matching only; raw OCR is
-# never changed.
+# introduced by OCR for them. They are ignored in the broad fallback matching
+# form, but can also be preserved in a structural form when JSONL supplies them.
 _WORD_BOUNDARY_MARKS = str.maketrans("", "", "|¦‖ˈˌ·•")
+_BOUNDARY_CANONICAL = str.maketrans({
+    "|": "·",
+    "¦": "·",
+    "‖": "·",
+    "ˈ": "·",
+    "ˌ": "·",
+    "•": "·",
+})
 _DASHES = str.maketrans({
     "‐": "-",
     "‑": "-",
@@ -24,16 +32,35 @@ _DASHES = str.maketrans({
 
 
 def normalize_text_for_match(text: str) -> str:
-    """Return a conservative SAOL/OCR matching form.
+    """Return a broad, conservative SAOL/OCR matching form.
 
     This is deliberately lossy and MUST NOT be used as reconstructed source
-    text. It exists only to compare known JSONL text/headwords with OCR.
+    text. It exists only to compare known JSONL text/headwords with OCR when
+    typographic word-boundary marks are unreliable or missing in OCR.
     """
 
     text = unicodedata.normalize("NFKC", text)
     text = text.translate(_DASHES)
     text = _BRACKETED.sub(" ", text)
     text = text.translate(_WORD_BOUNDARY_MARKS)
+    text = text.casefold()
+    text = _WS.sub(" ", text).strip()
+    return text
+
+
+def normalize_headword_structure(text: str) -> str:
+    """Normalize a SAOL headword while preserving known word boundaries.
+
+    JSONL fields such as ``stycke`` and ``ord`` contain SAOL's boundary marks
+    (for example ``abro·vink`` and ``abro·vinsch``).  This form retains that
+    information by canonicalising common OCR substitutes to ``·`` rather than
+    deleting the separator. Pronunciation annotations are still removed.
+    """
+
+    text = unicodedata.normalize("NFKC", text)
+    text = text.translate(_DASHES)
+    text = _BRACKETED.sub(" ", text)
+    text = text.translate(_BOUNDARY_CANONICAL)
     text = text.casefold()
     text = _WS.sub(" ", text).strip()
     return text
