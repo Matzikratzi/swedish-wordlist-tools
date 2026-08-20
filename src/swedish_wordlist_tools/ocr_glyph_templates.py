@@ -14,6 +14,7 @@ class TemplateSample:
     source_word: str
     character: str
     char_index: int
+    style: str
     bbox: tuple[int, int, int, int]
     output: str
 
@@ -39,11 +40,6 @@ def _ink_projection(gray: Image.Image) -> list[float]:
 
 
 def _split_by_projection(crop: Image.Image, n_chars: int) -> list[tuple[int, int]]:
-    """Approximate character spans from vertical ink valleys.
-
-    This is deliberately conservative and intended only for clean, accepted
-    bold SAOL headword samples. It is not a general OCR segmenter.
-    """
     img = _trim(crop)
     if n_chars <= 0 or img.width <= 0:
         return []
@@ -77,10 +73,12 @@ def main() -> int:
     parser.add_argument("tsv", type=Path)
     parser.add_argument("targets", nargs="+", help="Exact OCR word strings known to be clean/accepted")
     parser.add_argument("--chars", default="ce", help="Only save these character classes")
+    parser.add_argument("--style", choices=("bold", "italic", "roman"), required=True)
     parser.add_argument("--out-dir", type=Path, required=True)
     args = parser.parse_args()
 
-    args.out_dir.mkdir(parents=True, exist_ok=True)
+    style_dir = args.out_dir / args.style
+    style_dir.mkdir(parents=True, exist_ok=True)
     page = Image.open(args.image).convert("L")
     wanted_words = set(args.targets)
     wanted_chars = set(args.chars)
@@ -98,8 +96,6 @@ def main() -> int:
             y = int(row["top"])
             w = int(row["width"])
             h = int(row["height"])
-            # Reuse the empirical clean-headword constraint discovered during
-            # calibration. Tall boxes are usually merged OCR regions.
             if h > 18 or h < 8:
                 continue
             crop = _trim(page.crop((x, y, x + w, y + h)))
@@ -116,14 +112,15 @@ def main() -> int:
                 if glyph.width <= 0 or glyph.height <= 0:
                     continue
                 filename = f"{ch}-{len(samples):04d}-{text}-{i}.png".replace("/", "_")
-                glyph.save(args.out_dir / filename)
+                glyph.save(style_dir / filename)
                 samples.append(
                     TemplateSample(
                         source_word=text,
                         character=ch,
                         char_index=i,
+                        style=args.style,
                         bbox=(x + left, y, right - left, h),
-                        output=filename,
+                        output=str(Path(args.style) / filename),
                     )
                 )
 
