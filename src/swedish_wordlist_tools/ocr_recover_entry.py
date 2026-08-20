@@ -8,11 +8,13 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
+from .ocr_glyph_verify import verification_dict, verify_expected_headword
 from .ocr_match_jsonl import load_entry
 
 
 MIN_HEADWORD_SCORE = 0.70
 MIN_KNOWN_TEXT_SCORE = 0.55
+GLYPH_FALLBACK_MIN_HEADWORD_SCORE = 0.30
 
 
 def _run(*args: str) -> None:
@@ -59,10 +61,18 @@ def _acceptable(result: dict[str, object]) -> bool:
     )
 
 
-def _selection_key(result: dict[str, object]) -> tuple[float, float, float]:
-    # Headword identity dominates. Known text is secondary confirmation; the
-    # combined article score is only a tertiary tie-breaker.
+def _glyph_candidate(result: dict[str, object]) -> bool:
+    score = float(result.get("headword_score", 0.0))
     return (
+        GLYPH_FALLBACK_MIN_HEADWORD_SCORE <= score < MIN_HEADWORD_SCORE
+        and float(result.get("known_text_score", 0.0)) >= MIN_KNOWN_TEXT_SCORE
+    )
+
+
+def _selection_key(result: dict[str, object]) -> tuple[float, float, float, float]:
+    glyph_verified = 1.0 if result.get("glyph_verified") is True else 0.0
+    return (
+        glyph_verified,
         float(result.get("headword_score", 0.0)),
         float(result.get("known_text_score", 0.0)),
         float(result.get("article_score", 0.0)),
@@ -95,6 +105,7 @@ def main() -> int:
 
     results = []
     entry_json = json.dumps(entry, ensure_ascii=False)
+    expected_headword = str(entry.get("normaliserat_ord") or "")
     for idx, column in enumerate(columns, 1):
         tsv = workdir / f"column-{idx}.tsv"
         _ocr_tsv(column, tsv)
@@ -116,6 +127,16 @@ def main() -> int:
         data = json.loads(proc.stdout)
         data["column"] = idx
         data["acceptable"] = _acceptable(data)
+        data["glyph_verified"] = False
+        data["glyph_verification"] = None
+
+        if not data["acceptable"] and expected_headword and _glyph_candidate(data):
+            verification = verify_expected_headword(column, tsv, expected_headword)
+            data["glyph_verification"] = verification_dict(verification)
+            if verification is not None and verification.verified:
+                data["glyph_verified"] = True
+                data["acceptable"] = True
+
         results.append(data)
 
     acceptable = [r for r in results if r.get("acceptable") is True]
@@ -133,6 +154,7 @@ def main() -> int:
         "thresholds": {
             "min_headword_score": MIN_HEADWORD_SCORE,
             "min_known_text_score": MIN_KNOWN_TEXT_SCORE,
+            "glyph_fallback_min_headword_score": GLYPH_FALLBACK_MIN_HEADWORD_SCORE,
         },
         "columns": results,
     }
