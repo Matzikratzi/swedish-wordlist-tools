@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from PIL import Image, ImageChops
@@ -15,6 +15,8 @@ class GlyphSample:
     bbox: tuple[int, int, int, int]
     dark_ratio: float
     mean_gray: float
+    accepted: bool
+    reject_reason: str | None
 
 
 def _trim(img: Image.Image) -> Image.Image:
@@ -34,14 +36,29 @@ def _stats(img: Image.Image) -> tuple[float, float]:
     return dark, mean
 
 
+def _quality_reason(height: int, dark_ratio: float, *, max_height: int, min_dark_ratio: float) -> str | None:
+    if height > max_height:
+        return f"bbox-too-tall>{max_height}"
+    if dark_ratio < min_dark_ratio:
+        return f"dark-ratio<{min_dark_ratio}"
+    return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Collect real SAOL glyph/word crops from a page+TSV for font/style calibration."
+        description="Collect real SAOL word crops for font/style calibration while rejecting merged OCR boxes."
     )
     parser.add_argument("image", type=Path)
     parser.add_argument("tsv", type=Path)
     parser.add_argument("targets", nargs="+", help="OCR word strings to collect exactly")
     parser.add_argument("--out-dir", type=Path, required=True)
+    parser.add_argument("--max-height", type=int, default=18, help="Reject suspiciously tall word boxes")
+    parser.add_argument(
+        "--min-dark-ratio",
+        type=float,
+        default=0.28,
+        help="Reject low-density boxes when calibrating bold headword style",
+    )
     args = parser.parse_args()
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -63,14 +80,24 @@ def main() -> int:
             h = int(row["height"])
             crop = page.crop((x, y, x + w, y + h))
             dark_ratio, mean_gray = _stats(crop)
+            reject_reason = _quality_reason(
+                h,
+                dark_ratio,
+                max_height=args.max_height,
+                min_dark_ratio=args.min_dark_ratio,
+            )
+            accepted = reject_reason is None
             index = len(samples)
-            crop.save(args.out_dir / f"{index:03d}-{text.replace('/', '_')}.png")
+            suffix = "accepted" if accepted else "rejected"
+            crop.save(args.out_dir / f"{index:03d}-{suffix}-{text.replace('/', '_')}.png")
             samples.append(
                 GlyphSample(
                     text=text,
                     bbox=(x, y, w, h),
                     dark_ratio=round(dark_ratio, 4),
                     mean_gray=round(mean_gray, 2),
+                    accepted=accepted,
+                    reject_reason=reject_reason,
                 )
             )
 
