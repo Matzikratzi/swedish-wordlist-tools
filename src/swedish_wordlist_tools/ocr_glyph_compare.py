@@ -45,12 +45,6 @@ def _find_word_bbox(tsv: Path, target: str) -> tuple[int, int, int, int]:
 
 
 def _segment_by_index(word_crop: Image.Image, text: str, index: int) -> Image.Image:
-    """Approximate one glyph by proportional x slicing.
-
-    This is deliberately simple and only intended for ambiguous-character fallback.
-    The surrounding word bbox is already localized by OCR; later we can replace
-    this with connected-component segmentation if needed.
-    """
     n = max(1, len(text))
     left = round(word_crop.width * index / n)
     right = round(word_crop.width * (index + 1) / n)
@@ -67,12 +61,19 @@ def main() -> int:
     parser.add_argument("--word", required=True, help="OCR word containing the ambiguous glyph")
     parser.add_argument("--index", type=int, required=True, help="0-based character index in OCR word")
     parser.add_argument("--templates", type=Path, required=True)
+    parser.add_argument("--observed-out", type=Path, help="Write the observed glyph crop as PNG for HTML/manual review")
     args = parser.parse_args()
 
     x, y, w, h = _find_word_bbox(args.tsv, args.word)
     page = Image.open(args.image).convert("L")
     word_crop = page.crop((x, y, x + w, y + h))
     observed = _segment_by_index(word_crop, args.word, args.index)
+
+    observed_path = None
+    if args.observed_out is not None:
+        args.observed_out.parent.mkdir(parents=True, exist_ok=True)
+        observed.save(args.observed_out)
+        observed_path = str(args.observed_out.resolve())
 
     comparisons: list[GlyphComparison] = []
     for path in sorted(args.templates.glob("*.png")):
@@ -91,6 +92,7 @@ def main() -> int:
             "index": args.index,
             "ocr_character": args.word[args.index] if 0 <= args.index < len(args.word) else None,
             "word_bbox": [x, y, w, h],
+            "observed_crop": observed_path,
             "best": asdict(best) if best else None,
             "margin": margin,
             "comparisons": [asdict(item) for item in comparisons],
