@@ -13,8 +13,6 @@ from .ocr_tsv_articles import OcrArticle, group_articles, read_words
 
 
 _MARKER_PREFIX = "+~-–—"
-# Meaning/example bullets vary in the facsimile and OCR. Keep this deliberately
-# conservative; unfamiliar glyphs should lead to review rather than invention.
 _STOP_PREFIXES = ("•", "♦", "◆", "◊", "«", "»")
 
 
@@ -22,6 +20,7 @@ _STOP_PREFIXES = ("•", "♦", "◆", "◊", "«", "»")
 class TailRecovery:
     paragraph: int
     article_score: float
+    headword_score: float
     known_text_score: float
     known_text: str
     recovered_tail: str
@@ -55,11 +54,6 @@ def _window_score(target: list[str], candidate: list[str]) -> float:
 
 
 def locate_known_text(entry: dict[str, object], article: OcrArticle) -> tuple[int, int, float] | None:
-    """Locate the known JSONL text inside an OCR article.
-
-    Returns the half-open raw-token range and fuzzy score. Marker glyphs (+/~/-)
-    are ignored because Tesseract does not reproduce them consistently.
-    """
     target = _known_tokens(entry)
     if not target:
         return None
@@ -67,8 +61,6 @@ def locate_known_text(entry: dict[str, object], article: OcrArticle) -> tuple[in
     raw = _raw_tokens(article)
     soft = [_soft_token(token) for token in raw]
     best: tuple[int, int, float] | None = None
-
-    # Permit one-token width variation for OCR splits/merges.
     for width in range(max(1, len(target) - 1), len(target) + 2):
         for start in range(0, max(0, len(soft) - width + 1)):
             end = start + width
@@ -84,18 +76,21 @@ def _is_stop_token(token: str) -> str | None:
         return None
     if stripped.startswith(_STOP_PREFIXES):
         return "bullet"
-    # A standalone leading sense number marks material beyond the inflection
-    # string. Do not stop on digits embedded in words or pronunciation.
     if re.fullmatch(r"\d+[.)]?", stripped):
         return "sense-number"
     return None
 
 
-def recover_tail(entry: dict[str, object], article: OcrArticle, article_score: float = 0.0) -> TailRecovery:
+def recover_tail(
+    entry: dict[str, object],
+    article: OcrArticle,
+    article_score: float = 0.0,
+    headword_score: float = 0.0,
+) -> TailRecovery:
     located = locate_known_text(entry, article)
     known_text = str(entry.get("text") or "")
     if located is None:
-        return TailRecovery(article.paragraph, article_score, 0.0, known_text, "", "known-text-not-found", _raw_lines(article))
+        return TailRecovery(article.paragraph, article_score, headword_score, 0.0, known_text, "", "known-text-not-found", _raw_lines(article))
 
     _start, end, score = located
     raw = _raw_tokens(article)
@@ -111,6 +106,7 @@ def recover_tail(entry: dict[str, object], article: OcrArticle, article_score: f
     return TailRecovery(
         paragraph=article.paragraph,
         article_score=round(article_score, 4),
+        headword_score=round(headword_score, 4),
         known_text_score=round(score, 4),
         known_text=known_text,
         recovered_tail=" ".join(tail).strip(),
@@ -143,7 +139,7 @@ def main() -> int:
         raise SystemExit("no OCR articles found")
     best = ranked[0]
     article = next(a for a in articles if a.paragraph == best.paragraph)
-    result = recover_tail(entry, article, best.score)
+    result = recover_tail(entry, article, best.score, best.headword_score)
     json.dump(asdict(result), __import__("sys").stdout, ensure_ascii=False, indent=2)
     print()
     return 0
