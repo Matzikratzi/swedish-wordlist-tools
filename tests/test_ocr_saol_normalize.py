@@ -1,8 +1,8 @@
 from swedish_wordlist_tools.ocr_saol_normalize import (
     article_text_for_match,
-    jsonl_normalized_headword_from_ord,
     normalize_headword_structure,
     normalize_text_for_match,
+    printed_headword_for_match,
 )
 from swedish_wordlist_tools.ocr_tsv_articles import OcrArticle, OcrLine, OcrWord
 
@@ -40,10 +40,10 @@ def test_headword_structure_distinguishes_half_and_full_boundaries():
     assert normalize_text_for_match("abs·cess|bild·ning") == "abscessbildning"
 
 
-def test_jsonl_normalized_headword_collapses_duplicate_at_full_boundary():
-    assert jsonl_normalized_headword_from_ord("boll|lek") == "bollek"
-    assert jsonl_normalized_headword_from_ord("abs·cess|bild·ning") == "abscessbildning"
-    assert jsonl_normalized_headword_from_ord("abro·vinsch") == "abrovinsch"
+def test_bollek_printed_headword_is_not_derived_from_structural_ord():
+    assert printed_headword_for_match("bollek") == "bollek"
+    assert normalize_headword_structure("boll|lek") == "boll|lek"
+    assert normalize_text_for_match("boll|lek") == "bolllek"
 
 
 def test_normalize_unifies_typographic_dashes():
