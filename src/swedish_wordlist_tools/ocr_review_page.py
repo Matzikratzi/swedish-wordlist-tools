@@ -8,9 +8,8 @@ from pathlib import Path
 
 
 def _data_uri(path: Path) -> str:
-    mime = "image/png"
     data = base64.b64encode(path.read_bytes()).decode("ascii")
-    return f"data:{mime};base64,{data}"
+    return f"data:image/png;base64,{data}"
 
 
 def main() -> int:
@@ -22,30 +21,32 @@ def main() -> int:
 
     data = json.loads(args.comparison_json.read_text(encoding="utf-8"))
     observed = data.get("observed_crop")
-    candidates = data.get("candidates", [])
+    comparisons = data.get("comparisons", [])
 
     cards = []
-    for item in candidates:
-        fname = item.get("template") or item.get("output")
+    for item in comparisons:
+        fname = item.get("template")
         img = ""
         if fname:
             path = args.templates / fname
             if path.exists():
-                img = f'<img src="{_data_uri(path)}" alt="template">'
+                img = f'<img src="{_data_uri(path)}" alt="template {html.escape(str(item.get("candidate", "?")))}">'
         cards.append(
             "<div class=card>"
-            f"<h3>{html.escape(str(item.get('character', item.get('candidate', '?'))))}</h3>"
+            f"<h3>Kandidat: {html.escape(str(item.get('candidate', '?')))}</h3>"
             f"{img}"
-            f"<pre>{html.escape(json.dumps(item, ensure_ascii=False, indent=2))}</pre>"
+            f"<p>pixel-score: <b>{html.escape(str(item.get('score', '')))}</b></p>"
+            f"<p>mall: {html.escape(str(fname or ''))}</p>"
             "</div>"
         )
 
-    observed_html = ""
+    observed_html = "<p>Ingen observerad crop sparades.</p>"
     if observed:
         path = Path(observed)
         if path.exists():
-            observed_html = f'<img class="observed" src="{_data_uri(path)}" alt="observed">'
+            observed_html = f'<img class="observed" src="{_data_uri(path)}" alt="observed glyph">'
 
+    best = data.get("best") or {}
     doc = f'''<!doctype html>
 <meta charset="utf-8">
 <title>SAOL OCR review</title>
@@ -53,13 +54,19 @@ def main() -> int:
 body{{font-family:system-ui,sans-serif;margin:2rem;max-width:1100px}}
 .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem}}
 .card{{border:1px solid #bbb;border-radius:10px;padding:1rem}}
-img{{image-rendering:pixelated;transform:scale(4);transform-origin:left top;margin:0 0 3rem 0}}
-pre{{white-space:pre-wrap;font-size:12px}}
-.observed{{display:block;margin-bottom:4rem}}
+img{{image-rendering:pixelated;min-width:96px;min-height:96px;object-fit:contain;background:white;border:1px solid #ddd}}
+.observed{{display:block;min-width:160px;min-height:160px;margin-bottom:1rem}}
+.meta{{background:#f5f5f5;padding:1rem;border-radius:8px;margin-bottom:1rem}}
 </style>
 <h1>SAOL OCR glyph review</h1>
-<p><b>Expected:</b> {html.escape(str(data.get('expected', '')))} &nbsp; <b>OCR:</b> {html.escape(str(data.get('observed_ocr', '')))}</p>
+<div class="meta">
+<p><b>OCR-ord:</b> {html.escape(str(data.get('word', '')))}</p>
+<p><b>Position:</b> {html.escape(str(data.get('index', '')))} &nbsp; <b>OCR-tecken:</b> {html.escape(str(data.get('ocr_character', '')))}</p>
+<p><b>Bästa kandidat:</b> {html.escape(str(best.get('candidate', '')))} &nbsp; <b>marginal:</b> {html.escape(str(data.get('margin', '')))}</p>
+</div>
+<h2>Observerat tecken</h2>
 {observed_html}
+<h2>Kända SAOL-mallar</h2>
 <div class="grid">{''.join(cards)}</div>
 '''
     args.out.parent.mkdir(parents=True, exist_ok=True)
