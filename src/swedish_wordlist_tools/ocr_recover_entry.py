@@ -11,6 +11,10 @@ from pathlib import Path
 from .ocr_match_jsonl import load_entry
 
 
+MIN_HEADWORD_SCORE = 0.70
+MIN_KNOWN_TEXT_SCORE = 0.55
+
+
 def _run(*args: str) -> None:
     subprocess.run(args, check=True)
 
@@ -28,8 +32,6 @@ def _download(url: str, dest: Path) -> None:
 
 def _crop_columns(image: Path, workdir: Path) -> list[Path]:
     width, height = _image_size(image)
-    # SAOL facsimile pages are three-column pages. Give each crop a little
-    # horizontal overlap so headwords near a gutter are not clipped.
     third = width / 3
     overlap = max(6, round(width * 0.015))
     columns: list[Path] = []
@@ -48,6 +50,23 @@ def _ocr_tsv(image: Path, dest: Path) -> None:
     generated = base.with_suffix(".tsv")
     if generated != dest:
         generated.replace(dest)
+
+
+def _acceptable(result: dict[str, object]) -> bool:
+    return (
+        float(result.get("headword_score", 0.0)) >= MIN_HEADWORD_SCORE
+        and float(result.get("known_text_score", 0.0)) >= MIN_KNOWN_TEXT_SCORE
+    )
+
+
+def _selection_key(result: dict[str, object]) -> tuple[float, float, float]:
+    # Headword identity dominates. Known text is secondary confirmation; the
+    # combined article score is only a tertiary tie-breaker.
+    return (
+        float(result.get("headword_score", 0.0)),
+        float(result.get("known_text_score", 0.0)),
+        float(result.get("article_score", 0.0)),
+    )
 
 
 def main() -> int:
@@ -96,10 +115,11 @@ def main() -> int:
             continue
         data = json.loads(proc.stdout)
         data["column"] = idx
+        data["acceptable"] = _acceptable(data)
         results.append(data)
 
-    successful = [r for r in results if "article_score" in r]
-    best = max(successful, key=lambda r: float(r.get("article_score", 0.0)), default=None)
+    acceptable = [r for r in results if r.get("acceptable") is True]
+    best = max(acceptable, key=_selection_key, default=None)
     output = {
         "entry": {
             "normaliserat_ord": entry.get("normaliserat_ord"),
@@ -109,6 +129,11 @@ def main() -> int:
             "source": source,
         },
         "best": best,
+        "status": "matched" if best is not None else "review-no-confident-headword-match",
+        "thresholds": {
+            "min_headword_score": MIN_HEADWORD_SCORE,
+            "min_known_text_score": MIN_KNOWN_TEXT_SCORE,
+        },
         "columns": results,
     }
     json.dump(output, __import__("sys").stdout, ensure_ascii=False, indent=2)
