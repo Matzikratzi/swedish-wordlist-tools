@@ -51,13 +51,14 @@ def normalize_text_for_match(text: str) -> str:
 
 
 def normalize_headword_structure(text: str) -> str:
-    """Normalize a SAOL headword while preserving boundary strength.
+    """Normalize a SAOL structural headword/split while preserving boundary strength.
 
     JSONL distinguishes half boundary ``·`` from full boundary ``|`` and both
-    may occur in the same headword, e.g. ``abs·cess|bild·ning``. Keep that
-    distinction. Only OCR-like substitutes whose strength is reasonably clear
-    are canonicalised; ambiguous plain ``|`` remains a full boundary.
-    Pronunciation annotations are removed.
+    may occur in the same structural form, e.g. ``abs·cess|bild·ning``. Keep
+    that distinction. This function does not imply that the structured ``ord``
+    value is the literal bold headword printed first in the article; SAOL can
+    print a separate headword followed by an explicit split, e.g.
+    ``bollek uppdelas boll|lek``.
     """
 
     text = unicodedata.normalize("NFKC", text)
@@ -70,28 +71,15 @@ def normalize_headword_structure(text: str) -> str:
     return text
 
 
-def jsonl_normalized_headword_from_ord(text: str) -> str:
-    """Approximate SAOL JSONL ``normaliserat_ord`` from an ``ord`` headword.
+def printed_headword_for_match(text: str) -> str:
+    """Normalize the literal printed headword without deriving it from ``ord``.
 
-    A full boundary ``|`` denotes a compound boundary. Removing it may expose
-    the same letter on both sides; the JSONL normalised form collapses that
-    doubled boundary letter. Example: ``boll|lek`` -> ``bollek`` (not
-    ``bolllek``). Half boundaries ``·`` are simply removed.
-
-    This function is intended for matching/validation only, not for rewriting
-    source data.
+    Use JSONL ``normaliserat_ord`` (or an explicitly observed printed headword)
+    as this signal. In particular, do not infer ``bollek`` by rewriting
+    ``boll|lek``: the facsimile explicitly contains both pieces of information.
     """
 
-    text = normalize_headword_structure(text)
-    text = text.replace("·", "")
-
-    while "|" in text:
-        left, right = text.split("|", 1)
-        if left and right and left[-1] == right[0]:
-            text = left + right[1:]
-        else:
-            text = left + right
-    return text
+    return normalize_text_for_match(text)
 
 
 def article_raw_lines(article: OcrArticle) -> list[str]:
