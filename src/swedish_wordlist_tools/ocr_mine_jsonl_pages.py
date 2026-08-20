@@ -51,6 +51,16 @@ def _ocr_tsv(image: Path, tsv: Path) -> None:
         generated.replace(tsv)
 
 
+def _inventory(style_dir: Path) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    if not style_dir.exists():
+        return counts
+    for path in style_dir.glob("*.png"):
+        ch = path.name.split("-", 1)[0]
+        counts[ch] = counts.get(ch, 0) + 1
+    return dict(sorted(counts.items()))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Mine SAOL italic glyph templates across several facsimile pages.")
     parser.add_argument("jsonl", type=Path)
@@ -74,6 +84,8 @@ def main() -> int:
     pages = sorted(set(pages))
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
+    before_inventory = _inventory(args.out_dir / "italic")
+
     owned = None
     if args.keep_workdir:
         root = args.keep_workdir
@@ -82,7 +94,7 @@ def main() -> int:
         owned = tempfile.TemporaryDirectory(prefix="saol-glyph-pages-")
         root = Path(owned.name)
 
-    aggregate: dict[str, int] = {}
+    run_counts: dict[str, int] = {}
     page_results: list[dict[str, object]] = []
 
     for page in pages:
@@ -127,11 +139,18 @@ def main() -> int:
             counts = data.get("counts", {})
             if isinstance(counts, dict):
                 for ch, n in counts.items():
-                    aggregate[str(ch)] = aggregate.get(str(ch), 0) + int(n)
+                    run_counts[str(ch)] = run_counts.get(str(ch), 0) + int(n)
             column_results.append({"column": idx, "matched_entries": data.get("matched_entries"), "counts": counts})
         page_results.append({"page": page, "columns": column_results})
 
-    result = {"pages": pages, "counts": dict(sorted(aggregate.items())), "page_results": page_results}
+    after_inventory = _inventory(args.out_dir / "italic")
+    result = {
+        "pages": pages,
+        "run_counts": dict(sorted(run_counts.items())),
+        "library_before": before_inventory,
+        "library_after": after_inventory,
+        "page_results": page_results,
+    }
     (args.out_dir / "manifest-pages.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
     print()
