@@ -11,15 +11,17 @@ _WS = re.compile(r"\s+")
 
 # Characters that may appear as SAOL word-boundary/typographic separators or be
 # introduced by OCR for them. They are ignored in the broad fallback matching
-# form, but can also be preserved in a structural form when JSONL supplies them.
+# form, but structural matching distinguishes SAOL's half and full boundary
+# marks whenever JSONL supplies them.
 _WORD_BOUNDARY_MARKS = str.maketrans("", "", "|¦‖ˈˌ·•")
-_BOUNDARY_CANONICAL = str.maketrans({
-    "|": "·",
+_HALF_BOUNDARY_SUBSTITUTES = str.maketrans({
     "¦": "·",
-    "‖": "·",
     "ˈ": "·",
     "ˌ": "·",
     "•": "·",
+})
+_FULL_BOUNDARY_SUBSTITUTES = str.maketrans({
+    "‖": "|",
 })
 _DASHES = str.maketrans({
     "‐": "-",
@@ -49,18 +51,20 @@ def normalize_text_for_match(text: str) -> str:
 
 
 def normalize_headword_structure(text: str) -> str:
-    """Normalize a SAOL headword while preserving known word boundaries.
+    """Normalize a SAOL headword while preserving boundary strength.
 
-    JSONL fields such as ``stycke`` and ``ord`` contain SAOL's boundary marks
-    (for example ``abro·vink`` and ``abro·vinsch``).  This form retains that
-    information by canonicalising common OCR substitutes to ``·`` rather than
-    deleting the separator. Pronunciation annotations are still removed.
+    JSONL distinguishes half boundary ``·`` from full boundary ``|`` and both
+    may occur in the same headword, e.g. ``abs·cess|bild·ning``.  Keep that
+    distinction. Only OCR-like substitutes whose strength is reasonably clear
+    are canonicalised; ambiguous plain ``|`` remains a full boundary.
+    Pronunciation annotations are removed.
     """
 
     text = unicodedata.normalize("NFKC", text)
     text = text.translate(_DASHES)
     text = _BRACKETED.sub(" ", text)
-    text = text.translate(_BOUNDARY_CANONICAL)
+    text = text.translate(_HALF_BOUNDARY_SUBSTITUTES)
+    text = text.translate(_FULL_BOUNDARY_SUBSTITUTES)
     text = text.casefold()
     text = _WS.sub(" ", text).strip()
     return text
