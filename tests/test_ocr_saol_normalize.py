@@ -30,8 +30,13 @@ def test_normalize_removes_pronunciation_and_word_boundary_marks():
 def test_headword_structure_preserves_jsonl_boundary_mark():
     assert normalize_headword_structure("abro·vink") == "abro·vink"
     assert normalize_headword_structure("abro·vinsch") == "abro·vinsch"
-    assert normalize_headword_structure("abro|vink [-vin'k]") == "abro·vink"
     assert normalize_headword_structure("abro¦vinsch [-vin'ʃ]") == "abro·vinsch"
+
+
+def test_headword_structure_distinguishes_half_and_full_boundaries():
+    assert normalize_headword_structure("abs·cess|bild·ning") == "abs·cess|bild·ning"
+    assert normalize_headword_structure("abs¦cess‖bild¦ning") == "abs·cess|bild·ning"
+    assert normalize_text_for_match("abs·cess|bild·ning") == "abscessbildning"
 
 
 def test_normalize_unifies_typographic_dashes():
