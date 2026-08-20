@@ -21,6 +21,7 @@ def main() -> int:
 
     data = json.loads(args.comparison_json.read_text(encoding="utf-8"))
     observed = data.get("observed_crop")
+    context = data.get("context_crop")
     comparisons = data.get("comparisons", [])
 
     cards = []
@@ -30,7 +31,7 @@ def main() -> int:
         if fname:
             path = args.templates / fname
             if path.exists():
-                img = f'<img src="{_data_uri(path)}" alt="template {html.escape(str(item.get("candidate", "?")))}">'
+                img = f'<img class="glyph" src="{_data_uri(path)}" alt="template {html.escape(str(item.get("candidate", "?")))}">'
         cards.append(
             "<div class=card>"
             f"<h3>Kandidat: {html.escape(str(item.get('candidate', '?')))}</h3>"
@@ -44,7 +45,13 @@ def main() -> int:
     if observed:
         path = Path(observed)
         if path.exists():
-            observed_html = f'<img class="observed" src="{_data_uri(path)}" alt="observed glyph">'
+            observed_html = f'<img class="glyph observed" src="{_data_uri(path)}" alt="observed glyph">'
+
+    context_html = ""
+    if context:
+        path = Path(context)
+        if path.exists():
+            context_html = f'<img class="context" src="{_data_uri(path)}" alt="word context">'
 
     best = data.get("best") or {}
     doc = f'''<!doctype html>
@@ -54,16 +61,22 @@ def main() -> int:
 body{{font-family:system-ui,sans-serif;margin:2rem;max-width:1100px}}
 .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem}}
 .card{{border:1px solid #bbb;border-radius:10px;padding:1rem}}
-img{{image-rendering:pixelated;min-width:96px;min-height:96px;object-fit:contain;background:white;border:1px solid #ddd}}
-.observed{{display:block;min-width:160px;min-height:160px;margin-bottom:1rem}}
+.glyph{{image-rendering:pixelated;transform:scale(2);transform-origin:left top;margin:0 2rem 2rem 0;background:white;border:1px solid #ddd}}
+.context{{image-rendering:pixelated;display:block;max-width:100%;transform:scale(2);transform-origin:left top;margin:0 0 3rem 0;border:1px solid #ddd}}
 .meta{{background:#f5f5f5;padding:1rem;border-radius:8px;margin-bottom:1rem}}
+code{{font-size:13px}}
 </style>
 <h1>SAOL OCR glyph review</h1>
 <div class="meta">
 <p><b>OCR-ord:</b> {html.escape(str(data.get('word', '')))}</p>
+<p><b>Stilklass:</b> {html.escape(str(data.get('style', '')))}</p>
 <p><b>Position:</b> {html.escape(str(data.get('index', '')))} &nbsp; <b>OCR-tecken:</b> {html.escape(str(data.get('ocr_character', '')))}</p>
+<p><b>Ord-bbox:</b> <code>{html.escape(str(data.get('word_bbox', '')))}</code></p>
+<p><b>Tecken-bbox:</b> <code>{html.escape(str(data.get('glyph_bbox_in_image', '')))}</code></p>
 <p><b>Bästa kandidat:</b> {html.escape(str(best.get('candidate', '')))} &nbsp; <b>marginal:</b> {html.escape(str(data.get('margin', '')))}</p>
 </div>
+<h2>Kontext</h2>
+{context_html}
 <h2>Observerat tecken</h2>
 {observed_html}
 <h2>Kända SAOL-mallar</h2>
