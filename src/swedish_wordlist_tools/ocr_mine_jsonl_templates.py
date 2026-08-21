@@ -10,7 +10,7 @@ from PIL import Image
 
 from .ocr_glyph_templates import _split_by_projection, _trim
 from .ocr_match_jsonl import rank_articles
-from .ocr_recover_tail import _known_tokens, _raw_tokens, locate_known_text
+from .ocr_recover_tail import _known_tokens, locate_known_text
 from .ocr_saol_normalize import normalize_text_for_match
 from .ocr_tsv_articles import OcrArticle, OcrWord, group_articles, read_words
 
@@ -24,6 +24,7 @@ class MinedTemplate:
     subnr: object
     paragraph: int
     bbox: tuple[int, int, int, int]
+    position_kind: str
     output: str
 
 
@@ -42,7 +43,6 @@ def _best_expected_word(ocr_word: str, expected_words: list[str]) -> tuple[str, 
     best: tuple[str, float] | None = None
     for expected in expected_words:
         exp = _soft_word(expected)
-        # Exact character alignment is needed before we label individual glyphs.
         if len(exp) != len(observed) or not exp:
             continue
         score = SequenceMatcher(None, exp, observed).ratio()
@@ -63,9 +63,38 @@ def _load_page_entries(jsonl: Path, page: int) -> list[dict[str, object]]:
     return result
 
 
+def _col_ink(gray: Image.Image) -> list[float]:
+    return [
+        sum((255 - gray.getpixel((x, y))) / 255.0 for y in range(gray.height))
+        for x in range(gray.width)
+    ]
+
+
+def _boundary_quality(crop: Image.Image, spans: list[tuple[int, int]], idx: int) -> bool:
+    """Require clear ink valleys around an interior character.
+
+    Edge characters are much safer because one boundary is the exact OCR word
+    edge. For interior characters we only keep samples whose two inferred cuts
+    both fall in unusually low-ink columns.
+    """
+    if idx == 0 or idx == len(spans) - 1:
+        return True
+    proj = _col_ink(crop)
+    nonzero = sorted(v for v in proj if v > 0.05)
+    if not nonzero:
+        return False
+    median = nonzero[len(nonzero) // 2]
+    threshold = max(0.8, median * 0.30)
+    left, right = spans[idx]
+    left_val = min(proj[max(0, left - 1)], proj[min(len(proj) - 1, left)])
+    right_cut = min(len(proj) - 1, right)
+    right_val = min(proj[max(0, right_cut - 1)], proj[right_cut])
+    return left_val <= threshold and right_val <= threshold
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Mine real italic SAOL glyph templates from JSONL-known inflection text aligned to OCR."
+        description="Mine conservative real italic SAOL glyph templates from JSONL-known text aligned to OCR."
     )
     parser.add_argument("jsonl", type=Path)
     parser.add_argument("image", type=Path, help="One cropped SAOL column image")
@@ -74,8 +103,12 @@ def main() -> int:
     parser.add_argument("--chars", default="abcdefghijklmnopqrstuvwxyzåäö")
     parser.add_argument("--out-dir", type=Path, required=True)
     parser.add_argument("--min-headword-score", type=float, default=0.72)
-    parser.add_argument("--min-word-score", type=float, default=0.86)
     parser.add_argument("--limit-per-char", type=int, default=12)
+    parser.add_argument(
+        "--allow-interior",
+        action="store_true",
+        help="Also mine interior glyphs when both inferred character boundaries are very clean",
+    )
     args = parser.parse_args()
 
     style = "italic"
@@ -91,6 +124,9 @@ def main() -> int:
     counts: dict[str, int] = {}
     mined: list[MinedTemplate] = []
     matched_entries = 0
+    rejected_fuzzy_words = 0
+    rejected_interior = 0
+    rejected_boundary = 0
 
     for entry in entries:
         ranked = rank_articles(entry, articles)
@@ -114,16 +150,20 @@ def main() -> int:
         matched_entries += 1
 
         for word in words[start:end]:
-            # Merged/tall OCR boxes are dangerous for character extraction.
             if word.height < 6 or word.height > 18 or word.width < 2:
                 continue
             pairing = _best_expected_word(word.text, expected_words)
             if pairing is None:
                 continue
             expected, pair_score = pairing
-            if pair_score < args.min_word_score:
-                continue
             observed = _soft_word(word.text)
+
+            # Training labels must come from words whose complete normalized OCR
+            # spelling already agrees with JSONL. Fuzzy word matches are useful
+            # for locating entries, but are not trustworthy enough for templates.
+            if pair_score != 1.0 or observed != expected:
+                rejected_fuzzy_words += 1
+                continue
             if len(expected) != len(observed):
                 continue
 
@@ -132,22 +172,32 @@ def main() -> int:
             if len(spans) != len(observed):
                 continue
 
-            for idx, (obs_ch, exp_ch) in enumerate(zip(observed, expected)):
-                # Only mine characters for which OCR and JSONL already agree.
-                # Ambiguous/disagreeing positions are exactly what these templates
-                # will later be used to adjudicate.
-                if obs_ch != exp_ch or exp_ch not in wanted_chars:
+            for idx, exp_ch in enumerate(expected):
+                if exp_ch not in wanted_chars:
                     continue
                 if counts.get(exp_ch, 0) >= args.limit_per_char:
                     continue
+                is_edge = idx == 0 or idx == len(expected) - 1
+                if not is_edge and not args.allow_interior:
+                    rejected_interior += 1
+                    continue
+                if not _boundary_quality(crop, spans, idx):
+                    rejected_boundary += 1
+                    continue
+
                 left, right = spans[idx]
                 if right <= left:
                     continue
                 glyph = _trim(crop.crop((left, 0, right, crop.height)))
                 if glyph.width <= 0 or glyph.height <= 0:
                     continue
+
                 number = counts.get(exp_ch, 0)
-                filename = f"{exp_ch}-{number:03d}-sub{entry.get('subnr')}-{observed}-{idx}.png".replace("/", "_")
+                position_kind = "edge" if is_edge else "interior-clean"
+                filename = (
+                    f"{exp_ch}-{number:03d}-sub{entry.get('subnr')}-{observed}-{idx}-{position_kind}.png"
+                    .replace("/", "_")
+                )
                 glyph.save(style_dir / filename)
                 counts[exp_ch] = number + 1
                 mined.append(
@@ -159,6 +209,7 @@ def main() -> int:
                         subnr=entry.get("subnr"),
                         paragraph=article.paragraph,
                         bbox=(word.left + left, word.top, right - left, word.height),
+                        position_kind=position_kind,
                         output=f"{style}/{filename}",
                     )
                 )
@@ -169,6 +220,9 @@ def main() -> int:
         "entries_on_page": len(entries),
         "matched_entries": matched_entries,
         "counts": dict(sorted(counts.items())),
+        "rejected_fuzzy_words": rejected_fuzzy_words,
+        "rejected_interior": rejected_interior,
+        "rejected_boundary": rejected_boundary,
         "templates": [asdict(item) for item in mined],
     }
     (args.out_dir / "manifest-italic.json").write_text(
