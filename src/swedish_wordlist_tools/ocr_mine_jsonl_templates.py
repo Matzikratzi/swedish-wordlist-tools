@@ -114,6 +114,8 @@ def main() -> int:
     parser.add_argument("--min-headword-score", type=float, default=0.72)
     parser.add_argument("--limit-per-char", type=int, default=12)
     parser.add_argument("--allow-interior", action="store_true")
+    parser.add_argument("--debug-pairs", type=int, default=12,
+                        help="Include up to this many rejected OCR/JSONL token pair examples in the manifest")
     args = parser.parse_args()
 
     style = args.style
@@ -134,6 +136,7 @@ def main() -> int:
     rejected_boundary = 0
     rejected_split = 0
     rejected_geometry = 0
+    fuzzy_examples: list[dict[str, object]] = []
 
     for entry in entries:
         ranked = rank_articles(entry, articles)
@@ -168,11 +171,29 @@ def main() -> int:
                 continue
             pairing = _best_expected_word(word.text, expected_words)
             if pairing is None:
+                if len(fuzzy_examples) < args.debug_pairs:
+                    fuzzy_examples.append({
+                        "subnr": entry.get("subnr"),
+                        "ocr": word.text,
+                        "observed": _soft_word(word.text),
+                        "expected_tokens": expected_words[:12],
+                        "reason": "no-same-length-candidate",
+                    })
                 continue
             expected, pair_score = pairing
             observed = _soft_word(word.text)
             if pair_score != 1.0 or observed != expected:
                 rejected_fuzzy_words += 1
+                if len(fuzzy_examples) < args.debug_pairs:
+                    fuzzy_examples.append({
+                        "subnr": entry.get("subnr"),
+                        "ocr": word.text,
+                        "observed": observed,
+                        "expected": expected,
+                        "score": round(pair_score, 4),
+                        "expected_tokens": expected_words[:12],
+                        "reason": "fuzzy",
+                    })
                 continue
             exact_word_matches += 1
             crop = _trim(page_image.crop((word.left, word.top, word.left + word.width, word.top + word.height)))
@@ -219,6 +240,7 @@ def main() -> int:
         "rejected_boundary": rejected_boundary,
         "rejected_split": rejected_split,
         "rejected_geometry": rejected_geometry,
+        "fuzzy_examples": fuzzy_examples,
         "templates": [asdict(item) for item in mined],
     }
     (args.out_dir / f"manifest-{style}.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
