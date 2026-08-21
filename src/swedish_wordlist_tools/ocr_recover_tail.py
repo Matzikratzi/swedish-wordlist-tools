@@ -13,6 +13,7 @@ from .ocr_tsv_articles import OcrArticle, OcrLine, group_articles, read_words
 
 _MARKER_PREFIX = "+~-–—"
 _STOP_PREFIXES = ("•", "♦", "◆", "◊", "«", "»")
+_OCR_DECORATION_TOKENS = {"=", "«", "»", "|", "¦", "¬"}
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,7 @@ class TailRecovery:
     known_text_score: float
     known_text: str
     recovered_tail: str
+    raw_recovered_tail: str
     stop_reason: str
     raw_article_lines: tuple[str, ...]
 
@@ -52,22 +54,46 @@ def _window_score(target: list[str], candidate: list[str]) -> float:
     return SequenceMatcher(None, " ".join(target), " ".join(candidate)).ratio()
 
 
+def _token_similarity(a: str, b: str) -> float:
+    aa, bb = _compact(a), _compact(b)
+    if not aa or not bb:
+        return 0.0
+    return SequenceMatcher(None, aa, bb).ratio()
+
+
 def locate_known_text(entry: dict[str, object], article: OcrArticle) -> tuple[int, int, int, float] | None:
+    """Locate known JSONL text, strongly preferring the correct final token.
+
+    A plain fuzzy window can stop one token early when punctuation/style OCR is
+    noisy.  For truncated fields that is disastrous: we then duplicate most of
+    the final inflection word.  Therefore the score includes an explicit match
+    against JSONL's final known token.
+    """
     target = _known_tokens(entry)
     if not target:
         return None
+    last_target = target[-1]
     best = None
+    best_rank = -1.0
     for line_idx, line in enumerate(article.lines):
         combined = list(line.words)
         if line_idx + 1 < len(article.lines):
             combined += list(article.lines[line_idx + 1].words)
         soft = [_soft_token(w.text) for w in combined]
-        for width in range(max(1, len(target) - 1), len(target) + 2):
+        for width in range(max(1, len(target) - 2), len(target) + 3):
             for start in range(0, max(0, len(soft) - width + 1)):
                 end = start + width
-                score = _window_score(target, [t for t in soft[start:end] if t])
-                if best is None or score > best[3]:
-                    best = (line_idx, start, end, score)
+                candidate = [t for t in soft[start:end] if t]
+                if not candidate:
+                    continue
+                body_score = _window_score(target, candidate)
+                end_score = _token_similarity(last_target, candidate[-1])
+                # The ending token is deliberately strong evidence, because the
+                # whole task is to recover what follows that exact truncation.
+                rank = 0.65 * body_score + 0.35 * end_score
+                if rank > best_rank:
+                    best_rank = rank
+                    best = (line_idx, start, end, body_score)
     return best
 
 
@@ -148,18 +174,61 @@ def _suffix_from_last_word(known_last: str, ocr_last: str) -> str:
     return ""
 
 
+def _clean_tail_tokens(tokens: list[str]) -> str:
+    """Remove OCR-only decoration without inventing lexical content.
+
+    This intentionally does not dictionary-correct words.  Glyph verification
+    can do that later.  Here we only remove standalone/fused print ornaments
+    and repair unmistakable OCR whitespace around punctuation.
+    """
+    cleaned: list[str] = []
+    for token in tokens:
+        t = token.strip()
+        if not t or t in _OCR_DECORATION_TOKENS:
+            continue
+        # SAOL's superscript semantic dot is frequently OCR'd as a leading «.
+        # Keep it as an explicit neutral marker so callers can preserve the
+        # article structure without confusing it with lexical text.
+        if t.startswith("«") or t.startswith("»"):
+            t = "· " + t[1:].lstrip()
+        # Trailing isolated OCR ornaments are not lexical characters.
+        while t and t[-1] in "«»=¦|":
+            t = t[:-1].rstrip()
+        if t:
+            cleaned.append(t)
+    text = " ".join(cleaned)
+    text = re.sub(r"\s+([,.;:])", r"\1", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _result(article: OcrArticle, article_score: float, headword_score: float, score: float, known_text: str, tail: list[str], reason: str) -> TailRecovery:
+    raw = " ".join(tail).strip()
+    return TailRecovery(
+        article.paragraph,
+        round(article_score, 4),
+        round(headword_score, 4),
+        round(score, 4),
+        known_text,
+        _clean_tail_tokens(tail),
+        raw,
+        reason,
+        _raw_lines(article),
+    )
+
+
 def recover_tail(entry: dict[str, object], article: OcrArticle, article_score: float = 0.0, headword_score: float = 0.0, next_entry: dict[str, object] | None = None) -> TailRecovery:
     located = locate_known_text(entry, article)
     known_text = str(entry.get("text") or "")
     if located is None:
-        return TailRecovery(article.paragraph, article_score, headword_score, 0.0, known_text, "", "known-text-not-found", _raw_lines(article))
+        return TailRecovery(article.paragraph, article_score, headword_score, 0.0, known_text, "", "", "known-text-not-found", _raw_lines(article))
 
     line_idx, start, end, score = located
     first_line = article.lines[line_idx]
     second_line = article.lines[line_idx + 1] if line_idx + 1 < len(article.lines) else None
     combined = list(first_line.words) + (list(second_line.words) if second_line else [])
     if end <= 0 or end > len(combined):
-        return TailRecovery(article.paragraph, article_score, headword_score, round(score, 4), known_text, "", "geometry-not-found", _raw_lines(article))
+        return TailRecovery(article.paragraph, article_score, headword_score, round(score, 4), known_text, "", "", "geometry-not-found", _raw_lines(article))
 
     tail: list[str] = []
     known_tokens = _known_tokens(entry)
@@ -176,38 +245,31 @@ def recover_tail(entry: dict[str, object], article: OcrArticle, article_score: f
         end_pos_in_line = end - len(first_line.words)
 
     targets = _next_headword_targets(next_entry)
-
-    # When JSONL tells us the next real article, punctuation is content, not a
-    # boundary. OCR often reads SAOL's superscript bullet as «/»; stopping on
-    # that was exactly why abc-stridsmedel lost "äldre beteckning ... CBRN".
     current_line = article.lines[end_line_idx]
     for word in current_line.words[end_pos_in_line:]:
         if not targets:
             reason = _is_stop_token(word.text)
             if reason:
-                return TailRecovery(article.paragraph, round(article_score, 4), round(headword_score, 4), round(score, 4), known_text, " ".join(tail).strip(), reason, _raw_lines(article))
+                return _result(article, article_score, headword_score, score, known_text, tail, reason)
         tail.append(word.text)
 
-    # With a known next JSONL headword, scan far enough to reach it. The OCR
-    # article grouper can accidentally merge many printed articles, so a tiny
-    # four-line horizon defeats the whole point of having the JSONL boundary.
     max_follow_lines = len(article.lines) if targets else 4
     following = article.lines[end_line_idx + 1 : end_line_idx + 1 + max_follow_lines]
     for rel, line in enumerate(following):
         next_line = following[rel + 1] if rel + 1 < len(following) else None
         if _line_starts_next_jsonl_headword(line, next_line, targets):
-            return TailRecovery(article.paragraph, round(article_score, 4), round(headword_score, 4), round(score, 4), known_text, " ".join(tail).strip(), "next-jsonl-headword", _raw_lines(article))
+            return _result(article, article_score, headword_score, score, known_text, tail, "next-jsonl-headword")
         if not targets and _looks_like_new_headword_line(line):
-            return TailRecovery(article.paragraph, round(article_score, 4), round(headword_score, 4), round(score, 4), known_text, " ".join(tail).strip(), "next-headword-line", _raw_lines(article))
+            return _result(article, article_score, headword_score, score, known_text, tail, "next-headword-line")
         for word in line.words:
             if not targets:
                 reason = _is_stop_token(word.text)
                 if reason:
-                    return TailRecovery(article.paragraph, round(article_score, 4), round(headword_score, 4), round(score, 4), known_text, " ".join(tail).strip(), reason, _raw_lines(article))
+                    return _result(article, article_score, headword_score, score, known_text, tail, reason)
             tail.append(word.text)
 
-    stop_reason = "next-jsonl-headword-not-found" if targets else ("review-follow-line-limit" if end_line_idx + 1 + max_follow_lines < len(article.lines) else "article-end")
-    return TailRecovery(article.paragraph, round(article_score, 4), round(headword_score, 4), round(score, 4), known_text, " ".join(tail).strip(), stop_reason, _raw_lines(article))
+    reason = "next-jsonl-headword-not-found" if targets else ("review-follow-line-limit" if end_line_idx + 1 + max_follow_lines < len(article.lines) else "article-end")
+    return _result(article, article_score, headword_score, score, known_text, tail, reason)
 
 
 def main() -> int:
