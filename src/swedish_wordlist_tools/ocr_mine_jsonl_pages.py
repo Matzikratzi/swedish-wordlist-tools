@@ -143,6 +143,8 @@ def main() -> int:
                     "rejected_fuzzy_words": data.get("rejected_fuzzy_words"),
                     "rejected_split": data.get("rejected_split"),
                     "rejected_boundary": data.get("rejected_boundary"),
+                    "rejected_geometry": data.get("rejected_geometry"),
+                    "fuzzy_examples": data.get("fuzzy_examples", []),
                 }
             column_results.append({"column": idx, "styles": style_results})
         page_results.append({"page": page, "columns": column_results})
