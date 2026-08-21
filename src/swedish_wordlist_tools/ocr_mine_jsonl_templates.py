@@ -127,7 +127,13 @@ def main() -> int:
     entries = _load_page_entries(args.jsonl, args.page)
     counts: dict[str, int] = {}
     mined: list[MinedTemplate] = []
-    matched_entries = rejected_fuzzy_words = rejected_interior = rejected_boundary = 0
+    matched_entries = 0
+    exact_word_matches = 0
+    rejected_fuzzy_words = 0
+    rejected_interior = 0
+    rejected_boundary = 0
+    rejected_split = 0
+    rejected_geometry = 0
 
     for entry in entries:
         ranked = rank_articles(entry, articles)
@@ -158,6 +164,7 @@ def main() -> int:
 
         for word in candidate_words:
             if word.height < 6 or word.height > 18 or word.width < 2:
+                rejected_geometry += 1
                 continue
             pairing = _best_expected_word(word.text, expected_words)
             if pairing is None:
@@ -167,9 +174,11 @@ def main() -> int:
             if pair_score != 1.0 or observed != expected:
                 rejected_fuzzy_words += 1
                 continue
+            exact_word_matches += 1
             crop = _trim(page_image.crop((word.left, word.top, word.left + word.width, word.top + word.height)))
             spans = _split_by_projection(crop, len(observed))
             if len(spans) != len(observed):
+                rejected_split += 1
                 continue
             for idx, exp_ch in enumerate(expected):
                 if exp_ch not in wanted_chars or counts.get(exp_ch, 0) >= args.limit_per_char:
@@ -183,9 +192,11 @@ def main() -> int:
                     continue
                 left, right = spans[idx]
                 if right <= left:
+                    rejected_geometry += 1
                     continue
                 glyph = _trim(crop.crop((left, 0, right, crop.height)))
                 if glyph.width <= 0 or glyph.height <= 0:
+                    rejected_geometry += 1
                     continue
                 number = counts.get(exp_ch, 0)
                 position_kind = "edge" if is_edge else "interior-clean"
@@ -196,7 +207,20 @@ def main() -> int:
                 counts[exp_ch] = number + 1
                 mined.append(MinedTemplate(style, exp_ch, observed, expected, entry.get("subnr"), article.paragraph, (word.left + left, word.top, right - left, word.height), position_kind, f"{style}/{filename}"))
 
-    manifest = {"page": args.page, "style": style, "entries_on_page": len(entries), "matched_entries": matched_entries, "counts": dict(sorted(counts.items())), "rejected_fuzzy_words": rejected_fuzzy_words, "rejected_interior": rejected_interior, "rejected_boundary": rejected_boundary, "templates": [asdict(item) for item in mined]}
+    manifest = {
+        "page": args.page,
+        "style": style,
+        "entries_on_page": len(entries),
+        "matched_entries": matched_entries,
+        "exact_word_matches": exact_word_matches,
+        "counts": dict(sorted(counts.items())),
+        "rejected_fuzzy_words": rejected_fuzzy_words,
+        "rejected_interior": rejected_interior,
+        "rejected_boundary": rejected_boundary,
+        "rejected_split": rejected_split,
+        "rejected_geometry": rejected_geometry,
+        "templates": [asdict(item) for item in mined],
+    }
     (args.out_dir / f"manifest-{style}.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     json.dump(manifest, __import__("sys").stdout, ensure_ascii=False, indent=2)
     print()
