@@ -25,24 +25,23 @@ def _source_for_page(jsonl: Path, page: int) -> str | None:
     return None
 
 
-def _crop_columns(image: Path, workdir: Path) -> list[Path]:
+def _crop_columns(image: Path, workdir: Path) -> list[tuple[Path, int]]:
     identify = subprocess.check_output(["identify", "-format", "%w %h", str(image)], text=True).strip()
     width, height = map(int, identify.split())
     third = width / 3
     overlap = max(6, round(width * 0.015))
-    out = []
+    out: list[tuple[Path, int]] = []
     for i in range(3):
         left = max(0, round(i * third) - overlap)
         right = min(width, round((i + 1) * third) + overlap)
         crop = workdir / f"page-column-{i+1}.png"
         if not crop.exists():
             subprocess.run(["convert", str(image), "-crop", f"{right-left}x{height}+{left}+0", "+repage", str(crop)], check=True)
-        out.append(crop)
+        out.append((crop, left))
     return out
 
 
 def _ocr_tsv(image: Path, tsv: Path) -> None:
-    # Reuse expensive OCR from an earlier interrupted/rejected mining pass.
     if tsv.exists() and tsv.stat().st_size > 0:
         return
     base = tsv.with_suffix("")
@@ -104,6 +103,7 @@ def main() -> int:
 
     run_counts = {style: {} for style in styles}
     page_results = []
+    template_sources: dict[str, dict[str, object]] = {}
     for page in pages:
         source = _source_for_page(args.jsonl, page)
         if not source:
@@ -116,15 +116,12 @@ def main() -> int:
             _download(source, image)
         columns = _crop_columns(image, page_dir)
         column_results = []
-        for idx, column in enumerate(columns, 1):
+        for idx, (column, column_left) in enumerate(columns, 1):
             tsv = page_dir / f"column-{idx}.tsv"
             _ocr_tsv(column, tsv)
             style_results = {}
             for style in styles:
                 cmd = [sys.executable, "-m", "swedish_wordlist_tools.ocr_mine_jsonl_templates", str(args.jsonl), str(column), str(tsv), "--page", str(page), "--chars", args.chars, "--out-dir", str(args.out_dir), "--limit-per-char", str(args.limit_per_char), "--style", style]
-                # Exact OCR=JSONL words are trusted labels. Let the miner use
-                # cleanly separable interior glyphs too; edge-only mining throws
-                # away almost all of the useful alphabet.
                 if style == "italic":
                     cmd.append("--allow-interior")
                 proc = subprocess.run(cmd, text=True, capture_output=True)
@@ -136,6 +133,34 @@ def main() -> int:
                 for ch, n in counts.items():
                     d = run_counts[style]
                     d[str(ch)] = d.get(str(ch), 0) + int(n)
+                templates = data.get("templates", [])
+                if isinstance(templates, list):
+                    for item in templates:
+                        if not isinstance(item, dict):
+                            continue
+                        output = str(item.get("output") or "")
+                        if not output:
+                            continue
+                        bbox = item.get("bbox")
+                        page_bbox = None
+                        if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+                            page_bbox = [int(bbox[0]) + column_left, int(bbox[1]), int(bbox[2]), int(bbox[3])]
+                        template_sources[output] = {
+                            "page": page,
+                            "column": idx,
+                            "column_left": column_left,
+                            "bbox": bbox,
+                            "page_bbox": page_bbox,
+                            "source": source,
+                            "page_image": str(image),
+                            "column_image": str(column),
+                            "subnr": item.get("subnr"),
+                            "source_word": item.get("source_word"),
+                            "expected_word": item.get("expected_word"),
+                            "position_kind": item.get("position_kind"),
+                            "style": style,
+                            "character": item.get("character"),
+                        }
                 style_results[style] = {
                     "matched_entries": data.get("matched_entries"),
                     "exact_word_matches": data.get("exact_word_matches"),
@@ -143,14 +168,25 @@ def main() -> int:
                     "rejected_fuzzy_words": data.get("rejected_fuzzy_words"),
                     "rejected_split": data.get("rejected_split"),
                     "rejected_boundary": data.get("rejected_boundary"),
+                    "rejected_charbox_count": data.get("rejected_charbox_count"),
+                    "rejected_charbox_labels": data.get("rejected_charbox_labels"),
                     "rejected_geometry": data.get("rejected_geometry"),
                     "fuzzy_examples": data.get("fuzzy_examples", []),
                 }
-            column_results.append({"column": idx, "styles": style_results})
-        page_results.append({"page": page, "columns": column_results})
+            column_results.append({"column": idx, "column_left": column_left, "styles": style_results})
+        page_results.append({"page": page, "source": source, "columns": column_results})
 
     after = {style: _inventory(args.out_dir / style) for style in styles}
-    result = {"pages": pages, "styles": styles, "run_counts": {s: dict(sorted(c.items())) for s, c in run_counts.items()}, "library_before": before, "library_after": after, "page_results": page_results}
+    result = {
+        "pages": pages,
+        "styles": styles,
+        "workdir": str(root),
+        "run_counts": {s: dict(sorted(c.items())) for s, c in run_counts.items()},
+        "library_before": before,
+        "library_after": after,
+        "template_sources": template_sources,
+        "page_results": page_results,
+    }
     (args.out_dir / "manifest-pages.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
     print()
