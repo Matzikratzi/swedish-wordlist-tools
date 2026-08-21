@@ -86,10 +86,6 @@ def _boundary_quality(crop: Image.Image, spans: list[tuple[int, int]], idx: int)
 def _expected_words_for_style(entry: dict[str, object], style: str) -> list[str]:
     if style == "italic":
         return _known_tokens(entry)
-    # Bold and roman mining are deliberately conservative: use structural
-    # headword spellings as known labels. Roman body text needs a separate
-    # source of ground truth, so for now roman means non-italic headword
-    # material rather than guessing labels from definitions.
     values: list[str] = []
     for key in ("stycke", "ord", "normaliserat_ord"):
         value = entry.get(key)
@@ -98,6 +94,12 @@ def _expected_words_for_style(entry: dict[str, object], style: str) -> list[str]
             if cleaned:
                 values.extend(cleaned.split())
     return values
+
+
+def _safe_character_name(ch: str) -> str:
+    if ch.isalnum():
+        return ch
+    return f"u{ord(ch):04x}"
 
 
 def main() -> int:
@@ -138,14 +140,15 @@ def main() -> int:
         words = _article_words(article)
         if style == "italic":
             located = locate_known_text(entry, article)
-            if located is None or located[2] < 0.55:
+            if located is None:
                 continue
-            start, end, _ = located
+            start, end, score = located[:3]
+            if score < 0.55:
+                continue
             if start < 0 or end > len(words) or start >= end:
                 continue
             candidate_words = words[start:end]
         else:
-            # Headword styles: restrict to the beginning of the matched article.
             candidate_words = words[: min(4, len(words))]
 
         expected_words = _expected_words_for_style(entry, style)
@@ -186,7 +189,9 @@ def main() -> int:
                     continue
                 number = counts.get(exp_ch, 0)
                 position_kind = "edge" if is_edge else "interior-clean"
-                filename = f"{exp_ch}-{number:03d}-sub{entry.get('subnr')}-{observed}-{idx}-{position_kind}.png".replace("/", "_")
+                label = _safe_character_name(exp_ch)
+                safe_observed = "".join(ch if ch.isalnum() else "_" for ch in observed)
+                filename = f"{label}-{number:03d}-sub{entry.get('subnr')}-{safe_observed}-{idx}-{position_kind}.png"
                 glyph.save(style_dir / filename)
                 counts[exp_ch] = number + 1
                 mined.append(MinedTemplate(style, exp_ch, observed, expected, entry.get("subnr"), article.paragraph, (word.left + left, word.top, right - left, word.height), position_kind, f"{style}/{filename}"))
