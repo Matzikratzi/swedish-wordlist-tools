@@ -8,13 +8,19 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
-from .ocr_glyph_verify import verification_dict, verify_expected_headword
 from .ocr_match_jsonl import load_entry
+from .ocr_saol_normalize import normalize_text_for_match
+from .ocr_tsv_articles import group_articles, read_words
+from .ocr_recover_tail import recover_tail
 
 
 MIN_HEADWORD_SCORE = 0.70
 MIN_KNOWN_TEXT_SCORE = 0.55
-GLYPH_FALLBACK_MIN_HEADWORD_SCORE = 0.30
+# If the known JSONL text matches strongly, allow a damaged OCR headword. This
+# is the important abc-stridsmedel -> abe-stridsimedel case: JSONL supplies the
+# identity; OCR only has to locate the printed article and recover its suffix.
+ANCHORED_MIN_HEADWORD_SCORE = 0.30
+ANCHORED_MIN_KNOWN_TEXT_SCORE = 0.64
 
 
 def _run(*args: str) -> None:
@@ -54,27 +60,75 @@ def _ocr_tsv(image: Path, dest: Path) -> None:
         generated.replace(dest)
 
 
-def _acceptable(result: dict[str, object]) -> bool:
+def _soft(text: str) -> str:
+    text = normalize_text_for_match(text)
+    return " ".join(part.lstrip("+~-–—") for part in text.split())
+
+
+def _headword_score(entry: dict[str, object], article_text: str) -> float:
+    from difflib import SequenceMatcher
+
+    def compact(value: object) -> str:
+        if not isinstance(value, str):
+            return ""
+        return "".join(ch for ch in normalize_text_for_match(value) if ch.isalnum())
+
+    targets = [compact(entry.get(k)) for k in ("normaliserat_ord", "stycke", "ord")]
+    targets = [x for x in targets if x]
+    article = compact(article_text)
+    best = 0.0
+    for target in targets:
+        # Compare against the printed prefix only. Permit a little extra OCR
+        # material because punctuation/style boundaries often get fused.
+        for extra in range(0, 4):
+            prefix = article[: len(target) + extra]
+            if prefix:
+                best = max(best, SequenceMatcher(None, target, prefix).ratio())
+    return best
+
+
+def _known_text_score(entry: dict[str, object], article_text: str) -> float:
+    from difflib import SequenceMatcher
+
+    known = _soft(str(entry.get("text") or ""))
+    haystack = _soft(article_text)
+    if not known:
+        return 0.0
+    if known in haystack:
+        return 1.0
+    target = known.split()
+    words = haystack.split()
+    best = 0.0
+    for width in range(max(1, len(target) - 1), len(target) + 2):
+        for start in range(max(0, len(words) - width + 1)):
+            best = max(best, SequenceMatcher(None, known, " ".join(words[start:start + width])).ratio())
+    return best
+
+
+def _candidate(entry: dict[str, object], article, column: int) -> dict[str, object]:
+    article_text = " ".join(word.text for line in article.lines for word in line.words)
+    hs = _headword_score(entry, article_text)
+    ks = _known_text_score(entry, article_text)
+    anchored = hs >= ANCHORED_MIN_HEADWORD_SCORE and ks >= ANCHORED_MIN_KNOWN_TEXT_SCORE
+    conventional = hs >= MIN_HEADWORD_SCORE and ks >= MIN_KNOWN_TEXT_SCORE
+    recovery = recover_tail(entry, article, 0.8 * hs + 0.2 * ks, hs)
+    data = recovery.__dict__.copy()
+    data.update({
+        "column": column,
+        "headword_score": round(hs, 4),
+        "known_text_score": round(ks, 4),
+        "acceptable": conventional or anchored,
+        "match_mode": "jsonl-anchor" if anchored and not conventional else ("normal" if conventional else None),
+    })
+    return data
+
+
+def _selection_key(result: dict[str, object]) -> tuple[float, float, float]:
+    # Once the known 50-char field anchors us to an article, it is stronger
+    # evidence than exact OCR of a styled headword.
     return (
-        float(result.get("headword_score", 0.0)) >= MIN_HEADWORD_SCORE
-        and float(result.get("known_text_score", 0.0)) >= MIN_KNOWN_TEXT_SCORE
-    )
-
-
-def _glyph_candidate(result: dict[str, object]) -> bool:
-    score = float(result.get("headword_score", 0.0))
-    return (
-        GLYPH_FALLBACK_MIN_HEADWORD_SCORE <= score < MIN_HEADWORD_SCORE
-        and float(result.get("known_text_score", 0.0)) >= MIN_KNOWN_TEXT_SCORE
-    )
-
-
-def _selection_key(result: dict[str, object]) -> tuple[float, float, float, float]:
-    glyph_verified = 1.0 if result.get("glyph_verified") is True else 0.0
-    return (
-        glyph_verified,
-        float(result.get("headword_score", 0.0)),
         float(result.get("known_text_score", 0.0)),
+        float(result.get("headword_score", 0.0)),
         float(result.get("article_score", 0.0)),
     )
 
@@ -100,63 +154,33 @@ def main() -> int:
         workdir = Path(owned_tmp.name)
 
     page = workdir / Path(source).name
-    _download(source, page)
+    if not page.exists():
+        _download(source, page)
     columns = _crop_columns(page, workdir)
 
-    results = []
-    entry_json = json.dumps(entry, ensure_ascii=False)
-    expected_headword = str(entry.get("normaliserat_ord") or "")
+    results: list[dict[str, object]] = []
     for idx, column in enumerate(columns, 1):
         tsv = workdir / f"column-{idx}.tsv"
         _ocr_tsv(column, tsv)
-        proc = subprocess.run(
-            [
-                __import__("sys").executable,
-                "-m",
-                "swedish_wordlist_tools.ocr_recover_tail",
-                str(tsv),
-                "--entry-json",
-                entry_json,
-            ],
-            text=True,
-            capture_output=True,
-        )
-        if proc.returncode != 0:
-            results.append({"column": idx, "error": proc.stderr.strip() or proc.stdout.strip()})
-            continue
-        data = json.loads(proc.stdout)
-        data["column"] = idx
-        data["acceptable"] = _acceptable(data)
-        data["glyph_verified"] = False
-        data["glyph_verification"] = None
-
-        if not data["acceptable"] and expected_headword and _glyph_candidate(data):
-            verification = verify_expected_headword(column, tsv, expected_headword)
-            data["glyph_verification"] = verification_dict(verification)
-            if verification is not None and verification.verified:
-                data["glyph_verified"] = True
-                data["acceptable"] = True
-
-        results.append(data)
+        with tsv.open("r", encoding="utf-8", newline="") as stream:
+            articles = group_articles(read_words(stream))
+        results.extend(_candidate(entry, article, idx) for article in articles)
 
     acceptable = [r for r in results if r.get("acceptable") is True]
     best = max(acceptable, key=_selection_key, default=None)
     output = {
-        "entry": {
-            "normaliserat_ord": entry.get("normaliserat_ord"),
-            "subnr": entry.get("subnr"),
-            "sidnr1": entry.get("sidnr1"),
-            "text": entry.get("text"),
-            "source": source,
-        },
+        "entry": {k: entry.get(k) for k in ("normaliserat_ord", "subnr", "sidnr1", "text", "source")},
         "best": best,
-        "status": "matched" if best is not None else "review-no-confident-headword-match",
+        "status": "matched" if best is not None else "review-no-confident-jsonl-anchor",
         "thresholds": {
             "min_headword_score": MIN_HEADWORD_SCORE,
             "min_known_text_score": MIN_KNOWN_TEXT_SCORE,
-            "glyph_fallback_min_headword_score": GLYPH_FALLBACK_MIN_HEADWORD_SCORE,
+            "anchored_min_headword_score": ANCHORED_MIN_HEADWORD_SCORE,
+            "anchored_min_known_text_score": ANCHORED_MIN_KNOWN_TEXT_SCORE,
         },
-        "columns": results,
+        "candidate_count": len(results),
+        "acceptable_count": len(acceptable),
+        "top_candidates": sorted(results, key=_selection_key, reverse=True)[:5],
     }
     json.dump(output, __import__("sys").stdout, ensure_ascii=False, indent=2)
     print()
