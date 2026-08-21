@@ -81,6 +81,62 @@ def _is_stop_token(token: str) -> str | None:
     return None
 
 
+def _line_token_ranges(article: OcrArticle) -> list[tuple[int, int, object]]:
+    ranges = []
+    offset = 0
+    for line in article.lines:
+        start = offset
+        offset += len(line.words)
+        ranges.append((start, offset, line))
+    return ranges
+
+
+def _looks_like_new_headword_line(line) -> bool:
+    """Conservative signal that a visual line starts a new SAOL article.
+
+    We intentionally avoid linguistic guessing.  SAOL headword lines normally
+    start near the left article margin, have a word-like first token, and then
+    quickly contain pronunciation/word-class material.  This catches the giant
+    Tesseract-paragraph failure without treating wrapped definition lines as
+    new articles.
+    """
+    if not line.words:
+        return False
+    first = line.words[0]
+    token = normalize_text_for_match(first.text).strip()
+    if not token or len(token) < 2:
+        return False
+    if not any(ch.isalpha() for ch in token):
+        return False
+    # Wrapped prose often starts indented; real headwords in a cropped column
+    # are generally at the column's left text margin. Empirically allow a broad
+    # margin because Tesseract geometry is noisy.
+    if first.left > 80:
+        return False
+    text = " ".join(word.text for word in line.words[:5])
+    norm = normalize_text_for_match(text)
+    # Strong structural cues appearing shortly after the first token.
+    cues = (" s.", " s ", " adj.", " adj ", " v.", " v ", " adv.", " prep.", " pron.", " n ", "[-", "[")
+    return any(cue in f" {norm} " for cue in cues)
+
+
+def _next_article_token(article: OcrArticle, after_token: int) -> int | None:
+    ranges = _line_token_ranges(article)
+    # Never stop on the same visual line as the known truncation point. Start
+    # looking at subsequent lines only.
+    current_line_idx = None
+    for idx, (start, end, _line) in enumerate(ranges):
+        if start <= max(0, after_token - 1) < end:
+            current_line_idx = idx
+            break
+    if current_line_idx is None:
+        return None
+    for start, _end, line in ranges[current_line_idx + 1 :]:
+        if _looks_like_new_headword_line(line):
+            return start
+    return None
+
+
 def recover_tail(
     entry: dict[str, object],
     article: OcrArticle,
@@ -94,9 +150,13 @@ def recover_tail(
 
     _start, end, score = located
     raw = _raw_tokens(article)
+    next_article = _next_article_token(article, end)
     tail: list[str] = []
     stop_reason = "article-end"
-    for token in raw[end:]:
+    for pos, token in enumerate(raw[end:], start=end):
+        if next_article is not None and pos >= next_article:
+            stop_reason = "next-headword-line"
+            break
         reason = _is_stop_token(token)
         if reason:
             stop_reason = reason
