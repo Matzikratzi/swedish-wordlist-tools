@@ -13,7 +13,8 @@ from .ocr_tsv_articles import OcrArticle, OcrLine, group_articles, read_words
 
 _MARKER_PREFIX = "+~-–—"
 _STOP_PREFIXES = ("•", "♦", "◆", "◊", "«", "»")
-_OCR_DECORATION_TOKENS = {"=", "«", "»", "|", "¦", "¬"}
+_OCR_DECORATION_TOKENS = {"=", "|", "¦", "¬"}
+_SEMANTIC_MARKER_PREFIXES = ("«", "»", "•", "♦", "◆", "◊")
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,8 @@ class TailRecovery:
     known_text: str
     recovered_tail: str
     raw_recovered_tail: str
+    article_remainder: str
+    raw_article_remainder: str
     stop_reason: str
     raw_article_lines: tuple[str, ...]
 
@@ -62,13 +65,6 @@ def _token_similarity(a: str, b: str) -> float:
 
 
 def locate_known_text(entry: dict[str, object], article: OcrArticle) -> tuple[int, int, int, float] | None:
-    """Locate known JSONL text, strongly preferring the correct final token.
-
-    A plain fuzzy window can stop one token early when punctuation/style OCR is
-    noisy.  For truncated fields that is disastrous: we then duplicate most of
-    the final inflection word.  Therefore the score includes an explicit match
-    against JSONL's final known token.
-    """
     target = _known_tokens(entry)
     if not target:
         return None
@@ -88,8 +84,6 @@ def locate_known_text(entry: dict[str, object], article: OcrArticle) -> tuple[in
                     continue
                 body_score = _window_score(target, candidate)
                 end_score = _token_similarity(last_target, candidate[-1])
-                # The ending token is deliberately strong evidence, because the
-                # whole task is to recover what follows that exact truncation.
                 rank = 0.65 * body_score + 0.35 * end_score
                 if rank > best_rank:
                     best_rank = rank
@@ -154,6 +148,12 @@ def _looks_like_new_headword_line(line: OcrLine) -> bool:
 
 
 def _suffix_from_last_word(known_last: str, ocr_last: str) -> str:
+    """Recover only the unknown suffix while trusting JSONL for the prefix.
+
+    Internal OCR corruption is deliberately ignored here.  For example JSONL
+    abc-stridsmedle + OCR abo-stridsmedlen yields only 'n': the known JSONL
+    prefix remains authoritative and OCR contributes only material beyond it.
+    """
     known = _soft_token(known_last)
     observed = _soft_token(ocr_last)
     if not known or not observed:
@@ -166,32 +166,29 @@ def _suffix_from_last_word(known_last: str, ocr_last: str) -> str:
     hi = min(len(observed), len(known) + 3)
     for split in range(lo, hi + 1):
         score = SequenceMatcher(None, known, observed[:split]).ratio()
-        if score > best_score:
-            best_score = score
+        # Prefer a split close to the known JSONL length when scores tie.
+        rank = score - 0.01 * abs(split - len(known))
+        if rank > best_score:
+            best_score = rank
             best_split = split
-    if best_split is not None and best_score >= 0.72 and best_split < len(observed):
+    if best_split is not None and best_score >= 0.70 and best_split < len(observed):
         return observed[best_split:]
     return ""
 
 
-def _clean_tail_tokens(tokens: list[str]) -> str:
-    """Remove OCR-only decoration without inventing lexical content.
-
-    This intentionally does not dictionary-correct words.  Glyph verification
-    can do that later.  Here we only remove standalone/fused print ornaments
-    and repair unmistakable OCR whitespace around punctuation.
-    """
+def _clean_tokens(tokens: list[str], preserve_semantic_dot: bool = False) -> str:
     cleaned: list[str] = []
     for token in tokens:
         t = token.strip()
         if not t or t in _OCR_DECORATION_TOKENS:
             continue
-        # SAOL's superscript semantic dot is frequently OCR'd as a leading «.
-        # Keep it as an explicit neutral marker so callers can preserve the
-        # article structure without confusing it with lexical text.
-        if t.startswith("«") or t.startswith("»"):
-            t = "· " + t[1:].lstrip()
-        # Trailing isolated OCR ornaments are not lexical characters.
+        if t.startswith(_SEMANTIC_MARKER_PREFIXES):
+            rest = t[1:].lstrip()
+            if preserve_semantic_dot:
+                cleaned.append("·")
+            if rest:
+                cleaned.append(rest)
+            continue
         while t and t[-1] in "«»=¦|":
             t = t[:-1].rstrip()
         if t:
@@ -202,16 +199,40 @@ def _clean_tail_tokens(tokens: list[str]) -> str:
     return text
 
 
+def _split_semantic_marker(tokens: list[str]) -> tuple[list[str], list[str]]:
+    """Split inflection-field continuation from the article body marker.
+
+    SAOL's raised dot marks the transition from form/inflection data to the
+    explanatory article body.  Tesseract commonly renders it as « or ».  A
+    fused token such as «äldre is split into marker + lexical remainder.
+    """
+    for idx, token in enumerate(tokens):
+        t = token.strip()
+        if t.startswith(_SEMANTIC_MARKER_PREFIXES):
+            before = tokens[:idx]
+            after: list[str] = []
+            rest = t[1:].lstrip()
+            if rest:
+                after.append(rest)
+            after.extend(tokens[idx + 1 :])
+            return before, after
+    return tokens, []
+
+
 def _result(article: OcrArticle, article_score: float, headword_score: float, score: float, known_text: str, tail: list[str], reason: str) -> TailRecovery:
-    raw = " ".join(tail).strip()
+    inflection_tokens, remainder_tokens = _split_semantic_marker(tail)
+    raw_tail = " ".join(inflection_tokens).strip()
+    raw_remainder = " ".join(remainder_tokens).strip()
     return TailRecovery(
         article.paragraph,
         round(article_score, 4),
         round(headword_score, 4),
         round(score, 4),
         known_text,
-        _clean_tail_tokens(tail),
-        raw,
+        _clean_tokens(inflection_tokens),
+        raw_tail,
+        _clean_tokens(remainder_tokens, preserve_semantic_dot=False),
+        raw_remainder,
         reason,
         _raw_lines(article),
     )
@@ -221,14 +242,14 @@ def recover_tail(entry: dict[str, object], article: OcrArticle, article_score: f
     located = locate_known_text(entry, article)
     known_text = str(entry.get("text") or "")
     if located is None:
-        return TailRecovery(article.paragraph, article_score, headword_score, 0.0, known_text, "", "", "known-text-not-found", _raw_lines(article))
+        return TailRecovery(article.paragraph, article_score, headword_score, 0.0, known_text, "", "", "", "", "known-text-not-found", _raw_lines(article))
 
     line_idx, start, end, score = located
     first_line = article.lines[line_idx]
     second_line = article.lines[line_idx + 1] if line_idx + 1 < len(article.lines) else None
     combined = list(first_line.words) + (list(second_line.words) if second_line else [])
     if end <= 0 or end > len(combined):
-        return TailRecovery(article.paragraph, article_score, headword_score, round(score, 4), known_text, "", "", "geometry-not-found", _raw_lines(article))
+        return TailRecovery(article.paragraph, article_score, headword_score, round(score, 4), known_text, "", "", "", "", "geometry-not-found", _raw_lines(article))
 
     tail: list[str] = []
     known_tokens = _known_tokens(entry)
