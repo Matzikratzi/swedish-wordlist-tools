@@ -8,15 +8,36 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 
-DEFAULT_CHARS = "abcdefghijklmnopqrstuvwxyzåäö"
+FALLBACK_CHARS = "abcdefghijklmnopqrstuvwxyzåäö0123456789+-.,;:()[]/=%_’'"
+
+
+def _discover_chars(jsonl: Path) -> str:
+    """Return every non-whitespace character occurring in JSONL text fields.
+
+    The truncation target is the JSONL `text` string, so its actual character
+    inventory is the right default alphabet. Letters are folded to lowercase;
+    punctuation, digits and symbols are kept literally.
+    """
+    chars: set[str] = set()
+    with jsonl.open("r", encoding="utf-8") as stream:
+        for line in stream:
+            if not line.strip():
+                continue
+            entry = json.loads(line)
+            text = entry.get("text")
+            if not isinstance(text, str):
+                continue
+            for ch in text:
+                if ch.isspace():
+                    continue
+                chars.add(ch.lower() if ch.isalpha() else ch)
+    if not chars:
+        return FALLBACK_CHARS
+    # Stable output: letters, digits, then the rest by code point.
+    return "".join(sorted(chars, key=lambda ch: (0 if ch.isalpha() else 1 if ch.isdigit() else 2, ch)))
 
 
 def _page_char_supply(jsonl: Path, wanted: set[str]) -> tuple[dict[int, Counter[str]], dict[int, int]]:
-    """Estimate useful italic glyph supply per page from JSONL text.
-
-    This is only a page-selection heuristic. The actual miner remains strict:
-    it emits templates only when the OCR token exactly matches the JSONL token.
-    """
     supply: dict[int, Counter[str]] = defaultdict(Counter)
     entries: dict[int, int] = defaultdict(int)
     with jsonl.open("r", encoding="utf-8") as stream:
@@ -29,9 +50,10 @@ def _page_char_supply(jsonl: Path, wanted: set[str]) -> tuple[dict[int, Counter[
             if not isinstance(page, int) or not isinstance(text, str) or not text:
                 continue
             entries[page] += 1
-            for ch in text.lower():
-                if ch in wanted:
-                    supply[page][ch] += 1
+            for ch in text:
+                key = ch.lower() if ch.isalpha() else ch
+                if key in wanted:
+                    supply[page][key] += 1
     return dict(supply), dict(entries)
 
 
@@ -52,8 +74,7 @@ def _select_pages(
         for page in available:
             counts = supply[page]
             gain = Counter({ch: min(remaining[ch], counts.get(ch, 0)) for ch in chars if remaining[ch] > 0})
-            # Rare characters matter more. A page with one useful c/å is often
-            # worth more than another hundred e:s.
+            # Rare characters matter more than yet another common letter.
             score = sum((n / max(1, target_per_char)) * (1.0 + 2.0 * remaining[ch] / target_per_char) for ch, n in gain.items())
             if score > best_score:
                 best_page = page
@@ -79,7 +100,8 @@ def main() -> int:
         description="Select pages across SAOL14 and build a strict global italic glyph library for truncation recovery."
     )
     parser.add_argument("jsonl", type=Path)
-    parser.add_argument("--chars", default=DEFAULT_CHARS)
+    parser.add_argument("--chars", default=None,
+                        help="Characters to mine. Default: all non-whitespace characters actually found in JSONL text fields.")
     parser.add_argument("--target-per-char", type=int, default=30,
                         help="Estimated JSONL occurrences to cover per character before strict OCR filtering")
     parser.add_argument("--limit-per-char", type=int, default=30,
@@ -90,12 +112,13 @@ def main() -> int:
     parser.add_argument("--plan-only", action="store_true")
     args = parser.parse_args()
 
-    chars = "".join(dict.fromkeys(args.chars.lower()))
+    chars = "".join(dict.fromkeys((args.chars if args.chars is not None else _discover_chars(args.jsonl))))
     supply, entries = _page_char_supply(args.jsonl, set(chars))
     pages, estimated = _select_pages(supply, chars, args.target_per_char, args.max_pages)
 
     plan = {
         "chars": chars,
+        "character_count": len(chars),
         "target_per_char": args.target_per_char,
         "max_pages": args.max_pages,
         "selected_pages": pages,
