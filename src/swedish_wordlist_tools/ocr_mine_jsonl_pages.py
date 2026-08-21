@@ -35,12 +35,16 @@ def _crop_columns(image: Path, workdir: Path) -> list[Path]:
         left = max(0, round(i * third) - overlap)
         right = min(width, round((i + 1) * third) + overlap)
         crop = workdir / f"page-column-{i+1}.png"
-        subprocess.run(["convert", str(image), "-crop", f"{right-left}x{height}+{left}+0", "+repage", str(crop)], check=True)
+        if not crop.exists():
+            subprocess.run(["convert", str(image), "-crop", f"{right-left}x{height}+{left}+0", "+repage", str(crop)], check=True)
         out.append(crop)
     return out
 
 
 def _ocr_tsv(image: Path, tsv: Path) -> None:
+    # Reuse expensive OCR from an earlier interrupted/rejected mining pass.
+    if tsv.exists() and tsv.stat().st_size > 0:
+        return
     base = tsv.with_suffix("")
     subprocess.run(["tesseract", str(image), str(base), "-l", "swe", "--psm", "6", "tsv"], check=True)
     generated = base.with_suffix(".tsv")
@@ -118,6 +122,11 @@ def main() -> int:
             style_results = {}
             for style in styles:
                 cmd = [sys.executable, "-m", "swedish_wordlist_tools.ocr_mine_jsonl_templates", str(args.jsonl), str(column), str(tsv), "--page", str(page), "--chars", args.chars, "--out-dir", str(args.out_dir), "--limit-per-char", str(args.limit_per_char), "--style", style]
+                # Exact OCR=JSONL words are trusted labels. Let the miner use
+                # cleanly separable interior glyphs too; edge-only mining throws
+                # away almost all of the useful alphabet.
+                if style == "italic":
+                    cmd.append("--allow-interior")
                 proc = subprocess.run(cmd, text=True, capture_output=True)
                 if proc.returncode != 0:
                     style_results[style] = {"error": proc.stderr.strip() or proc.stdout.strip()}
@@ -127,7 +136,14 @@ def main() -> int:
                 for ch, n in counts.items():
                     d = run_counts[style]
                     d[str(ch)] = d.get(str(ch), 0) + int(n)
-                style_results[style] = {"matched_entries": data.get("matched_entries"), "counts": counts}
+                style_results[style] = {
+                    "matched_entries": data.get("matched_entries"),
+                    "exact_word_matches": data.get("exact_word_matches"),
+                    "counts": counts,
+                    "rejected_fuzzy_words": data.get("rejected_fuzzy_words"),
+                    "rejected_split": data.get("rejected_split"),
+                    "rejected_boundary": data.get("rejected_boundary"),
+                }
             column_results.append({"column": idx, "styles": style_results})
         page_results.append({"page": page, "columns": column_results})
 
