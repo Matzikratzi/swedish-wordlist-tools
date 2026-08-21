@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
+import tempfile
 from dataclasses import asdict, dataclass
-from difflib import SequenceMatcher
 from pathlib import Path
 
 from PIL import Image
 
-from .ocr_glyph_templates import _split_by_projection, _trim
+from .ocr_glyph_templates import _trim
 from .ocr_match_jsonl import rank_articles
 from .ocr_recover_tail import _known_tokens
 from .ocr_saol_normalize import normalize_text_for_match
@@ -48,26 +49,6 @@ def _load_page_entries(jsonl: Path, page: int) -> list[dict[str, object]]:
     return result
 
 
-def _col_ink(gray: Image.Image) -> list[float]:
-    return [sum((255 - gray.getpixel((x, y))) / 255.0 for y in range(gray.height)) for x in range(gray.width)]
-
-
-def _boundary_quality(crop: Image.Image, spans: list[tuple[int, int]], idx: int) -> bool:
-    if idx == 0 or idx == len(spans) - 1:
-        return True
-    proj = _col_ink(crop)
-    nonzero = sorted(v for v in proj if v > 0.05)
-    if not nonzero:
-        return False
-    median = nonzero[len(nonzero) // 2]
-    threshold = max(0.8, median * 0.30)
-    left, right = spans[idx]
-    left_val = min(proj[max(0, left - 1)], proj[min(len(proj) - 1, left)])
-    right_cut = min(len(proj) - 1, right)
-    right_val = min(proj[max(0, right_cut - 1)], proj[right_cut])
-    return left_val <= threshold and right_val <= threshold
-
-
 def _expected_words_for_style(entry: dict[str, object], style: str) -> list[str]:
     if style == "italic":
         return _known_tokens(entry)
@@ -88,14 +69,74 @@ def _safe_character_name(ch: str) -> str:
 
 
 def _informative_exact_token(token: str) -> bool:
-    """Use only exact labels that are unlikely to occur by chance elsewhere.
-
-    OCR paragraph grouping can merge several printed articles.  Generic form
-    tokens such as n, s., pl. and el. are therefore unsafe labels even when
-    they match JSONL exactly.  Three or more alphanumeric characters give us
-    a conservative source of glyph ground truth.
-    """
     return sum(ch.isalnum() for ch in token) >= 3
+
+
+def _printed_form(jsonl_token: str, ocr_token: str) -> tuple[str, str] | None:
+    """Return (labels, printed chars) when OCR and JSONL token shapes align.
+
+    SAOL JSONL uses '+' as an abstract repetition marker while the facsimile
+    prints a tilde-like '~'.  Labels retain '+' because that is what recovery
+    ultimately needs, while the printed string uses '~' for box verification.
+    Leading marker normalization is deliberately not used here: we need the
+    glyph itself when it is part of an otherwise informative exact token.
+    """
+    labels = normalize_text_for_match(jsonl_token).strip()
+    observed = normalize_text_for_match(ocr_token).strip()
+    if not labels or not observed:
+        return None
+    printed = labels.replace("+", "~")
+    # Common OCR normalizations may still erase the visual distinction, so
+    # compare with '+' and '~' treated as the same printed marker.
+    canonical_expected = printed.replace("+", "~")
+    canonical_observed = observed.replace("+", "~")
+    if canonical_expected != canonical_observed:
+        return None
+    if len(labels) != len(observed):
+        return None
+    return labels, printed
+
+
+def _tesseract_char_boxes(crop: Image.Image, expected_len: int) -> list[tuple[str, int, int, int, int]] | None:
+    """Get symbol boxes from Tesseract for one already-verified word crop.
+
+    Coordinates returned by makebox use a bottom-left origin; convert them to
+    PIL top-left coordinates.  Recognition labels are not trusted here; JSONL
+    supplies the labels.  We only trust the geometry when symbol count matches
+    the verified token length exactly.
+    """
+    if expected_len <= 0:
+        return None
+    with tempfile.TemporaryDirectory(prefix="saol-charbox-") as tmp:
+        image_path = Path(tmp) / "word.png"
+        crop.save(image_path)
+        proc = subprocess.run(
+            ["tesseract", str(image_path), "stdout", "-l", "swe", "--psm", "8", "makebox"],
+            text=True,
+            capture_output=True,
+        )
+        if proc.returncode != 0:
+            return None
+        boxes: list[tuple[str, int, int, int, int]] = []
+        h = crop.height
+        for line in proc.stdout.splitlines():
+            parts = line.split()
+            if len(parts) < 5:
+                continue
+            try:
+                ch = parts[0]
+                left, bottom, right, top = map(int, parts[1:5])
+            except ValueError:
+                continue
+            x0 = max(0, left)
+            x1 = min(crop.width, right)
+            y0 = max(0, h - top)
+            y1 = min(crop.height, h - bottom)
+            if x1 <= x0 or y1 <= y0:
+                continue
+            boxes.append((ch, x0, y0, x1, y1))
+        boxes.sort(key=lambda item: (item[1], item[2]))
+        return boxes if len(boxes) == expected_len else None
 
 
 def main() -> int:
@@ -132,6 +173,7 @@ def main() -> int:
     rejected_split = 0
     rejected_geometry = 0
     rejected_uninformative = 0
+    rejected_charbox_count = 0
     fuzzy_examples: list[dict[str, object]] = []
 
     for entry in entries:
@@ -148,65 +190,80 @@ def main() -> int:
             continue
         matched_entries += 1
 
-        # For italic form text, do not use locate_known_text(): that routine is
-        # intentionally fuzzy because it serves truncation recovery.  Glyph
-        # mining needs the opposite property: exact labels.  Scan the matched
-        # OCR article and accept only exact, informative JSONL tokens.
-        if style == "italic":
-            expected_exact = {_soft_word(token) for token in expected_words}
-            expected_exact.discard("")
-            candidate_words = _article_words(article)
-        else:
-            expected_exact = {_soft_word(token) for token in expected_words}
-            expected_exact.discard("")
-            candidate_words = _article_words(article)[:4]
+        # Map normalized forms back to their JSONL spelling so '+' remains a
+        # usable output label even though the facsimile prints '~'.
+        expected_by_soft: dict[str, list[str]] = {}
+        for token in expected_words:
+            soft = _soft_word(token)
+            if soft:
+                expected_by_soft.setdefault(soft, []).append(token)
+
+        candidate_words = _article_words(article) if style == "italic" else _article_words(article)[:4]
 
         for word in candidate_words:
             if word.height < 6 or word.height > 18 or word.width < 2:
                 rejected_geometry += 1
                 continue
-            observed = _soft_word(word.text)
-            if not observed:
+            observed_soft = _soft_word(word.text)
+            raw_candidates = expected_by_soft.get(observed_soft, [])
+            if not raw_candidates:
                 continue
-            if observed not in expected_exact:
+
+            pair = None
+            for raw_expected in raw_candidates:
+                candidate = _printed_form(raw_expected, word.text)
+                if candidate is not None:
+                    pair = candidate
+                    break
+            if pair is None:
+                # The soft match may have hidden the '+' -> '~' distinction or
+                # punctuation differences.  Keep this conservative for now.
+                rejected_fuzzy_words += 1
                 continue
-            if style == "italic" and not _informative_exact_token(observed):
+            labels, printed = pair
+            if style == "italic" and not _informative_exact_token(labels):
                 rejected_uninformative += 1
                 continue
 
-            expected = observed
             exact_word_matches += 1
-            crop = _trim(page_image.crop((word.left, word.top, word.left + word.width, word.top + word.height)))
-            spans = _split_by_projection(crop, len(observed))
-            if len(spans) != len(observed):
-                rejected_split += 1
+            word_crop = page_image.crop((word.left, word.top, word.left + word.width, word.top + word.height))
+            boxes = _tesseract_char_boxes(word_crop, len(labels))
+            if boxes is None:
+                rejected_charbox_count += 1
                 continue
-            for idx, exp_ch in enumerate(expected):
+
+            for idx, exp_ch in enumerate(labels):
                 if exp_ch not in wanted_chars or counts.get(exp_ch, 0) >= args.limit_per_char:
                     continue
-                is_edge = idx == 0 or idx == len(expected) - 1
+                is_edge = idx == 0 or idx == len(labels) - 1
                 if not is_edge and not args.allow_interior:
                     rejected_interior += 1
                     continue
-                if not _boundary_quality(crop, spans, idx):
-                    rejected_boundary += 1
-                    continue
-                left, right = spans[idx]
-                if right <= left:
-                    rejected_geometry += 1
-                    continue
-                glyph = _trim(crop.crop((left, 0, right, crop.height)))
+                _ocr_ch, left, top, right, bottom = boxes[idx]
+                glyph = _trim(word_crop.crop((left, top, right, bottom)))
                 if glyph.width <= 0 or glyph.height <= 0:
                     rejected_geometry += 1
                     continue
                 number = counts.get(exp_ch, 0)
-                position_kind = "edge" if is_edge else "interior-clean"
+                position_kind = "edge" if is_edge else "interior-charbox"
                 label = _safe_character_name(exp_ch)
-                safe_observed = "".join(ch if ch.isalnum() else "_" for ch in observed)
+                safe_observed = "".join(ch if ch.isalnum() else "_" for ch in printed)
                 filename = f"{label}-{number:03d}-sub{entry.get('subnr')}-{safe_observed}-{idx}-{position_kind}.png"
                 glyph.save(style_dir / filename)
                 counts[exp_ch] = number + 1
-                mined.append(MinedTemplate(style, exp_ch, observed, expected, entry.get("subnr"), article.paragraph, (word.left + left, word.top, right - left, word.height), position_kind, f"{style}/{filename}"))
+                mined.append(
+                    MinedTemplate(
+                        style,
+                        exp_ch,
+                        word.text,
+                        labels,
+                        entry.get("subnr"),
+                        article.paragraph,
+                        (word.left + left, word.top + top, right - left, bottom - top),
+                        position_kind,
+                        f"{style}/{filename}",
+                    )
+                )
 
     manifest = {
         "page": args.page,
@@ -220,6 +277,7 @@ def main() -> int:
         "rejected_interior": rejected_interior,
         "rejected_boundary": rejected_boundary,
         "rejected_split": rejected_split,
+        "rejected_charbox_count": rejected_charbox_count,
         "rejected_geometry": rejected_geometry,
         "fuzzy_examples": fuzzy_examples,
         "templates": [asdict(item) for item in mined],
