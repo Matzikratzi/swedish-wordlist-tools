@@ -10,7 +10,7 @@ from PIL import Image
 
 from .ocr_glyph_templates import _split_by_projection, _trim
 from .ocr_match_jsonl import rank_articles
-from .ocr_recover_tail import _known_tokens, locate_known_text
+from .ocr_recover_tail import _known_tokens
 from .ocr_saol_normalize import normalize_text_for_match
 from .ocr_tsv_articles import OcrArticle, OcrWord, group_articles, read_words
 
@@ -34,21 +34,6 @@ def _soft_word(text: str) -> str:
 
 def _article_words(article: OcrArticle) -> list[OcrWord]:
     return [word for line in article.lines for word in line.words]
-
-
-def _best_expected_word(ocr_word: str, expected_words: list[str]) -> tuple[str, float] | None:
-    observed = _soft_word(ocr_word)
-    if not observed:
-        return None
-    best: tuple[str, float] | None = None
-    for expected in expected_words:
-        exp = _soft_word(expected)
-        if len(exp) != len(observed) or not exp:
-            continue
-        score = SequenceMatcher(None, exp, observed).ratio()
-        if best is None or score > best[1]:
-            best = (exp, score)
-    return best
 
 
 def _load_page_entries(jsonl: Path, page: int) -> list[dict[str, object]]:
@@ -102,6 +87,17 @@ def _safe_character_name(ch: str) -> str:
     return f"u{ord(ch):04x}"
 
 
+def _informative_exact_token(token: str) -> bool:
+    """Use only exact labels that are unlikely to occur by chance elsewhere.
+
+    OCR paragraph grouping can merge several printed articles.  Generic form
+    tokens such as n, s., pl. and el. are therefore unsafe labels even when
+    they match JSONL exactly.  Three or more alphanumeric characters give us
+    a conservative source of glyph ground truth.
+    """
+    return sum(ch.isalnum() for ch in token) >= 3
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Mine conservative real SAOL glyph templates from JSONL-known text aligned to OCR.")
     parser.add_argument("jsonl", type=Path)
@@ -114,8 +110,7 @@ def main() -> int:
     parser.add_argument("--min-headword-score", type=float, default=0.72)
     parser.add_argument("--limit-per-char", type=int, default=12)
     parser.add_argument("--allow-interior", action="store_true")
-    parser.add_argument("--debug-pairs", type=int, default=12,
-                        help="Include up to this many rejected OCR/JSONL token pair examples in the manifest")
+    parser.add_argument("--debug-pairs", type=int, default=12)
     args = parser.parse_args()
 
     style = args.style
@@ -136,6 +131,7 @@ def main() -> int:
     rejected_boundary = 0
     rejected_split = 0
     rejected_geometry = 0
+    rejected_uninformative = 0
     fuzzy_examples: list[dict[str, object]] = []
 
     for entry in entries:
@@ -146,55 +142,39 @@ def main() -> int:
         article = next((a for a in articles if a.paragraph == best.paragraph), None)
         if article is None:
             continue
-        words = _article_words(article)
-        if style == "italic":
-            located = locate_known_text(entry, article)
-            if located is None:
-                continue
-            start, end, score = located[:3]
-            if score < 0.55:
-                continue
-            if start < 0 or end > len(words) or start >= end:
-                continue
-            candidate_words = words[start:end]
-        else:
-            candidate_words = words[: min(4, len(words))]
 
         expected_words = _expected_words_for_style(entry, style)
         if not expected_words:
             continue
         matched_entries += 1
 
+        # For italic form text, do not use locate_known_text(): that routine is
+        # intentionally fuzzy because it serves truncation recovery.  Glyph
+        # mining needs the opposite property: exact labels.  Scan the matched
+        # OCR article and accept only exact, informative JSONL tokens.
+        if style == "italic":
+            expected_exact = {_soft_word(token) for token in expected_words}
+            expected_exact.discard("")
+            candidate_words = _article_words(article)
+        else:
+            expected_exact = {_soft_word(token) for token in expected_words}
+            expected_exact.discard("")
+            candidate_words = _article_words(article)[:4]
+
         for word in candidate_words:
             if word.height < 6 or word.height > 18 or word.width < 2:
                 rejected_geometry += 1
                 continue
-            pairing = _best_expected_word(word.text, expected_words)
-            if pairing is None:
-                if len(fuzzy_examples) < args.debug_pairs:
-                    fuzzy_examples.append({
-                        "subnr": entry.get("subnr"),
-                        "ocr": word.text,
-                        "observed": _soft_word(word.text),
-                        "expected_tokens": expected_words[:12],
-                        "reason": "no-same-length-candidate",
-                    })
-                continue
-            expected, pair_score = pairing
             observed = _soft_word(word.text)
-            if pair_score != 1.0 or observed != expected:
-                rejected_fuzzy_words += 1
-                if len(fuzzy_examples) < args.debug_pairs:
-                    fuzzy_examples.append({
-                        "subnr": entry.get("subnr"),
-                        "ocr": word.text,
-                        "observed": observed,
-                        "expected": expected,
-                        "score": round(pair_score, 4),
-                        "expected_tokens": expected_words[:12],
-                        "reason": "fuzzy",
-                    })
+            if not observed:
                 continue
+            if observed not in expected_exact:
+                continue
+            if style == "italic" and not _informative_exact_token(observed):
+                rejected_uninformative += 1
+                continue
+
+            expected = observed
             exact_word_matches += 1
             crop = _trim(page_image.crop((word.left, word.top, word.left + word.width, word.top + word.height)))
             spans = _split_by_projection(crop, len(observed))
@@ -236,6 +216,7 @@ def main() -> int:
         "exact_word_matches": exact_word_matches,
         "counts": dict(sorted(counts.items())),
         "rejected_fuzzy_words": rejected_fuzzy_words,
+        "rejected_uninformative": rejected_uninformative,
         "rejected_interior": rejected_interior,
         "rejected_boundary": rejected_boundary,
         "rejected_split": rejected_split,
