@@ -13,12 +13,8 @@ from .ocr_saol_normalize import normalize_text_for_match
 from .ocr_tsv_articles import group_articles, read_words
 from .ocr_recover_tail import recover_tail
 
-
 MIN_HEADWORD_SCORE = 0.70
 MIN_KNOWN_TEXT_SCORE = 0.55
-# If the known JSONL text matches strongly, allow a damaged OCR headword. This
-# is the important abc-stridsmedel -> abe-stridsimedel case: JSONL supplies the
-# identity; OCR only has to locate the printed article and recover its suffix.
 ANCHORED_MIN_HEADWORD_SCORE = 0.30
 ANCHORED_MIN_KNOWN_TEXT_SCORE = 0.64
 
@@ -42,7 +38,7 @@ def _crop_columns(image: Path, workdir: Path) -> list[Path]:
     width, height = _image_size(image)
     third = width / 3
     overlap = max(6, round(width * 0.015))
-    columns: list[Path] = []
+    columns = []
     for i in range(3):
         left = max(0, round(i * third) - overlap)
         right = min(width, round((i + 1) * third) + overlap)
@@ -67,19 +63,15 @@ def _soft(text: str) -> str:
 
 def _headword_score(entry: dict[str, object], article_text: str) -> float:
     from difflib import SequenceMatcher
-
     def compact(value: object) -> str:
         if not isinstance(value, str):
             return ""
         return "".join(ch for ch in normalize_text_for_match(value) if ch.isalnum())
-
     targets = [compact(entry.get(k)) for k in ("normaliserat_ord", "stycke", "ord")]
     targets = [x for x in targets if x]
     article = compact(article_text)
     best = 0.0
     for target in targets:
-        # Compare against the printed prefix only. Permit a little extra OCR
-        # material because punctuation/style boundaries often get fused.
         for extra in range(0, 4):
             prefix = article[: len(target) + extra]
             if prefix:
@@ -89,7 +81,6 @@ def _headword_score(entry: dict[str, object], article_text: str) -> float:
 
 def _known_text_score(entry: dict[str, object], article_text: str) -> float:
     from difflib import SequenceMatcher
-
     known = _soft(str(entry.get("text") or ""))
     haystack = _soft(article_text)
     if not known:
@@ -105,32 +96,47 @@ def _known_text_score(entry: dict[str, object], article_text: str) -> float:
     return best
 
 
-def _candidate(entry: dict[str, object], article, column: int) -> dict[str, object]:
+def _load_entry_and_next(jsonl: Path, subnr: int) -> tuple[dict[str, object], dict[str, object] | None]:
+    current = None
+    current_seen = False
+    current_subnr = None
+    with jsonl.open("r", encoding="utf-8") as stream:
+        for line in stream:
+            if not line.strip():
+                continue
+            item = json.loads(line)
+            item_subnr = item.get("subnr")
+            if not current_seen:
+                if item_subnr == subnr:
+                    current = item
+                    current_seen = True
+                    current_subnr = item_subnr
+                continue
+            # Multiple JSONL records can describe variants of the same printed
+            # article. Skip all rows with the same subnr; the first different
+            # subnr is the next printed dictionary entry.
+            if item_subnr == current_subnr:
+                continue
+            return current, item
+    if current is None:
+        raise SystemExit(f"subnr {subnr} not found in {jsonl}")
+    return current, None
+
+
+def _candidate(entry: dict[str, object], next_entry: dict[str, object] | None, article, column: int) -> dict[str, object]:
     article_text = " ".join(word.text for line in article.lines for word in line.words)
     hs = _headword_score(entry, article_text)
     ks = _known_text_score(entry, article_text)
     anchored = hs >= ANCHORED_MIN_HEADWORD_SCORE and ks >= ANCHORED_MIN_KNOWN_TEXT_SCORE
     conventional = hs >= MIN_HEADWORD_SCORE and ks >= MIN_KNOWN_TEXT_SCORE
-    recovery = recover_tail(entry, article, 0.8 * hs + 0.2 * ks, hs)
+    recovery = recover_tail(entry, article, 0.8 * hs + 0.2 * ks, hs, next_entry)
     data = recovery.__dict__.copy()
-    data.update({
-        "column": column,
-        "headword_score": round(hs, 4),
-        "known_text_score": round(ks, 4),
-        "acceptable": conventional or anchored,
-        "match_mode": "jsonl-anchor" if anchored and not conventional else ("normal" if conventional else None),
-    })
+    data.update({"column": column, "headword_score": round(hs, 4), "known_text_score": round(ks, 4), "acceptable": conventional or anchored, "match_mode": "jsonl-anchor" if anchored and not conventional else ("normal" if conventional else None)})
     return data
 
 
 def _selection_key(result: dict[str, object]) -> tuple[float, float, float]:
-    # Once the known 50-char field anchors us to an article, it is stronger
-    # evidence than exact OCR of a styled headword.
-    return (
-        float(result.get("known_text_score", 0.0)),
-        float(result.get("headword_score", 0.0)),
-        float(result.get("article_score", 0.0)),
-    )
+    return (float(result.get("known_text_score", 0.0)), float(result.get("headword_score", 0.0)), float(result.get("article_score", 0.0)))
 
 
 def main() -> int:
@@ -140,7 +146,7 @@ def main() -> int:
     parser.add_argument("--keep-workdir", type=Path)
     args = parser.parse_args()
 
-    entry = load_entry(args.jsonl, args.subnr)
+    entry, next_entry = _load_entry_and_next(args.jsonl, args.subnr)
     source = entry.get("source")
     if not isinstance(source, str) or not source.startswith("http"):
         raise SystemExit("entry has no usable source URL")
@@ -158,26 +164,22 @@ def main() -> int:
         _download(source, page)
     columns = _crop_columns(page, workdir)
 
-    results: list[dict[str, object]] = []
+    results = []
     for idx, column in enumerate(columns, 1):
         tsv = workdir / f"column-{idx}.tsv"
         _ocr_tsv(column, tsv)
         with tsv.open("r", encoding="utf-8", newline="") as stream:
             articles = group_articles(read_words(stream))
-        results.extend(_candidate(entry, article, idx) for article in articles)
+        results.extend(_candidate(entry, next_entry, article, idx) for article in articles)
 
     acceptable = [r for r in results if r.get("acceptable") is True]
     best = max(acceptable, key=_selection_key, default=None)
     output = {
         "entry": {k: entry.get(k) for k in ("normaliserat_ord", "subnr", "sidnr1", "text", "source")},
+        "next_entry": {k: next_entry.get(k) for k in ("normaliserat_ord", "subnr", "sidnr1", "stycke", "ord")} if next_entry else None,
         "best": best,
         "status": "matched" if best is not None else "review-no-confident-jsonl-anchor",
-        "thresholds": {
-            "min_headword_score": MIN_HEADWORD_SCORE,
-            "min_known_text_score": MIN_KNOWN_TEXT_SCORE,
-            "anchored_min_headword_score": ANCHORED_MIN_HEADWORD_SCORE,
-            "anchored_min_known_text_score": ANCHORED_MIN_KNOWN_TEXT_SCORE,
-        },
+        "thresholds": {"min_headword_score": MIN_HEADWORD_SCORE, "min_known_text_score": MIN_KNOWN_TEXT_SCORE, "anchored_min_headword_score": ANCHORED_MIN_HEADWORD_SCORE, "anchored_min_known_text_score": ANCHORED_MIN_KNOWN_TEXT_SCORE},
         "candidate_count": len(results),
         "acceptable_count": len(acceptable),
         "top_candidates": sorted(results, key=_selection_key, reverse=True)[:5],
