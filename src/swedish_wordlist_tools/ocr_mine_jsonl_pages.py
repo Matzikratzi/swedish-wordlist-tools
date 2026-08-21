@@ -30,15 +30,12 @@ def _crop_columns(image: Path, workdir: Path) -> list[Path]:
     width, height = map(int, identify.split())
     third = width / 3
     overlap = max(6, round(width * 0.015))
-    out: list[Path] = []
+    out = []
     for i in range(3):
         left = max(0, round(i * third) - overlap)
         right = min(width, round((i + 1) * third) + overlap)
         crop = workdir / f"page-column-{i+1}.png"
-        subprocess.run(
-            ["convert", str(image), "-crop", f"{right-left}x{height}+{left}+0", "+repage", str(crop)],
-            check=True,
-        )
+        subprocess.run(["convert", str(image), "-crop", f"{right-left}x{height}+{left}+0", "+repage", str(crop)], check=True)
         out.append(crop)
     return out
 
@@ -52,27 +49,17 @@ def _ocr_tsv(image: Path, tsv: Path) -> None:
 
 
 def _inventory(style_dir: Path) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    if not style_dir.exists():
-        return counts
-    for path in style_dir.glob("*.png"):
-        ch = path.name.split("-", 1)[0]
-        counts[ch] = counts.get(ch, 0) + 1
+    counts = {}
+    if style_dir.exists():
+        for path in style_dir.glob("*.png"):
+            ch = path.name.split("-", 1)[0]
+            counts[ch] = counts.get(ch, 0) + 1
     return dict(sorted(counts.items()))
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Mine SAOL italic glyph templates across several facsimile pages.")
-    parser.add_argument("jsonl", type=Path)
-    parser.add_argument("--pages", required=True, help="Page list/ranges, e.g. 1-8,10,12")
-    parser.add_argument("--chars", default="abcdefghijklmnopqrstuvwxyzåäö")
-    parser.add_argument("--out-dir", type=Path, required=True)
-    parser.add_argument("--keep-workdir", type=Path)
-    parser.add_argument("--limit-per-char", type=int, default=20)
-    args = parser.parse_args()
-
-    pages: list[int] = []
-    for part in args.pages.split(","):
+def _parse_pages(spec: str) -> list[int]:
+    pages = []
+    for part in spec.split(","):
         part = part.strip()
         if not part:
             continue
@@ -81,10 +68,27 @@ def main() -> int:
             pages.extend(range(a, b + 1))
         else:
             pages.append(int(part))
-    pages = sorted(set(pages))
+    return sorted(set(pages))
 
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Mine separate SAOL glyph template libraries by style.")
+    parser.add_argument("jsonl", type=Path)
+    parser.add_argument("--pages", required=True)
+    parser.add_argument("--chars", default="abcdefghijklmnopqrstuvwxyzåäö")
+    parser.add_argument("--styles", default="italic,bold,roman", help="Comma-separated: italic,bold,roman")
+    parser.add_argument("--out-dir", type=Path, required=True)
+    parser.add_argument("--keep-workdir", type=Path)
+    parser.add_argument("--limit-per-char", type=int, default=20)
+    args = parser.parse_args()
+
+    pages = _parse_pages(args.pages)
+    styles = [s.strip() for s in args.styles.split(",") if s.strip()]
+    bad = [s for s in styles if s not in {"italic", "bold", "roman"}]
+    if bad:
+        parser.error(f"unknown styles: {','.join(bad)}")
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    before_inventory = _inventory(args.out_dir / "italic")
+    before = {style: _inventory(args.out_dir / style) for style in styles}
 
     owned = None
     if args.keep_workdir:
@@ -94,9 +98,8 @@ def main() -> int:
         owned = tempfile.TemporaryDirectory(prefix="saol-glyph-pages-")
         root = Path(owned.name)
 
-    run_counts: dict[str, int] = {}
-    page_results: list[dict[str, object]] = []
-
+    run_counts = {style: {} for style in styles}
+    page_results = []
     for page in pages:
         source = _source_for_page(args.jsonl, page)
         if not source:
@@ -108,49 +111,28 @@ def main() -> int:
         if not image.exists():
             _download(source, image)
         columns = _crop_columns(image, page_dir)
-        column_results: list[dict[str, object]] = []
+        column_results = []
         for idx, column in enumerate(columns, 1):
             tsv = page_dir / f"column-{idx}.tsv"
             _ocr_tsv(column, tsv)
-            proc = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "swedish_wordlist_tools.ocr_mine_jsonl_templates",
-                    str(args.jsonl),
-                    str(column),
-                    str(tsv),
-                    "--page",
-                    str(page),
-                    "--chars",
-                    args.chars,
-                    "--out-dir",
-                    str(args.out_dir),
-                    "--limit-per-char",
-                    str(args.limit_per_char),
-                ],
-                text=True,
-                capture_output=True,
-            )
-            if proc.returncode != 0:
-                column_results.append({"column": idx, "error": proc.stderr.strip() or proc.stdout.strip()})
-                continue
-            data = json.loads(proc.stdout)
-            counts = data.get("counts", {})
-            if isinstance(counts, dict):
+            style_results = {}
+            for style in styles:
+                cmd = [sys.executable, "-m", "swedish_wordlist_tools.ocr_mine_jsonl_templates", str(args.jsonl), str(column), str(tsv), "--page", str(page), "--chars", args.chars, "--out-dir", str(args.out_dir), "--limit-per-char", str(args.limit_per_char), "--style", style]
+                proc = subprocess.run(cmd, text=True, capture_output=True)
+                if proc.returncode != 0:
+                    style_results[style] = {"error": proc.stderr.strip() or proc.stdout.strip()}
+                    continue
+                data = json.loads(proc.stdout)
+                counts = data.get("counts", {})
                 for ch, n in counts.items():
-                    run_counts[str(ch)] = run_counts.get(str(ch), 0) + int(n)
-            column_results.append({"column": idx, "matched_entries": data.get("matched_entries"), "counts": counts})
+                    d = run_counts[style]
+                    d[str(ch)] = d.get(str(ch), 0) + int(n)
+                style_results[style] = {"matched_entries": data.get("matched_entries"), "counts": counts}
+            column_results.append({"column": idx, "styles": style_results})
         page_results.append({"page": page, "columns": column_results})
 
-    after_inventory = _inventory(args.out_dir / "italic")
-    result = {
-        "pages": pages,
-        "run_counts": dict(sorted(run_counts.items())),
-        "library_before": before_inventory,
-        "library_after": after_inventory,
-        "page_results": page_results,
-    }
+    after = {style: _inventory(args.out_dir / style) for style in styles}
+    result = {"pages": pages, "styles": styles, "run_counts": {s: dict(sorted(c.items())) for s, c in run_counts.items()}, "library_before": before, "library_after": after, "page_results": page_results}
     (args.out_dir / "manifest-pages.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
     print()
