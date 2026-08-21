@@ -9,8 +9,7 @@ from pathlib import Path
 
 from .ocr_match_jsonl import load_entry, rank_articles
 from .ocr_saol_normalize import normalize_text_for_match
-from .ocr_tsv_articles import OcrArticle, group_articles, read_words
-
+from .ocr_tsv_articles import OcrArticle, OcrLine, group_articles, read_words
 
 _MARKER_PREFIX = "+~-–—"
 _STOP_PREFIXES = ("•", "♦", "◆", "◊", "«", "»")
@@ -57,10 +56,9 @@ def locate_known_text(entry: dict[str, object], article: OcrArticle) -> tuple[in
     target = _known_tokens(entry)
     if not target:
         return None
-
     raw = _raw_tokens(article)
     soft = [_soft_token(token) for token in raw]
-    best: tuple[int, int, float] | None = None
+    best = None
     for width in range(max(1, len(target) - 1), len(target) + 2):
         for start in range(0, max(0, len(soft) - width + 1)):
             end = start + width
@@ -81,98 +79,106 @@ def _is_stop_token(token: str) -> str | None:
     return None
 
 
-def _line_token_ranges(article: OcrArticle) -> list[tuple[int, int, object]]:
-    ranges = []
-    offset = 0
+def _line_ranges(article: OcrArticle) -> list[tuple[int, int, OcrLine]]:
+    out = []
+    pos = 0
     for line in article.lines:
-        start = offset
-        offset += len(line.words)
-        ranges.append((start, offset, line))
-    return ranges
+        start = pos
+        pos += len(line.words)
+        out.append((start, pos, line))
+    return out
 
 
-def _looks_like_new_headword_line(line) -> bool:
-    """Conservative signal that a visual line starts a new SAOL article.
-
-    We intentionally avoid linguistic guessing.  SAOL headword lines normally
-    start near the left article margin, have a word-like first token, and then
-    quickly contain pronunciation/word-class material.  This catches the giant
-    Tesseract-paragraph failure without treating wrapped definition lines as
-    new articles.
-    """
+def _looks_like_new_headword_line(line: OcrLine) -> bool:
     if not line.words:
         return False
     first = line.words[0]
     token = normalize_text_for_match(first.text).strip()
-    if not token or len(token) < 2:
+    if len(token) < 2 or not any(ch.isalpha() for ch in token) or first.left > 82:
         return False
-    if not any(ch.isalpha() for ch in token):
-        return False
-    # Wrapped prose often starts indented; real headwords in a cropped column
-    # are generally at the column's left text margin. Empirically allow a broad
-    # margin because Tesseract geometry is noisy.
-    if first.left > 80:
-        return False
-    text = " ".join(word.text for word in line.words[:5])
-    norm = normalize_text_for_match(text)
-    # Strong structural cues appearing shortly after the first token.
-    cues = (" s.", " s ", " adj.", " adj ", " v.", " v ", " adv.", " prep.", " pron.", " n ", "[-", "[")
+    norm = normalize_text_for_match(" ".join(w.text for w in line.words[:6]))
+    cues = (" s.", " s ", " adj.", " adj ", " v.", " v ", " adv.", " prep.", " pron.", "[-", "[")
     return any(cue in f" {norm} " for cue in cues)
 
 
-def _next_article_token(article: OcrArticle, after_token: int) -> int | None:
-    ranges = _line_token_ranges(article)
-    # Never stop on the same visual line as the known truncation point. Start
-    # looking at subsequent lines only.
-    current_line_idx = None
-    for idx, (start, end, _line) in enumerate(ranges):
-        if start <= max(0, after_token - 1) < end:
-            current_line_idx = idx
-            break
-    if current_line_idx is None:
-        return None
-    for start, _end, line in ranges[current_line_idx + 1 :]:
-        if _looks_like_new_headword_line(line):
-            return start
-    return None
+def _suffix_from_last_word(known_last: str, ocr_last: str) -> str:
+    """Recover characters cut from JSONL inside the OCR word itself.
+
+    Example: JSONL ends in abc-stridsmedle while OCR has abo-stridsmedlen.
+    Align the two approximately and return only the extra trailing characters,
+    rather than duplicating the whole OCR token.
+    """
+    known = _soft_token(known_last)
+    observed = _soft_token(ocr_last)
+    if not known or not observed:
+        return ""
+    # Exact prefix is the easy case.
+    if observed.startswith(known):
+        return observed[len(known):]
+    # Allow OCR substitutions in the shared prefix. Compare every split close
+    # to the known length and prefer the most similar prefix.
+    best_split = None
+    best_score = 0.0
+    lo = max(1, len(known) - 2)
+    hi = min(len(observed), len(known) + 2)
+    for split in range(lo, hi + 1):
+        score = SequenceMatcher(None, known, observed[:split]).ratio()
+        if score > best_score:
+            best_score = score
+            best_split = split
+    if best_split is not None and best_score >= 0.72 and best_split < len(observed):
+        return observed[best_split:]
+    return ""
 
 
-def recover_tail(
-    entry: dict[str, object],
-    article: OcrArticle,
-    article_score: float = 0.0,
-    headword_score: float = 0.0,
-) -> TailRecovery:
+def recover_tail(entry: dict[str, object], article: OcrArticle, article_score: float = 0.0, headword_score: float = 0.0) -> TailRecovery:
     located = locate_known_text(entry, article)
     known_text = str(entry.get("text") or "")
     if located is None:
         return TailRecovery(article.paragraph, article_score, headword_score, 0.0, known_text, "", "known-text-not-found", _raw_lines(article))
 
-    _start, end, score = located
+    start, end, score = located
     raw = _raw_tokens(article)
-    next_article = _next_article_token(article, end)
+    ranges = _line_ranges(article)
+    current_idx = None
+    for idx, (ls, le, _line) in enumerate(ranges):
+        if ls <= max(start, end - 1) < le:
+            current_idx = idx
+            break
+    if current_idx is None:
+        return TailRecovery(article.paragraph, article_score, headword_score, round(score, 4), known_text, "", "geometry-not-found", _raw_lines(article))
+
     tail: list[str] = []
+    # First recover any characters truncated inside the final matched OCR token.
+    known_tokens = _known_tokens(entry)
+    if known_tokens and end > 0 and end <= len(raw):
+        suffix = _suffix_from_last_word(known_tokens[-1], raw[end - 1])
+        if suffix:
+            tail.append(suffix)
+
     stop_reason = "article-end"
-    for pos, token in enumerate(raw[end:], start=end):
-        if next_article is not None and pos >= next_article:
+    # Continue only on the same visual line after the matched window, then move
+    # down line-by-line in this already-cropped physical column. Never flatten
+    # the remainder of a huge Tesseract paragraph into one token stream.
+    current_start, current_end, current_line = ranges[current_idx]
+    for pos in range(max(end, current_start), current_end):
+        reason = _is_stop_token(raw[pos])
+        if reason:
+            return TailRecovery(article.paragraph, round(article_score, 4), round(headword_score, 4), round(score, 4), known_text, " ".join(tail).strip(), reason, _raw_lines(article))
+        tail.append(raw[pos])
+
+    for _ls, _le, line in ranges[current_idx + 1:]:
+        if _looks_like_new_headword_line(line):
             stop_reason = "next-headword-line"
             break
-        reason = _is_stop_token(token)
-        if reason:
-            stop_reason = reason
-            break
-        tail.append(token)
+        for word in line.words:
+            reason = _is_stop_token(word.text)
+            if reason:
+                stop_reason = reason
+                return TailRecovery(article.paragraph, round(article_score, 4), round(headword_score, 4), round(score, 4), known_text, " ".join(tail).strip(), stop_reason, _raw_lines(article))
+            tail.append(word.text)
 
-    return TailRecovery(
-        paragraph=article.paragraph,
-        article_score=round(article_score, 4),
-        headword_score=round(headword_score, 4),
-        known_text_score=round(score, 4),
-        known_text=known_text,
-        recovered_tail=" ".join(tail).strip(),
-        stop_reason=stop_reason,
-        raw_article_lines=_raw_lines(article),
-    )
+    return TailRecovery(article.paragraph, round(article_score, 4), round(headword_score, 4), round(score, 4), known_text, " ".join(tail).strip(), stop_reason, _raw_lines(article))
 
 
 def main() -> int:
@@ -183,17 +189,14 @@ def main() -> int:
     source.add_argument("--jsonl", type=Path)
     parser.add_argument("--subnr", type=int)
     args = parser.parse_args()
-
     if args.entry_json:
         entry = json.loads(args.entry_json)
     else:
         if args.subnr is None:
             parser.error("--subnr is required with --jsonl")
         entry = load_entry(args.jsonl, args.subnr)
-
     with args.tsv.open("r", encoding="utf-8", newline="") as stream:
         articles = group_articles(read_words(stream))
-
     ranked = rank_articles(entry, articles)
     if not ranked:
         raise SystemExit("no OCR articles found")
