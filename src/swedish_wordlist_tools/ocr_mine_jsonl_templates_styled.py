@@ -1,0 +1,78 @@
+from __future__ import annotations
+
+import re
+
+from . import ocr_mine_jsonl_templates as base
+from .ocr_saol_normalize import normalize_text_for_match
+
+# These are grammatical/metalanguage labels printed in roman in SAOL's
+# inflection field.  They must never seed the italic glyph library.
+_ROMAN_LABELS = {
+    "pl.", "pl", "best.", "best", "pres.", "pres", "pret.", "pret",
+    "sup.", "sup", "imper.", "imper", "inf.", "inf", "komp.", "komp",
+    "superl.", "superl", "neutr.", "neutr", "mask.", "mask", "fem.", "fem",
+    "gen.", "gen", "dat.", "dat", "ack.", "ack", "nom.", "nom",
+    "el.", "el", "äv.", "äv", "och", "eller",
+}
+
+
+def _clean_form_token(token: str) -> str:
+    token = normalize_text_for_match(token).strip()
+    # Separating punctuation in e.g. "~~n;" and "~," is roman according to
+    # the facsimile typography.  Keep morphology markers at the left edge.
+    token = token.strip(";,:")
+    return token
+
+
+def _tokens_from_k_markup(text: str) -> list[str]:
+    spans = re.findall(r"<k>(.*?)</k>", text, flags=re.IGNORECASE | re.DOTALL)
+    result: list[str] = []
+    for span in spans:
+        for raw in span.split():
+            token = _clean_form_token(raw)
+            if token:
+                result.append(token)
+    return result
+
+
+def _heuristic_form_tokens(text: str) -> list[str]:
+    """Recover only likely italic form tokens from plain JSONL text.
+
+    Example typography supplied from the facsimile:
+      <b>tvätt|mästare</b> s. <k>~~n</k>; pl. <k>~~ ~</k>,
+      best. pl. <k>-mästarna</k>
+
+    Therefore grammar labels and separators are roman; form strings are italic.
+    If source markup with <k> exists, that exact markup wins over this fallback.
+    """
+    result: list[str] = []
+    for raw in text.split():
+        token = _clean_form_token(raw)
+        if not token:
+            continue
+        if token.casefold() in _ROMAN_LABELS:
+            continue
+        # Pure punctuation is never an italic training token.
+        if not any(ch.isalnum() or ch in "+~-–—" for ch in token):
+            continue
+        result.append(token)
+    return result
+
+
+def _styled_expected_words(entry: dict[str, object], style: str) -> list[str]:
+    if style != "italic":
+        return _ORIGINAL(entry, style)
+    text = entry.get("text")
+    if not isinstance(text, str) or not text:
+        return []
+    if re.search(r"<k>.*?</k>", text, flags=re.IGNORECASE | re.DOTALL):
+        return _tokens_from_k_markup(text)
+    return _heuristic_form_tokens(text)
+
+
+_ORIGINAL = base._expected_words_for_style
+base._expected_words_for_style = _styled_expected_words
+
+
+if __name__ == "__main__":
+    raise SystemExit(base.main())
