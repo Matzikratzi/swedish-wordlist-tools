@@ -76,18 +76,14 @@ def _printed_form(jsonl_token: str, ocr_token: str) -> tuple[str, str] | None:
     """Return (labels, printed chars) when OCR and JSONL token shapes align.
 
     SAOL JSONL uses '+' as an abstract repetition marker while the facsimile
-    prints a tilde-like '~'.  Labels retain '+' because that is what recovery
+    prints a tilde-like '~'. Labels retain '+' because that is what recovery
     ultimately needs, while the printed string uses '~' for box verification.
-    Leading marker normalization is deliberately not used here: we need the
-    glyph itself when it is part of an otherwise informative exact token.
     """
     labels = normalize_text_for_match(jsonl_token).strip()
     observed = normalize_text_for_match(ocr_token).strip()
     if not labels or not observed:
         return None
     printed = labels.replace("+", "~")
-    # Common OCR normalizations may still erase the visual distinction, so
-    # compare with '+' and '~' treated as the same printed marker.
     canonical_expected = printed.replace("+", "~")
     canonical_observed = observed.replace("+", "~")
     if canonical_expected != canonical_observed:
@@ -97,13 +93,37 @@ def _printed_form(jsonl_token: str, ocr_token: str) -> tuple[str, str] | None:
     return labels, printed
 
 
+def _canonical_printed_char(ch: str) -> str:
+    """Normalize only equivalences that are known to be visual aliases here."""
+    if ch in {"+", "~"}:
+        return "~"
+    return normalize_text_for_match(ch).strip()
+
+
+def _charbox_labels_match(
+    boxes: list[tuple[str, int, int, int, int]], printed: str
+) -> bool:
+    """Require Tesseract's own symbol labels to agree with JSONL's printed form.
+
+    Geometry-only alignment can silently shift labels: a box recognized as v
+    may otherwise be stored as the neighboring expected a. For the training
+    library we prefer throwing away such a word to poisoning the glyph class.
+    """
+    if len(boxes) != len(printed):
+        return False
+    for (ocr_ch, *_coords), expected_ch in zip(boxes, printed):
+        if _canonical_printed_char(ocr_ch) != _canonical_printed_char(expected_ch):
+            return False
+    return True
+
+
 def _tesseract_char_boxes(crop: Image.Image, expected_len: int) -> list[tuple[str, int, int, int, int]] | None:
     """Get symbol boxes from Tesseract for one already-verified word crop.
 
     Coordinates returned by makebox use a bottom-left origin; convert them to
-    PIL top-left coordinates.  Recognition labels are not trusted here; JSONL
-    supplies the labels.  We only trust the geometry when symbol count matches
-    the verified token length exactly.
+    PIL top-left coordinates. We trust the geometry only when symbol count
+    matches the verified token length exactly; the caller separately verifies
+    the symbol labels against JSONL before accepting any glyphs.
     """
     if expected_len <= 0:
         return None
@@ -174,6 +194,7 @@ def main() -> int:
     rejected_geometry = 0
     rejected_uninformative = 0
     rejected_charbox_count = 0
+    rejected_charbox_labels = 0
     fuzzy_examples: list[dict[str, object]] = []
 
     for entry in entries:
@@ -190,8 +211,6 @@ def main() -> int:
             continue
         matched_entries += 1
 
-        # Map normalized forms back to their JSONL spelling so '+' remains a
-        # usable output label even though the facsimile prints '~'.
         expected_by_soft: dict[str, list[str]] = {}
         for token in expected_words:
             soft = _soft_word(token)
@@ -216,8 +235,6 @@ def main() -> int:
                     pair = candidate
                     break
             if pair is None:
-                # The soft match may have hidden the '+' -> '~' distinction or
-                # punctuation differences.  Keep this conservative for now.
                 rejected_fuzzy_words += 1
                 continue
             labels, printed = pair
@@ -230,6 +247,9 @@ def main() -> int:
             boxes = _tesseract_char_boxes(word_crop, len(labels))
             if boxes is None:
                 rejected_charbox_count += 1
+                continue
+            if not _charbox_labels_match(boxes, printed):
+                rejected_charbox_labels += 1
                 continue
 
             for idx, exp_ch in enumerate(labels):
@@ -278,6 +298,7 @@ def main() -> int:
         "rejected_boundary": rejected_boundary,
         "rejected_split": rejected_split,
         "rejected_charbox_count": rejected_charbox_count,
+        "rejected_charbox_labels": rejected_charbox_labels,
         "rejected_geometry": rejected_geometry,
         "fuzzy_examples": fuzzy_examples,
         "templates": [asdict(item) for item in mined],
