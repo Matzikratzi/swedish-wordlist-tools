@@ -77,21 +77,27 @@ def _locate_word_crop(
     )
 
 
+def _source_id(page: object, column: object, subnr: object, source_word: str, expected: str) -> str:
+    return f"p{page}-c{column}-sub{subnr}-{source_word}-{expected}"
+
+
 def _build_resegmented_refs(
     groups: dict[tuple[object, ...], list[dict[str, object]]],
     style: str,
     excluded_subnr: object,
     root: Path,
-) -> tuple[list[Path], Counter[str]]:
+) -> tuple[list[Path], Counter[str], dict[str, set[str]]]:
     """Build reference glyphs from whole verified words using test segmentation.
 
-    This intentionally ignores the old per-character PNG crops.  Character
-    identity comes from the known expected word; character geometry is produced
-    by exactly the same `_segment_word` routine that is later used on the test
-    word.  This removes makebox/xclean crop mismatch from the transfer test.
+    This intentionally ignores old per-character PNG crops. Character identity
+    comes from the known expected word; character geometry is produced by the
+    same `_segment_word` routine used on the test word. Source-word membership
+    is tracked per character so the benchmark can distinguish many glyph files
+    from many independent word observations.
     """
     refs: list[Path] = []
     stats: Counter[str] = Counter()
+    sources_by_class: dict[str, set[str]] = defaultdict(set)
     physical_seen: set[tuple[object, ...]] = set()
     for key, items in groups.items():
         page, column, subnr, source_word, expected_word, column_image = key
@@ -119,14 +125,16 @@ def _build_resegmented_refs(
         if len(segments) != len(expected):
             stats["segment-count"] += 1
             continue
+        sid = _source_id(page, column, subnr, source_word, expected)
         for i, ((_x0, _x1, glyph), ch) in enumerate(zip(segments, expected)):
             out = root / style / f"{_safe_char(ch)}-sub{subnr}-p{page}-c{column}-i{i}.png"
             out.parent.mkdir(parents=True, exist_ok=True)
             glyph.save(out)
             refs.append(out)
+            sources_by_class[ch].add(sid)
             stats["glyphs"] += 1
         stats["words"] += 1
-    return refs, stats
+    return refs, stats, sources_by_class
 
 
 def main() -> int:
@@ -189,11 +197,14 @@ def main() -> int:
                 continue
 
             if args.reference_source == "word-segments":
-                refs, ref_stats = _build_resegmented_refs(groups, args.style, subnr, ref_root / f"holdout-{subnr}")
+                refs, ref_stats, sources_by_class = _build_resegmented_refs(
+                    groups, args.style, subnr, ref_root / f"holdout-{subnr}"
+                )
             else:
                 needle = f"-sub{subnr}-"
                 refs = [p for p in legacy_refs if needle not in p.name]
                 ref_stats = Counter({"glyphs": len(refs)})
+                sources_by_class = defaultdict(set)
 
             ref_classes = {semantic_label(p) for p in refs}
             missing_classes = sorted({ch for ch in expected if ch not in ref_classes})
@@ -273,6 +284,9 @@ def main() -> int:
                 "same_subnr_refs_excluded": True,
                 "reference_source": args.reference_source,
                 "reference_stats": dict(ref_stats),
+                "independent_sources_by_class": {
+                    ch: len(sources_by_class.get(ch, set())) for ch in sorted(ref_classes)
+                },
                 "diagnostic_dir": str(word_dir) if word_dir is not None else None,
                 "segments": segment_rows,
             })
@@ -298,6 +312,7 @@ def main() -> int:
             "leakage_guard": "all references from test subnr excluded",
             "segmentation": "training and test glyphs use the same whole-word x-ink segmentation",
             "reference_source": "word-segments rebuilds glyphs from verified whole words; legacy-glyphs retained only for A/B comparison",
+            "independent_sources": "reported per character class so duplicate glyph files do not masquerade as independent evidence",
             "matcher": "weighted aligned per-class median consensus plus mild geometry prior by default",
             "punctuation": "dot remains its own glyph class; plus-like scan artifacts are treated as visual variation",
         },
