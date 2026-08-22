@@ -14,13 +14,14 @@ DEFAULT_CHARS = "abcdefghijklmnopqrstuvwxyzåäö|~-,.;:+()/:"
 
 
 def _canon(text: str) -> str:
-    # Keep the semantic characters distinct. printed_text handles SAOL display
+    # Keep semantic characters distinct. printed_text handles SAOL display
     # conventions; do not alias punctuation classes here.
     return printed_text(normalize_text_for_match(text))
 
 
 def _page_of(row: dict[str, object]) -> int | None:
-    for key in ("sida", "page", "sidnr"):
+    # SAOL14 faksimil JSONL uses sidnr1. Keep older aliases for robustness.
+    for key in ("sidnr1", "sida", "page", "sidnr"):
         value = row.get(key)
         if isinstance(value, int):
             return value
@@ -30,12 +31,9 @@ def _page_of(row: dict[str, object]) -> int | None:
 
 
 def _iter_style_chars(text: str):
-    canon = _canon(text)
-    # classify_inflection_text operates on the source text offsets; in normal
-    # SAOL text printed_text is length preserving for ordinary characters. For
-    # planning we only need candidate pages, not exact glyph positions.
-    segs = classify_inflection_text(text)
-    for seg in segs:
+    # classify_inflection_text returns source offsets, so slice the original
+    # string first and normalize each fragment afterwards.
+    for seg in classify_inflection_text(text):
         style = seg.style
         if style not in {"roman", "italic"}:
             continue
@@ -88,27 +86,38 @@ def main() -> int:
         lambda: {"roman": Counter(), "italic": Counter()}
     )
     page_examples: dict[int, dict[tuple[str, str], list[str]]] = defaultdict(lambda: defaultdict(list))
+    scan = Counter()
 
     with args.jsonl.open("r", encoding="utf-8") as f:
         for line in f:
             if not line.strip():
                 continue
+            scan["rows_seen"] += 1
             try:
                 row = json.loads(line)
             except json.JSONDecodeError:
+                scan["json_errors"] += 1
                 continue
             if not isinstance(row, dict):
                 continue
             page = _page_of(row)
-            text = row.get("text")
-            if page is None or not isinstance(text, str) or not text:
+            if page is None:
+                scan["rows_without_page"] += 1
                 continue
+            scan["rows_with_page"] += 1
+            text = row.get("text")
+            if not isinstance(text, str) or not text:
+                scan["rows_without_text"] += 1
+                continue
+            scan["rows_with_text"] += 1
             local: dict[str, Counter[str]] = {"roman": Counter(), "italic": Counter()}
             for style, ch in _iter_style_chars(text):
                 if ch in needs[style] and needs[style][ch] > 0:
                     local[style][ch] += 1
             if not any(local[s] for s in local):
+                scan["rows_without_needed_chars"] += 1
                 continue
+            scan["rows_with_supply"] += 1
             for style in ("roman", "italic"):
                 for ch, n in local[style].items():
                     page_supply[page][style][ch] += n
@@ -138,6 +147,7 @@ def main() -> int:
         if best_page is None or best_gain <= 0:
             break
         unused.remove(best_page)
+        assert best_detail is not None
         for style in ("roman", "italic"):
             for ch, take in best_detail[style].items():
                 remaining[style][ch] = max(0, remaining[style][ch] - take)
@@ -160,16 +170,19 @@ def main() -> int:
             candidates.append({"page": page, "score": score, "covers": covers})
     candidates.sort(key=lambda x: (-int(x["score"]), int(x["page"])))
 
+    scan["pages_with_supply"] = len(page_supply)
     payload = {
         "target": args.target,
         "chars": "".join(chars),
         "existing": {s: dict(sorted(existing[s].items())) for s in existing},
         "needs_before": {s: dict(sorted(needs[s].items())) for s in needs},
+        "scan_stats": dict(sorted(scan.items())),
         "selected_pages": selected,
         "selected_page_numbers": [x["page"] for x in selected],
         "remaining_after_plan": {s: dict(sorted(remaining[s].items())) for s in remaining},
         "top_candidate_pages": candidates[: args.top_candidates],
         "notes": {
+            "page_field": "SAOL14 faksimil JSONL sidnr1",
             "purpose": "page selection only; candidates must still pass OCR/token alignment and holdout verification",
             "styles": "roman and italic planned separately",
             "strategy": "greedy set cover weighted by remaining per-character source need",
