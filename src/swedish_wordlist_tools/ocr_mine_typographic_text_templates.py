@@ -13,7 +13,6 @@ from .ocr_glyph_templates import _trim
 from .ocr_match_jsonl import rank_articles
 from .ocr_mine_jsonl_templates import (
     _article_words,
-    _canonical_printed_char,
     _load_page_entries,
     _safe_character_name,
     _tesseract_char_boxes,
@@ -49,13 +48,6 @@ def _token_specs(text: str) -> list[tuple[str, list[str | None]]]:
     for m in re.finditer(r"\S+", text):
         out.append((m.group(0), mask[m.start():m.end()]))
     return out
-
-
-def _labels_match(boxes: list[tuple[str, int, int, int, int]], printed: str) -> bool:
-    if len(boxes) != len(printed):
-        return False
-    return all(_canonical_printed_char(got) == _canonical_printed_char(exp)
-               for (got, *_), exp in zip(boxes, printed))
 
 
 def _ink_columns(img: Image.Image, threshold: int = 220) -> list[int]:
@@ -118,57 +110,30 @@ def _token_similarity(expected: str, observed: str) -> float:
     return SequenceMatcher(None, a, b).ratio()
 
 
-def _candidate_windows(words: list[object], start: int, max_words: int = 3):
-    for width in range(1, max_words + 1):
-        end = start + width
-        if end > len(words):
-            break
-        yield start, end, "".join(str(w.text) for w in words[start:end])
-        if width > 1:
-            yield start, end, " ".join(str(w.text) for w in words[start:end])
-
-
 def _ordered_token_alignment(
     specs: list[tuple[str, list[str | None]]],
     words: list[object],
     min_similarity: float = 0.72,
-) -> list[tuple[tuple[str, list[str | None]], list[object], float]]:
-    """Align expected tokens monotonically to one or more OCR words.
-
-    OCR often splits punctuation or joins a short form to neighbouring marks.
-    Search forward over windows of up to three OCR words. Only alignments whose
-    concatenated OCR text is exactly the expected printed token are harvested;
-    fuzzy windows only advance the sequence so later tokens stay in order.
-    """
-    result: list[tuple[tuple[str, list[str | None]], list[object], float]] = []
+) -> list[tuple[tuple[str, list[str | None]], object, float]]:
+    result: list[tuple[tuple[str, list[str | None]], object, float]] = []
     cursor = 0
     for spec in specs:
         raw, _styles = spec
-        best: tuple[int, int, float] | None = None
-        hi = min(len(words), cursor + 18)
+        best_i = None
+        best_score = 0.0
+        hi = min(len(words), cursor + 14)
         for i in range(cursor, hi):
-            for start, end, observed in _candidate_windows(words, i):
-                score = _token_similarity(raw, observed)
-                if best is None or score > best[2]:
-                    best = (start, end, score)
-                if score == 1.0:
-                    break
-            if best is not None and best[2] == 1.0:
+            score = _token_similarity(raw, words[i].text)
+            if score > best_score:
+                best_score = score
+                best_i = i
+            if score == 1.0:
                 break
-        if best is None or best[2] < min_similarity:
+        if best_i is None or best_score < min_similarity:
             continue
-        start, end, score = best
-        result.append((spec, words[start:end], score))
-        cursor = end
+        result.append((spec, words[best_i], best_score))
+        cursor = best_i + 1
     return result
-
-
-def _window_crop(image: Image.Image, words: list[object]) -> tuple[Image.Image, int, int]:
-    left = min(int(w.left) for w in words)
-    top = min(int(w.top) for w in words)
-    right = max(int(w.left + w.width) for w in words)
-    bottom = max(int(w.top + w.height) for w in words)
-    return image.crop((left, top, right, bottom)), left, top
 
 
 def main() -> int:
@@ -192,66 +157,54 @@ def main() -> int:
     counts: dict[str, dict[str, int]] = {"italic": {}, "roman": {}}
     mined: list[TypographicTemplate] = []
     matched_entries = exact_tokens = fuzzy_aligned_tokens = 0
-    rejected_charbox = rejected_labels = rejected_geometry = 0
-    rejected_x_geometry = rejected_duplicate_source = rejected_used_word = 0
+    rejected_charbox = rejected_geometry = 0
+    accepted_label_mismatch = 0
+    rejected_x_geometry = rejected_duplicate_source = 0
     used_source_boxes: set[tuple[int, int, int, int]] = set()
-    used_word_boxes: set[tuple[int, int, int, int]] = set()
 
     for entry in _load_page_entries(args.jsonl, args.page):
         text = entry.get("text")
         if not isinstance(text, str) or not text:
             continue
-        ranked = [r for r in rank_articles(entry, articles) if r.headword_score >= args.min_headword_score]
+        ranked = rank_articles(entry, articles)
+        ranked = [r for r in ranked if r.headword_score >= args.min_headword_score]
         if not ranked:
             continue
-
-        article = None
-        for candidate in ranked[:6]:
-            maybe = next((a for a in articles if a.paragraph == candidate.paragraph), None)
-            if maybe is None:
-                continue
-            # Do not lock an entire paragraph. Reject only candidates whose OCR
-            # word geometry is already wholly consumed by earlier entries.
-            candidate_boxes = {(int(w.left), int(w.top), int(w.width), int(w.height)) for w in _article_words(maybe)}
-            if candidate_boxes and candidate_boxes.issubset(used_word_boxes):
-                continue
-            article = maybe
-            break
+        best = ranked[0]
+        article = next((a for a in articles if a.paragraph == best.paragraph), None)
         if article is None:
             continue
         matched_entries += 1
 
         specs = _token_specs(text)
         words = _article_words(article)
-        for (raw, styles), aligned_words, align_score in _ordered_token_alignment(specs, words):
+        for (raw, styles), word, align_score in _ordered_token_alignment(specs, words):
             if align_score < 1.0:
                 fuzzy_aligned_tokens += 1
                 continue
             printed = printed_text(normalize_text_for_match(raw).strip()).replace("+", "~")
-            observed_joined = "".join(normalize_text_for_match(w.text).strip() for w in aligned_words).replace("+", "~")
-            observed_spaced = " ".join(normalize_text_for_match(w.text).strip() for w in aligned_words).replace("+", "~")
-            if printed not in {observed_joined, observed_spaced} or len(printed) != len(styles):
+            observed = normalize_text_for_match(word.text).strip().replace("+", "~")
+            if printed != observed or len(printed) != len(styles):
                 continue
             exact_tokens += 1
-
-            word_boxes = {(int(w.left), int(w.top), int(w.width), int(w.height)) for w in aligned_words}
-            if word_boxes and word_boxes.issubset(used_word_boxes):
-                rejected_used_word += 1
-                continue
-
-            crop, crop_left, crop_top = _window_crop(image, aligned_words)
-            if crop.width < 2 or crop.height < 6 or crop.height > 20:
+            if word.height < 6 or word.height > 18 or word.width < 2:
                 rejected_geometry += 1
                 continue
+            crop = image.crop((word.left, word.top, word.left + word.width, word.top + word.height))
             boxes = _tesseract_char_boxes(crop, len(printed))
             if boxes is None:
                 rejected_charbox += 1
                 continue
-            if not _labels_match(boxes, printed):
-                rejected_labels += 1
-                continue
 
-            harvested_any = False
+            # IMPORTANT: for an exactly aligned token, the JSONL string is the
+            # character identity authority. Tesseract's per-character labels are
+            # not. We only require Tesseract to provide the same number of boxes
+            # in left-to-right order. Any label disagreement is recorded for
+            # diagnostics, but does not poison or reject the sample.
+            label_mismatch = any(str(boxes[i][0]) != printed[i] for i in range(len(printed)))
+            if label_mismatch:
+                accepted_label_mismatch += 1
+
             for idx, (ch, style) in enumerate(zip(printed, styles)):
                 if style not in {"italic", "roman"}:
                     continue
@@ -265,7 +218,7 @@ def main() -> int:
                     continue
                 glyph, local_bbox = sanitized
                 gl, gt, gw, gh = local_bbox
-                source_bbox = (crop_left + gl, crop_top + gt, gw, gh)
+                source_bbox = (word.left + gl, word.top + gt, gw, gh)
                 if source_bbox in used_source_boxes:
                     rejected_duplicate_source += 1
                     continue
@@ -276,20 +229,17 @@ def main() -> int:
                 filename = f"{label}-{n:03d}-sub{entry.get('subnr')}-{safe_word}-{idx}-xclean.png"
                 glyph.save(args.out_dir / style / filename)
                 counts[style][ch] = n + 1
-                harvested_any = True
                 mined.append(TypographicTemplate(
                     style=style,
                     character=ch,
-                    source_word=" ".join(str(w.text) for w in aligned_words),
+                    source_word=word.text,
                     expected_word=printed,
                     subnr=entry.get("subnr"),
                     paragraph=article.paragraph,
                     bbox=source_bbox,
-                    position_kind="ordered-window-xclean",
+                    position_kind="known-text-xclean",
                     output=f"{style}/{filename}",
                 ))
-            if harvested_any:
-                used_word_boxes.update(word_boxes)
 
     result = {
         "page": args.page,
@@ -298,19 +248,18 @@ def main() -> int:
         "exact_tokens": exact_tokens,
         "fuzzy_aligned_tokens": fuzzy_aligned_tokens,
         "rejected_charbox_count": rejected_charbox,
-        "rejected_charbox_labels": rejected_labels,
+        "accepted_charbox_label_mismatch": accepted_label_mismatch,
         "rejected_geometry": rejected_geometry,
         "rejected_x_geometry": rejected_x_geometry,
         "rejected_duplicate_source": rejected_duplicate_source,
-        "rejected_used_word": rejected_used_word,
         "templates": [asdict(x) for x in mined],
         "notes": {
             "plus_printed_as": "~",
             "square_brackets": "excluded",
+            "glyph_identity": "known exact JSONL token, not Tesseract character label",
             "glyph_crop": "Tesseract box expanded then reduced to one horizontal ink group",
             "source_bbox_reuse": "rejected",
-            "paragraph_reuse": "allowed; only already-consumed OCR word geometry is rejected",
-            "token_alignment": "expected tokens aligned monotonically to 1-3 OCR-word windows; only exact windows harvested",
+            "token_alignment": "expected text tokens aligned monotonically to OCR words; only exact aligned tokens harvested",
         },
     }
     (args.out_dir / "manifest-typographic.json").write_text(json.dumps(result, ensure_ascii=False, indent=2)+"\n", encoding="utf-8")
