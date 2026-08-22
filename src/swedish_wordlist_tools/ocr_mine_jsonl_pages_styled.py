@@ -54,7 +54,7 @@ def main() -> int:
             _download(source, image)
         columns = _crop_columns(image, page_dir)
         column_results = []
-        for idx, column in enumerate(columns, 1):
+        for idx, (column, column_left) in enumerate(columns, 1):
             tsv = page_dir / f"column-{idx}.tsv"
             _ocr_tsv(column, tsv)
             style_results = {}
@@ -79,13 +79,23 @@ def main() -> int:
                 for item in data.get("templates", []):
                     output = item.get("output")
                     bbox = item.get("bbox")
-                    if isinstance(output, str) and isinstance(bbox, list | tuple):
+                    if isinstance(output, str) and isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+                        page_bbox = [int(bbox[0]) + column_left, int(bbox[1]), int(bbox[2]), int(bbox[3])]
                         template_sources[output] = {
                             "page": page,
                             "column": idx,
+                            "column_left": column_left,
                             "bbox": list(bbox),
+                            "page_bbox": page_bbox,
                             "column_image": str(column),
+                            "page_image": str(image),
                             "source": source,
+                            "subnr": item.get("subnr"),
+                            "source_word": item.get("source_word"),
+                            "expected_word": item.get("expected_word"),
+                            "position_kind": item.get("position_kind"),
+                            "style": style,
+                            "character": item.get("character"),
                         }
                 style_results[style] = {
                     "matched_entries": data.get("matched_entries"),
@@ -96,8 +106,8 @@ def main() -> int:
                     "rejected_charbox_labels": data.get("rejected_charbox_labels"),
                     "rejected_geometry": data.get("rejected_geometry"),
                 }
-            column_results.append({"column": idx, "styles": style_results})
-        page_results.append({"page": page, "columns": column_results})
+            column_results.append({"column": idx, "column_left": column_left, "styles": style_results})
+        page_results.append({"page": page, "source": source, "columns": column_results})
 
     after = {style: _inventory(args.out_dir / style) for style in styles}
     result = {
