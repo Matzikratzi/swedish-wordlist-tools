@@ -22,23 +22,59 @@ def _ink(img: Image.Image) -> Image.Image:
     return ImageChops.invert(_trim(img.convert("L")))
 
 
-def _dense_support(img: Image.Image, threshold: int = 24) -> Image.Image:
-    """Crop a glyph to the ink support that is actually present.
+def _x_profile(ink: Image.Image, threshold: int = 24) -> list[int]:
+    px = ink.load()
+    return [sum(1 for y in range(ink.height) if px[x, y] >= threshold) for x in range(ink.width)]
 
-    Earlier mined character boxes can contain a surprisingly large halo or a
-    few faint neighbour pixels.  Those pixels are disastrous for tiny glyphs
-    such as '.' and narrow stems such as 'l'.  Work in inverted grayscale and
-    retain the tight bounding box of pixels with meaningful ink.  We do not
-    resize or stretch anything.
+
+def _x_groups(profile: list[int], max_gap: int = 1) -> list[tuple[int, int, int]]:
+    """Return (start, end, ink_count) horizontal ink groups."""
+    active = [i for i, n in enumerate(profile) if n > 0]
+    if not active:
+        return []
+    groups: list[tuple[int, int, int]] = []
+    start = prev = active[0]
+    for x in active[1:]:
+        if x - prev > max_gap + 1:
+            groups.append((start, prev + 1, sum(profile[start:prev + 1])))
+            start = x
+        prev = x
+    groups.append((start, prev + 1, sum(profile[start:prev + 1])))
+    return groups
+
+
+def _horizontal_support(img: Image.Image, threshold: int = 24) -> Image.Image | None:
+    """Keep one coherent horizontal glyph support; reject ambiguous neighbours.
+
+    SAOL glyphs may have vertically disconnected components (i/ä/:), but those
+    components still share one horizontal x-support.  Earlier char boxes can
+    contain neighbour ink, especially disastrous for l and '.'.  We therefore
+    split by x-support and retain the dominant group only when it clearly owns
+    the crop.  Competing groups are rejected instead of poisoning consensus.
     """
     ink = _ink(img)
     if ink.width <= 0 or ink.height <= 0:
-        return ink
-    binary = ink.point(lambda p: 255 if p >= threshold else 0)
-    bbox = binary.getbbox()
+        return None
+    profile = _x_profile(ink, threshold=threshold)
+    groups = _x_groups(profile, max_gap=1)
+    if not groups:
+        return None
+    ranked = sorted(groups, key=lambda g: (g[2], g[1] - g[0]), reverse=True)
+    best = ranked[0]
+    total = sum(g[2] for g in groups)
+    if len(ranked) > 1:
+        second = ranked[1]
+        # If a second horizontal group carries substantial ink, this is likely
+        # a multi-glyph crop. Reject rather than guessing which neighbour wins.
+        if second[2] >= max(2, round(best[2] * 0.35)):
+            return None
+    x0, x1, _ = best
+    cropped = ink.crop((x0, 0, x1, ink.height))
+    binary = cropped.point(lambda p: 255 if p >= threshold else 0)
+    bbox = binary.getbbox() or cropped.getbbox()
     if not bbox:
-        bbox = ink.getbbox()
-    return ink.crop(bbox) if bbox else ink
+        return None
+    return cropped.crop(bbox)
 
 
 def _canvas(img: Image.Image, width: int, height: int, x: int, y: int) -> Image.Image:
@@ -121,7 +157,10 @@ def _geometry_from_ink(ink: Image.Image) -> dict[str, float]:
 
 
 def _geometry(img: Image.Image) -> dict[str, float]:
-    return _geometry_from_ink(_dense_support(img))
+    support = _horizontal_support(img)
+    return _geometry_from_ink(support) if support is not None else {
+        "width": 0.0, "height": 0.0, "area": 0.0, "aspect": 0.0, "fill": 0.0
+    }
 
 
 def _geometry_penalty(query: dict[str, float], model: dict[str, float]) -> float:
@@ -160,10 +199,17 @@ def build_consensus(refs: list[Path], max_shift: int = 3) -> dict[str, dict[str,
         grouped[semantic_label(path)].append(path)
     result: dict[str, dict[str, object]] = {}
     for ch, paths in grouped.items():
-        raw = [_dense_support(Image.open(p).convert("L")) for p in paths]
-        raw = [im for im in raw if im.width > 0 and im.height > 0]
-        if not raw:
+        accepted: list[tuple[Path, Image.Image]] = []
+        rejected: list[str] = []
+        for path in paths:
+            support = _horizontal_support(Image.open(path).convert("L"))
+            if support is None:
+                rejected.append(path.name)
+            else:
+                accepted.append((path, support))
+        if not accepted:
             continue
+        raw = [im for _path, im in accepted]
         anchor = _medoid(raw, max_shift)
         aligned = [_best_aligned(im, anchor, max_shift) for im in raw]
         median = _median(aligned)
@@ -177,13 +223,16 @@ def build_consensus(refs: list[Path], max_shift: int = 3) -> dict[str, dict[str,
             "mask": mask,
             "geometry": _geometry_from_ink(median),
             "count": len(raw),
-            "templates": [p.name for p in paths],
+            "templates": [p.name for p, _im in accepted],
+            "rejected_templates": rejected,
         }
     return result
 
 
 def _weighted_shift_score(query: Image.Image, median: Image.Image, mask: Image.Image, max_shift: int) -> tuple[float, int, int]:
-    q = _dense_support(query)
+    q = _horizontal_support(query)
+    if q is None:
+        return 2.0, 0, 0
     pad = max_shift + 3
     width = max(q.width, median.width) + 2 * pad
     height = max(q.height, median.height) + 2 * pad
@@ -221,6 +270,7 @@ def classify_consensus(query: Image.Image, refs: list[Path], max_shift: int = 3)
             "dx": dx,
             "dy": dy,
             "reference_count": model["count"],
+            "rejected_reference_count": len(model.get("rejected_templates", [])),
             "model_geometry": model["geometry"],
         })
     ranked.sort(key=lambda row: float(row["score"]))
