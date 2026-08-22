@@ -134,7 +134,7 @@ def main() -> int:
                     physical_seen.add(physical)
 
                     crop = column_img.crop((word.left, word.top, word.left + word.width, word.top + word.height))
-                    segments = _segment_word(crop, len(expected))
+                    segments = _segment_word(crop, len(expected), style=style, expected_text=expected)
                     if len(segments) != len(expected):
                         stats["segment-count"] += 1
                         continue
@@ -184,7 +184,7 @@ def main() -> int:
         "notes": {
             "identity": "exact JSONL/OCR token agreement",
             "style": "only tokens whose complete typography mask has one style",
-            "segmentation": "whole-word geometric _segment_word; no Tesseract character labels",
+            "segmentation": "whole-word geometric _segment_word; italic connected glyphs may use slanted low-ink cuts; no Tesseract character labels",
             "square_brackets": "excluded by typography classifier",
         },
     }
