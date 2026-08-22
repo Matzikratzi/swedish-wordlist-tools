@@ -42,9 +42,13 @@ def main() -> int:
     ap.add_argument("--style", choices=("roman", "italic"))
     args = ap.parse_args()
 
-    manifest_path = args.library / "manifest-word-segments.json"
-    if not manifest_path.exists():
-        raise SystemExit(f"missing {manifest_path}")
+    candidates = [
+        args.library / "manifest-style-word-segments.json",
+        args.library / "manifest-word-segments.json",
+    ]
+    manifest_path = next((p for p in candidates if p.exists()), None)
+    if manifest_path is None:
+        raise SystemExit("missing word-segment manifest; tried: " + ", ".join(str(p) for p in candidates))
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     sources = _load_sources(args.jsonl)
 
@@ -130,7 +134,7 @@ input{{font:inherit;padding:.5rem .7rem;width:28rem;max-width:100%;border:1px so
 a{{color:#0645ad}}
 </style>
 <h1>SAOL word-segment QC</h1>
-<p class="intro">{len(cards)} ord. Kontrollera att segmenten under varje ord verkligen motsvarar bokstäverna som står under dem. Fel segmentgräns är viktigare att fånga än små rasterartefakter. Saknade filer: {missing}.</p>
+<p class="intro">{len(cards)} ord. Kontrollera att segmenten under varje ord verkligen motsvarar bokstäverna som står under dem. Fel segmentgräns är viktigare att fånga än små rasterartefakter. Saknade filer: {missing}. Manifest: {html.escape(manifest_path.name)}.</p>
 <div class="toolbar"><input id="q" placeholder="Filtrera på ord, stil, sida eller subnr…"></div>
 {''.join(cards)}
 <script>
@@ -141,7 +145,7 @@ q.addEventListener('input',()=>{{const s=q.value.toLowerCase();document.querySel
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(doc, encoding="utf-8")
     print(args.out)
-    print(f"words={len(cards)} missing={missing} styles={','.join(sorted(set(str(w.get('style')) for w in words)))}")
+    print(f"words={len(cards)} missing={missing} styles={','.join(sorted(set(str(w.get('style')) for w in words)))} manifest={manifest_path.name}")
     return 0
 
 
