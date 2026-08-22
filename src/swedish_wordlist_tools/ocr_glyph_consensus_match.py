@@ -47,10 +47,10 @@ def _horizontal_support(img: Image.Image, threshold: int = 24) -> Image.Image | 
     """Keep one coherent horizontal glyph support; reject ambiguous neighbours.
 
     SAOL glyphs may have vertically disconnected components (i/ä/:), but those
-    components still share one horizontal x-support.  Earlier char boxes can
-    contain neighbour ink, especially disastrous for l and '.'.  We therefore
+    components still share one horizontal x-support. Earlier char boxes can
+    contain neighbour ink, especially disastrous for l and '.'. We therefore
     split by x-support and retain the dominant group only when it clearly owns
-    the crop.  Competing groups are rejected instead of poisoning consensus.
+    the crop. Competing groups are rejected instead of poisoning consensus.
     """
     ink = _ink(img)
     if ink.width <= 0 or ink.height <= 0:
@@ -61,11 +61,8 @@ def _horizontal_support(img: Image.Image, threshold: int = 24) -> Image.Image | 
         return None
     ranked = sorted(groups, key=lambda g: (g[2], g[1] - g[0]), reverse=True)
     best = ranked[0]
-    total = sum(g[2] for g in groups)
     if len(ranked) > 1:
         second = ranked[1]
-        # If a second horizontal group carries substantial ink, this is likely
-        # a multi-glyph crop. Reject rather than guessing which neighbour wins.
         if second[2] >= max(2, round(best[2] * 0.35)):
             return None
     x0, x1, _ = best
@@ -106,7 +103,28 @@ def _best_aligned(img: Image.Image, anchor: Image.Image, max_shift: int) -> Imag
     return best
 
 
+def _common_canvas(images: list[Image.Image]) -> list[Image.Image]:
+    """Place aligned images on one shared top-left canvas without resizing.
+
+    `_best_aligned` uses a pair-specific canvas because the input glyph widths
+    and heights vary. A class with many references therefore produces aligned
+    images of different dimensions. Median/stability calculations require one
+    common raster shape, so pad every aligned result to the class-wide maximum
+    dimensions while preserving its existing origin and pixels.
+    """
+    if not images:
+        return []
+    width = max(im.width for im in images)
+    height = max(im.height for im in images)
+    return [_canvas(im, width, height, 0, 0) for im in images]
+
+
 def _median(images: list[Image.Image]) -> Image.Image:
+    if not images:
+        raise ValueError("median requires at least one image")
+    sizes = {im.size for im in images}
+    if len(sizes) != 1:
+        raise ValueError(f"median requires equal image sizes, got {sorted(sizes)}")
     w, h = images[0].size
     rows = [list(im.getdata()) for im in images]
     out = []
@@ -120,6 +138,9 @@ def _median(images: list[Image.Image]) -> Image.Image:
 
 def _stability_mask(images: list[Image.Image], median: Image.Image) -> Image.Image:
     """Return weights for glyph support: stable ink high, variable ink low."""
+    sizes = {im.size for im in images}
+    if sizes != {median.size}:
+        raise ValueError(f"stability mask requires equal image sizes, got {sorted(sizes)} and median {median.size}")
     w, h = median.size
     med = list(median.getdata())
     rows = [list(im.getdata()) for im in images]
@@ -212,6 +233,7 @@ def build_consensus(refs: list[Path], max_shift: int = 3) -> dict[str, dict[str,
         raw = [im for _path, im in accepted]
         anchor = _medoid(raw, max_shift)
         aligned = [_best_aligned(im, anchor, max_shift) for im in raw]
+        aligned = _common_canvas(aligned)
         median = _median(aligned)
         mask = _stability_mask(aligned, median)
         bbox = median.getbbox()
