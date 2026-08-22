@@ -13,7 +13,7 @@ def semantic_label(path: Path) -> str:
     """Return the actual glyph class encoded by the template filename.
 
     Keep punctuation/symbol classes distinct here. Any JSONL semantic mapping
-    (for example repetition notation) belongs above the visual classifier.
+    belongs above the visual classifier.
     """
     return _label(path)
 
@@ -64,12 +64,7 @@ def _median(images: list[Image.Image]) -> Image.Image:
 
 
 def _stability_mask(images: list[Image.Image], median: Image.Image) -> Image.Image:
-    """Return weights for the glyph support: 255 stable, 51 variable, 0 outside.
-
-    Background outside the consensus glyph must have zero weight. Previously it
-    was weighted as strongly as the glyph itself, which biased translation-only
-    matching toward an extreme canvas corner and collapsed class margins.
-    """
+    """Return weights for glyph support: stable ink high, variable ink low."""
     w, h = median.size
     med = list(median.getdata())
     rows = [list(im.getdata()) for im in images]
@@ -81,13 +76,45 @@ def _stability_mask(images: list[Image.Image], median: Image.Image) -> Image.Ima
             continue
         mad = sum(abs(row[i] - med[i]) for row in rows) / len(rows)
         stability = max(51, round(255 - min(204, mad * 2.2)))
-        # Weight glyph-support pixels by how much ink is actually present so a
-        # large empty halo cannot dominate the score.
         ink_weight = max(32, min(255, support))
         out.append(round(stability * ink_weight / 255))
     mask = Image.new("L", (w, h), 0)
     mask.putdata(out)
     return mask
+
+
+def _geometry(img: Image.Image) -> dict[str, float]:
+    ink = _ink(img)
+    bbox = ink.getbbox()
+    if not bbox:
+        return {"width": 0.0, "height": 0.0, "area": 0.0, "aspect": 0.0, "fill": 0.0}
+    cropped = ink.crop(bbox)
+    vals = list(cropped.getdata())
+    area = sum(vals) / 255.0
+    width = float(cropped.width)
+    height = float(cropped.height)
+    return {
+        "width": width,
+        "height": height,
+        "area": round(area, 4),
+        "aspect": round(height / width, 4) if width else 0.0,
+        "fill": round(area / (width * height), 4) if width and height else 0.0,
+    }
+
+
+def _geometry_penalty(query: dict[str, float], model: dict[str, float]) -> float:
+    """Small shape prior; enough to separate dot-like from tall-stem glyphs.
+
+    Pixel score remains dominant. Geometry only nudges near-ties where raster
+    artifacts make two classes look deceptively similar.
+    """
+    if not query["width"] or not query["height"] or not model["width"] or not model["height"]:
+        return 0.0
+    h = abs(query["height"] - model["height"]) / max(query["height"], model["height"])
+    w = abs(query["width"] - model["width"]) / max(query["width"], model["width"])
+    a = abs(query["aspect"] - model["aspect"]) / max(query["aspect"], model["aspect"], 1e-6)
+    f = abs(query["fill"] - model["fill"])
+    return 0.08 * h + 0.04 * w + 0.06 * a + 0.02 * f
 
 
 def _medoid(images: list[Image.Image], max_shift: int) -> Image.Image:
@@ -120,8 +147,6 @@ def build_consensus(refs: list[Path], max_shift: int = 3) -> dict[str, dict[str,
         aligned = [_best_aligned(im, anchor, max_shift) for im in raw]
         median = _median(aligned)
         mask = _stability_mask(aligned, median)
-        # Keep the canonical consensus tightly cropped, and crop the mask by the
-        # same rectangle. This gives query and model the same origin semantics.
         bbox = median.getbbox()
         if bbox:
             median = median.crop(bbox)
@@ -129,6 +154,7 @@ def build_consensus(refs: list[Path], max_shift: int = 3) -> dict[str, dict[str,
         result[ch] = {
             "median": median,
             "mask": mask,
+            "geometry": _geometry(ImageChops.invert(median)),
             "count": len(paths),
             "templates": [p.name for p in paths],
         }
@@ -141,7 +167,6 @@ def _weighted_shift_score(query: Image.Image, median: Image.Image, mask: Image.I
     width = max(q.width, median.width) + 2 * pad
     height = max(q.height, median.height) + 2 * pad
     med = _canvas(median, width, height, pad, pad)
-    # Paste a zero-background weight mask at exactly the same origin as median.
     msk = _canvas(mask, width, height, pad, pad)
     medvals = list(med.getdata())
     weights = list(msk.getdata())
@@ -159,15 +184,25 @@ def _weighted_shift_score(query: Image.Image, median: Image.Image, mask: Image.I
 
 def classify_consensus(query: Image.Image, refs: list[Path], max_shift: int = 3) -> dict[str, object]:
     models = build_consensus(refs, max_shift=max_shift)
+    query_geometry = _geometry(query)
     ranked = []
     for ch, model in models.items():
-        score, dx, dy = _weighted_shift_score(query, model["median"], model["mask"], max_shift)
+        pixel_score, dx, dy = _weighted_shift_score(query, model["median"], model["mask"], max_shift)
+        geometry_penalty = _geometry_penalty(query_geometry, model["geometry"])
+        # A singleton class is useful evidence, but less trustworthy than a
+        # consensus from multiple independent examples.
+        singleton_penalty = 0.01 if int(model["count"]) == 1 else 0.0
+        score = pixel_score + geometry_penalty + singleton_penalty
         ranked.append({
             "character": ch,
             "score": round(score, 6),
+            "pixel_score": round(pixel_score, 6),
+            "geometry_penalty": round(geometry_penalty, 6),
+            "singleton_penalty": singleton_penalty,
             "dx": dx,
             "dy": dy,
             "reference_count": model["count"],
+            "model_geometry": model["geometry"],
         })
     ranked.sort(key=lambda row: float(row["score"]))
     best = ranked[0] if ranked else None
@@ -175,4 +210,10 @@ def classify_consensus(query: Image.Image, refs: list[Path], max_shift: int = 3)
     margin = None
     if best is not None and second is not None:
         margin = round(float(second["score"]) - float(best["score"]), 6)
-    return {"best": best, "second": second, "margin": margin, "ranked": ranked}
+    return {
+        "best": best,
+        "second": second,
+        "margin": margin,
+        "ranked": ranked,
+        "query_geometry": query_geometry,
+    }
