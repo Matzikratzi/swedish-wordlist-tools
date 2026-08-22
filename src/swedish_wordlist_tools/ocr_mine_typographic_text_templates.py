@@ -4,6 +4,7 @@ import argparse
 import json
 import re
 from dataclasses import asdict, dataclass
+from difflib import SequenceMatcher
 from pathlib import Path
 
 from PIL import Image
@@ -35,7 +36,7 @@ class TypographicTemplate:
 
 
 def _canon(text: str) -> str:
-    return normalize_text_for_match(printed_text(text)).strip()
+    return normalize_text_for_match(printed_text(text)).strip().replace("+", "~")
 
 
 def _token_specs(text: str) -> list[tuple[str, list[str | None]]]:
@@ -64,18 +65,12 @@ def _labels_match(boxes: list[tuple[str, int, int, int, int]], printed: str) -> 
 
 
 def _ink_columns(img: Image.Image, threshold: int = 220) -> list[int]:
-    """Count dark pixels in each x column of a grayscale crop."""
     gray = img.convert("L")
     px = gray.load()
     return [sum(1 for y in range(gray.height) if px[x, y] < threshold) for x in range(gray.width)]
 
 
 def _x_groups(profile: list[int], max_gap: int = 1) -> list[tuple[int, int]]:
-    """Return horizontal ink groups, bridging at most max_gap empty columns.
-
-    This deliberately works in x only: dots over i/ä and the two dots in ':'
-    remain part of the same glyph group because their x ranges overlap.
-    """
     active = [i for i, n in enumerate(profile) if n > 0]
     if not active:
         return []
@@ -91,26 +86,15 @@ def _x_groups(profile: list[int], max_gap: int = 1) -> list[tuple[int, int]]:
 
 
 def _sanitize_charbox(crop: Image.Image, box: tuple[int, int, int, int], pad: int = 3) -> tuple[Image.Image, tuple[int, int, int, int]] | None:
-    """Trim a Tesseract charbox to one horizontal glyph group.
-
-    The charbox is expanded slightly so accidental neighbor capture is visible.
-    We then inspect horizontal ink groups. A valid glyph should occupy one group
-    in x (possibly made from several vertical components such as i, ä or ':').
-    If multiple groups overlap the proposed character region ambiguously, reject
-    the sample instead of poisoning the template library.
-    """
     left, top, right, bottom = box
     x0 = max(0, left - pad)
     x1 = min(crop.width, right + pad)
     y0 = max(0, top - 1)
     y1 = min(crop.height, bottom + 1)
     expanded = crop.crop((x0, y0, x1, y1))
-    profile = _ink_columns(expanded)
-    groups = _x_groups(profile, max_gap=1)
+    groups = _x_groups(_ink_columns(expanded), max_gap=1)
     if not groups:
         return None
-
-    # Expected charbox position in expanded-crop coordinates.
     expected_l = left - x0
     expected_r = right - x0
     overlaps: list[tuple[int, int, int]] = []
@@ -122,18 +106,57 @@ def _sanitize_charbox(crop: Image.Image, box: tuple[int, int, int, int], pad: in
         return None
     overlaps.sort(reverse=True)
     _ov, a, b = overlaps[0]
-    # If two separated groups substantially overlap the expected box, the crop
-    # is ambiguous (often two letters fused into one OCR box): reject it.
     if len(overlaps) > 1 and overlaps[1][0] >= max(2, overlaps[0][0] // 2):
         return None
-
-    # Keep only the chosen x-group. Vertical trimming happens afterward in _trim.
     glyph = _trim(expanded.crop((a, 0, b, expanded.height)))
     if glyph.width <= 0 or glyph.height <= 0:
         return None
-    final_left = x0 + a
-    final_top = y0
-    return glyph, (final_left, final_top, b - a, y1 - y0)
+    return glyph, (x0 + a, y0, b - a, y1 - y0)
+
+
+def _token_similarity(expected: str, observed: str) -> float:
+    a = _canon(expected)
+    b = _canon(observed)
+    if not a or not b:
+        return 0.0
+    if a == b:
+        return 1.0
+    return SequenceMatcher(None, a, b).ratio()
+
+
+def _ordered_token_alignment(
+    specs: list[tuple[str, list[str | None]]],
+    words: list[object],
+    min_similarity: float = 0.72,
+) -> list[tuple[tuple[str, list[str | None]], object, float]]:
+    """Greedily align expected text tokens to OCR words in reading order.
+
+    Exact matches are preferred, but a token may be aligned fuzzily so later
+    exact tokens do not jump backwards or bind to an unrelated duplicate word.
+    Only exact alignments are harvested; fuzzy alignments exist to preserve the
+    article/token sequence.
+    """
+    result: list[tuple[tuple[str, list[str | None]], object, float]] = []
+    cursor = 0
+    for spec in specs:
+        raw, _styles = spec
+        best_i = None
+        best_score = 0.0
+        # Search only forward and keep the window modest; article ranking has
+        # already localized us to one OCR paragraph.
+        hi = min(len(words), cursor + 14)
+        for i in range(cursor, hi):
+            score = _token_similarity(raw, words[i].text)
+            if score > best_score:
+                best_score = score
+                best_i = i
+            if score == 1.0:
+                break
+        if best_i is None or best_score < min_similarity:
+            continue
+        result.append((spec, words[best_i], best_score))
+        cursor = best_i + 1
+    return result
 
 
 def main() -> int:
@@ -156,48 +179,41 @@ def main() -> int:
         (args.out_dir / style).mkdir(parents=True, exist_ok=True)
     counts: dict[str, dict[str, int]] = {"italic": {}, "roman": {}}
     mined: list[TypographicTemplate] = []
-    matched_entries = exact_tokens = 0
+    matched_entries = exact_tokens = fuzzy_aligned_tokens = 0
     rejected_charbox = rejected_labels = rejected_geometry = 0
     rejected_x_geometry = rejected_duplicate_source = 0
     used_source_boxes: set[tuple[int, int, int, int]] = set()
+    used_paragraphs: set[int] = set()
 
     for entry in _load_page_entries(args.jsonl, args.page):
         text = entry.get("text")
         if not isinstance(text, str) or not text:
             continue
         ranked = rank_articles(entry, articles)
-        if not ranked or ranked[0].headword_score < args.min_headword_score:
+        ranked = [r for r in ranked if r.headword_score >= args.min_headword_score and r.paragraph not in used_paragraphs]
+        if not ranked:
             continue
-        article = next((a for a in articles if a.paragraph == ranked[0].paragraph), None)
+        best = ranked[0]
+        article = next((a for a in articles if a.paragraph == best.paragraph), None)
         if article is None:
             continue
+        used_paragraphs.add(article.paragraph)
         matched_entries += 1
 
-        expected: dict[str, list[tuple[str, list[str | None]]]] = {}
-        for raw, styles in _token_specs(text):
-            key = _canon(raw)
-            if key:
-                expected.setdefault(key, []).append((raw, styles))
-
-        used_token_candidates: dict[str, int] = {}
-        for word in _article_words(article):
-            if word.height < 6 or word.height > 18 or word.width < 2:
-                rejected_geometry += 1
+        specs = _token_specs(text)
+        words = _article_words(article)
+        for (raw, styles), word, align_score in _ordered_token_alignment(specs, words):
+            if align_score < 1.0:
+                fuzzy_aligned_tokens += 1
                 continue
-            key = _canon(word.text)
-            candidates = expected.get(key, [])
-            if not candidates:
-                continue
-            candidate_index = used_token_candidates.get(key, 0)
-            if candidate_index >= len(candidates):
-                continue
-            raw, styles = candidates[candidate_index]
-            used_token_candidates[key] = candidate_index + 1
-            printed = printed_text(normalize_text_for_match(raw).strip())
+            printed = printed_text(normalize_text_for_match(raw).strip()).replace("+", "~")
             observed = normalize_text_for_match(word.text).strip().replace("+", "~")
             if printed != observed or len(printed) != len(styles):
                 continue
             exact_tokens += 1
+            if word.height < 6 or word.height > 18 or word.width < 2:
+                rejected_geometry += 1
+                continue
             crop = image.crop((word.left, word.top, word.left + word.width, word.top + word.height))
             boxes = _tesseract_char_boxes(crop, len(printed))
             if boxes is None:
@@ -239,7 +255,7 @@ def main() -> int:
                     subnr=entry.get("subnr"),
                     paragraph=article.paragraph,
                     bbox=source_bbox,
-                    position_kind="mixed-style-xclean",
+                    position_kind="ordered-token-xclean",
                     output=f"{style}/{filename}",
                 ))
 
@@ -248,6 +264,7 @@ def main() -> int:
         "counts": {s: dict(sorted(v.items())) for s, v in counts.items()},
         "matched_entries": matched_entries,
         "exact_tokens": exact_tokens,
+        "fuzzy_aligned_tokens": fuzzy_aligned_tokens,
         "rejected_charbox_count": rejected_charbox,
         "rejected_charbox_labels": rejected_labels,
         "rejected_geometry": rejected_geometry,
@@ -259,6 +276,8 @@ def main() -> int:
             "square_brackets": "excluded",
             "glyph_crop": "Tesseract box expanded then reduced to one horizontal ink group",
             "source_bbox_reuse": "rejected",
+            "paragraph_reuse": "rejected within each column invocation",
+            "token_alignment": "expected text tokens aligned monotonically to OCR words; only exact aligned tokens harvested",
         },
     }
     (args.out_dir / "manifest-typographic.json").write_text(json.dumps(result, ensure_ascii=False, indent=2)+"\n", encoding="utf-8")
