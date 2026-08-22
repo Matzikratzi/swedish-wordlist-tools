@@ -22,6 +22,25 @@ def _ink(img: Image.Image) -> Image.Image:
     return ImageChops.invert(_trim(img.convert("L")))
 
 
+def _dense_support(img: Image.Image, threshold: int = 24) -> Image.Image:
+    """Crop a glyph to the ink support that is actually present.
+
+    Earlier mined character boxes can contain a surprisingly large halo or a
+    few faint neighbour pixels.  Those pixels are disastrous for tiny glyphs
+    such as '.' and narrow stems such as 'l'.  Work in inverted grayscale and
+    retain the tight bounding box of pixels with meaningful ink.  We do not
+    resize or stretch anything.
+    """
+    ink = _ink(img)
+    if ink.width <= 0 or ink.height <= 0:
+        return ink
+    binary = ink.point(lambda p: 255 if p >= threshold else 0)
+    bbox = binary.getbbox()
+    if not bbox:
+        bbox = ink.getbbox()
+    return ink.crop(bbox) if bbox else ink
+
+
 def _canvas(img: Image.Image, width: int, height: int, x: int, y: int) -> Image.Image:
     out = Image.new("L", (width, height), 0)
     out.paste(img, (x, y))
@@ -83,8 +102,7 @@ def _stability_mask(images: list[Image.Image], median: Image.Image) -> Image.Ima
     return mask
 
 
-def _geometry(img: Image.Image) -> dict[str, float]:
-    ink = _ink(img)
+def _geometry_from_ink(ink: Image.Image) -> dict[str, float]:
     bbox = ink.getbbox()
     if not bbox:
         return {"width": 0.0, "height": 0.0, "area": 0.0, "aspect": 0.0, "fill": 0.0}
@@ -102,12 +120,12 @@ def _geometry(img: Image.Image) -> dict[str, float]:
     }
 
 
-def _geometry_penalty(query: dict[str, float], model: dict[str, float]) -> float:
-    """Small shape prior; enough to separate dot-like from tall-stem glyphs.
+def _geometry(img: Image.Image) -> dict[str, float]:
+    return _geometry_from_ink(_dense_support(img))
 
-    Pixel score remains dominant. Geometry only nudges near-ties where raster
-    artifacts make two classes look deceptively similar.
-    """
+
+def _geometry_penalty(query: dict[str, float], model: dict[str, float]) -> float:
+    """Small shape prior; enough to separate dot-like from tall-stem glyphs."""
     if not query["width"] or not query["height"] or not model["width"] or not model["height"]:
         return 0.0
     h = abs(query["height"] - model["height"]) / max(query["height"], model["height"])
@@ -142,7 +160,10 @@ def build_consensus(refs: list[Path], max_shift: int = 3) -> dict[str, dict[str,
         grouped[semantic_label(path)].append(path)
     result: dict[str, dict[str, object]] = {}
     for ch, paths in grouped.items():
-        raw = [_ink(Image.open(p).convert("L")) for p in paths]
+        raw = [_dense_support(Image.open(p).convert("L")) for p in paths]
+        raw = [im for im in raw if im.width > 0 and im.height > 0]
+        if not raw:
+            continue
         anchor = _medoid(raw, max_shift)
         aligned = [_best_aligned(im, anchor, max_shift) for im in raw]
         median = _median(aligned)
@@ -154,15 +175,15 @@ def build_consensus(refs: list[Path], max_shift: int = 3) -> dict[str, dict[str,
         result[ch] = {
             "median": median,
             "mask": mask,
-            "geometry": _geometry(ImageChops.invert(median)),
-            "count": len(paths),
+            "geometry": _geometry_from_ink(median),
+            "count": len(raw),
             "templates": [p.name for p in paths],
         }
     return result
 
 
 def _weighted_shift_score(query: Image.Image, median: Image.Image, mask: Image.Image, max_shift: int) -> tuple[float, int, int]:
-    q = _ink(query)
+    q = _dense_support(query)
     pad = max_shift + 3
     width = max(q.width, median.width) + 2 * pad
     height = max(q.height, median.height) + 2 * pad
@@ -189,8 +210,6 @@ def classify_consensus(query: Image.Image, refs: list[Path], max_shift: int = 3)
     for ch, model in models.items():
         pixel_score, dx, dy = _weighted_shift_score(query, model["median"], model["mask"], max_shift)
         geometry_penalty = _geometry_penalty(query_geometry, model["geometry"])
-        # A singleton class is useful evidence, but less trustworthy than a
-        # consensus from multiple independent examples.
         singleton_penalty = 0.01 if int(model["count"]) == 1 else 0.0
         score = pixel_score + geometry_penalty + singleton_penalty
         ranked.append({
