@@ -5,8 +5,6 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
-from PIL import Image
-
 from .ocr_glyph_consensus_match import build_consensus
 
 
@@ -19,7 +17,12 @@ def main() -> int:
         description="Build per-character SAOL consensus glyphs from benchmark-verified source words."
     )
     ap.add_argument("library", type=Path, help="Mined word-segment library")
-    ap.add_argument("benchmark", type=Path, help="Holdout benchmark JSON; only correct words are trusted")
+    ap.add_argument(
+        "benchmarks",
+        nargs="+",
+        type=Path,
+        help="One or more holdout benchmark JSON files; only correct words are trusted",
+    )
     ap.add_argument("--out-dir", type=Path, required=True)
     ap.add_argument("--max-shift", type=int, default=3)
     ap.add_argument("--min-sources", type=int, default=2)
@@ -28,19 +31,31 @@ def main() -> int:
     manifest_path = args.library / "manifest-word-segments.json"
     if not manifest_path.exists():
         raise SystemExit(f"missing {manifest_path}")
-    if not args.benchmark.exists():
-        raise SystemExit(f"missing {args.benchmark}")
+    for benchmark_path in args.benchmarks:
+        if not benchmark_path.exists():
+            raise SystemExit(f"missing {benchmark_path}")
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    benchmark = json.loads(args.benchmark.read_text(encoding="utf-8"))
+    trusted_ids: set[int] = set()
+    benchmark_summaries = []
+    for benchmark_path in args.benchmarks:
+        benchmark = json.loads(benchmark_path.read_text(encoding="utf-8"))
+        accepted = {
+            int(row["source_id"])
+            for row in benchmark.get("results", [])
+            if isinstance(row, dict) and row.get("correct") is True and "source_id" in row
+        }
+        trusted_ids.update(accepted)
+        benchmark_summaries.append({
+            "file": str(benchmark_path),
+            "tested_words": benchmark.get("tested_words"),
+            "word_accuracy": benchmark.get("word_accuracy"),
+            "accepted_source_count": len(accepted),
+            "accepted_source_ids": sorted(accepted),
+        })
 
-    trusted_ids = {
-        int(row["source_id"])
-        for row in benchmark.get("results", [])
-        if isinstance(row, dict) and row.get("correct") is True and "source_id" in row
-    }
     if not trusted_ids:
-        raise SystemExit("benchmark contains no correct/trusted source_id values")
+        raise SystemExit("benchmarks contain no correct/trusted source_id values")
 
     word_by_id = {
         int(row["source_id"]): row
@@ -84,8 +99,6 @@ def main() -> int:
         stem = _safe_char(ch)
         median_file = f"{stem}-median.png"
         mask_file = f"{stem}-variation-mask.png"
-        # build_consensus returns inverted-ink grayscale models: black background,
-        # brighter ink. Save them directly for inspection and matching.
         model["median"].save(args.out_dir / median_file)
         model["mask"].save(args.out_dir / mask_file)
         rows.append({
@@ -102,7 +115,7 @@ def main() -> int:
 
     payload = {
         "library": str(args.library),
-        "benchmark": str(args.benchmark),
+        "benchmarks": benchmark_summaries,
         "trusted_source_count": len(trusted_ids),
         "trusted_source_ids": sorted(trusted_ids),
         "max_shift": args.max_shift,
@@ -112,7 +125,7 @@ def main() -> int:
         "missing_glyph_files": missing_files,
         "models": rows,
         "notes": {
-            "selection": "only source words marked correct by the supplied holdout benchmark",
+            "selection": "union of source words marked correct by the supplied holdout benchmark files",
             "alignment": "translation only; no scaling or stretching",
             "median": "pixel median after alignment",
             "variation_mask": "stable glyph-support pixels receive higher weight; variable raster artifacts lower weight",
