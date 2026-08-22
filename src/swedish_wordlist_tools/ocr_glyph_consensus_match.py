@@ -10,11 +10,6 @@ from .ocr_glyph_templates import _trim
 
 
 def semantic_label(path: Path) -> str:
-    """Return the actual glyph class encoded by the template filename.
-
-    Keep punctuation/symbol classes distinct here. Any JSONL semantic mapping
-    belongs above the visual classifier.
-    """
     return _label(path)
 
 
@@ -28,7 +23,6 @@ def _x_profile(ink: Image.Image, threshold: int = 24) -> list[int]:
 
 
 def _x_groups(profile: list[int], max_gap: int = 1) -> list[tuple[int, int, int]]:
-    """Return (start, end, ink_count) horizontal ink groups."""
     active = [i for i, n in enumerate(profile) if n > 0]
     if not active:
         return []
@@ -44,14 +38,6 @@ def _x_groups(profile: list[int], max_gap: int = 1) -> list[tuple[int, int, int]
 
 
 def _horizontal_support(img: Image.Image, threshold: int = 24) -> Image.Image | None:
-    """Keep one coherent horizontal glyph support; reject ambiguous neighbours.
-
-    SAOL glyphs may have vertically disconnected components (i/ä/:), but those
-    components still share one horizontal x-support. Earlier char boxes can
-    contain neighbour ink, especially disastrous for l and '.'. We therefore
-    split by x-support and retain the dominant group only when it clearly owns
-    the crop. Competing groups are rejected instead of poisoning consensus.
-    """
     ink = _ink(img)
     if ink.width <= 0 or ink.height <= 0:
         return None
@@ -104,14 +90,6 @@ def _best_aligned(img: Image.Image, anchor: Image.Image, max_shift: int) -> Imag
 
 
 def _common_canvas(images: list[Image.Image]) -> list[Image.Image]:
-    """Place aligned images on one shared top-left canvas without resizing.
-
-    `_best_aligned` uses a pair-specific canvas because the input glyph widths
-    and heights vary. A class with many references therefore produces aligned
-    images of different dimensions. Median/stability calculations require one
-    common raster shape, so pad every aligned result to the class-wide maximum
-    dimensions while preserving its existing origin and pixels.
-    """
     if not images:
         return []
     width = max(im.width for im in images)
@@ -137,7 +115,6 @@ def _median(images: list[Image.Image]) -> Image.Image:
 
 
 def _stability_mask(images: list[Image.Image], median: Image.Image) -> Image.Image:
-    """Return weights for glyph support: stable ink high, variable ink low."""
     sizes = {im.size for im in images}
     if sizes != {median.size}:
         raise ValueError(f"stability mask requires equal image sizes, got {sorted(sizes)} and median {median.size}")
@@ -169,9 +146,7 @@ def _geometry_from_ink(ink: Image.Image) -> dict[str, float]:
     width = float(cropped.width)
     height = float(cropped.height)
     return {
-        "width": width,
-        "height": height,
-        "area": round(area, 4),
+        "width": width, "height": height, "area": round(area, 4),
         "aspect": round(height / width, 4) if width else 0.0,
         "fill": round(area / (width * height), 4) if width and height else 0.0,
     }
@@ -185,7 +160,6 @@ def _geometry(img: Image.Image) -> dict[str, float]:
 
 
 def _geometry_penalty(query: dict[str, float], model: dict[str, float]) -> float:
-    """Small shape prior; enough to separate dot-like from tall-stem glyphs."""
     if not query["width"] or not query["height"] or not model["width"] or not model["height"]:
         return 0.0
     h = abs(query["height"] - model["height"]) / max(query["height"], model["height"])
@@ -232,8 +206,7 @@ def build_consensus(refs: list[Path], max_shift: int = 3) -> dict[str, dict[str,
             continue
         raw = [im for _path, im in accepted]
         anchor = _medoid(raw, max_shift)
-        aligned = [_best_aligned(im, anchor, max_shift) for im in raw]
-        aligned = _common_canvas(aligned)
+        aligned = _common_canvas([_best_aligned(im, anchor, max_shift) for im in raw])
         median = _median(aligned)
         mask = _stability_mask(aligned, median)
         bbox = median.getbbox()
@@ -241,11 +214,8 @@ def build_consensus(refs: list[Path], max_shift: int = 3) -> dict[str, dict[str,
             median = median.crop(bbox)
             mask = mask.crop(bbox)
         result[ch] = {
-            "median": median,
-            "mask": mask,
-            "geometry": _geometry_from_ink(median),
-            "count": len(raw),
-            "templates": [p.name for p, _im in accepted],
+            "median": median, "mask": mask, "geometry": _geometry_from_ink(median),
+            "count": len(raw), "templates": [p.name for p, _im in accepted],
             "rejected_templates": rejected,
         }
     return result
@@ -274,8 +244,8 @@ def _weighted_shift_score(query: Image.Image, median: Image.Image, mask: Image.I
     return best
 
 
-def classify_consensus(query: Image.Image, refs: list[Path], max_shift: int = 3) -> dict[str, object]:
-    models = build_consensus(refs, max_shift=max_shift)
+def classify_consensus_models(query: Image.Image, models: dict[str, dict[str, object]], max_shift: int = 3) -> dict[str, object]:
+    """Classify against already-built models so callers can reuse expensive consensus work."""
     query_geometry = _geometry(query)
     ranked = []
     for ch, model in models.items():
@@ -284,27 +254,18 @@ def classify_consensus(query: Image.Image, refs: list[Path], max_shift: int = 3)
         singleton_penalty = 0.01 if int(model["count"]) == 1 else 0.0
         score = pixel_score + geometry_penalty + singleton_penalty
         ranked.append({
-            "character": ch,
-            "score": round(score, 6),
-            "pixel_score": round(pixel_score, 6),
-            "geometry_penalty": round(geometry_penalty, 6),
-            "singleton_penalty": singleton_penalty,
-            "dx": dx,
-            "dy": dy,
-            "reference_count": model["count"],
+            "character": ch, "score": round(score, 6), "pixel_score": round(pixel_score, 6),
+            "geometry_penalty": round(geometry_penalty, 6), "singleton_penalty": singleton_penalty,
+            "dx": dx, "dy": dy, "reference_count": model["count"],
             "rejected_reference_count": len(model.get("rejected_templates", [])),
             "model_geometry": model["geometry"],
         })
     ranked.sort(key=lambda row: float(row["score"]))
     best = ranked[0] if ranked else None
     second = ranked[1] if len(ranked) > 1 else None
-    margin = None
-    if best is not None and second is not None:
-        margin = round(float(second["score"]) - float(best["score"]), 6)
-    return {
-        "best": best,
-        "second": second,
-        "margin": margin,
-        "ranked": ranked,
-        "query_geometry": query_geometry,
-    }
+    margin = round(float(second["score"]) - float(best["score"]), 6) if best is not None and second is not None else None
+    return {"best": best, "second": second, "margin": margin, "ranked": ranked, "query_geometry": query_geometry}
+
+
+def classify_consensus(query: Image.Image, refs: list[Path], max_shift: int = 3) -> dict[str, object]:
+    return classify_consensus_models(query, build_consensus(refs, max_shift=max_shift), max_shift=max_shift)
