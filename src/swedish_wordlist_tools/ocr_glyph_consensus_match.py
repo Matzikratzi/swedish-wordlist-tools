@@ -10,8 +10,12 @@ from .ocr_glyph_templates import _trim
 
 
 def semantic_label(path: Path) -> str:
-    ch = _label(path)
-    return "+" if ch in {"+", "~"} else ch
+    """Return the actual glyph class encoded by the template filename.
+
+    Keep punctuation/symbol classes distinct here. Any JSONL semantic mapping
+    (for example repetition notation) belongs above the visual classifier.
+    """
+    return _label(path)
 
 
 def _ink(img: Image.Image) -> Image.Image:
@@ -60,15 +64,28 @@ def _median(images: list[Image.Image]) -> Image.Image:
 
 
 def _stability_mask(images: list[Image.Image], median: Image.Image) -> Image.Image:
-    """Return weights: 255 stable, 51 highly variable."""
+    """Return weights for the glyph support: 255 stable, 51 variable, 0 outside.
+
+    Background outside the consensus glyph must have zero weight. Previously it
+    was weighted as strongly as the glyph itself, which biased translation-only
+    matching toward an extreme canvas corner and collapsed class margins.
+    """
     w, h = median.size
     med = list(median.getdata())
     rows = [list(im.getdata()) for im in images]
     out = []
     for i in range(w * h):
+        support = max([med[i], *(row[i] for row in rows)])
+        if support <= 0:
+            out.append(0)
+            continue
         mad = sum(abs(row[i] - med[i]) for row in rows) / len(rows)
-        out.append(max(51, round(255 - min(204, mad * 2.2))))
-    mask = Image.new("L", (w, h), 255)
+        stability = max(51, round(255 - min(204, mad * 2.2)))
+        # Weight glyph-support pixels by how much ink is actually present so a
+        # large empty halo cannot dominate the score.
+        ink_weight = max(32, min(255, support))
+        out.append(round(stability * ink_weight / 255))
+    mask = Image.new("L", (w, h), 0)
     mask.putdata(out)
     return mask
 
@@ -103,6 +120,12 @@ def build_consensus(refs: list[Path], max_shift: int = 3) -> dict[str, dict[str,
         aligned = [_best_aligned(im, anchor, max_shift) for im in raw]
         median = _median(aligned)
         mask = _stability_mask(aligned, median)
+        # Keep the canonical consensus tightly cropped, and crop the mask by the
+        # same rectangle. This gives query and model the same origin semantics.
+        bbox = median.getbbox()
+        if bbox:
+            median = median.crop(bbox)
+            mask = mask.crop(bbox)
         result[ch] = {
             "median": median,
             "mask": mask,
@@ -118,15 +141,16 @@ def _weighted_shift_score(query: Image.Image, median: Image.Image, mask: Image.I
     width = max(q.width, median.width) + 2 * pad
     height = max(q.height, median.height) + 2 * pad
     med = _canvas(median, width, height, pad, pad)
+    # Paste a zero-background weight mask at exactly the same origin as median.
     msk = _canvas(mask, width, height, pad, pad)
     medvals = list(med.getdata())
     weights = list(msk.getdata())
+    denom = sum(weights) or 1
     best = (2.0, 0, 0)
     for dy in range(-max_shift, max_shift + 1):
         for dx in range(-max_shift, max_shift + 1):
             qq = _canvas(q, width, height, pad + dx, pad + dy)
             qvals = list(qq.getdata())
-            denom = sum(weights) or 1
             score = sum(abs(a - b) * w for a, b, w in zip(qvals, medvals, weights)) / (255.0 * denom)
             if score < best[0]:
                 best = (score, dx, dy)
