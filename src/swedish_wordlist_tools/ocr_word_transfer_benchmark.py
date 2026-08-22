@@ -35,7 +35,7 @@ def _raw_best_class(query: Image.Image, refs: list[Path], max_shift: int) -> dic
     margin = None
     if best is not None and second is not None:
         margin = round(float(second["score"]) - float(best["score"]), 6)
-    return {"best": best, "second": second, "margin": margin, "ranked": ranked}
+    return {"best": best, "second": second, "margin": margin, "ranked": ranked, "query_geometry": None}
 
 
 def _contains(word, bbox: list[int]) -> bool:
@@ -46,9 +46,9 @@ def _contains(word, bbox: list[int]) -> bool:
 
 
 def _semantic_text(text: str) -> str:
-    # JSONL '+' is the semantic repetition marker. Existing mined libraries may
-    # have recorded a visually tilde-like raster as '~'; benchmark at semantics.
-    return text.replace("~", "+")
+    # Preserve the expected token classes in this benchmark. Visual oddities in
+    # the scanned PNG are learned as raster variation, not as character aliases.
+    return text
 
 
 def main() -> int:
@@ -177,6 +177,7 @@ def main() -> int:
                 "best": best,
                 "second": second,
                 "margin": margin,
+                "query_geometry": match.get("query_geometry"),
                 "segment_file": segment_file,
             })
 
@@ -220,9 +221,9 @@ def main() -> int:
             "character_labels": "not taken from Tesseract",
             "leakage_guard": "all templates from test subnr excluded",
             "segmentation": "x-ink groups with expected-length valley splitting",
-            "matcher": "weighted aligned per-class median consensus by default; raw nearest-template available for comparison",
-            "repeat_marker": "visual '~' and '+' templates are one semantic JSONL '+' class",
-            "diagnostics": "optional word and segment crops plus best/second class metadata",
+            "matcher": "weighted aligned per-class median consensus plus mild geometry prior by default; raw nearest-template available for comparison",
+            "punctuation": "dot remains its own glyph class; plus-like scan artifacts are treated as visual variation",
+            "diagnostics": "optional word and segment crops plus best/second class and geometry metadata",
         },
     }
     json.dump(payload, __import__("sys").stdout, ensure_ascii=False, indent=2)
