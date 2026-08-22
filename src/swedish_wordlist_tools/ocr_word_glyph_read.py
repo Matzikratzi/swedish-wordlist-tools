@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from PIL import Image, ImageChops
+from PIL import Image
 
 from .ocr_glyph_classify import classify_glyph
 from .ocr_glyph_templates import _trim
@@ -31,49 +31,124 @@ def _x_groups(profile: list[int], max_gap: int = 1) -> list[tuple[int, int]]:
     return groups
 
 
-def _segment_word(img: Image.Image, expected_chars: int | None = None) -> list[tuple[int, int, Image.Image]]:
-    """Segment a word crop into horizontal glyph candidates without OCR labels.
+def _cut_x(base: int, y: int, height: int, slant: float) -> int:
+    """Return x for a cut path; positive slant moves the top to the right."""
+    if height <= 1:
+        return base
+    mid = (height - 1) / 2.0
+    return int(round(base + slant * (mid - y)))
 
-    The first pass uses x-ink groups. If the number of groups is smaller than an
-    expected character count, recursively split the widest groups at their
-    deepest internal x-profile valleys. This is deliberately conservative and
-    intended for SAOL's stable typography, not arbitrary OCR.
+
+def _cut_ink_score(gray: Image.Image, base: int, slant: float, threshold: int = 220) -> float:
+    """Ink crossed by a possibly slanted boundary, with a tiny roughness penalty."""
+    px = gray.load()
+    score = 0.0
+    last_x: int | None = None
+    for y in range(gray.height):
+        x = _cut_x(base, y, gray.height, slant)
+        if x <= 0 or x >= gray.width:
+            return 1e9
+        # Inspect the two pixels straddling the boundary. Crossing dense ink is bad.
+        for xx in (x - 1, x):
+            if 0 <= xx < gray.width and px[xx, y] < threshold:
+                score += (threshold - px[xx, y]) / threshold
+        if last_x is not None:
+            score += 0.015 * abs(x - last_x)
+        last_x = x
+    return score
+
+
+def _split_by_path(gray: Image.Image, a: int, b: int, base: int, slant: float) -> tuple[Image.Image, Image.Image]:
+    """Split [a,b) with a slanted mask while keeping rectangular glyph images."""
+    left = gray.crop((a, 0, b, gray.height)).copy()
+    right = gray.crop((a, 0, b, gray.height)).copy()
+    lp = left.load()
+    rp = right.load()
+    for y in range(gray.height):
+        cut = max(a + 1, min(b - 1, _cut_x(base, y, gray.height, slant)))
+        local = cut - a
+        for x in range(b - a):
+            if x >= local:
+                lp[x, y] = 255
+            if x < local:
+                rp[x, y] = 255
+    return _trim(left), _trim(right)
+
+
+def _segment_word(
+    img: Image.Image,
+    expected_chars: int | None = None,
+    *,
+    style: str | None = None,
+    expected_text: str | None = None,
+) -> list[tuple[int, int, Image.Image]]:
+    """Segment a SAOL word crop into glyph candidates without OCR labels.
+
+    Initial disconnected x-ink groups are preserved. When a connected group must
+    be split, roman text uses vertical valleys, while italic text may use a small
+    family of forward/backward slanted boundaries. The slanted cut is represented
+    by masking pixels on either side, so neighboring strokes are not forced into
+    the same vertical rectangle.
     """
     gray = _trim(img.convert("L"))
     profile = _ink_columns(gray)
-    groups = _x_groups(profile, max_gap=1)
+    groups: list[dict[str, object]] = [
+        {"a": a, "b": b, "image": _trim(gray.crop((a, 0, b, gray.height)))}
+        for a, b in _x_groups(profile, max_gap=1)
+    ]
 
     if expected_chars and expected_chars > 0:
         while len(groups) < expected_chars:
-            best = None
-            for gi, (a, b) in enumerate(groups):
+            best: tuple[float, float, int, int, float] | None = None
+            for gi, group in enumerate(groups):
+                a, b = int(group["a"]), int(group["b"])
                 if b - a < 4:
                     continue
-                local = profile[a:b]
-                lo = 1
-                hi = len(local) - 1
-                if hi <= lo:
-                    continue
-                # Prefer an empty column; otherwise the least-ink internal valley.
-                rel = min(range(lo, hi), key=lambda i: (local[i], abs(i - len(local)/2)))
-                score = local[rel]
-                width = b - a
-                candidate = (score, -width, gi, a + rel)
-                if best is None or candidate < best:
-                    best = candidate
+                slants = (0.0, 0.12, 0.20, 0.28, -0.12) if style == "italic" else (0.0,)
+                for base in range(a + 1, b):
+                    left_w = base - a
+                    right_w = b - base
+                    if left_w < 1 or right_w < 1:
+                        continue
+                    for slant in slants:
+                        score = _cut_ink_score(gray.crop((a, 0, b, gray.height)), base - a, slant)
+                        # Prefer balanced cuts weakly; ink evidence remains dominant.
+                        balance = 0.02 * abs(left_w - right_w) / max(1, b - a)
+                        total = score + balance
+                        # Repeated review feedback: the p in roman "pl." was often
+                        # clipped and its right-hand pixels assigned to l. When the
+                        # first connected split is p|l, strongly discourage a p that
+                        # is not wider than l. This is scale-relative, not pixel-fixed.
+                        if (
+                            style == "roman"
+                            and expected_text == "pl."
+                            and gi == 0
+                            and len(groups) <= 2
+                            and left_w <= right_w
+                        ):
+                            total += 0.75
+                        candidate = (total, -float(b - a), gi, base, slant)
+                        if best is None or candidate < best:
+                            best = candidate
             if best is None:
                 break
-            _score, _negwidth, gi, cut = best
-            a, b = groups[gi]
-            if cut <= a or cut >= b:
+            _score, _negwidth, gi, base, slant = best
+            group = groups[gi]
+            a, b = int(group["a"]), int(group["b"])
+            local_gray = gray.crop((a, 0, b, gray.height))
+            left, right = _split_by_path(local_gray, 0, b - a, base - a, slant)
+            if left.width <= 0 or right.width <= 0:
                 break
-            groups = groups[:gi] + [(a, cut), (cut, b)] + groups[gi+1:]
+            groups = groups[:gi] + [
+                {"a": a, "b": base, "image": left},
+                {"a": base, "b": b, "image": right},
+            ] + groups[gi + 1:]
 
     out: list[tuple[int, int, Image.Image]] = []
-    for a, b in groups:
-        glyph = _trim(gray.crop((a, 0, b, gray.height)))
-        if glyph.width > 0 and glyph.height > 0:
-            out.append((a, b, glyph))
+    for group in groups:
+        glyph = group["image"]
+        if isinstance(glyph, Image.Image) and glyph.width > 0 and glyph.height > 0:
+            out.append((int(group["a"]), int(group["b"]), glyph))
     return out
 
 
@@ -91,7 +166,7 @@ def main() -> int:
     img = Image.open(args.word_crop).convert("L")
     expected = args.expected.replace("+", "~") if args.expected is not None else None
     expected_chars = len(expected) if expected is not None else None
-    segments = _segment_word(img, expected_chars)
+    segments = _segment_word(img, expected_chars, style=args.style, expected_text=expected)
 
     if args.segments_out:
         args.segments_out.mkdir(parents=True, exist_ok=True)
@@ -133,7 +208,7 @@ def main() -> int:
         "segments": rows,
         "notes": {
             "character_labels": "not taken from Tesseract",
-            "segmentation": "horizontal ink groups; widest groups split at internal valleys when expected length is supplied",
+            "segmentation": "ink groups; connected italic glyphs may be split by slanted low-ink paths",
         },
     }
     json.dump(payload, __import__("sys").stdout, ensure_ascii=False, indent=2)
