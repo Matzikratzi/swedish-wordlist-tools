@@ -7,22 +7,24 @@ from pathlib import Path
 
 from PIL import Image
 
-from .ocr_glyph_leave_one_out import _label, _shift_score
+from .ocr_glyph_consensus_match import classify_consensus, semantic_label
+from .ocr_glyph_leave_one_out import _shift_score
 from .ocr_tsv_articles import read_words
 from .ocr_word_glyph_read import _segment_word
 
 
-def _best_class(query: Image.Image, refs: list[Path], max_shift: int) -> dict[str, object]:
+def _raw_best_class(query: Image.Image, refs: list[Path], max_shift: int) -> dict[str, object]:
     best_by_class: dict[str, dict[str, object]] = {}
     for ref in refs:
         score, dx, dy = _shift_score(query, Image.open(ref).convert("L"), max_shift)
-        ch = _label(ref)
+        ch = semantic_label(ref)
         row = {
             "character": ch,
             "template": ref.name,
             "score": round(score, 6),
             "dx": dx,
             "dy": dy,
+            "reference_count": 1,
         }
         prev = best_by_class.get(ch)
         if prev is None or float(row["score"]) < float(prev["score"]):
@@ -33,12 +35,7 @@ def _best_class(query: Image.Image, refs: list[Path], max_shift: int) -> dict[st
     margin = None
     if best is not None and second is not None:
         margin = round(float(second["score"]) - float(best["score"]), 6)
-    return {
-        "best": best,
-        "second": second,
-        "margin": margin,
-        "ranked": ranked,
-    }
+    return {"best": best, "second": second, "margin": margin, "ranked": ranked}
 
 
 def _contains(word, bbox: list[int]) -> bool:
@@ -48,6 +45,12 @@ def _contains(word, bbox: list[int]) -> bool:
     return word.left <= cx <= word.left + word.width and word.top <= cy <= word.top + word.height
 
 
+def _semantic_text(text: str) -> str:
+    # JSONL '+' is the semantic repetition marker. Existing mined libraries may
+    # have recorded a visually tilde-like raster as '~'; benchmark at semantics.
+    return text.replace("~", "+")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Cross-word SAOL glyph OCR benchmark using whole word crops and no same-subnr templates.")
     ap.add_argument("library", type=Path)
@@ -55,6 +58,7 @@ def main() -> int:
     ap.add_argument("--max-shift", type=int, default=3)
     ap.add_argument("--margin", type=float, default=0.02)
     ap.add_argument("--limit", type=int, default=50)
+    ap.add_argument("--matcher", choices=("consensus", "raw"), default="consensus")
     ap.add_argument("--diagnostics-out", type=Path, help="Optional directory for word/segment diagnostic PNGs.")
     args = ap.parse_args()
 
@@ -89,7 +93,7 @@ def main() -> int:
         if not isinstance(source_word, str) or not isinstance(expected_word, str) or not isinstance(column_image, str):
             skipped["missing-metadata"] += 1
             continue
-        expected = expected_word.replace("+", "~")
+        expected = _semantic_text(expected_word)
         if not expected:
             skipped["empty-expected"] += 1
             continue
@@ -117,7 +121,7 @@ def main() -> int:
 
         needle = f"-sub{subnr}-"
         refs = [p for p in all_refs if needle not in p.name]
-        ref_classes = {_label(p) for p in refs}
+        ref_classes = {semantic_label(p) for p in refs}
         missing_classes = sorted({ch for ch in expected if ch not in ref_classes})
         if missing_classes:
             skipped["missing-class-after-holdout"] += 1
@@ -140,7 +144,10 @@ def main() -> int:
         segment_rows = []
         accepted = True
         for i, (x0, x1, glyph) in enumerate(segments):
-            match = _best_class(glyph, refs, args.max_shift)
+            if args.matcher == "consensus":
+                match = classify_consensus(glyph, refs, max_shift=args.max_shift)
+            else:
+                match = _raw_best_class(glyph, refs, args.max_shift)
             best = match["best"]
             second = match["second"]
             margin = match["margin"]
@@ -197,6 +204,7 @@ def main() -> int:
     payload = {
         "style": args.style,
         "library": str(args.library),
+        "matcher": args.matcher,
         "template_count": len(all_refs),
         "tested_words": len(results),
         "word_correct": word_correct,
@@ -212,7 +220,9 @@ def main() -> int:
             "character_labels": "not taken from Tesseract",
             "leakage_guard": "all templates from test subnr excluded",
             "segmentation": "x-ink groups with expected-length valley splitting",
-            "diagnostics": "optional word and segment crops plus best/second reference metadata",
+            "matcher": "weighted aligned per-class median consensus by default; raw nearest-template available for comparison",
+            "repeat_marker": "visual '~' and '+' templates are one semantic JSONL '+' class",
+            "diagnostics": "optional word and segment crops plus best/second class metadata",
         },
     }
     json.dump(payload, __import__("sys").stdout, ensure_ascii=False, indent=2)
