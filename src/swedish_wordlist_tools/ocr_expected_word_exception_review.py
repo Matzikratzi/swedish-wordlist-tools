@@ -38,15 +38,12 @@ def main() -> int:
         f"<p><b>Constrained decoding:</b> {payload.get('resolved_word_count', 0)} nya ord kunde förklaras helt och visas inte. "
         f"{payload.get('exception_word_count', len(payload.get('results', [])))} ord behöver granskning. "
         "Textsträngen är känd i förväg; sidan visar bara fall där någon förväntad glyph/kluster saknas eller där bläck blir oförklarat. "
-        "Rätta med samma etikett → box/pixel-flöde som tidigare. När du exporterar blir de nya manuella exemplen nästa atlas.</p>"
+        "Rätta med samma etikett → box/pixel-flöde som tidigare. Exporten innehåller bara dessa undantag; slå sedan ihop den med föregående atlas med ocr_merge_manual_pixel_atlases.</p>"
     )
     marker = "</h1>"
     if marker in text:
         text = text.replace(marker, marker + intro, 1)
 
-    # Add compact decode diagnostics to the existing card metadata. The HTML
-    # already embeds each result as data/proposal state; inject a visible summary
-    # immediately after the expected-word text where possible.
     for row in payload.get("results", []):
         expected = str(row.get("expected_word") or "")
         if not expected:
