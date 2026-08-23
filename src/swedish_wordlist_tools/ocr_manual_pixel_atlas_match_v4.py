@@ -15,12 +15,23 @@ from .ocr_manual_pixel_atlas_match import (
 )
 from .ocr_manual_pixel_atlas_match_v2 import _augment_hit
 
-# User-verified ordinary letters that stand on the support line.  Descenders are
+# User-verified ordinary letters that stand on the support line. Descenders are
 # deliberately omitted; they can still be matched after the baseline is known.
 BASELINE_ANCHORS = set("abcdehiklmnorstuvwxåäö")
-# These tiny marks are dangerous if allowed to float vertically inside unknown
-# glyphs.  Once a baseline is chosen they must occur at their learned y-position.
+# Tiny marks are dangerous if allowed to float vertically inside unknown glyphs.
 STRICT_Y_LABELS = {".", "·", "-", ","}
+
+
+def _anchor_model(model: dict[str, object]) -> dict[str, object]:
+    """For a stand-on-line glyph, ignore any stale atlas baseline annotation.
+
+    The support line is the glyph's lowest raster row, so baseline_offset is
+    height-1 after normalization. This prevents an old bad `pl.` baseline from
+    teaching the same error back to the matcher.
+    """
+    out = dict(model)
+    out["baseline_offset"] = int(model["height"]) - 1
+    return out
 
 
 def _global_nonoverlap(candidates: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -60,7 +71,8 @@ def _vote_baseline(
     for baseline in range(height):
         candidates: list[dict[str, object]] = []
         for label in BASELINE_ANCHORS:
-            for model_index, model in enumerate(style_models.get(label, [])):
+            for model_index, original_model in enumerate(style_models.get(label, [])):
+                model = _anchor_model(original_model)
                 for raw in _scan_model(
                     ink=ink,
                     width=width,
@@ -78,10 +90,10 @@ def _vote_baseline(
                     hit["model_index"] = model_index
                     candidates.append(hit)
         winners = _global_nonoverlap(candidates)
-        # Primary score: number of agreeing glyphs. Secondary: explained pixels.
-        # Tertiary: stay close to the old geometric guess when tied.
         votes = len(winners)
         pixels = sum(len(h.get("matched_pixels", [])) for h in winners)
+        # Count agreeing glyphs first, then explained pixels, then stay close to
+        # the geometric fallback only as a final tie-breaker.
         scores[baseline] = (votes, pixels, -abs(baseline - geometric_baseline))
         vote_counts[baseline] = votes
     best = max(scores, key=scores.get) if scores else geometric_baseline
@@ -154,7 +166,10 @@ def main() -> int:
         for label, label_models in style_models.items():
             label_hits: list[dict[str, object]] = []
             tolerance = 0 if label in STRICT_Y_LABELS else args.baseline_tolerance
-            for model_index, model in enumerate(label_models):
+            for model_index, original_model in enumerate(label_models):
+                # For verified baseline anchors, the physical glyph geometry is
+                # authoritative even if an old atlas entry had a bad baseline.
+                model = _anchor_model(original_model) if label in BASELINE_ANCHORS else original_model
                 for raw in _scan_model(
                     ink=ink,
                     width=width,
