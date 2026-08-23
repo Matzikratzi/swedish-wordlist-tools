@@ -45,7 +45,7 @@ def _iter_style_chars(text: str):
                 yield style, ch
 
 
-def _load_existing(manifests: list[Path]) -> dict[str, Counter[str]]:
+def _load_existing_consensus(manifests: list[Path]) -> dict[str, Counter[str]]:
     out = {"roman": Counter(), "italic": Counter()}
     for path in manifests:
         if not path.exists():
@@ -64,11 +64,43 @@ def _load_existing(manifests: list[Path]) -> dict[str, Counter[str]]:
     return out
 
 
+def _load_word_libraries(libraries: list[Path]) -> tuple[dict[str, Counter[str]], set[int]]:
+    """Load actual mined glyph coverage and pages from mixed-style word libraries."""
+    out = {"roman": Counter(), "italic": Counter()}
+    pages: set[int] = set()
+    for library in libraries:
+        manifest = library
+        if library.is_dir():
+            manifest = library / "manifest-style-word-segments.json"
+        if not manifest.exists():
+            continue
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        for page in payload.get("pages", []):
+            if isinstance(page, int):
+                pages.add(page)
+        independent = payload.get("independent_sources_by_class", {})
+        if isinstance(independent, dict):
+            for style in ("roman", "italic"):
+                values = independent.get(style, {})
+                if not isinstance(values, dict):
+                    continue
+                for ch, n in values.items():
+                    if isinstance(ch, str) and isinstance(n, int):
+                        # Separate libraries may overlap physically, so max is the
+                        # conservative merge until source IDs become globally stable.
+                        out[style][ch] = max(out[style][ch], n)
+    return out, pages
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Plan targeted SAOL pages for missing glyph/style coverage.")
     ap.add_argument("jsonl", type=Path)
     ap.add_argument("--consensus", type=Path, action="append", default=[],
                     help="Existing consensus manifest; repeat for roman/italic libraries")
+    ap.add_argument("--word-library", type=Path, action="append", default=[],
+                    help="Mined mixed-style word library or its manifest; repeatable")
+    ap.add_argument("--include-mined-pages", action="store_true",
+                    help="Allow pages already present in --word-library (normally excluded)")
     ap.add_argument("--target", type=int, default=20, help="Desired independent sources per style/character")
     ap.add_argument("--chars", default=DEFAULT_CHARS)
     ap.add_argument("--max-pages", type=int, default=20)
@@ -76,7 +108,12 @@ def main() -> int:
     args = ap.parse_args()
 
     chars = list(dict.fromkeys(args.chars))
-    existing = _load_existing(args.consensus)
+    existing = _load_existing_consensus(args.consensus)
+    word_existing, mined_pages = _load_word_libraries(args.word_library)
+    for style in ("roman", "italic"):
+        for ch, n in word_existing[style].items():
+            existing[style][ch] = max(existing[style][ch], n)
+
     needs = {
         style: {ch: max(0, args.target - existing[style].get(ch, 0)) for ch in chars}
         for style in ("roman", "italic")
@@ -105,6 +142,9 @@ def main() -> int:
                 scan["rows_without_page"] += 1
                 continue
             scan["rows_with_page"] += 1
+            if page in mined_pages and not args.include_mined_pages:
+                scan["rows_on_excluded_mined_pages"] += 1
+                continue
             text = row.get("text")
             if not isinstance(text, str) or not text:
                 scan["rows_without_text"] += 1
@@ -175,6 +215,7 @@ def main() -> int:
         "target": args.target,
         "chars": "".join(chars),
         "existing": {s: dict(sorted(existing[s].items())) for s in existing},
+        "mined_pages_excluded": sorted(mined_pages) if not args.include_mined_pages else [],
         "needs_before": {s: dict(sorted(needs[s].items())) for s in needs},
         "scan_stats": dict(sorted(scan.items())),
         "selected_pages": selected,
@@ -183,9 +224,10 @@ def main() -> int:
         "top_candidate_pages": candidates[: args.top_candidates],
         "notes": {
             "page_field": "SAOL14 faksimil JSONL sidnr1",
-            "purpose": "page selection only; candidates must still pass OCR/token alignment and holdout verification",
+            "purpose": "page selection only; candidates must still pass OCR/token alignment and topology verification",
             "styles": "roman and italic planned separately",
             "strategy": "greedy set cover weighted by remaining per-character source need",
+            "word_library": "actual independent glyph coverage is included; already mined pages are excluded by default",
         },
     }
     json.dump(payload, __import__("sys").stdout, ensure_ascii=False, indent=2)
