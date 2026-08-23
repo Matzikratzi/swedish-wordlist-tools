@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import tempfile
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 
 from PIL import Image
@@ -35,6 +35,53 @@ def _uniform_style(styles: list[str | None]) -> str | None:
     return style if style in {"roman", "italic"} else None
 
 
+def _assign_character_spans(
+    segments: list[tuple[int, int, Image.Image]], expected: str
+) -> list[tuple[int, int]] | None:
+    """Assign one or more consecutive expected characters to each segment.
+
+    The topology segmenter may deliberately stop with fewer image components than
+    expected characters when two printed letters really touch. We then need only
+    decide *which* component is the multi-letter cluster so that the surrounding
+    one-character components can still be used as trusted glyphs.
+
+    A tiny dynamic program partitions the expected character count among the
+    observed components. Width per assigned character is compared with the word's
+    average width; multi-character assignments carry a small penalty so isolated
+    glyphs are preferred whenever geometry supports them.
+    """
+    m = len(segments)
+    n = len(expected)
+    if not segments or m > n:
+        return None
+    if m == n:
+        return [(i, i + 1) for i in range(n)]
+
+    widths = [max(1, seg[2].width) for seg in segments]
+    unit = max(1.0, sum(widths) / float(n))
+    inf = 1e18
+    dp: list[dict[int, tuple[float, list[tuple[int, int]]]]] = [dict() for _ in range(m + 1)]
+    dp[0][0] = (0.0, [])
+
+    for i in range(m):
+        remaining_segments = m - i - 1
+        for consumed, (base_cost, spans) in dp[i].items():
+            max_k = n - consumed - remaining_segments
+            for k in range(1, max_k + 1):
+                end = consumed + k
+                observed_per_char = widths[i] / float(k)
+                width_cost = ((observed_per_char - unit) / unit) ** 2
+                cluster_penalty = 0.12 * (k - 1)
+                cost = base_cost + width_cost + cluster_penalty
+                old = dp[i + 1].get(end)
+                candidate = (cost, spans + [(consumed, end)])
+                if old is None or cost < old[0]:
+                    dp[i + 1][end] = candidate
+
+    result = dp[m].get(n)
+    return result[1] if result is not None else None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Mine verified whole roman/italic tokens and geometrically segment them into glyphs.")
     ap.add_argument("jsonl", type=Path)
@@ -53,7 +100,9 @@ def main() -> int:
     pages = _parse_pages(args.pages)
     args.out_dir.mkdir(parents=True, exist_ok=True)
     word_dir = args.out_dir / "words"
+    cluster_dir = args.out_dir / "clusters"
     word_dir.mkdir(parents=True, exist_ok=True)
+    cluster_dir.mkdir(parents=True, exist_ok=True)
     for style in wanted_styles:
         (args.out_dir / style).mkdir(parents=True, exist_ok=True)
 
@@ -135,34 +184,67 @@ def main() -> int:
 
                     crop = column_img.crop((word.left, word.top, word.left + word.width, word.top + word.height))
                     segments = _segment_word(crop, len(expected), style=style, expected_text=expected)
-                    if len(segments) != len(expected):
-                        stats["segment-count"] += 1
+                    spans = _assign_character_spans(segments, expected)
+                    if spans is None:
+                        stats["segment-assignment"] += 1
                         continue
 
                     source_id = len(rows)
                     safe_token = "".join(c if c.isalnum() else f"u{ord(c):04x}" for c in expected)
                     word_file = word_dir / f"w{source_id:05d}-{style}-sub{entry.get('subnr')}-p{page}-c{colno}-{safe_token}.png"
                     crop.save(word_file)
-                    glyphs = []
-                    for i, ((_x0, _x1, glyph), ch) in enumerate(zip(segments, expected)):
-                        label = _safe_char(ch)
-                        n = counts[style][ch]
-                        glyph_file = args.out_dir / style / f"{label}-{n:05d}-src{source_id:05d}-sub{entry.get('subnr')}-p{page}-c{colno}-i{i}.png"
-                        glyph.save(glyph_file)
-                        counts[style][ch] += 1
-                        glyphs.append({"character": ch, "index": i, "file": str(glyph_file.relative_to(args.out_dir))})
+
+                    glyphs: list[dict[str, object]] = []
+                    segment_rows: list[dict[str, object]] = []
+                    cluster_count = 0
+                    cluster_chars = 0
+                    for i, ((x0, x1, glyph), (start, end)) in enumerate(zip(segments, spans)):
+                        text_span = expected[start:end]
+                        if end - start == 1:
+                            ch = text_span
+                            label = _safe_char(ch)
+                            n = counts[style][ch]
+                            glyph_file = args.out_dir / style / f"{label}-{n:05d}-src{source_id:05d}-sub{entry.get('subnr')}-p{page}-c{colno}-i{i}.png"
+                            glyph.save(glyph_file)
+                            counts[style][ch] += 1
+                            rel = str(glyph_file.relative_to(args.out_dir))
+                            item = {
+                                "kind": "glyph", "character": ch, "expected_text": ch,
+                                "index": i, "char_start": start, "char_end": end,
+                                "x": [x0, x1], "file": rel,
+                            }
+                            glyphs.append({"character": ch, "index": i, "file": rel})
+                            segment_rows.append(item)
+                        else:
+                            cluster_count += 1
+                            cluster_chars += end - start
+                            cluster_file = cluster_dir / f"cluster-src{source_id:05d}-sub{entry.get('subnr')}-p{page}-c{colno}-i{i}-{start}-{end}.png"
+                            glyph.save(cluster_file)
+                            segment_rows.append({
+                                "kind": "cluster", "expected_text": text_span, "index": i,
+                                "char_start": start, "char_end": end, "x": [x0, x1],
+                                "file": str(cluster_file.relative_to(args.out_dir)),
+                                "usable": False,
+                            })
 
                     rows.append({
                         "source_id": source_id, "style": style, "page": page, "column": colno,
                         "column_left": column_left, "subnr": entry.get("subnr"), "paragraph": article.paragraph,
                         "expected_word": expected, "ocr_word": word.text,
                         "word_bbox": [word.left, word.top, word.width, word.height],
-                        "word_file": str(word_file.relative_to(args.out_dir)), "glyphs": glyphs,
+                        "word_file": str(word_file.relative_to(args.out_dir)),
+                        "glyphs": glyphs, "segments": segment_rows,
+                        "cluster_count": cluster_count, "cluster_character_count": cluster_chars,
                     })
                     stats["words"] += 1
                     stats[f"words-{style}"] += 1
                     stats["glyphs"] += len(glyphs)
                     stats[f"glyphs-{style}"] += len(glyphs)
+                    if cluster_count:
+                        stats["words-with-clusters"] += 1
+                        stats["clusters"] += cluster_count
+                        stats["cluster-characters"] += cluster_chars
+                        stats["salvaged-glyphs-around-clusters"] += len(glyphs)
 
     independent: dict[str, dict[str, int]] = {s: {} for s in wanted_styles}
     for style in wanted_styles:
@@ -184,7 +266,8 @@ def main() -> int:
         "notes": {
             "identity": "exact JSONL/OCR token agreement",
             "style": "only tokens whose complete typography mask has one style",
-            "segmentation": "whole-word geometric _segment_word; italic connected glyphs may use slanted low-ink cuts; no Tesseract character labels",
+            "segmentation": "x gaps plus strict zero-width topological seams that cannot cut 8-connected ink",
+            "clusters": "unsplittable multi-character ink components are excluded; surrounding single-character glyphs are retained",
             "square_brackets": "excluded by typography classifier",
         },
     }
