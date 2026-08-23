@@ -31,79 +31,125 @@ def _x_groups(profile: list[int], max_gap: int = 1) -> list[tuple[int, int]]:
     return groups
 
 
-def _darkness(value: int) -> float:
-    return max(0.0, min(1.0, (255.0 - float(value)) / 255.0))
-
-
-def _boundary_cost(gray: Image.Image, x: int, y: int) -> float:
-    """Cost of putting a zero-width boundary between pixels x-1 and x.
-
-    A seam may hug an ink edge, so one dark adjacent pixel is acceptable. Two
-    dark pixels on opposite sides are expensive because that is evidence that
-    the boundary would cut a connected stroke rather than pass through the
-    background between two printed glyphs.
-    """
+def _ink_mask(gray: Image.Image, threshold: int = 220) -> list[list[bool]]:
+    gray = gray.convert("L")
     px = gray.load()
-    left = _darkness(px[x - 1, y])
-    right = _darkness(px[x, y])
-    return 2.8 * min(left, right) + 0.35 * max(left, right)
+    return [[px[x, y] < threshold for x in range(gray.width)] for y in range(gray.height)]
 
 
-def _best_background_seam(gray: Image.Image) -> tuple[float, list[int]] | None:
-    """Find a top-to-bottom zero-width background seam with dynamic programming.
+def _ink_at(mask: list[list[bool]], x: int, y: int) -> bool:
+    if not mask:
+        return False
+    height = len(mask)
+    width = len(mask[0])
+    return 0 <= x < width and 0 <= y < height and mask[y][x]
 
-    The seam lives *between* pixel columns, not on a column. From one row to the
-    next it may stay put or move one pixel left/right. This lets it wind around
-    serifs and italic strokes while strongly disfavoring paths that cut ink.
+
+def _vertex_open(mask: list[list[bool]], x: int, y: int) -> bool:
+    """Whether a dual-grid vertex is a genuine background passage.
+
+    A path must not squeeze through a corner where two ink pixels touch
+    diagonally. Treating such diagonal contact as connected is exactly the
+    topology we want for printed glyphs: different letters are assumed to have
+    air between them even on the diagonal.
+    """
+    nw = _ink_at(mask, x - 1, y - 1)
+    ne = _ink_at(mask, x, y - 1)
+    sw = _ink_at(mask, x - 1, y)
+    se = _ink_at(mask, x, y)
+    return not ((nw and se) or (ne and sw))
+
+
+def _vertical_edge_open(mask: list[list[bool]], x: int, y: int) -> bool:
+    """Can a zero-width seam run vertically between columns x-1 and x?"""
+    return not (_ink_at(mask, x - 1, y) and _ink_at(mask, x, y))
+
+
+def _horizontal_edge_open(mask: list[list[bool]], column: int, y: int) -> bool:
+    """Can the seam shift sideways across the row boundary at y?"""
+    return not (_ink_at(mask, column, y - 1) and _ink_at(mask, column, y))
+
+
+def _edge_hug_penalty(mask: list[list[bool]], x: int, y: int) -> float:
+    """Weakly prefer open air, while allowing a seam to hug a serif edge."""
+    touches = int(_ink_at(mask, x - 1, y)) + int(_ink_at(mask, x, y))
+    return 0.035 * touches
+
+
+def _best_topological_seam(gray: Image.Image, threshold: int = 220) -> tuple[float, list[int]] | None:
+    """Find a strict top-to-bottom separator through the background topology.
+
+    The seam lives on the *boundaries between pixels*, so it has zero thickness.
+    It may stay in the same x position or move one pixel left/right at each row.
+    A move is forbidden if it would cross horizontal/vertical ink connectivity,
+    and a vertex is forbidden if it would squeeze between diagonally touching ink
+    pixels. Thus the seam can snake around overlapping serifs without ever
+    cutting an 8-connected ink component.
     """
     gray = gray.convert("L")
     width, height = gray.size
     if width < 3 or height < 1:
         return None
 
+    mask = _ink_mask(gray, threshold=threshold)
     xs = range(1, width)
+    center = width / 2.0
     inf = 1e18
-    prev = {x: _boundary_cost(gray, x, 0) for x in xs}
-    parents: list[dict[int, int]] = []
 
-    for y in range(1, height):
+    prev: dict[int, float] = {}
+    for x in xs:
+        if _vertex_open(mask, x, 0):
+            prev[x] = 0.002 * abs(x - center)
+    if not prev:
+        return None
+
+    parents: list[dict[int, int]] = []
+    for y in range(height):
         cur: dict[int, float] = {}
         parent: dict[int, int] = {}
-        for x in xs:
-            best_cost = inf
-            best_prev = x
-            for xp in (x - 1, x, x + 1):
-                if xp not in prev:
+        for xp, prev_cost in prev.items():
+            for x in (xp - 1, xp, xp + 1):
+                if x <= 0 or x >= width:
                     continue
-                # Small movement penalty: bending is allowed, zig-zagging is not free.
-                cost = prev[xp] + 0.055 * abs(x - xp)
-                if cost < best_cost:
-                    best_cost = cost
-                    best_prev = xp
-            cur[x] = best_cost + _boundary_cost(gray, x, y)
-            parent[x] = best_prev
+                if not _vertex_open(mask, x, y):
+                    continue
+                if x != xp:
+                    column = min(x, xp)
+                    if not _horizontal_edge_open(mask, column, y):
+                        continue
+                if not _vertical_edge_open(mask, x, y):
+                    continue
+                if not _vertex_open(mask, x, y + 1):
+                    continue
+
+                cost = prev_cost
+                cost += 0.02 * abs(x - xp)
+                cost += _edge_hug_penalty(mask, x, y)
+                cost += 0.002 * abs(x - center) / max(1.0, width)
+                if cost < cur.get(x, inf):
+                    cur[x] = cost
+                    parent[x] = xp
+        if not cur:
+            return None
         parents.append(parent)
         prev = cur
 
-    # Avoid the trivial outside-edge path. The penalty is deliberately weak:
-    # typography evidence should dominate, but a genuine inter-glyph seam is
-    # expected to leave ink on both sides.
-    center = width / 2.0
-    def terminal_score(x: int) -> float:
-        edge = min(x, width - x)
-        edge_penalty = 0.8 / max(1.0, float(edge))
-        center_penalty = 0.015 * abs(x - center) / max(1.0, width)
-        return prev[x] + edge_penalty + center_penalty
+    end_x = min(prev, key=lambda x: (prev[x], abs(x - center)))
+    score = prev[end_x]
 
-    end_x = min(xs, key=terminal_score)
-    score = terminal_score(end_x)
-    path = [end_x]
+    vertices = [end_x]
     x = end_x
     for parent in reversed(parents):
         x = parent[x]
-        path.append(x)
-    path.reverse()
-    return score, path
+        vertices.append(x)
+    vertices.reverse()
+
+    # The vertical segment crossing image row y uses the boundary after any
+    # sideways move at that row, i.e. vertex y+1.
+    seam = vertices[1:]
+    if len(seam) != height:
+        return None
+    return score, seam
 
 
 def _split_by_seam(gray: Image.Image, seam: list[int]) -> tuple[Image.Image, Image.Image]:
@@ -125,9 +171,9 @@ def _split_by_seam(gray: Image.Image, seam: list[int]) -> tuple[Image.Image, Ima
 
 
 def _split_candidate(group_image: Image.Image) -> tuple[float, Image.Image, Image.Image] | None:
-    """Return the best usable seam split for one connected group."""
+    """Return the best strict topological split for one x-connected group."""
     gray = group_image.convert("L")
-    found = _best_background_seam(gray)
+    found = _best_topological_seam(gray)
     if found is None:
         return None
     score, seam = found
@@ -135,14 +181,13 @@ def _split_candidate(group_image: Image.Image) -> tuple[float, Image.Image, Imag
     if left.width <= 0 or right.width <= 0 or left.height <= 0 or right.height <= 0:
         return None
 
-    # Penalize implausibly tiny pieces and gross imbalance, but do not impose a
-    # letter-pair-specific rule. The seam geometry remains the main evidence.
-    total_w = max(1, left.width + right.width)
-    tiny_penalty = 0.0
+    # Reject near-empty slivers; otherwise keep priors deliberately weak. The
+    # separator itself is already guaranteed not to cut an 8-connected stroke.
     if min(left.width, right.width) <= 1:
-        tiny_penalty += 1.0
-    balance_penalty = 0.06 * abs(left.width - right.width) / total_w
-    return score + tiny_penalty + balance_penalty, left, right
+        score += 0.8
+    total_w = max(1, left.width + right.width)
+    score += 0.035 * abs(left.width - right.width) / total_w
+    return score, left, right
 
 
 def _segment_word(
@@ -154,14 +199,14 @@ def _segment_word(
 ) -> list[tuple[int, int, Image.Image]]:
     """Segment a SAOL word crop into glyph candidates without OCR labels.
 
-    Disconnected x-ink groups are preserved. If fewer groups exist than the
-    known character count, connected groups are recursively split by a
-    top-to-bottom *zero-width background seam*. The seam may move one pixel
-    sideways per row, so overlapping serifs and forward-leaning italic strokes
-    do not require a completely white vertical column between glyphs.
+    Easy gaps are separated first by x projection. If the known character count
+    says that an x-connected region still contains multiple glyphs, it is split
+    only where a strict zero-width topological background seam exists. Such a
+    seam may wind around serifs and italic strokes, but it is forbidden to cut
+    horizontal, vertical, or diagonal ink connectivity.
 
-    ``style`` and ``expected_text`` are accepted for API compatibility and future
-    priors; the actual cut geometry is currently style- and pair-independent.
+    ``style`` and ``expected_text`` are accepted for API compatibility; the
+    geometry itself is intentionally style- and character-pair-independent.
     """
     gray = _trim(img.convert("L"))
     profile = _ink_columns(gray)
@@ -172,7 +217,8 @@ def _segment_word(
 
     if expected_chars and expected_chars > 0:
         while len(groups) < expected_chars:
-            best: tuple[float, float, int, Image.Image, Image.Image] | None = None
+            best_key: tuple[float, float, int] | None = None
+            best_value: tuple[int, Image.Image, Image.Image] | None = None
             for gi, group in enumerate(groups):
                 glyph = group.get("image")
                 if not isinstance(glyph, Image.Image) or glyph.width < 3:
@@ -181,18 +227,18 @@ def _segment_word(
                 if split is None:
                     continue
                 score, left, right = split
-                # Prefer resolving wide connected groups when seam evidence ties.
-                candidate = (score, -float(glyph.width), gi, left, right)
-                if best is None or candidate[:3] < best[:3]:
-                    best = candidate
-            if best is None:
+                key = (score, -float(glyph.width), gi)
+                if best_key is None or key < best_key:
+                    best_key = key
+                    best_value = (gi, left, right)
+            if best_value is None:
                 break
 
-            _score, _negwidth, gi, left, right = best
+            gi, left, right = best_value
             group = groups[gi]
             a, b = int(group["a"]), int(group["b"])
-            # x ranges are only diagnostics now: the actual boundary can vary by
-            # row. Use the trimmed-width proportion as a stable approximate split.
+            # x ranges are diagnostic only because a topological seam can vary by
+            # row. Use the trimmed-width proportion as an approximate scalar cut.
             denom = max(1, left.width + right.width)
             approx = a + max(1, min(b - a - 1, round((b - a) * left.width / denom)))
             groups = groups[:gi] + [
@@ -264,7 +310,7 @@ def main() -> int:
         "segments": rows,
         "notes": {
             "character_labels": "not taken from Tesseract",
-            "segmentation": "ink groups; connected glyphs split by zero-width dynamic background seams",
+            "segmentation": "x gaps plus strict zero-width topological seams that cannot cut 8-connected ink",
         },
     }
     json.dump(payload, __import__("sys").stdout, ensure_ascii=False, indent=2)
