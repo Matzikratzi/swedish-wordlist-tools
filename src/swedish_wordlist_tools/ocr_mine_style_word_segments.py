@@ -25,6 +25,20 @@ def _safe_token(raw: str) -> str:
     return printed_text(normalize_text_for_match(raw).strip())
 
 
+def _entry_headword(entry: dict[str, object]) -> str:
+    """Return the printed/article headword without deriving it from ord.
+
+    SAOL rows may expose the printed form through different fields. Prefer
+    stycke, which is the article headword form we have already validated against
+    the facsimile, then fall back to normaliserat_ord/ord only for display.
+    """
+    for key in ("stycke", "normaliserat_ord", "ord"):
+        value = entry.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
 def _uniform_style(styles: list[str | None]) -> str | None:
     if not styles:
         return None
@@ -38,18 +52,7 @@ def _uniform_style(styles: list[str | None]) -> str | None:
 def _assign_character_spans(
     segments: list[tuple[int, int, Image.Image]], expected: str
 ) -> list[tuple[int, int]] | None:
-    """Assign one or more consecutive expected characters to each segment.
-
-    The topology segmenter may deliberately stop with fewer image components than
-    expected characters when two printed letters really touch. We then need only
-    decide *which* component is the multi-letter cluster so that the surrounding
-    one-character components can still be used as trusted glyphs.
-
-    A tiny dynamic program partitions the expected character count among the
-    observed components. Width per assigned character is compared with the word's
-    average width; multi-character assignments carry a small penalty so isolated
-    glyphs are preferred whenever geometry supports them.
-    """
+    """Assign one or more consecutive expected characters to each segment."""
     m = len(segments)
     n = len(expected)
     if not segments or m > n:
@@ -59,7 +62,6 @@ def _assign_character_spans(
 
     widths = [max(1, seg[2].width) for seg in segments]
     unit = max(1.0, sum(widths) / float(n))
-    inf = 1e18
     dp: list[dict[int, tuple[float, list[tuple[int, int]]]]] = [dict() for _ in range(m + 1)]
     dp[0][0] = (0.0, [])
 
@@ -230,6 +232,7 @@ def main() -> int:
                     rows.append({
                         "source_id": source_id, "style": style, "page": page, "column": colno,
                         "column_left": column_left, "subnr": entry.get("subnr"), "paragraph": article.paragraph,
+                        "headword": _entry_headword(entry),
                         "expected_word": expected, "ocr_word": word.text,
                         "word_bbox": [word.left, word.top, word.width, word.height],
                         "word_file": str(word_file.relative_to(args.out_dir)),
@@ -268,6 +271,7 @@ def main() -> int:
             "style": "only tokens whose complete typography mask has one style",
             "segmentation": "x gaps plus strict zero-width topological seams that cannot cut 8-connected ink",
             "clusters": "unsplittable multi-character ink components are excluded; surrounding single-character glyphs are retained",
+            "headword": "stored from JSONL stycke when available for human review context",
             "square_brackets": "excluded by typography classifier",
         },
     }
