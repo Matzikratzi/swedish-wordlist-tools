@@ -62,14 +62,15 @@ function resolveCandidateOverlaps(proposals){
         raise SystemExit("could not insert overlap resolver")
     text = text.replace(anchor, helpers + "\n" + anchor, 1)
 
-    # Re-resolve on every render, so later larger live matches can displace earlier
-    # smaller ones without losing the suppressed proposals from memory.
+    # Keep the overlap count on the per-card state object. renderList() is a
+    # sibling function of render(), so a local const inside render() is not in
+    # scope there; using state also prevents one card's count leaking to another.
     render_anchor = "function render(){"
     if render_anchor not in text:
         raise SystemExit("could not patch render")
     text = text.replace(
         render_anchor,
-        "function render(){\n   const overlapSuppressed=resolveCandidateOverlaps(proposals);",
+        "function render(){\n   state.overlapSuppressed=resolveCandidateOverlaps(proposals);",
         1,
     )
 
@@ -91,7 +92,7 @@ function resolveCandidateOverlaps(proposals){
     # Display how many candidates were removed by the global allocation. This is
     # useful while validating the rule, especially for punctuation inside glyphs.
     list_tail = "box.querySelectorAll('.prop').forEach(el=>el.onclick=()=>{state.selected=+el.dataset.i;card.querySelector('.label').value='';render();});"
-    list_repl = list_tail + "\n   if(overlapSuppressed)card.querySelector('.legend').textContent='Överlapp: '+overlapSuppressed+' mindre auto-matchningar bortsorterade';"
+    list_repl = list_tail + "\n   if(state.overlapSuppressed)card.querySelector('.legend').textContent='Överlapp: '+state.overlapSuppressed+' mindre auto-matchningar bortsorterade';"
     if list_tail in text:
         text = text.replace(list_tail, list_repl, 1)
 
