@@ -31,48 +31,118 @@ def _x_groups(profile: list[int], max_gap: int = 1) -> list[tuple[int, int]]:
     return groups
 
 
-def _cut_x(base: int, y: int, height: int, slant: float) -> int:
-    """Return x for a cut path; positive slant moves the top to the right."""
-    if height <= 1:
-        return base
-    mid = (height - 1) / 2.0
-    return int(round(base + slant * (mid - y)))
+def _darkness(value: int) -> float:
+    return max(0.0, min(1.0, (255.0 - float(value)) / 255.0))
 
 
-def _cut_ink_score(gray: Image.Image, base: int, slant: float, threshold: int = 220) -> float:
-    """Ink crossed by a possibly slanted boundary, with a tiny roughness penalty."""
+def _boundary_cost(gray: Image.Image, x: int, y: int) -> float:
+    """Cost of putting a zero-width boundary between pixels x-1 and x.
+
+    A seam may hug an ink edge, so one dark adjacent pixel is acceptable. Two
+    dark pixels on opposite sides are expensive because that is evidence that
+    the boundary would cut a connected stroke rather than pass through the
+    background between two printed glyphs.
+    """
     px = gray.load()
-    score = 0.0
-    last_x: int | None = None
-    for y in range(gray.height):
-        x = _cut_x(base, y, gray.height, slant)
-        if x <= 0 or x >= gray.width:
-            return 1e9
-        # Inspect the two pixels straddling the boundary. Crossing dense ink is bad.
-        for xx in (x - 1, x):
-            if 0 <= xx < gray.width and px[xx, y] < threshold:
-                score += (threshold - px[xx, y]) / threshold
-        if last_x is not None:
-            score += 0.015 * abs(x - last_x)
-        last_x = x
-    return score
+    left = _darkness(px[x - 1, y])
+    right = _darkness(px[x, y])
+    return 2.8 * min(left, right) + 0.35 * max(left, right)
 
 
-def _split_by_path(gray: Image.Image, a: int, b: int, base: int, slant: float) -> tuple[Image.Image, Image.Image]:
-    """Split [a,b) with a slanted mask while keeping rectangular glyph images."""
-    left = gray.crop((a, 0, b, gray.height)).copy()
-    right = gray.crop((a, 0, b, gray.height)).copy()
+def _best_background_seam(gray: Image.Image) -> tuple[float, list[int]] | None:
+    """Find a top-to-bottom zero-width background seam with dynamic programming.
+
+    The seam lives *between* pixel columns, not on a column. From one row to the
+    next it may stay put or move one pixel left/right. This lets it wind around
+    serifs and italic strokes while strongly disfavoring paths that cut ink.
+    """
+    gray = gray.convert("L")
+    width, height = gray.size
+    if width < 3 or height < 1:
+        return None
+
+    xs = range(1, width)
+    inf = 1e18
+    prev = {x: _boundary_cost(gray, x, 0) for x in xs}
+    parents: list[dict[int, int]] = []
+
+    for y in range(1, height):
+        cur: dict[int, float] = {}
+        parent: dict[int, int] = {}
+        for x in xs:
+            best_cost = inf
+            best_prev = x
+            for xp in (x - 1, x, x + 1):
+                if xp not in prev:
+                    continue
+                # Small movement penalty: bending is allowed, zig-zagging is not free.
+                cost = prev[xp] + 0.055 * abs(x - xp)
+                if cost < best_cost:
+                    best_cost = cost
+                    best_prev = xp
+            cur[x] = best_cost + _boundary_cost(gray, x, y)
+            parent[x] = best_prev
+        parents.append(parent)
+        prev = cur
+
+    # Avoid the trivial outside-edge path. The penalty is deliberately weak:
+    # typography evidence should dominate, but a genuine inter-glyph seam is
+    # expected to leave ink on both sides.
+    center = width / 2.0
+    def terminal_score(x: int) -> float:
+        edge = min(x, width - x)
+        edge_penalty = 0.8 / max(1.0, float(edge))
+        center_penalty = 0.015 * abs(x - center) / max(1.0, width)
+        return prev[x] + edge_penalty + center_penalty
+
+    end_x = min(xs, key=terminal_score)
+    score = terminal_score(end_x)
+    path = [end_x]
+    x = end_x
+    for parent in reversed(parents):
+        x = parent[x]
+        path.append(x)
+    path.reverse()
+    return score, path
+
+
+def _split_by_seam(gray: Image.Image, seam: list[int]) -> tuple[Image.Image, Image.Image]:
+    """Split an image along a zero-width row-wise seam."""
+    gray = gray.convert("L")
+    left = gray.copy()
+    right = gray.copy()
     lp = left.load()
     rp = right.load()
-    for y in range(gray.height):
-        cut = max(a + 1, min(b - 1, _cut_x(base, y, gray.height, slant)))
-        local = cut - a
-        for x in range(b - a):
-            if x >= local:
+    width, height = gray.size
+    for y in range(height):
+        cut = max(1, min(width - 1, seam[y]))
+        for x in range(width):
+            if x >= cut:
                 lp[x, y] = 255
-            if x < local:
+            if x < cut:
                 rp[x, y] = 255
     return _trim(left), _trim(right)
+
+
+def _split_candidate(group_image: Image.Image) -> tuple[float, Image.Image, Image.Image] | None:
+    """Return the best usable seam split for one connected group."""
+    gray = group_image.convert("L")
+    found = _best_background_seam(gray)
+    if found is None:
+        return None
+    score, seam = found
+    left, right = _split_by_seam(gray, seam)
+    if left.width <= 0 or right.width <= 0 or left.height <= 0 or right.height <= 0:
+        return None
+
+    # Penalize implausibly tiny pieces and gross imbalance, but do not impose a
+    # letter-pair-specific rule. The seam geometry remains the main evidence.
+    total_w = max(1, left.width + right.width)
+    tiny_penalty = 0.0
+    if min(left.width, right.width) <= 1:
+        tiny_penalty += 1.0
+    balance_penalty = 0.06 * abs(left.width - right.width) / total_w
+    return score + tiny_penalty + balance_penalty, left, right
 
 
 def _segment_word(
@@ -84,11 +154,14 @@ def _segment_word(
 ) -> list[tuple[int, int, Image.Image]]:
     """Segment a SAOL word crop into glyph candidates without OCR labels.
 
-    Initial disconnected x-ink groups are preserved. When a connected group must
-    be split, roman text uses vertical valleys, while italic text may use a small
-    family of forward/backward slanted boundaries. The slanted cut is represented
-    by masking pixels on either side, so neighboring strokes are not forced into
-    the same vertical rectangle.
+    Disconnected x-ink groups are preserved. If fewer groups exist than the
+    known character count, connected groups are recursively split by a
+    top-to-bottom *zero-width background seam*. The seam may move one pixel
+    sideways per row, so overlapping serifs and forward-leaning italic strokes
+    do not require a completely white vertical column between glyphs.
+
+    ``style`` and ``expected_text`` are accepted for API compatibility and future
+    priors; the actual cut geometry is currently style- and pair-independent.
     """
     gray = _trim(img.convert("L"))
     profile = _ink_columns(gray)
@@ -99,49 +172,32 @@ def _segment_word(
 
     if expected_chars and expected_chars > 0:
         while len(groups) < expected_chars:
-            best: tuple[float, float, int, int, float] | None = None
+            best: tuple[float, float, int, Image.Image, Image.Image] | None = None
             for gi, group in enumerate(groups):
-                a, b = int(group["a"]), int(group["b"])
-                if b - a < 4:
+                glyph = group.get("image")
+                if not isinstance(glyph, Image.Image) or glyph.width < 3:
                     continue
-                slants = (0.0, 0.12, 0.20, 0.28, -0.12) if style == "italic" else (0.0,)
-                for base in range(a + 1, b):
-                    left_w = base - a
-                    right_w = b - base
-                    if left_w < 1 or right_w < 1:
-                        continue
-                    for slant in slants:
-                        score = _cut_ink_score(gray.crop((a, 0, b, gray.height)), base - a, slant)
-                        # Prefer balanced cuts weakly; ink evidence remains dominant.
-                        balance = 0.02 * abs(left_w - right_w) / max(1, b - a)
-                        total = score + balance
-                        # Repeated review feedback: the p in roman "pl." was often
-                        # clipped and its right-hand pixels assigned to l. When the
-                        # first connected split is p|l, strongly discourage a p that
-                        # is not wider than l. This is scale-relative, not pixel-fixed.
-                        if (
-                            style == "roman"
-                            and expected_text == "pl."
-                            and gi == 0
-                            and len(groups) <= 2
-                            and left_w <= right_w
-                        ):
-                            total += 0.75
-                        candidate = (total, -float(b - a), gi, base, slant)
-                        if best is None or candidate < best:
-                            best = candidate
+                split = _split_candidate(glyph)
+                if split is None:
+                    continue
+                score, left, right = split
+                # Prefer resolving wide connected groups when seam evidence ties.
+                candidate = (score, -float(glyph.width), gi, left, right)
+                if best is None or candidate[:3] < best[:3]:
+                    best = candidate
             if best is None:
                 break
-            _score, _negwidth, gi, base, slant = best
+
+            _score, _negwidth, gi, left, right = best
             group = groups[gi]
             a, b = int(group["a"]), int(group["b"])
-            local_gray = gray.crop((a, 0, b, gray.height))
-            left, right = _split_by_path(local_gray, 0, b - a, base - a, slant)
-            if left.width <= 0 or right.width <= 0:
-                break
+            # x ranges are only diagnostics now: the actual boundary can vary by
+            # row. Use the trimmed-width proportion as a stable approximate split.
+            denom = max(1, left.width + right.width)
+            approx = a + max(1, min(b - a - 1, round((b - a) * left.width / denom)))
             groups = groups[:gi] + [
-                {"a": a, "b": base, "image": left},
-                {"a": base, "b": b, "image": right},
+                {"a": a, "b": approx, "image": left},
+                {"a": approx, "b": b, "image": right},
             ] + groups[gi + 1:]
 
     out: list[tuple[int, int, Image.Image]] = []
@@ -208,7 +264,7 @@ def main() -> int:
         "segments": rows,
         "notes": {
             "character_labels": "not taken from Tesseract",
-            "segmentation": "ink groups; connected italic glyphs may be split by slanted low-ink paths",
+            "segmentation": "ink groups; connected glyphs split by zero-width dynamic background seams",
         },
     }
     json.dump(payload, __import__("sys").stdout, ensure_ascii=False, indent=2)
