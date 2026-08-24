@@ -194,6 +194,10 @@ def main() -> int:
         rewritten = original_argv[:]
         # First positional argument is always argv[1] for this CLI family.
         rewritten[1] = str(converted)
+        # v14 does not know this v15-only manifest sampling option.
+        if "--examples-per-char" in rewritten:
+            i = rewritten.index("--examples-per-char")
+            del rewritten[i:i + 2]
         sys.argv = rewritten
 
     try:
