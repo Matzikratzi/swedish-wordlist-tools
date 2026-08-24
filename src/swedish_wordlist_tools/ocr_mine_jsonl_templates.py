@@ -73,12 +73,6 @@ def _informative_exact_token(token: str) -> bool:
 
 
 def _printed_form(jsonl_token: str, ocr_token: str) -> tuple[str, str] | None:
-    """Return (labels, printed chars) when OCR and JSONL token shapes align.
-
-    SAOL JSONL uses '+' as an abstract repetition marker while the facsimile
-    prints a tilde-like '~'. Labels retain '+' because that is what recovery
-    ultimately needs, while the printed string uses '~' for box verification.
-    """
     labels = normalize_text_for_match(jsonl_token).strip()
     observed = normalize_text_for_match(ocr_token).strip()
     if not labels or not observed:
@@ -94,7 +88,6 @@ def _printed_form(jsonl_token: str, ocr_token: str) -> tuple[str, str] | None:
 
 
 def _canonical_printed_char(ch: str) -> str:
-    """Normalize only equivalences that are known to be visual aliases here."""
     if ch in {"+", "~"}:
         return "~"
     return normalize_text_for_match(ch).strip()
@@ -103,12 +96,6 @@ def _canonical_printed_char(ch: str) -> str:
 def _charbox_labels_match(
     boxes: list[tuple[str, int, int, int, int]], printed: str
 ) -> bool:
-    """Require Tesseract's own symbol labels to agree with JSONL's printed form.
-
-    Geometry-only alignment can silently shift labels: a box recognized as v
-    may otherwise be stored as the neighboring expected a. For the training
-    library we prefer throwing away such a word to poisoning the glyph class.
-    """
     if len(boxes) != len(printed):
         return False
     for (ocr_ch, *_coords), expected_ch in zip(boxes, printed):
@@ -118,13 +105,6 @@ def _charbox_labels_match(
 
 
 def _tesseract_char_boxes(crop: Image.Image, expected_len: int) -> list[tuple[str, int, int, int, int]] | None:
-    """Get symbol boxes from Tesseract for one already-verified word crop.
-
-    Coordinates returned by makebox use a bottom-left origin; convert them to
-    PIL top-left coordinates. We trust the geometry only when symbol count
-    matches the verified token length exactly; the caller separately verifies
-    the symbol labels against JSONL before accepting any glyphs.
-    """
     if expected_len <= 0:
         return None
     with tempfile.TemporaryDirectory(prefix="saol-charbox-") as tmp:
@@ -171,6 +151,7 @@ def main() -> int:
     parser.add_argument("--min-headword-score", type=float, default=0.72)
     parser.add_argument("--limit-per-char", type=int, default=12)
     parser.add_argument("--allow-interior", action="store_true")
+    parser.add_argument("--bold-all-chars", action="store_true")
     parser.add_argument("--debug-pairs", type=int, default=12)
     args = parser.parse_args()
 
@@ -221,9 +202,6 @@ def main() -> int:
         if style == "italic":
             candidate_words = article_words
         elif style == "bold":
-            # In SAOL the headword starts the article and is bold. Once the
-            # article itself has been matched to JSONL, only that first OCR word
-            # is admissible as bold training evidence.
             candidate_words = article_words[:1]
         else:
             candidate_words = article_words[:4]
@@ -262,15 +240,12 @@ def main() -> int:
                 continue
 
             for idx, exp_ch in enumerate(labels):
-                # For bold we deliberately mine only the very first character
-                # of the article headword. Its style is guaranteed by layout,
-                # so no visual style classifier is needed at all.
-                if style == "bold" and idx != 0:
+                if style == "bold" and not args.bold_all_chars and idx != 0:
                     continue
                 if exp_ch not in wanted_chars or counts.get(exp_ch, 0) >= args.limit_per_char:
                     continue
                 is_edge = idx == 0 or idx == len(labels) - 1
-                if not is_edge and not args.allow_interior:
+                if style != "bold" and not is_edge and not args.allow_interior:
                     rejected_interior += 1
                     continue
                 _ocr_ch, left, top, right, bottom = boxes[idx]
@@ -279,7 +254,10 @@ def main() -> int:
                     rejected_geometry += 1
                     continue
                 number = counts.get(exp_ch, 0)
-                position_kind = "initial" if style == "bold" else ("edge" if is_edge else "interior-charbox")
+                if style == "bold":
+                    position_kind = "initial" if idx == 0 else "headword-interior"
+                else:
+                    position_kind = "edge" if is_edge else "interior-charbox"
                 label = _safe_character_name(exp_ch)
                 safe_observed = "".join(ch if ch.isalnum() else "_" for ch in printed)
                 filename = f"{label}-{number:03d}-sub{entry.get('subnr')}-{safe_observed}-{idx}-{position_kind}.png"
