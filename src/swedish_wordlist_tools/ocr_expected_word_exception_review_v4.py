@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import ocr_manual_pixel_candidate_editor_v14 as v14
+from . import ocr_manual_pixel_candidate_editor_v15 as v15
 
 
 def main() -> int:
@@ -65,7 +65,7 @@ def main() -> int:
                 continue
             cleaned.append(token)
         sys.argv = cleaned
-        rc = v14.main()
+        rc = v15.main()
     finally:
         sys.argv = old
         try:
@@ -77,14 +77,14 @@ def main() -> int:
 
     text = args.out.read_text(encoding="utf-8")
     text = text.replace(
-        "<h1>SAOL live-lärande pixelannotering v14</h1>",
-        "<h1>SAOL undantagsgranskning v4 – piltangentsgranskning</h1>",
+        "<h1>SAOL live-lärande pixelannotering v15</h1>",
+        "<h1>SAOL undantagsgranskning v4 – pilar + versionerad serverexport</h1>",
         1,
     )
     intro = (
         f"<p><b>Snabbgranskning:</b> {payload.get('resolved_word_count', 0)} ord var redan helt bevisade. "
         f"Av {len(rows)} decoder-undantag visas {len(kept)}; {hidden} små residualfall doldes. "
-        "Klicka en etikett och använd sedan ←/→ för att gå glyph för glyph; ljuspunkterna följer markeringen.</p>"
+        "Klicka en etikett och använd ←/→ för glyphvis granskning. Exportknappen sparar samma JSON både lokalt och som en versionsfil på review-servern.</p>"
     )
     text = text.replace("</h1>", "</h1>" + intro, 1)
 
@@ -106,10 +106,10 @@ def main() -> int:
         repl = f">{expected}<span class=\"decode-reason\" style=\"margin-left:.7em;color:#9b3d00;font-weight:600\">[{'; '.join(bits)}]</span><"
         text = text.replace(needle, repl, 1)
 
-    text = text.replace("corrected-v14", "expected-exceptions-corrected-v16")
-    text = text.replace("corrected-v14.json", "expected-exceptions-corrected-v16.json")
+    text = text.replace("corrected-v15", "expected-exceptions-corrected-v16")
+    text = text.replace("corrected-v15.json", "expected-exceptions-corrected-v16.json")
     args.out.write_text(text, encoding="utf-8")
-    print(f"exception review v4: cards={len(kept)}; arrow-key glyph navigation enabled")
+    print(f"exception review v4: cards={len(kept)}; arrows + server-versioned export enabled")
     return 0
 
 
