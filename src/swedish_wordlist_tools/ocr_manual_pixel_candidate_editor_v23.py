@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from . import ocr_manual_pixel_candidate_editor_v22 as v22
+from . import ocr_manual_pixel_candidate_editor_v21 as v21
 
 
 def main() -> int:
@@ -14,23 +14,32 @@ def main() -> int:
         if i + 1 < len(argv):
             out = Path(argv[i + 1])
 
-    rc = v22.main()
+    rc = v21.main()
     if rc or out is None or not out.exists():
         return rc
 
     text = out.read_text(encoding="utf-8")
 
-    # v20 froze resumed-atlas baselines. After v21 source-ink registration that
-    # is no longer desirable: registered manual glyphs are aligned to the actual
-    # black raster and can safely vote for the baseline again. The vote stores
-    # the bottom ink row (max y); v22 draws the guide on that row's lower edge,
-    # i.e. directly underneath ordinary baseline letters such as a/b/c/d/e/o.
+    # v20 freezes resumed-atlas baselines before v21 registers annotations to
+    # actual source ink. After registration the manual glyph pixels are aligned
+    # to the black raster again, so ordinary baseline letters may safely vote.
     frozen = "baselineManual:true,baselineVotes:0"
     active = "baselineManual:false,baselineVotes:0"
     if frozen not in text:
         print("could not reactivate v23 baseline voting", file=sys.stderr)
         return 2
     text = text.replace(frozen, active)
+
+    # baseline_y is the bottom ink row. Draw the visible support line on the
+    # lower edge of that raster row, i.e. directly underneath letters that sit
+    # on the baseline. This changes presentation only; glyph coordinates stay
+    # in source-raster coordinates.
+    old_line = "line.style.top=((state.baseline + MARGIN + 0.5) * SCALE - 1)+'px';"
+    new_line = "line.style.top=((state.baseline + MARGIN + 1) * SCALE - 1)+'px';"
+    if old_line not in text:
+        print("could not position v23 baseline guide", file=sys.stderr)
+        return 2
+    text = text.replace(old_line, new_line, 1)
 
     text = text.replace(
         "<b>Facitstödlinje:</b> återupptagen atlas använder sparad baseline_y exakt; ingen automatisk omröstning får flytta den. ",
@@ -43,11 +52,10 @@ def main() -> int:
         1,
     )
 
-    text = text.replace("pixeleditor-bold-v22", "pixeleditor-bold-v23")
-    text = text.replace("corrected-v22.json", "corrected-v23.json")
-    text = text.replace("v22: baseline display is half a raster pixel lower", "v22: baseline display is half a raster pixel lower; v23: registered glyphs vote for the bottom ink row")
+    text = text.replace("SAOL live-lärande pixelannotering v21", "SAOL live-lärande pixelannotering v23", 1)
+    text = text.replace("corrected-v21.json", "corrected-v23.json")
     out.write_text(text, encoding="utf-8")
-    print("v23: source-registered glyphs vote for baseline bottom row; guide is drawn directly underneath")
+    print("v23: registered glyphs vote for bottom ink row; guide drawn directly underneath")
     return 0
 
 
