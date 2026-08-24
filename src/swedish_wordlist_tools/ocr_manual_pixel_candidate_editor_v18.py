@@ -9,6 +9,38 @@ from pathlib import Path
 from . import ocr_manual_pixel_candidate_editor_v17 as v17
 
 
+def _inspect_input(path: Path) -> tuple[str, int, int]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise SystemExit(f"v18: input file does not exist: {path}")
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"v18: input is not valid JSON: {path}: {exc}")
+    if not isinstance(payload, dict):
+        raise SystemExit(f"v18: input JSON root must be an object: {path}")
+    fmt = str(payload.get("format") or "")
+    words = payload.get("words")
+    results = payload.get("results")
+    word_count = len(words) if isinstance(words, list) else 0
+    result_count = len(results) if isinstance(results, list) else 0
+    print(
+        f"v18: input={path} format={fmt!r} words={word_count} results={result_count}"
+    )
+    is_atlas = fmt.startswith("saol-manual-pixel-atlas-corrected-") and isinstance(words, list)
+    is_matches = isinstance(results, list)
+    if not is_atlas and not is_matches:
+        raise SystemExit(
+            "v18: input is neither a corrected pixel atlas nor editor matches JSON. "
+            "Expected format='saol-manual-pixel-atlas-corrected-v…' with a words list, "
+            "or a top-level results list."
+        )
+    if is_atlas and word_count == 0:
+        raise SystemExit("v18: corrected atlas contains 0 words")
+    if is_matches and result_count == 0:
+        raise SystemExit("v18: matches JSON contains 0 results")
+    return fmt, word_count, result_count
+
+
 def _restore_missing_word_crops(atlas: Path, library: Path) -> tuple[int, int, list[str], list[str]]:
     """Restore atlas word crops when a /tmp harvest directory has changed name.
 
@@ -42,14 +74,12 @@ def _restore_missing_word_crops(atlas: Path, library: Path) -> tuple[int, int, l
         if dest.exists():
             continue
         candidates: list[Path] = []
-        # Exact relative path in sibling harvest directories is preferred.
         for sibling in root.iterdir() if root.exists() else []:
             if not sibling.is_dir() or sibling == library:
                 continue
             p = sibling / rel
             if p.exists():
                 candidates.append(p)
-        # Older editor runs sometimes put the crop directly in /tmp.
         direct = root / Path(rel).name
         if direct.exists():
             candidates.append(direct)
@@ -72,6 +102,8 @@ def main() -> int:
     pre.add_argument("--ink-threshold")
     pre.add_argument("--examples-per-char")
     args, _ = pre.parse_known_args(sys.argv[1:])
+
+    fmt, word_count, result_count = _inspect_input(args.matches)
 
     total, restored, missing, searched_roots = _restore_missing_word_crops(args.matches, args.library)
     if total:
@@ -101,10 +133,10 @@ def main() -> int:
     except OSError as exc:
         raise SystemExit(f"v18: output HTML missing: {exc}")
     cards = text.count('<article class="card"')
-    if total and cards == 0:
+    if (word_count or result_count) and cards == 0:
         raise SystemExit(
-            "v18: atlas loaded but generated 0 review cards even though word crops "
-            "were found. This is an editor conversion bug, not a missing-file issue."
+            "v18: valid input generated 0 review cards. This is an editor conversion "
+            "or word-image resolution bug, not valid empty input."
         )
     text = text.replace("SAOL live-lärande pixelannotering v17", "SAOL live-lärande pixelannotering v18", 1)
     text = text.replace("SAOL live-lärande pixelannotering v10", "SAOL live-lärande pixelannotering v18", 1)
