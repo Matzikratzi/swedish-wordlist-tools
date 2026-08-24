@@ -223,8 +223,7 @@ def main() -> int:
         elif style == "bold":
             # In SAOL the headword starts the article and is bold. Once the
             # article itself has been matched to JSONL, only that first OCR word
-            # is admissible as bold training evidence. This avoids accidentally
-            # harvesting a repeated headword from roman explanatory text.
+            # is admissible as bold training evidence.
             candidate_words = article_words[:1]
         else:
             candidate_words = article_words[:4]
@@ -263,6 +262,11 @@ def main() -> int:
                 continue
 
             for idx, exp_ch in enumerate(labels):
+                # For bold we deliberately mine only the very first character
+                # of the article headword. Its style is guaranteed by layout,
+                # so no visual style classifier is needed at all.
+                if style == "bold" and idx != 0:
+                    continue
                 if exp_ch not in wanted_chars or counts.get(exp_ch, 0) >= args.limit_per_char:
                     continue
                 is_edge = idx == 0 or idx == len(labels) - 1
@@ -275,7 +279,7 @@ def main() -> int:
                     rejected_geometry += 1
                     continue
                 number = counts.get(exp_ch, 0)
-                position_kind = "edge" if is_edge else "interior-charbox"
+                position_kind = "initial" if style == "bold" else ("edge" if is_edge else "interior-charbox")
                 label = _safe_character_name(exp_ch)
                 safe_observed = "".join(ch if ch.isalnum() else "_" for ch in printed)
                 filename = f"{label}-{number:03d}-sub{entry.get('subnr')}-{safe_observed}-{idx}-{position_kind}.png"
