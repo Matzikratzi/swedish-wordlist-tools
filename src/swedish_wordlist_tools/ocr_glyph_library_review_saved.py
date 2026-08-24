@@ -23,8 +23,8 @@ function manualColumnBox(){if(!payload||!manual)return null;return [payload.orig
 function markSavedButtons(){const all=loadOverrides();document.querySelectorAll('.review').forEach(b=>{const p=JSON.parse(b.dataset.review);b.classList.toggle('saved',!!all[overrideKey(p)]);b.textContent=all[overrideKey(p)]?'granska / rita box ✓':'granska / rita box';});}
 
 document.querySelectorAll('.review').forEach(b=>b.addEventListener('click',()=>{
-  const all=loadOverrides(), saved=all[overrideKey(payload)];
-  if(saved&&Array.isArray(saved.bbox)) manual=[saved.bbox[0]-payload.origin[0],saved.bbox[1]-payload.origin[1],saved.bbox[2],saved.bbox[3]];
+  const p=JSON.parse(b.dataset.review), all=loadOverrides(), saved=all[overrideKey(p)];
+  if(saved&&Array.isArray(saved.bbox)) manual=[saved.bbox[0]-p.origin[0],saved.bbox[1]-p.origin[1],saved.bbox[2],saved.bbox[3]];
 }));
 canvas.addEventListener('pointerup',()=>{
   if(!payload||!manual)return;
@@ -51,6 +51,7 @@ def main() -> int:
     parser.add_argument("library", type=Path)
     parser.add_argument("--style", choices=("italic", "bold", "roman"))
     parser.add_argument("--jsonl", type=Path)
+    parser.add_argument("--manifest", type=Path)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--scale", type=int, default=8)
     args = parser.parse_args()
@@ -60,11 +61,13 @@ def main() -> int:
         cmd += ["--style", args.style]
     if args.jsonl:
         cmd += ["--jsonl", str(args.jsonl)]
+    if args.manifest:
+        cmd += ["--manifest", str(args.manifest)]
     subprocess.run(cmd, check=True)
 
     doc = args.out.read_text(encoding="utf-8")
     doc = doc.replace('</style>', '</style>'+_EXTRA_STYLE, 1)
-    doc = doc.replace('</div>\n'+doc[doc.find("{''.join(style_sections)}"):] if False else '<div class="toolbar"><input id="filter" placeholder="Filtrera tecken, stil eller filnamn…"></div>', '<div class="toolbar"><input id="filter" placeholder="Filtrera tecken, stil eller filnamn…"><button id="exportboxes">exportera sparade boxar</button></div>', 1)
+    doc = doc.replace('<div class="toolbar"><input id="filter" placeholder="Filtrera tecken, stil eller filnamn…"></div>', '<div class="toolbar"><input id="filter" placeholder="Filtrera tecken, stil eller filnamn…"><button id="exportboxes">exportera sparade boxar</button></div>', 1)
     doc += _EXTRA_SCRIPT
     args.out.write_text(doc, encoding="utf-8")
     print(args.out)
