@@ -2,24 +2,26 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 from pathlib import Path
 
 from .ocr_saol_normalize import normalize_text_for_match
 
 
-_BOLD_RE = re.compile(r"<b>(.*?)</b>", flags=re.IGNORECASE | re.DOTALL)
-
-
 def _headword(entry: dict[str, object]) -> str | None:
-    text = entry.get("text")
-    if not isinstance(text, str):
-        return None
-    match = _BOLD_RE.search(text)
-    if not match:
-        return None
-    word = normalize_text_for_match(match.group(1)).replace("|", "").strip()
-    return word or None
+    """Return the JSONL headword using the same fields as the OCR matcher/miner.
+
+    The facsimile JSONL does not preserve literal <b> markup in every entry.
+    The canonical headword is already available in stycke/ord/normaliserat_ord,
+    so prefer those fields and only normalize the printed boundary marker.
+    """
+    for key in ("stycke", "ord", "normaliserat_ord"):
+        value = entry.get(key)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        word = normalize_text_for_match(value).replace("|", "").strip()
+        if word:
+            return word.split()[0]
+    return None
 
 
 def main() -> int:
