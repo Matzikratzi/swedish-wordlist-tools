@@ -14,7 +14,11 @@ def _atlas_as_matches(path: Path) -> tuple[Path | None, dict[str, object] | None
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None, None, 0
-    if not str(payload.get("format") or "").startswith("saol-manual-pixel-atlas-corrected-"):
+    fmt = str(payload.get("format") or "")
+    if not (
+        fmt.startswith("saol-manual-pixel-atlas-corrected-")
+        or fmt.startswith("saol-manual-pixel-atlas-merged-")
+    ):
         return None, None, 0
 
     results = []
@@ -27,9 +31,6 @@ def _atlas_as_matches(path: Path) -> tuple[Path | None, dict[str, object] | None
             if not isinstance(ann, dict):
                 continue
             label = str(ann.get("label") or "")
-            # Policy reset: every historical middle-dot annotation is invalid.
-            # From now on · is relearned only as the true half-height separator;
-            # the hanging heavy blob is labelled ¤.
             if label == "·":
                 dropped_middle_dot += 1
                 continue
@@ -103,9 +104,6 @@ def main() -> int:
 
     text = args.out.read_text(encoding="utf-8")
 
-    # Atlas entries are already user-reviewed truth.  v4 calls the matches bucket
-    # 'accepted'; turn those restored proposals back into manual facit so they
-    # participate as trusted learned glyphs rather than fresh OCR suggestions.
     old = "let proposals=JSON.parse(card.dataset.proposals).map((p,i)=>({...p,id:i,pixels:new Set((p.pixels||[]).map(q=>q[0]+','+q[1]))}));"
     new = "let proposals=JSON.parse(card.dataset.proposals).map((p,i)=>({...p,status:(p.status==='accepted'?'manual':p.status),id:i,pixels:new Set((p.pixels||[]).map(q=>q[0]+','+q[1]))}));"
     if old not in text:
@@ -133,11 +131,11 @@ if(reviewStop){
     text = text.replace("corrected-v16.json", "corrected-v17.json")
     text = text.replace(
         "<p><b>Poängmatchning:</b>",
-        "<p><b>Återupptagen atlas:</b> korrigerad atlas kan användas direkt som indata. Alla gamla `·` ignoreras medvetet; övriga annotationer återställs som manuellt facit. <b>Poängmatchning:</b>",
+        "<p><b>Återupptagen atlas:</b> korrigerad eller mergad atlas kan användas direkt som indata. Alla gamla `·` ignoreras medvetet; övriga annotationer återställs som manuellt facit. <b>Poängmatchning:</b>",
         1,
     )
     args.out.write_text(text, encoding="utf-8")
-    print(f"v17: resumed corrected atlas; dropped_old_middle_dot={dropped}; review_progress={'yes' if old_progress else 'no'}")
+    print(f"v17: resumed atlas; dropped_old_middle_dot={dropped}; review_progress={'yes' if old_progress else 'no'}")
     return 0
 
 
