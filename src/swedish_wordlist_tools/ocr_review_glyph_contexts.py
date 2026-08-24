@@ -72,9 +72,9 @@ h1{margin-bottom:4px}.summary{margin-bottom:20px}
 .meta{font:12px monospace;margin-top:5px;color:#444;overflow-wrap:anywhere}
 </style>
 <h1>SAOL glyph context review</h1>
-<div class="summary">%d skördade tecken. Röd box = sparad glyph.</div>
-<div class="grid">%s</div>
-""" % (len(rows), "\n".join(cards))
+"""
+    doc += f'<div class="summary">{len(rows)} skördade tecken. Röd box = sparad glyph.</div>\n'
+    doc += '<div class="grid">' + "\n".join(cards) + "</div>\n"
     (args.out_dir / "index.html").write_text(doc, encoding="utf-8")
     print(f"{len(rows)} glypher: {args.out_dir / 'index.html'}")
     return 0
