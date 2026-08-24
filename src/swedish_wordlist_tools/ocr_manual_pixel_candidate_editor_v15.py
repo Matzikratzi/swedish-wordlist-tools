@@ -13,13 +13,17 @@ from PIL import Image
 from . import ocr_manual_pixel_candidate_editor_v14 as v14
 
 
-def _manifest_as_matches(manifest: Path, library: Path, ink_threshold: int = 210) -> tuple[Path | None, dict[str, dict[str, object]]]:
-    """Turn a mined glyph manifest into the word-match shape used by the pixel editor.
+def _manifest_as_matches(
+    manifest: Path,
+    library: Path,
+    ink_threshold: int = 210,
+    examples_per_char: int = 3,
+) -> tuple[Path | None, dict[str, dict[str, object]]]:
+    """Turn a harvest manifest into whole-word review cards.
 
-    The bold-headword miner already gives us one exact glyph crop plus its known
-    character label and source metadata.  Treat the crop's dark pixels as one
-    accepted initial proposal so the ordinary pixel editor can correct it just
-    like an auto-matched word glyph.
+    The page/word geometry is authoritative context.  We keep only a small
+    number of glyph proposals per character, but always show the complete
+    printed headword so baseline and neighbouring ink can be judged correctly.
     """
     try:
         payload = json.loads(manifest.read_text(encoding="utf-8"))
@@ -30,63 +34,100 @@ def _manifest_as_matches(manifest: Path, library: Path, ink_threshold: int = 210
     if not isinstance(raw_sources, dict) or not raw_sources:
         return None, {}
 
+    groups: dict[tuple[object, ...], list[tuple[str, dict[str, object]]]] = {}
+    for rel, meta in raw_sources.items():
+        if not isinstance(rel, str) or not isinstance(meta, dict):
+            continue
+        wb = meta.get("page_word_bbox")
+        if not isinstance(wb, (list, tuple)) or len(wb) != 4:
+            continue
+        key = (
+            meta.get("page"), meta.get("subnr"), meta.get("source_word"),
+            tuple(int(v) for v in wb), meta.get("style") or "bold",
+        )
+        groups.setdefault(key, []).append((rel, meta))
+
+    if not groups:
+        return None, raw_sources
+
+    review_dir = library / "_pixel_editor_words"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    counts: dict[str, int] = {}
     results: list[dict[str, object]] = []
-    sources: dict[str, dict[str, object]] = {}
-    for rel, raw_meta in raw_sources.items():
-        if not isinstance(rel, str) or not isinstance(raw_meta, dict):
+    selected_sources: dict[str, dict[str, object]] = {}
+
+    def group_sort(item):
+        key, _items = item
+        return (int(key[0] or 0), str(key[1] or ""), str(key[2] or ""))
+
+    for key, items in sorted(groups.items(), key=group_sort):
+        page, subnr, source_word, wb_tuple, style = key
+        items.sort(key=lambda pair: int(pair[1].get("char_index") if pair[1].get("char_index") is not None else 9999))
+        useful = [
+            (rel, meta) for rel, meta in items
+            if str(meta.get("character") or "") and counts.get(str(meta.get("character")), 0) < examples_per_char
+        ]
+        if not useful:
             continue
-        path = library / rel
-        if not path.exists():
+        page_image = Path(str(items[0][1].get("page_image") or ""))
+        if not page_image.exists():
             continue
+        wx, wy, ww, wh = map(int, wb_tuple)
         try:
-            with Image.open(path) as im0:
-                im = im0.convert("L")
-                width, height = im.size
-                pixels = [
-                    [x, y]
-                    for y in range(height)
-                    for x in range(width)
-                    if im.getpixel((x, y)) < ink_threshold
-                ]
+            with Image.open(page_image) as im0:
+                page_gray = im0.convert("L")
+                word_im = page_gray.crop((wx, wy, wx + ww, wy + wh))
         except OSError:
             continue
+        safe = re.sub(r"[^0-9A-Za-z._-]+", "_", str(source_word))[:60] or "word"
+        word_rel = f"_pixel_editor_words/p{int(page or 0):05d}-sub{subnr}-{safe}.png"
+        word_im.save(library / word_rel)
 
-        label = str(raw_meta.get("character") or "")
-        source_word = str(raw_meta.get("source_word") or raw_meta.get("expected_word") or label)
-        results.append(
-            {
-                "source_id": f"manifest:{rel}",
-                "style": str(raw_meta.get("style") or "bold"),
-                "expected_word": label or source_word,
-                "headword": source_word,
-                "page": raw_meta.get("page") or 0,
-                "subnr": str(raw_meta.get("subnr") or ""),
-                "word_file": rel,
-                "width": width,
-                "height": height,
-                # The crop is a single glyph.  Bottom ink is the safest initial
-                # support-line guess; it remains fully editable in the UI.
-                "baseline_y": max(0, max((p[1] for p in pixels), default=height - 1)),
-                "matches": {
-                    label: [
-                        {
-                            "matched_pixels": pixels,
-                            "external_contact_pixels": [],
-                            "external_contacts": 0,
-                            "missing": 0,
-                            "extra": 0,
-                        }
-                    ]
-                }
-                if label
-                else {},
-                "rejected_candidates": {},
-            }
-        )
-        sources[rel] = raw_meta
+        matches: dict[str, list[dict[str, object]]] = {}
+        for rel, meta in useful:
+            label = str(meta.get("character") or "")
+            if counts.get(label, 0) >= examples_per_char:
+                continue
+            pb = meta.get("page_bbox")
+            if not isinstance(pb, (list, tuple)) or len(pb) != 4:
+                continue
+            gx, gy, gw, gh = map(int, pb)
+            pixels = []
+            for yy in range(max(wy, gy), min(wy + wh, gy + gh)):
+                for xx in range(max(wx, gx), min(wx + ww, gx + gw)):
+                    if page_gray.getpixel((xx, yy)) < ink_threshold:
+                        pixels.append([xx - wx, yy - wy])
+            if not pixels:
+                continue
+            matches.setdefault(label, []).append({
+                "matched_pixels": pixels,
+                "external_contact_pixels": [],
+                "external_contacts": 0,
+                "missing": 0,
+                "extra": 0,
+            })
+            counts[label] = counts.get(label, 0) + 1
+            selected_sources[word_rel] = meta
+
+        if not matches:
+            continue
+        results.append({
+            "source_id": f"manifest-word:{page}:{subnr}:{source_word}",
+            "style": str(style),
+            "expected_word": str(source_word),
+            "headword": str(source_word),
+            "page": page or 0,
+            "subnr": str(subnr or ""),
+            "word_file": word_rel,
+            "width": ww,
+            "height": wh,
+            "baseline_y": max(0, wh - 1),
+            "matches": matches,
+            "rejected_candidates": {},
+        })
 
     if not results:
-        return None, sources
+        return None, raw_sources
 
     tmp = tempfile.NamedTemporaryFile(
         mode="w", encoding="utf-8", suffix="-pixel-editor-matches.json", delete=False
@@ -94,7 +135,7 @@ def _manifest_as_matches(manifest: Path, library: Path, ink_threshold: int = 210
     with tmp:
         json.dump({"results": results}, tmp, ensure_ascii=False, indent=2)
         tmp.write("\n")
-    return Path(tmp.name), sources
+    return Path(tmp.name), selected_sources
 
 
 def _add_facsimile_links(text: str, sources: dict[str, dict[str, object]]) -> tuple[str, int]:
@@ -139,13 +180,14 @@ def main() -> int:
     pre.add_argument("--scale")
     pre.add_argument("--margin")
     pre.add_argument("--ink-threshold", type=int, default=210)
+    pre.add_argument("--examples-per-char", type=int, default=3)
     args, _ = pre.parse_known_args(sys.argv[1:])
 
     original_argv = sys.argv[:]
     temp_matches: Path | None = None
     manifest_sources: dict[str, dict[str, object]] = {}
     converted, manifest_sources = _manifest_as_matches(
-        args.matches, args.library, max(0, min(255, args.ink_threshold))
+        args.matches, args.library, max(0, min(255, args.ink_threshold)), max(1, args.examples_per_char)
     )
     if converted is not None:
         temp_matches = converted
@@ -226,7 +268,7 @@ def main() -> int:
     args.out.write_text(text, encoding="utf-8")
     if manifest_sources:
         print(
-            f"v15: opened bold harvest manifest with {len(manifest_sources)} source glyphs; "
+            f"v15: opened bold harvest as whole-word context with {len(manifest_sources)} selected word sources; "
             f"facsimile_links={facsimile_links}"
         )
     else:
