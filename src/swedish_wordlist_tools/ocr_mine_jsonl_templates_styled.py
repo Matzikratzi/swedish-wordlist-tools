@@ -28,8 +28,8 @@ def _clean_form_token(token: str) -> str:
     return token
 
 
-def _tokens_from_k_markup(text: str) -> list[str]:
-    spans = re.findall(r"<k>(.*?)</k>", text, flags=re.IGNORECASE | re.DOTALL)
+def _tokens_from_markup(text: str, tag: str) -> list[str]:
+    spans = re.findall(fr"<{tag}>(.*?)</{tag}>", text, flags=re.IGNORECASE | re.DOTALL)
     result: list[str] = []
     for span in spans:
         for raw in span.split():
@@ -37,6 +37,14 @@ def _tokens_from_k_markup(text: str) -> list[str]:
             if token:
                 result.append(token)
     return result
+
+
+def _tokens_from_k_markup(text: str) -> list[str]:
+    return _tokens_from_markup(text, "k")
+
+
+def _tokens_from_b_markup(text: str) -> list[str]:
+    return _tokens_from_markup(text, "b")
 
 
 def _heuristic_form_tokens(text: str) -> list[str]:
@@ -63,12 +71,37 @@ def _heuristic_form_tokens(text: str) -> list[str]:
     return result
 
 
+def _fallback_headword_tokens(entry: dict[str, object]) -> list[str]:
+    """Return only the article headword when old JSONL lacks <b> markup."""
+    for key in ("stycke", "ord", "normaliserat_ord"):
+        value = entry.get(key)
+        if not isinstance(value, str) or not value:
+            continue
+        cleaned = normalize_text_for_match(value).strip()
+        if cleaned:
+            return cleaned.split()[:1]
+    return []
+
+
 def _styled_expected_words(entry: dict[str, object], style: str) -> list[str]:
+    text = entry.get("text")
+
+    if style == "bold":
+        # SAOL article headwords are bold. Prefer the literal typography markup:
+        # this gives us a much stronger style label than classifying glyph pixels.
+        if isinstance(text, str) and text:
+            marked = _tokens_from_b_markup(text)
+            if marked:
+                return marked
+        return _fallback_headword_tokens(entry)
+
     if style != "italic":
         return _ORIGINAL(entry, style)
-    text = entry.get("text")
+
     if not isinstance(text, str) or not text:
         return []
+    # Inflection/form strings are explicitly marked <k> in the recovered JSONL.
+    # Treat those starts as authoritative italic evidence.
     if re.search(r"<k>.*?</k>", text, flags=re.IGNORECASE | re.DOTALL):
         return _tokens_from_k_markup(text)
     return _heuristic_form_tokens(text)
