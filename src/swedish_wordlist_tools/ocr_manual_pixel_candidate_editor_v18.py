@@ -23,37 +23,38 @@ def _inspect_input(path: Path) -> tuple[str, int, int]:
     results = payload.get("results")
     word_count = len(words) if isinstance(words, list) else 0
     result_count = len(results) if isinstance(results, list) else 0
-    print(
-        f"v18: input={path} format={fmt!r} words={word_count} results={result_count}"
+    print(f"v18: input={path} format={fmt!r} words={word_count} results={result_count}")
+    is_atlas = (
+        (
+            fmt.startswith("saol-manual-pixel-atlas-corrected-")
+            or fmt.startswith("saol-manual-pixel-atlas-merged-")
+        )
+        and isinstance(words, list)
     )
-    is_atlas = fmt.startswith("saol-manual-pixel-atlas-corrected-") and isinstance(words, list)
     is_matches = isinstance(results, list)
     if not is_atlas and not is_matches:
         raise SystemExit(
-            "v18: input is neither a corrected pixel atlas nor editor matches JSON. "
-            "Expected format='saol-manual-pixel-atlas-corrected-v…' with a words list, "
-            "or a top-level results list."
+            "v18: input is neither a supported pixel atlas nor editor matches JSON. "
+            "Expected format='saol-manual-pixel-atlas-corrected-v…' or "
+            "'saol-manual-pixel-atlas-merged-v…' with a words list, or a top-level results list."
         )
     if is_atlas and word_count == 0:
-        raise SystemExit("v18: corrected atlas contains 0 words")
+        raise SystemExit("v18: atlas contains 0 words")
     if is_matches and result_count == 0:
         raise SystemExit("v18: matches JSON contains 0 results")
     return fmt, word_count, result_count
 
 
 def _restore_missing_word_crops(atlas: Path, library: Path) -> tuple[int, int, list[str], list[str]]:
-    """Restore atlas word crops when a /tmp harvest directory has changed name.
-
-    Saved atlases deliberately store word_file as a relative path. During OCR
-    experiments we often regenerate the harvest into a sibling directory such
-    as saol14-bold-headwords-v2. Search sibling trees for the exact relative
-    path/basename and copy it into the library passed to the editor.
-    """
     try:
         payload = json.loads(atlas.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return 0, 0, [], []
-    if not str(payload.get("format") or "").startswith("saol-manual-pixel-atlas-corrected-"):
+    fmt = str(payload.get("format") or "")
+    if not (
+        fmt.startswith("saol-manual-pixel-atlas-corrected-")
+        or fmt.startswith("saol-manual-pixel-atlas-merged-")
+    ):
         return 0, 0, [], []
 
     wanted: list[str] = []
@@ -108,20 +109,16 @@ def main() -> int:
     total, restored, missing, searched_roots = _restore_missing_word_crops(args.matches, args.library)
     if total:
         available = total - len(missing)
-        print(
-            f"v18: atlas word crops total={total}; available={available}; "
-            f"restored={restored}; still_missing={len(missing)}"
-        )
+        print(f"v18: atlas word crops total={total}; available={available}; restored={restored}; still_missing={len(missing)}")
         if missing:
             for rel in missing[:12]:
                 print(f"  missing: {rel}")
         if available == 0:
             roots = ", ".join(searched_roots) or "(none)"
             raise SystemExit(
-                "v18: none of the atlas word crops are available, so the editor "
-                "would generate 0 cards. Searched under: " + roots + "\n"
-                "The atlas contains annotations, but the corresponding PNG word "
-                "crops must be regenerated or copied back before resuming it."
+                "v18: none of the atlas word crops are available, so the editor would generate 0 cards. "
+                "Searched under: " + roots + "\n"
+                "The atlas contains annotations, but the corresponding PNG word crops must be regenerated or copied back before resuming it."
             )
 
     rc = v17.main()
@@ -135,8 +132,7 @@ def main() -> int:
     cards = text.count('<article class="card"')
     if (word_count or result_count) and cards == 0:
         raise SystemExit(
-            "v18: valid input generated 0 review cards. This is an editor conversion "
-            "or word-image resolution bug, not valid empty input."
+            "v18: valid input generated 0 review cards. This is an editor conversion or word-image resolution bug, not valid empty input."
         )
     text = text.replace("SAOL live-lärande pixelannotering v17", "SAOL live-lärande pixelannotering v18", 1)
     text = text.replace("SAOL live-lärande pixelannotering v10", "SAOL live-lärande pixelannotering v18", 1)
