@@ -25,6 +25,8 @@ class MinedTemplate:
     subnr: object
     paragraph: int
     bbox: tuple[int, int, int, int]
+    word_bbox: tuple[int, int, int, int]
+    char_index: int
     position_kind: str
     output: str
 
@@ -272,6 +274,8 @@ def main() -> int:
                         entry.get("subnr"),
                         article.paragraph,
                         (word.left + left, word.top + top, right - left, bottom - top),
+                        (word.left, word.top, word.width, word.height),
+                        idx,
                         position_kind,
                         f"{style}/{filename}",
                     )
