@@ -9,7 +9,7 @@ from pathlib import Path
 from . import ocr_manual_pixel_candidate_editor_v17 as v17
 
 
-def _restore_missing_word_crops(atlas: Path, library: Path) -> tuple[int, int, list[str]]:
+def _restore_missing_word_crops(atlas: Path, library: Path) -> tuple[int, int, list[str], list[str]]:
     """Restore atlas word crops when a /tmp harvest directory has changed name.
 
     Saved atlases deliberately store word_file as a relative path. During OCR
@@ -20,9 +20,9 @@ def _restore_missing_word_crops(atlas: Path, library: Path) -> tuple[int, int, l
     try:
         payload = json.loads(atlas.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return 0, 0, []
+        return 0, 0, [], []
     if not str(payload.get("format") or "").startswith("saol-manual-pixel-atlas-corrected-"):
-        return 0, 0, []
+        return 0, 0, [], []
 
     wanted: list[str] = []
     for word in payload.get("words", []):
@@ -31,7 +31,12 @@ def _restore_missing_word_crops(atlas: Path, library: Path) -> tuple[int, int, l
 
     restored = 0
     missing: list[str] = []
+    searched_roots: list[str] = []
     root = library.parent
+    searched_roots.append(str(library))
+    if root.exists():
+        searched_roots.append(str(root))
+
     for rel in dict.fromkeys(wanted):
         dest = library / rel
         if dest.exists():
@@ -54,7 +59,7 @@ def _restore_missing_word_crops(atlas: Path, library: Path) -> tuple[int, int, l
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(candidates[0], dest)
         restored += 1
-    return len(dict.fromkeys(wanted)), restored, missing
+    return len(dict.fromkeys(wanted)), restored, missing, searched_roots
 
 
 def main() -> int:
@@ -68,12 +73,24 @@ def main() -> int:
     pre.add_argument("--examples-per-char")
     args, _ = pre.parse_known_args(sys.argv[1:])
 
-    total, restored, missing = _restore_missing_word_crops(args.matches, args.library)
+    total, restored, missing, searched_roots = _restore_missing_word_crops(args.matches, args.library)
     if total:
-        print(f"v18: atlas word crops total={total}; restored={restored}; still_missing={len(missing)}")
+        available = total - len(missing)
+        print(
+            f"v18: atlas word crops total={total}; available={available}; "
+            f"restored={restored}; still_missing={len(missing)}"
+        )
         if missing:
             for rel in missing[:12]:
                 print(f"  missing: {rel}")
+        if available == 0:
+            roots = ", ".join(searched_roots) or "(none)"
+            raise SystemExit(
+                "v18: none of the atlas word crops are available, so the editor "
+                "would generate 0 cards. Searched under: " + roots + "\n"
+                "The atlas contains annotations, but the corresponding PNG word "
+                "crops must be regenerated or copied back before resuming it."
+            )
 
     rc = v17.main()
     if rc:
@@ -86,8 +103,8 @@ def main() -> int:
     cards = text.count('<article class="card"')
     if total and cards == 0:
         raise SystemExit(
-            "v18: atlas loaded but generated 0 review cards. "
-            "The word crops could not be resolved; see missing paths above."
+            "v18: atlas loaded but generated 0 review cards even though word crops "
+            "were found. This is an editor conversion bug, not a missing-file issue."
         )
     text = text.replace("SAOL live-lärande pixelannotering v17", "SAOL live-lärande pixelannotering v18", 1)
     text = text.replace("SAOL live-lärande pixelannotering v10", "SAOL live-lärande pixelannotering v18", 1)
