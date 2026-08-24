@@ -12,7 +12,7 @@ from .ocr_mine_jsonl_pages import _crop_columns, _download, _inventory, _ocr_tsv
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Mine bold SAOL headword initials, using JSONL labels and Tesseract box geometry."
+        description="Mine glyphs from verified bold SAOL headwords, using JSONL labels and Tesseract box geometry."
     )
     parser.add_argument("jsonl", type=Path)
     parser.add_argument("--pages", required=True)
@@ -32,7 +32,7 @@ def main() -> int:
         root = args.keep_workdir
         root.mkdir(parents=True, exist_ok=True)
     else:
-        owned = tempfile.TemporaryDirectory(prefix="saol-bold-initial-pages-")
+        owned = tempfile.TemporaryDirectory(prefix="saol-bold-headword-pages-")
         root = Path(owned.name)
 
     run_counts: dict[str, dict[str, int]] = {style: {}}
@@ -71,6 +71,7 @@ def main() -> int:
                 str(args.limit_per_char),
                 "--style",
                 style,
+                "--bold-all-chars",
             ]
             proc = subprocess.run(cmd, text=True, capture_output=True)
             if proc.returncode != 0:
@@ -133,7 +134,7 @@ def main() -> int:
         "page_results": page_results,
         "template_sources": template_sources,
     }
-    (args.out_dir / "manifest-pages-bold-initials.json").write_text(
+    (args.out_dir / "manifest-pages-bold-headwords.json").write_text(
         json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
