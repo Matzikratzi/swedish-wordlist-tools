@@ -217,7 +217,17 @@ def main() -> int:
             if soft:
                 expected_by_soft.setdefault(soft, []).append(token)
 
-        candidate_words = _article_words(article) if style == "italic" else _article_words(article)[:4]
+        article_words = _article_words(article)
+        if style == "italic":
+            candidate_words = article_words
+        elif style == "bold":
+            # In SAOL the headword starts the article and is bold. Once the
+            # article itself has been matched to JSONL, only that first OCR word
+            # is admissible as bold training evidence. This avoids accidentally
+            # harvesting a repeated headword from roman explanatory text.
+            candidate_words = article_words[:1]
+        else:
+            candidate_words = article_words[:4]
 
         for word in candidate_words:
             if word.height < 6 or word.height > 18 or word.width < 2:
