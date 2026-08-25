@@ -92,7 +92,7 @@ def main() -> int:
     text = out.read_text(encoding="utf-8")
 
     card_re = re.compile(
-        r'(<article class="card"\s+)(.*?)(data-proposals=\')([^\']*)(\'>)',
+        r"(<article class=\"card\"\s+)(.*?)(data-proposals=')([^']*)('>)",
         re.S,
     )
     patched = 0
