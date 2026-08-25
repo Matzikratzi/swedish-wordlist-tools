@@ -86,21 +86,21 @@ function optimiseCardBaseline(card,proposals,state,INK,W,H){
         return 2
     text = text.replace(anchor, helper + "\n" + anchor, 1)
 
-    # The stable generated-card tail from v4 survives the later wrappers.  Hook
-    # baseline optimisation immediately before the card's first final render,
-    # after all handlers are installed and proposals are available.
-    init = "if(state.selected!==null)card.querySelector('.label').value=proposals[state.selected].label;\n render();\n});"
-    repl = "if(state.selected!==null)card.querySelector('.label').value=proposals[state.selected].label;\n if(!state.baselineManual){const ob=optimiseCardBaseline(card,proposals,state,INK,W,H);state.autoBaselineTried=ob.tried;}\n render();\n});"
-    if init not in text:
-        # v5+ clears the label input on selection; support that generated tail too.
-        init2 = "if(state.selected!==null)card.querySelector('.label').value='';\n render();\n});"
-        repl2 = "if(state.selected!==null)card.querySelector('.label').value='';\n if(!state.baselineManual){const ob=optimiseCardBaseline(card,proposals,state,INK,W,H);state.autoBaselineTried=ob.tried;}\n render();\n});"
-        if init2 not in text:
-            print("could not install v35 initial baseline optimisation", file=sys.stderr)
-            return 2
-        text = text.replace(init2, repl2, 1)
-    else:
-        text = text.replace(init, repl, 1)
+    # Install immediately before the first card setup closes. This is intentionally
+    # regex-based because earlier wrappers have changed the exact label-input tail
+    # several times. We anchor on the final render() followed by the forEach close.
+    tail_re = re.compile(r"(?P<indent>[ \t]*)render\(\);\n\}\);\n\n(?=document\.querySelector\('#export'\))")
+    m = tail_re.search(text)
+    if not m:
+        print("could not install v35 initial baseline optimisation", file=sys.stderr)
+        return 2
+    indent = m.group("indent")
+    injected = (
+        f"{indent}if(!state.baselineManual){{const ob=optimiseCardBaseline(card,proposals,state,INK,W,H);state.autoBaselineTried=ob.tried;}}\n"
+        f"{indent}render();\n"
+        "});\n\n"
+    )
+    text = tail_re.sub(injected, text, count=1)
 
     old_recompute = "const r=recomputeTargetCard(card,proposals,state,INK);\n   card.querySelector('.legend').textContent='Omräknat: '+r.added+' auto-kandidater · '+r.rejectedQuality+' under kvalitetsgräns · '+r.rejectedGap+' över hårt mellanrum';"
     new_recompute = "const r=recomputeTargetCard(card,proposals,state,INK);\n   let ob=null;if(!state.baselineManual)ob=optimiseCardBaseline(card,proposals,state,INK,+card.dataset.w,+card.dataset.h);\n   card.querySelector('.legend').textContent='Omräknat: '+r.added+' auto-kandidater'+(ob?' · stödlinje '+ob.baseline+' ('+ob.tried+' lägen)':'')+' · '+r.rejectedQuality+' under kvalitetsgräns · '+r.rejectedGap+' över hårt mellanrum';"
