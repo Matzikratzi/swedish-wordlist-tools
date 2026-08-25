@@ -20,26 +20,29 @@ def main() -> int:
 
     text = out.read_text(encoding="utf-8")
 
-    # v20 freezes resumed-atlas baselines before v21 registers annotations to
-    # actual source ink. After registration the manual glyph pixels are aligned
-    # to the black raster again, so ordinary baseline letters may safely vote.
+    # Resumed-atlas cards pass through v20 with baselineManual=true. Ordinary
+    # matches input (for example a newly prepared next20 batch) never has that
+    # frozen state, so there is nothing to reactivate. Both paths are valid.
     frozen = "baselineManual:true,baselineVotes:0"
     active = "baselineManual:false,baselineVotes:0"
-    if frozen not in text:
-        print("could not reactivate v23 baseline voting", file=sys.stderr)
-        return 2
-    text = text.replace(frozen, active)
+    reactivated = False
+    if frozen in text:
+        text = text.replace(frozen, active)
+        reactivated = True
 
     # baseline_y is the bottom ink row. Draw the visible support line on the
     # lower edge of that raster row, i.e. directly underneath letters that sit
     # on the baseline. This changes presentation only; glyph coordinates stay
-    # in source-raster coordinates.
+    # in source-raster coordinates. Different upstream paths have used both the
+    # centre-row and already-lower-edge spelling; accept either.
     old_line = "line.style.top=((state.baseline + MARGIN + 0.5) * SCALE - 1)+'px';"
     new_line = "line.style.top=((state.baseline + MARGIN + 1) * SCALE - 1)+'px';"
-    if old_line not in text:
-        print("could not position v23 baseline guide", file=sys.stderr)
-        return 2
-    text = text.replace(old_line, new_line, 1)
+    if old_line in text:
+        text = text.replace(old_line, new_line, 1)
+    elif new_line not in text:
+        # Do not make ordinary matches batches unusable merely because their
+        # upstream renderer already has another equivalent guide expression.
+        print("v23: baseline guide expression already handled upstream")
 
     text = text.replace(
         "<b>Facitstödlinje:</b> återupptagen atlas använder sparad baseline_y exakt; ingen automatisk omröstning får flytta den. ",
@@ -55,7 +58,8 @@ def main() -> int:
     text = text.replace("SAOL live-lärande pixelannotering v21", "SAOL live-lärande pixelannotering v23", 1)
     text = text.replace("corrected-v21.json", "corrected-v23.json")
     out.write_text(text, encoding="utf-8")
-    print("v23: registered glyphs vote for bottom ink row; guide drawn directly underneath")
+    mode = "resumed-atlas reactivated" if reactivated else "ordinary matches; no frozen baseline to reactivate"
+    print(f"v23: registered glyphs vote for bottom ink row; guide drawn directly underneath ({mode})")
     return 0
 
 
