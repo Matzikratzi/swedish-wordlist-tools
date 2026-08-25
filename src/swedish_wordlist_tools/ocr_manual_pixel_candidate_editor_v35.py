@@ -21,10 +21,6 @@ def main() -> int:
 
     text = out.read_text(encoding="utf-8")
 
-    # Candidate generation must keep a slightly wider vertical pool than the
-    # final acceptance rule.  Otherwise trying neighbouring baselines cannot
-    # resurrect a glyph that was discarded under the initial guess.  The row
-    # resolver remains strict (>=2 px from the baseline is impossible).
     text = text.replace(
         "temp.baseline_distance_error=Math.abs(impliedBaseline-state.baseline);if(temp.baseline_distance_error>=2)continue;",
         "temp.baseline_distance_error=Math.abs(impliedBaseline-state.baseline);if(temp.baseline_distance_error>=4)continue;",
@@ -36,11 +32,6 @@ def main() -> int:
         1,
     )
 
-    # v33's fixed exact bonus (at least +12 per candidate) accidentally rewards
-    # decomposing one full letter into several tiny exact templates.  Replace it
-    # with a size-proportional exact bonus and a per-fragment cost.  A perfect
-    # 30-pixel n therefore dominates four 5-pixel half-lod fragments when both
-    # compete for the same local ink.
     old_weight = re.compile(
         r"const rel=relativeGlyphScore\(p\);const exact=.*?return p\.pixels\.size \+ 0\.45\*quality \+ 8\*rel \+ exactBonus - partialPenalty - \(Number\.isFinite\(\+p\.baseline_distance_error\)\?6\*Math\.abs\(\+p\.baseline_distance_error\):0\);"
     )
@@ -59,8 +50,6 @@ def main() -> int:
         return 2
     text = old_weight.sub(new_weight, text, count=1)
 
-    # Expose the best whole-row objective from the beam search so the same
-    # candidate pool can be evaluated cheaply at neighbouring baselines.
     old_best = "const best=states[0]||{chosen:[]};\n const winners=new Set(best.chosen);"
     new_best = "const best=states[0]||{chosen:[],value:0,covered:0};\n state.lastRowScore=(best.value||0)+0.06*(best.covered||0);\n const winners=new Set(best.chosen);"
     if old_best not in text:
@@ -68,8 +57,6 @@ def main() -> int:
         return 2
     text = text.replace(old_best, new_best, 1)
 
-    # Try only five baselines around the initial guess.  resolveCandidateOverlaps
-    # reuses the already generated candidate pool; no glyph raster scan is redone.
     anchor = "document.querySelectorAll('.card').forEach(card=>{"
     helper = r'''
 function optimiseCardBaseline(card,proposals,state,INK,W,H){
@@ -99,18 +86,22 @@ function optimiseCardBaseline(card,proposals,state,INK,W,H){
         return 2
     text = text.replace(anchor, helper + "\n" + anchor, 1)
 
-    # Run the cheap five-way baseline comparison once after each card has its
-    # render hook and full initial proposal pool.  Manual baseline edits remain
-    # authoritative and v34 recomputes the word immediately.
-    init = "state.render=render;\n render();"
-    repl = "state.render=render;\n if(!state.baselineManual){const ob=optimiseCardBaseline(card,proposals,state,INK,W,H);state.autoBaselineTried=ob.tried;}\n render();"
+    # The stable generated-card tail from v4 survives the later wrappers.  Hook
+    # baseline optimisation immediately before the card's first final render,
+    # after all handlers are installed and proposals are available.
+    init = "if(state.selected!==null)card.querySelector('.label').value=proposals[state.selected].label;\n render();\n});"
+    repl = "if(state.selected!==null)card.querySelector('.label').value=proposals[state.selected].label;\n if(!state.baselineManual){const ob=optimiseCardBaseline(card,proposals,state,INK,W,H);state.autoBaselineTried=ob.tried;}\n render();\n});"
     if init not in text:
-        print("could not install v35 initial baseline optimisation", file=sys.stderr)
-        return 2
-    text = text.replace(init, repl, 1)
+        # v5+ clears the label input on selection; support that generated tail too.
+        init2 = "if(state.selected!==null)card.querySelector('.label').value='';\n render();\n});"
+        repl2 = "if(state.selected!==null)card.querySelector('.label').value='';\n if(!state.baselineManual){const ob=optimiseCardBaseline(card,proposals,state,INK,W,H);state.autoBaselineTried=ob.tried;}\n render();\n});"
+        if init2 not in text:
+            print("could not install v35 initial baseline optimisation", file=sys.stderr)
+            return 2
+        text = text.replace(init2, repl2, 1)
+    else:
+        text = text.replace(init, repl, 1)
 
-    # Recompute button should also re-evaluate the support line if the human has
-    # not explicitly set it.  A human baseline is never silently moved.
     old_recompute = "const r=recomputeTargetCard(card,proposals,state,INK);\n   card.querySelector('.legend').textContent='Omräknat: '+r.added+' auto-kandidater · '+r.rejectedQuality+' under kvalitetsgräns · '+r.rejectedGap+' över hårt mellanrum';"
     new_recompute = "const r=recomputeTargetCard(card,proposals,state,INK);\n   let ob=null;if(!state.baselineManual)ob=optimiseCardBaseline(card,proposals,state,INK,+card.dataset.w,+card.dataset.h);\n   card.querySelector('.legend').textContent='Omräknat: '+r.added+' auto-kandidater'+(ob?' · stödlinje '+ob.baseline+' ('+ob.tried+' lägen)':'')+' · '+r.rejectedQuality+' under kvalitetsgräns · '+r.rejectedGap+' över hårt mellanrum';"
     if old_recompute not in text:
