@@ -18,6 +18,21 @@ def _ann_style(word: dict[str, object], ann: dict[str, object]) -> str:
     return str(ann.get("style") or word.get("style") or "roman")
 
 
+def _is_obsolete_stylecopy(word: dict[str, object]) -> bool:
+    return str(word.get("source_id") or "").endswith("::stylecopy")
+
+
+def _physical_key(word: dict[str, object]) -> tuple[str, str, str, str]:
+    # word_file is strongest because historical style-copy rows reused the exact
+    # same raster.  The other fields keep the key useful for older atlases.
+    return (
+        str(word.get("word_file") or ""),
+        str(word.get("page") or ""),
+        str(word.get("subnr") or ""),
+        str(word.get("expected_word") or ""),
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Summarize manually learned SAOL glyphs and make a representative editor atlas.")
     ap.add_argument("atlas", type=Path)
@@ -27,7 +42,27 @@ def main() -> int:
     args = ap.parse_args()
 
     payload = json.loads(args.atlas.read_text(encoding="utf-8"))
-    words = [w for w in payload.get("words", []) if isinstance(w, dict)]
+    raw_words = [w for w in payload.get("words", []) if isinstance(w, dict)]
+
+    # Old editors created hidden per-style copies of the same raster row.  Since
+    # style is now per annotation, those rows are obsolete training/review data.
+    # Drop explicit ::stylecopy rows and deduplicate any remaining identical
+    # physical word rasters, preferring the first/original row.
+    words: list[dict[str, object]] = []
+    seen_physical: set[tuple[str, str, str, str]] = set()
+    dropped_stylecopies = 0
+    dropped_duplicates = 0
+    for word in raw_words:
+        if _is_obsolete_stylecopy(word):
+            dropped_stylecopies += 1
+            continue
+        key = _physical_key(word)
+        if key in seen_physical:
+            dropped_duplicates += 1
+            continue
+        seen_physical.add(key)
+        words.append(word)
+
     target = max(1, args.examples_per_glyph)
 
     overall: Counter[str] = Counter()
@@ -72,7 +107,7 @@ def main() -> int:
                 needs[key] -= 1
 
     review = dict(payload)
-    review["format"] = "saol-manual-pixel-atlas-corrected-glyph-review-v1"
+    review["format"] = "saol-manual-pixel-atlas-corrected-glyph-review-v2"
     review["review_progress"] = None
     review["words"] = [words[i] for i in chosen]
     args.review_out.parent.mkdir(parents=True, exist_ok=True)
@@ -85,7 +120,6 @@ def main() -> int:
         lines.append(
             f"{ch}\t{total}\t{by_style.get('italic', Counter())[ch]}\t{by_style.get('roman', Counter())[ch]}\t{by_style.get('bold', Counter())[ch]}\t{status}"
         )
-    # Also show learned non-letter glyphs because punctuation is important to SAOL.
     for ch in sorted(k for k in overall if k not in ALPHABET):
         lines.append(
             f"{ch}\t{overall[ch]}\t{by_style.get('italic', Counter())[ch]}\t{by_style.get('roman', Counter())[ch]}\t{by_style.get('bold', Counter())[ch]}\tSYMBOL"
@@ -96,7 +130,8 @@ def main() -> int:
     present = "".join(ch for ch in ALPHABET if overall[ch])
     missing = " ".join(ch for ch in ALPHABET if not overall[ch]) or "INGA"
     weak = " ".join(f"{ch}:{overall[ch]}" for ch in ALPHABET if 0 < overall[ch] < target) or "INGA"
-    print(f"words_in_atlas={len(words)} review_words={len(chosen)} examples_per_glyph={target}")
+    print(f"words_in_atlas={len(raw_words)} usable_words={len(words)} review_words={len(chosen)} examples_per_glyph={target}")
+    print(f"dropped_stylecopies={dropped_stylecopies} dropped_duplicate_rasters={dropped_duplicates}")
     print(f"present={present}")
     print(f"missing={missing}")
     print(f"under_{target}={weak}")
