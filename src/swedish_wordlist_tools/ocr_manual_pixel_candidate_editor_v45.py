@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -30,97 +31,91 @@ function rawBaselineCandidatesV45(profile){
  const counts=new Map();
  for(const s of segs){
    if(!s.body)continue;
-   // Tiny punctuation-like bodies must not dominate the normal text baseline.
-   const w=Math.max(1,Number(s.width||1));
    const px=Math.max(1,Number(s.pixels||1));
-   const weight=Math.min(3,Math.max(1,Math.round(Math.sqrt(px)/3)));
-   counts.set(s.bottom,(counts.get(s.bottom)||0)+weight);
+   const weight=Math.min(4,Math.max(1,Math.round(Math.sqrt(px)/2.5)));
+   counts.set(Number(s.bottom),(counts.get(Number(s.bottom))||0)+weight);
  }
  const ranked=[...counts.entries()].sort((a,b)=>b[1]-a[1]||a[0]-b[0]);
  if(!ranked.length)return [];
  const best=ranked[0][1];
- // Keep only levels with real raw-raster support. This intentionally excludes
- // absurd high levels such as y=5 in q-märka/qigong when bodies vote 11/14.
  let ys=ranked.filter(([,c])=>c>=Math.max(2,best*0.34)).map(([y])=>+y);
- // A descender level is commonly 3 px below the true baseline. If both are
- // present, preserve both for scoring; glyph evidence may then choose the upper.
- ys=[...new Set(ys)].sort((a,b)=>a-b);
- return ys;
-}
-function nearestAllowedBaselineV45(y,allowed){
- if(!allowed||!allowed.length)return y;
- let best=allowed[0],d=Math.abs(y-best);
- for(const a of allowed){const dd=Math.abs(y-a);if(dd<d){d=dd;best=a;}}
- return best;
+ return [...new Set(ys)].sort((a,b)=>a-b);
 }
 function chooseRawBaselineV45(profile,current){
  const allowed=rawBaselineCandidatesV45(profile);
  if(!allowed.length)return {baseline:current,allowed};
- // Prefer the upper of two strongly supported levels separated by the usual
- // descender distance. Otherwise use the strongest/raw-seed-nearest level.
- const counts=new Map();for(const s of (profile.segs||[]))if(s.body)counts.set(s.bottom,(counts.get(s.bottom)||0)+1);
+ const counts=new Map();
+ for(const s of (profile.segs||[]))if(s.body)counts.set(Number(s.bottom),(counts.get(Number(s.bottom))||0)+1);
  let baseline=allowed[0],score=-Infinity;
  for(const y of allowed){
    let sc=10*(counts.get(y)||0);
-   if(allowed.includes(y+3))sc+=7; // y likely baseline; y+3 likely descender bottom
-   if(allowed.includes(y-3))sc-=2;
-   if(Number.isFinite(current))sc-=0.1*Math.abs(y-current);
+   if(allowed.includes(y+3))sc+=8; // lower level is likely descenders
+   if(allowed.includes(y-3))sc-=3;
+   if(Number.isFinite(current))sc-=0.05*Math.abs(y-current);
    if(sc>score){score=sc;baseline=y;}
  }
  return {baseline,allowed};
 }
 function clearAutoCandidatesV45(proposals){
- for(let i=proposals.length-1;i>=0;i--){
-   const p=proposals[i];
-   if(p.status!=='manual')proposals.splice(i,1);
- }
+ for(let i=proposals.length-1;i>=0;i--)if(proposals[i].status!=='manual')proposals.splice(i,1);
 }
 function regenerateAllAutoV45(card,proposals,state,INK){
- // A baseline change changes glyph geometry. Rebuild automatic candidates from
- // the persistent facit and live manual models rather than translating/reusing
- // the old candidate universe.
  clearAutoCandidatesV45(proposals);
  if(typeof facitExactHitsV38==='function')facitExactHitsV38(card,proposals,state,INK);
  if(typeof propagateAllManualAnnotations==='function')propagateAllManualAnnotations();
- // Re-run the normal scoring/partition chain on the newly generated universe.
  if(typeof rejectEmbeddedTinyV41==='function')rejectEmbeddedTinyV41(card,proposals,state,INK);
  if(typeof enforcePerfectFullGlyphDominanceV42==='function')enforcePerfectFullGlyphDominanceV42(card,proposals,state,INK);
  if(typeof finalExclusivePartitionV44==='function')finalExclusivePartitionV44(card,proposals,state,INK);
- state.regeneratedAtBaselineV45=state.baselineY;
+ state.regeneratedAtBaselineV45=state.baseline;
  if(state.render)state.render();
 }
 '''
     text = text.replace(anchor, helpers + "\n" + anchor, 1)
 
-    old = "const r=rawBaselineV41(INK,W,H);\n if(!r)return null;\n state.rawBaselineV41=r.baseline;state.rawBottomProfileV41=r.profile;\n if(state.baselineManual)return r;\n state.baselineY=r.baseline;card.dataset.baseline=String(r.baseline);"
-    new = "const r=rawBaselineV41(INK,W,H);\n if(!r)return null;\n const rb=chooseRawBaselineV45(r.profile,r.baseline);\n state.rawBaselineV41=r.baseline;state.rawBottomProfileV41=r.profile;state.rawAllowedBaselinesV45=rb.allowed;\n if(state.baselineManual)return r;\n state.baselineY=rb.baseline;card.dataset.baseline=String(rb.baseline);"
+    # Replace the complete v41 baseline chooser with a v45 chooser that only
+    # returns raw-raster-supported levels. This is robust to later wrappers
+    # around applyRawBaselineV41.
+    chooser_re = re.compile(
+        r"function chooseRawBaselineV41\(INK,W,H,fallback\)\{.*?\n\}",
+        re.S,
+    )
+    new_chooser = r'''function chooseRawBaselineV41(INK,W,H,fallback){
+ const p=bottomProfileV41(INK,W,H);
+ const rb=chooseRawBaselineV45(p,fallback);
+ return {baseline:rb.baseline,profile:p,allowedV45:rb.allowed};
+}'''
+    if not chooser_re.search(text):
+        print("could not patch v45 raw baseline chooser", file=sys.stderr)
+        return 2
+    text = chooser_re.sub(new_chooser, text, count=1)
+
+    # Patch applyRawBaselineV41 itself at stable statements that are still
+    # present after v42-v44. Record allowed levels, and regenerate the automatic
+    # candidate universe after committing the baseline.
+    old = "state.baseline=r.baseline;card.dataset.baseline=String(r.baseline);state.rawBaselineV41=r.baseline;state.rawBottomProfileV41=r.profile;"
+    new = "state.baseline=r.baseline;card.dataset.baseline=String(r.baseline);state.rawBaselineV41=r.baseline;state.rawBottomProfileV41=r.profile;state.rawAllowedBaselinesV45=r.allowedV45||rawBaselineCandidatesV45(r.profile);"
     if old not in text:
-        print("could not patch v45 raw baseline selection", file=sys.stderr)
+        print("could not patch v45 baseline assignment", file=sys.stderr)
         return 2
     text = text.replace(old, new, 1)
 
-    # After automatic baseline choice, rebuild automatic candidates from scratch
-    # at that geometry before any final partitioning.
-    old2 = "if(typeof recomputeCandidateGeometry==='function')recomputeCandidateGeometry(card,proposals,state,INK);\n rejectEmbeddedTinyV41(card,proposals,state,INK);"
-    new2 = "if(typeof recomputeCandidateGeometry==='function')recomputeCandidateGeometry(card,proposals,state,INK);\n regenerateAllAutoV45(card,proposals,state,INK);\n rejectEmbeddedTinyV41(card,proposals,state,INK);"
+    old2 = "for(const p of proposals){if(Number.isFinite(+p.baseline_hint))p.baseline_distance_error=Math.abs((+p.baseline_hint)-state.baseline);}"
+    new2 = "regenerateAllAutoV45(card,proposals,state,INK);\n for(const p of proposals){if(Number.isFinite(+p.baseline_hint))p.baseline_distance_error=Math.abs((+p.baseline_hint)-state.baseline);}"
     if old2 not in text:
         print("could not patch v45 automatic regeneration", file=sys.stderr)
         return 2
     text = text.replace(old2, new2, 1)
 
-    # Manual baseline buttons in the older editor eventually call the candidate
-    # geometry recomputation path. Wrap it so any manual baseline change also
-    # regenerates from facit rather than merely moving/reweighting stale matches.
+    # Manual baseline changes eventually flow through recomputeTargetCard in the
+    # editor. Wrap it once: if the baseline is manual, rebuild all automatic
+    # proposals from the persistent facit after the ordinary recomputation.
     hook = "function regenerateAllAutoV45(card,proposals,state,INK){"
     wrapper = r'''
-const recomputeCandidateGeometryV45Original=(typeof recomputeCandidateGeometry==='function')?recomputeCandidateGeometry:null;
-if(recomputeCandidateGeometryV45Original){
- recomputeCandidateGeometry=function(card,proposals,state,INK){
-   const before=state.baselineY;
-   const out=recomputeCandidateGeometryV45Original(card,proposals,state,INK);
-   if(state.baselineManual || state.baselineY!==before){
-     setTimeout(()=>regenerateAllAutoV45(card,proposals,state,INK),0);
-   }
+const recomputeTargetCardV45Original=(typeof recomputeTargetCard==='function')?recomputeTargetCard:null;
+if(recomputeTargetCardV45Original){
+ recomputeTargetCard=function(card,proposals,state,INK){
+   const out=recomputeTargetCardV45Original(card,proposals,state,INK);
+   if(state.baselineManual)setTimeout(()=>regenerateAllAutoV45(card,proposals,state,INK),0);
    return out;
  };
 }
@@ -132,12 +127,12 @@ if(recomputeCandidateGeometryV45Original){
     text = text.replace("corrected-v44.json", "corrected-v45.json")
     text = text.replace(
         "<b>Exklusiv slutpartition v44:</b>",
-        "<b>Rågeometriskt baslinjeintervall v45:</b> endast baslinjenivåer med starkt stöd från råglyphernas nedersta pixelnivåer får prövas automatiskt; nivåer långt ovanför kropparnas bottnar är förbjudna. Typisk nivå +3 behandlas som möjlig descenderbotten och den övre nivån föredras. Varje automatisk eller manuell baslinjeändring bygger dessutom om alla auto-kandidater från det permanenta glyphfacit vid den nya geometrin. <b>Exklusiv slutpartition v44:</b>",
+        "<b>Rågeometriskt baslinjeintervall v45:</b> endast nivåer som råglyphernas nedersta pixlar faktiskt stöder får väljas automatiskt. En nivå tre pixlar under en annan stark nivå behandlas som sannolik descenderbotten, så den övre nivån gynnas. När baslinjen ändras byggs de automatiska kandidaterna om från det permanenta glyphfacit i stället för att gamla träffar bara flyttas eller omvärderas. <b>Exklusiv slutpartition v44:</b>",
         1,
     )
 
     args.out.write_text(text, encoding="utf-8")
-    print("v45: raw raster constrains baseline hypotheses; every baseline change regenerates auto candidates from persistent facit")
+    print("v45: raw raster constrains baseline hypotheses; baseline changes regenerate auto candidates from persistent facit")
     return 0
 
 
