@@ -84,20 +84,6 @@ def _bbox_pixels(ink: set[tuple[int, int]], x0: int, x1: int, y0: int, y1: int) 
     return {(x, y) for x, y in ink if x0 <= x <= x1 and y0 <= y <= y1}
 
 
-def _component(ink: set[tuple[int, int]], start: tuple[int, int]) -> set[tuple[int, int]]:
-    if start not in ink:
-        return set()
-    seen = {start}
-    stack = [start]
-    while stack:
-        x, y = stack.pop()
-        for q in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
-            if q in ink and q not in seen:
-                seen.add(q)
-                stack.append(q)
-    return seen
-
-
 def exact_matches(
     ink: set[tuple[int, int]],
     width: int,
@@ -167,9 +153,9 @@ def exact_sequence_cover(
 ) -> list[Match] | None:
     """Return an exact left-to-right cover whose labels concatenate to expected.
 
-    Baseline is deliberately local to each glyph. A later part of a word may be
-    shifted vertically and still be an exact cover. Multi-character models such
-    as ``tt`` are valid alternatives to separate ``t`` + ``t`` models.
+    Every selected glyph must imply the same support baseline for the whole word.
+    Multi-character models such as ``tt`` are valid alternatives to separate
+    ``t`` + ``t`` models.
     """
     if not expected:
         return None
@@ -183,10 +169,15 @@ def exact_sequence_cover(
         rows.sort(key=lambda m: (m.x, -len(m.label), -m.model_pixels, -m.sources, m.baseline, m.style))
 
     target = frozenset(ink)
-    seen: set[tuple[int, int, frozenset[tuple[int, int]]]] = set()
+    seen: set[tuple[int, int, int | None, frozenset[tuple[int, int]]]] = set()
 
-    def dfs(pos: int, min_x: int, used: frozenset[tuple[int, int]]) -> list[Match] | None:
-        state = (pos, min_x, used)
+    def dfs(
+        pos: int,
+        min_x: int,
+        word_baseline: int | None,
+        used: frozenset[tuple[int, int]],
+    ) -> list[Match] | None:
+        state = (pos, min_x, word_baseline, used)
         if state in seen:
             return None
         seen.add(state)
@@ -195,6 +186,8 @@ def exact_sequence_cover(
         for m in by_pos.get(pos, []):
             if m.x < min_x:
                 continue
+            if word_baseline is not None and m.baseline != word_baseline:
+                continue
             if used.intersection(m.pixels):
                 continue
             # Do not skip unexplained ink to the left of the next candidate.
@@ -202,12 +195,13 @@ def exact_sequence_cover(
             if left_unexplained:
                 continue
             new_used = frozenset(set(used) | set(m.pixels))
-            tail = dfs(pos + len(m.label), m.x1 + 1, new_used)
+            baseline = m.baseline if word_baseline is None else word_baseline
+            tail = dfs(pos + len(m.label), m.x1 + 1, baseline, new_used)
             if tail is not None:
                 return [m] + tail
         return None
 
-    return dfs(0, 0, frozenset())
+    return dfs(0, 0, None, frozenset())
 
 
 def baseline_votes(matches: Iterable[Match]) -> Counter[int]:
@@ -265,7 +259,7 @@ def analyse(ink: set[tuple[int, int]], width: int, height: int, models: list[Gly
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Minimal SAOL glyph matcher: exact glyphs only; local baselines allowed.")
+    ap = argparse.ArgumentParser(description="Minimal SAOL glyph matcher: exact glyphs only; one support baseline per word.")
     ap.add_argument("word_debug", type=Path)
     ap.add_argument("--facit", type=Path, default=Path("glyphs/saol14-manual-glyph-facit.json"))
     ap.add_argument("--out", type=Path)
@@ -279,7 +273,7 @@ def main() -> int:
     expected_labels = sorted(set(expected))
     result.update(
         {
-            "format": "saol14-minimal-glyph-match-v4",
+            "format": "saol14-minimal-glyph-match-v5",
             "expected_word": debug.get("expected_word"),
             "headword": debug.get("headword"),
             "page": debug.get("page"),
