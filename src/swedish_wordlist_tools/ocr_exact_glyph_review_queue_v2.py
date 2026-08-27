@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 
-from .ocr_exact_glyph_review_queue import _expand_inputs, _expected_partial, _raw_baseline_guess
+from .ocr_exact_glyph_review_queue import _expand_inputs, _raw_baseline_guess
 from .ocr_glyph_facit_table import build_html as build_facit_html
 from .ocr_glyph_matcher import exact_matches, exact_sequence_cover, load_facit, load_word_debug
 
@@ -13,14 +13,55 @@ VALID_STYLES = {"bold", "roman", "italic"}
 STYLE_SHORT = {"bold": "b", "roman": "r", "italic": "i"}
 
 
+def _expected_partial(matches, expected: str):
+    """Choose pixel-disjoint exact matches in expected-word order.
+
+    Glyph bounding boxes may overlap horizontally.  Ordering therefore follows
+    each glyph's left anchor, not the previous glyph's rightmost x.  Actual black
+    pixels must remain exclusive.
+    """
+    if not expected or not matches:
+        return []
+    rows = sorted(matches, key=lambda m: (m.x, -len(m.label), -m.model_pixels, m.label, m.style))
+
+    @lru_cache(maxsize=None)
+    def dfs(i: int, expected_pos: int, min_anchor_x: int, occupied_key: tuple[tuple[int, int], ...]):
+        occupied = set(occupied_key)
+        if i >= len(rows):
+            return (0, 0, ())
+        best = dfs(i + 1, expected_pos, min_anchor_x, occupied_key)
+        m = rows[i]
+        if m.x >= min_anchor_x and m.label and not occupied.intersection(m.pixels):
+            p = expected.find(m.label, expected_pos)
+            while p >= 0:
+                new_occupied = tuple(sorted(occupied | set(m.pixels)))
+                tail_chars, tail_pixels, tail_idx = dfs(
+                    i + 1,
+                    p + len(m.label),
+                    m.x + 1,
+                    new_occupied,
+                )
+                cand = (
+                    len(m.label) + tail_chars,
+                    m.model_pixels + tail_pixels,
+                    (i,) + tail_idx,
+                )
+                if (cand[0], cand[1]) > (best[0], best[1]):
+                    best = cand
+                p = expected.find(m.label, p + 1)
+        return best
+
+    _, _, idx = dfs(0, 0, 0, ())
+    return [rows[i] for i in idx]
+
+
 def _analyse_one(path: Path, models):
     ink, width, height, debug = load_word_debug(path)
     expected = str(debug.get("expected_word") or debug.get("headword") or "")
     word_style = str(debug.get("style") or (debug.get("card_dataset") or {}).get("style") or "bold")
 
-    # Deliberately match all learned styles freely. Style belongs to each glyph,
-    # not to the whole word/card. This also lets mixed-style source rows work
-    # without a separate per-word style mode.
+    # Match all learned styles freely. Style belongs to each glyph, not to the
+    # whole word/card. This also lets mixed-style source rows work naturally.
     cover = exact_sequence_cover(ink, width, height, models, expected) if expected else None
     if cover:
         baseline = cover[0].baseline
@@ -86,7 +127,7 @@ code{{background:#eee;padding:1px 4px;border-radius:3px}}
 <label><input type='checkbox' id='showDone'> Visa även helt exakta ord</label>
 <button id='save'>Spara uppdaterat facit</button>
 <a href='glyph-facit-table.html' target='_blank'>Glyphfacit</a>
-<div><small>Automatiska träffar söker fritt bland alla stilar men måste vara 100 % exakta och ligga i rätt ordningsföljd. Vid manuell märkning skriv stil i etiketten: <code>f{{i}}</code> kursiv, <code>f{{r}}</code> roman, <code>f{{b}}</code> fet. Alt-dra tar bort pixlar; Shift-dra lägger tillbaka dem.</small></div>
+<div><small>Automatiska träffar söker fritt bland alla stilar men måste vara 100 % exakta och ligga i rätt ordningsföljd. Glyphars x-utbredning får överlappa men de får aldrig dela svarta pixlar. Vid manuell märkning skriv stil i etiketten: <code>f{{i}}</code> kursiv, <code>f{{r}}</code> roman, <code>f{{b}}</code> fet. Alt-dra tar bort pixlar; Shift-dra lägger tillbaka dem.</small></div>
 </div><div id='cards'></div>
 <script>
 const DATA={data}; const SCALE=14,M=2; let additions=[];
