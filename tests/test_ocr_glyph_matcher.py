@@ -1,15 +1,11 @@
 import unittest
 from pathlib import Path
 
-from swedish_wordlist_tools.ocr_glyph_matcher import GlyphModel, analyse, load_facit
+from swedish_wordlist_tools.ocr_glyph_matcher import GlyphModel, analyse, exact_sequence_cover, load_facit
 
 
 class GlyphMatcherTests(unittest.TestCase):
     def test_perfect_q_infers_baseline_without_seed(self):
-        # Shape taken from the real bold q regression case, but expressed in the
-        # facit's coordinate system: x normalized to the left edge, y relative to
-        # support baseline. In the source raster the true baseline is y=7 and the
-        # descender continues to y=10.
         source_pixels = {
             (2, 0), (3, 0), (4, 0), (5, 0),
             (1, 1), (2, 1), (3, 1), (4, 1), (5, 1),
@@ -25,24 +21,12 @@ class GlyphMatcherTests(unittest.TestCase):
         model_pixels = frozenset((x, y - true_baseline) for x, y in source_pixels)
         models = [GlyphModel(label="q", style="bold", pixels=model_pixels, sources=2)]
 
-        result = analyse(source_pixels, 6, 11, models)
+        result = analyse(source_pixels, 6, 11, models, expected="q")
 
         self.assertEqual(result["baseline"], 7)
-        self.assertEqual(result["baseline_votes"], {7: 41})
-        self.assertEqual(
-            result["selected_exact"],
-            [
-                {
-                    "label": "q",
-                    "style": "bold",
-                    "x": 0,
-                    "baseline": 7,
-                    "pixels": 41,
-                    "sources": 2,
-                    "score": 1681.0,
-                }
-            ],
-        )
+        self.assertTrue(result["fully_exact"])
+        self.assertEqual([r["label"] for r in result["exact_sequence_cover"]], ["q"])
+        self.assertEqual(result["exact_sequence_cover"][0]["baseline"], 7)
 
     def test_qigong_is_six_exact_bold_glyphs_on_one_baseline(self):
         facit = Path(__file__).resolve().parents[1] / "glyphs" / "saol14-manual-glyph-facit.json"
@@ -59,13 +43,29 @@ class GlyphMatcherTests(unittest.TestCase):
 
         width = max(x for x, _ in source_pixels) + 1
         height = max(y for _, y in source_pixels) + 1
-        result = analyse(source_pixels, width, height, models)
+        result = analyse(source_pixels, width, height, models, expected="qigong")
 
-        self.assertEqual(result["baseline"], 11)
-        self.assertEqual([row["label"] for row in result["selected_exact"]], labels)
-        self.assertTrue(all(row["style"] == "bold" for row in result["selected_exact"]))
-        self.assertTrue(all(row["baseline"] == 11 for row in result["selected_exact"]))
-        self.assertEqual(result["fuzzy_diagnostics"], [])
+        self.assertTrue(result["fully_exact"])
+        self.assertEqual([row["label"] for row in result["exact_sequence_cover"]], labels)
+        self.assertTrue(all(row["style"] == "bold" for row in result["exact_sequence_cover"]))
+        self.assertTrue(all(row["baseline"] == 11 for row in result["exact_sequence_cover"]))
+
+    def test_exact_cover_allows_local_baseline_shift(self):
+        a = GlyphModel("a", "bold", frozenset({(0, -1), (0, 0)}), 1)
+        b = GlyphModel("b", "bold", frozenset({(0, -1), (1, 0)}), 1)
+        ink = {(0, 2), (0, 3), (2, 1), (3, 2)}
+        cover = exact_sequence_cover(ink, 4, 4, [a, b], "ab")
+        self.assertIsNotNone(cover)
+        self.assertEqual([m.label for m in cover], ["a", "b"])
+        self.assertEqual([m.baseline for m in cover], [3, 2])
+
+    def test_exact_cover_accepts_multichar_model(self):
+        tt = GlyphModel("tt", "bold", frozenset({(0, -1), (0, 0), (1, -1), (1, 0)}), 1)
+        ink = {(0, 1), (0, 2), (1, 1), (1, 2)}
+        cover = exact_sequence_cover(ink, 2, 3, [tt], "tt")
+        self.assertIsNotNone(cover)
+        self.assertEqual([m.label for m in cover], ["tt"])
+        self.assertEqual(cover[0].baseline, 2)
 
 
 if __name__ == "__main__":
