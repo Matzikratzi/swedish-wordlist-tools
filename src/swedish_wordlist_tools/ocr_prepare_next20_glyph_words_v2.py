@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections import Counter
 from pathlib import Path
 
 from . import ocr_prepare_next20_glyph_words as v1
@@ -48,16 +49,71 @@ def _write_seen_file(path: Path, seen: set[tuple[str, str, str]]) -> None:
     )
 
 
+def _facit_inventory(path: Path | None) -> Counter[tuple[str, str]]:
+    out: Counter[tuple[str, str]] = Counter()
+    if path is None or not path.exists():
+        return out
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    for row in payload.get("glyphs") or []:
+        if not isinstance(row, dict):
+            continue
+        label = str(row.get("label") or "").lower()
+        style = str(row.get("style") or "roman")
+        if label:
+            out[(label, style)] += 1
+    return out
+
+
+def _word_mix(meta: dict[str, object], facit_inv: Counter[tuple[str, str]]) -> tuple[set[str], set[str], str]:
+    word = str(meta.get("expected_word") or meta.get("source_word") or "").lower()
+    style = str(meta.get("style") or "bold")
+    chars = {ch for ch in word if ch in v1.ALPHABET}
+    known = {ch for ch in chars if facit_inv[(ch, style)] > 0}
+    new = chars - known
+    return known, new, style
+
+
+def _mixed_priority(meta: dict[str, object], facit_inv: Counter[tuple[str, str]]) -> tuple[float, int, int, int, str]:
+    """Prefer words mixing known and unseen label/style glyphs.
+
+    First priority is at least one already learned and at least one unseen
+    character in the word's source style. Within that class, prefer more unseen
+    characters but retain several known anchors. If no unseen character remains,
+    prefer label/style pairs with few learned raster variants.
+    """
+    word = str(meta.get("expected_word") or meta.get("source_word") or "").lower()
+    known, new, style = _word_mix(meta, facit_inv)
+    mixed = bool(known and new)
+    scarcity = 0.0
+    for ch in {c for c in word if c in v1.ALPHABET}:
+        n = facit_inv[(ch, style)]
+        scarcity += 20.0 if n == 0 else 4.0 / n
+    # Lower tuple sorts first. Mixed words dominate; then maximize new glyphs,
+    # then known anchors, then scarcity/length for useful context.
+    return (
+        0.0 if mixed else 1.0,
+        -len(new),
+        -len(known),
+        -int(round(scarcity * 100)),
+        word,
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Prepare a new glyph-review batch while persistently excluding all previously shown words."
+        description="Prepare a new glyph-review batch while persistently excluding shown words and optionally prioritizing mixed known/new glyphs."
     )
     ap.add_argument("atlas", type=Path)
     ap.add_argument("manifest", type=Path)
     ap.add_argument("library", type=Path)
     ap.add_argument("--count", type=int, default=20)
     ap.add_argument("--out", type=Path, required=True)
-    ap.add_argument("--seen-file", type=Path, required=True)
+    ap.add_argument(
+        "--seen-file",
+        type=Path,
+        default=Path("glyphs/saol14-glyph-batch-seen.json"),
+        help="Persistent reviewed-word journal; defaults inside the repository.",
+    )
     ap.add_argument(
         "--exclude-batch",
         type=Path,
@@ -65,6 +121,12 @@ def main() -> int:
         default=[],
         help="Existing batch JSON to import into the persistent seen journal; may be repeated.",
     )
+    ap.add_argument(
+        "--facit",
+        type=Path,
+        help="Current glyph facit; with --mixed-known-new, prioritize words containing both learned and unseen label/style glyphs.",
+    )
+    ap.add_argument("--mixed-known-new", action="store_true")
     args = ap.parse_args()
 
     atlas = json.loads(args.atlas.read_text(encoding="utf-8"))
@@ -82,7 +144,13 @@ def main() -> int:
         seen.update(keys)
 
     candidates = v1._collect_candidates(manifest, seen)
-    candidates.sort(key=lambda m: v1._priority(m, inv))
+    facit_inv = _facit_inventory(args.facit)
+    if args.mixed_known_new:
+        if not facit_inv:
+            raise SystemExit("--mixed-known-new requires a readable non-empty --facit")
+        candidates.sort(key=lambda m: (_mixed_priority(m, facit_inv), int(m.get("page") or 0)))
+    else:
+        candidates.sort(key=lambda m: v1._priority(m, inv))
     count = max(1, args.count)
     selected = candidates[:count]
 
@@ -133,6 +201,7 @@ def main() -> int:
         "format": "saol-next-glyph-review-batch-v2",
         "source_atlas": str(args.atlas),
         "count_requested": count,
+        "selection": "mixed-known-new" if args.mixed_known_new else "legacy-priority",
         "results": results,
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -150,7 +219,12 @@ def main() -> int:
         print("crop_failures=" + " ".join(failures))
     print("selected_words:")
     for row in results:
-        print(f"  p{row['page']} sub{row['subnr']} {row['expected_word']}")
+        meta = next((m for m in selected if str(m.get("page")) == str(row.get("page")) and str(m.get("subnr")) == str(row.get("subnr")) and str(m.get("expected_word") or m.get("source_word") or "") == str(row.get("expected_word") or "")), {})
+        if args.mixed_known_new:
+            known, new, style = _word_mix(meta, facit_inv)
+            print(f"  p{row['page']} sub{row['subnr']} {row['expected_word']} style={style} old=[{''.join(sorted(known))}] new=[{''.join(sorted(new))}]")
+        else:
+            print(f"  p{row['page']} sub{row['subnr']} {row['expected_word']}")
     print(f"seen_file={args.seen_file}")
     print(f"batch={args.out}")
     return 0 if len(results) == count else 3
