@@ -50,14 +50,12 @@ class GlyphMatcherTests(unittest.TestCase):
         self.assertTrue(all(row["style"] == "bold" for row in result["exact_sequence_cover"]))
         self.assertTrue(all(row["baseline"] == 11 for row in result["exact_sequence_cover"]))
 
-    def test_exact_cover_allows_local_baseline_shift(self):
+    def test_exact_cover_rejects_local_baseline_shift(self):
         a = GlyphModel("a", "bold", frozenset({(0, -1), (0, 0)}), 1)
         b = GlyphModel("b", "bold", frozenset({(0, -1), (1, 0)}), 1)
         ink = {(0, 2), (0, 3), (2, 1), (3, 2)}
         cover = exact_sequence_cover(ink, 4, 4, [a, b], "ab")
-        self.assertIsNotNone(cover)
-        self.assertEqual([m.label for m in cover], ["a", "b"])
-        self.assertEqual([m.baseline for m in cover], [3, 2])
+        self.assertIsNone(cover)
 
     def test_exact_cover_accepts_multichar_model(self):
         tt = GlyphModel("tt", "bold", frozenset({(0, -1), (0, 0), (1, -1), (1, 0)}), 1)
