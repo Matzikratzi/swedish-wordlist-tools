@@ -80,12 +80,6 @@ def load_word_debug(path: Path) -> tuple[set[tuple[int, int]], int, int, dict[st
 
 
 def _vertical_strip_pixels(ink: set[tuple[int, int]], x0: int, x1: int) -> set[tuple[int, int]]:
-    """All source ink in the candidate glyph's x span, at every y.
-
-    A perfect glyph must own the full source raster in its horizontal span.
-    This prevents a small model from matching only the middle/top/bottom of a
-    larger glyph while ignoring extra black pixels outside the model's height.
-    """
     return {(x, y) for x, y in ink if x0 <= x <= x1}
 
 
@@ -114,9 +108,6 @@ def exact_matches(
                 if baseline < b_lo or baseline > b_hi:
                     continue
                 placed = frozenset((x0 + x, baseline + y) for x, y in model.pixels)
-                # Perfect means exactly perfect: every model pixel is black and
-                # there is no additional black source pixel anywhere above or
-                # below it inside the glyph's horizontal span.
                 if source_strip != set(placed):
                     continue
                 out.append(
@@ -154,16 +145,19 @@ def exact_sequence_cover(
     height: int,
     models: list[GlyphModel],
     expected: str,
+    *,
+    styles: set[str] | None = None,
 ) -> list[Match] | None:
     """Return an exact left-to-right cover whose labels concatenate to expected.
 
     Every selected glyph must imply the same support baseline for the whole word.
     Multi-character models such as ``tt`` are valid alternatives to separate
-    ``t`` + ``t`` models.
+    ``t`` + ``t`` models.  If ``styles`` is supplied, only those stored styles
+    may participate in the cover.
     """
     if not expected:
         return None
-    candidates = exact_matches(ink, width, height, models)
+    candidates = exact_matches(ink, width, height, models, styles=styles)
     by_pos: dict[int, list[Match]] = {i: [] for i in range(len(expected))}
     for m in candidates:
         for pos in range(len(expected)):
@@ -276,7 +270,7 @@ def main() -> int:
     expected_labels = sorted(set(expected))
     result.update(
         {
-            "format": "saol14-minimal-glyph-match-v6",
+            "format": "saol14-minimal-glyph-match-v7",
             "expected_word": debug.get("expected_word"),
             "headword": debug.get("headword"),
             "page": debug.get("page"),
