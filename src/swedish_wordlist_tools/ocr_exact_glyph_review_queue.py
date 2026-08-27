@@ -1,19 +1,14 @@
 from __future__ import annotations
 
 import argparse
-import html
 import json
+import math
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from .ocr_glyph_matcher import (
-    choose_baseline,
-    exact_matches,
-    exact_sequence_cover,
-    load_facit,
-    load_word_debug,
-    select_non_overlapping_exact,
-)
+from .ocr_glyph_facit_table import build_html as build_facit_html
+from .ocr_glyph_matcher import exact_matches, exact_sequence_cover, load_facit, load_word_debug
 
 
 def _expand_inputs(paths: list[Path]) -> list[Path]:
@@ -26,22 +21,116 @@ def _expand_inputs(paths: list[Path]) -> list[Path]:
     return list(dict.fromkeys(out))
 
 
+def _raw_baseline_guess(ink: set[tuple[int, int]], height: int) -> int | None:
+    """Guess the support row from raw raster density, without glyph matches.
+
+    Start at the densest horizontal ink row and walk downward.  The support row
+    is the last still-dense row before the raster becomes sparse for two rows in
+    a row.  Descenders normally live in that sparse tail and therefore do not
+    drag the baseline down.
+    """
+    if not ink or height <= 0:
+        return None
+    counts = [0] * height
+    for _, y in ink:
+        if 0 <= y < height:
+            counts[y] += 1
+    peak = max(counts)
+    if peak <= 0:
+        return None
+    # Prefer the lowest row if several rows tie for maximum density.
+    peak_y = max(y for y, n in enumerate(counts) if n == peak)
+    threshold = max(2, int(math.ceil(peak * 0.40)))
+    last_dense = peak_y
+    sparse_run = 0
+    for y in range(peak_y + 1, height):
+        if counts[y] >= threshold:
+            last_dense = y
+            sparse_run = 0
+        else:
+            sparse_run += 1
+            if sparse_run >= 2:
+                break
+    return last_dense
+
+
+def _expected_partial(matches, expected: str):
+    """Choose exact matches that form an ordered subsequence of expected.
+
+    This is deliberately not free fragment matching.  If the known word is
+    ``Wales``, a tiny ``|`` shape inside W cannot be shown because ``|`` is not
+    part of the expected label sequence.  Unknown glyphs may be skipped, so
+    known exact ``a``, ``l``, ``e``, ``s`` can still be shown.
+    """
+    if not expected or not matches:
+        return []
+    rows = sorted(matches, key=lambda m: (m.x, m.x1, -len(m.label), -m.model_pixels, m.label, m.style))
+
+    @lru_cache(maxsize=None)
+    def dfs(i: int, expected_pos: int, min_x: int):
+        if i >= len(rows):
+            return (0, 0, ())
+        best = dfs(i + 1, expected_pos, min_x)
+        m = rows[i]
+        if m.x >= min_x and m.label:
+            p = expected.find(m.label, expected_pos)
+            while p >= 0:
+                tail_chars, tail_pixels, tail_idx = dfs(i + 1, p + len(m.label), m.x1 + 1)
+                cand = (
+                    len(m.label) + tail_chars,
+                    m.model_pixels + tail_pixels,
+                    (i,) + tail_idx,
+                )
+                if (cand[0], cand[1]) > (best[0], best[1]):
+                    best = cand
+                p = expected.find(m.label, p + 1)
+        return best
+
+    _, _, idx = dfs(0, 0, 0)
+    chosen = [rows[i] for i in idx]
+    # Exact matcher already protects each candidate's full vertical strip; make
+    # the final partial display pixel-exclusive as well.
+    occupied: set[tuple[int, int]] = set()
+    out = []
+    for m in chosen:
+        if occupied.intersection(m.pixels):
+            continue
+        occupied.update(m.pixels)
+        out.append(m)
+    return out
+
+
 def _analyse_one(path: Path, models) -> dict[str, Any]:
     ink, width, height, debug = load_word_debug(path)
     expected = str(debug.get("expected_word") or debug.get("headword") or "")
+    word_style = str(debug.get("style") or debug.get("card_dataset", {}).get("style") or "bold")
+    styles = {word_style} if word_style in {"bold", "roman", "italic"} else None
+
     cover = exact_sequence_cover(ink, width, height, models, expected) if expected else None
 
-    all_exact = exact_matches(ink, width, height, models)
-    seed_for_baseline = select_non_overlapping_exact(all_exact)
-    baseline = choose_baseline(seed_for_baseline)
-    if baseline is None:
-        exact_on_baseline = []
+    if cover is not None:
+        baseline = cover[0].baseline
+        shown = cover
+        baseline_source = "exact-cover"
     else:
-        exact_on_baseline = select_non_overlapping_exact(
-            exact_matches(ink, width, height, models, baseline_only=baseline)
-        )
+        # For incomplete words, do not let arbitrary tiny exact fragments vote
+        # for the baseline.  Guess it directly from the raster, then ask only for
+        # exact whole-strip matches on that one row and in the expected sequence.
+        baseline = _raw_baseline_guess(ink, height)
+        baseline_source = "raw-density"
+        if baseline is None:
+            shown = []
+        else:
+            on_baseline = exact_matches(
+                ink,
+                width,
+                height,
+                models,
+                styles=styles,
+                baseline_only=baseline,
+            )
+            shown = _expected_partial(on_baseline, expected)
 
-    shown = cover if cover is not None else exact_on_baseline
     covered = set().union(*(m.pixels for m in shown)) if shown else set()
     unexplained = sorted([[x, y] for x, y in ink - covered])
     return {
@@ -50,11 +139,12 @@ def _analyse_one(path: Path, models) -> dict[str, Any]:
         "headword": debug.get("headword"),
         "page": debug.get("page"),
         "subnr": debug.get("subnr"),
-        "style": debug.get("style") or debug.get("card_dataset", {}).get("style") or "bold",
+        "style": word_style,
         "width": width,
         "height": height,
         "ink": sorted([[x, y] for x, y in ink]),
-        "baseline": cover[0].baseline if cover else baseline,
+        "baseline": baseline,
+        "baseline_source": baseline_source,
         "fully_exact": cover is not None,
         "exact": [
             {
@@ -101,7 +191,8 @@ input,select,button{{font:inherit;padding:5px}}
  <span id='stats'></span>
  <label><input type='checkbox' id='showDone'> Visa även helt exakt tolkade ord</label>
  <button id='save'>Spara uppdaterat facit</button>
- <div><small>Endast 100 % exakta facitmodeller markeras. Om en glyph inte matchar perfekt lämnas dess pixlar svarta och omarkerade. Stödlinjen gäller hela ordet och kan dras vertikalt med musen.</small></div>
+ <a href='glyph-facit-table.html' target='_blank'>Glyphfacit</a>
+ <div><small>Endast 100 % exakta facitmodeller i rätt ordningsföljd markeras. Om en glyph inte matchar perfekt lämnas dess pixlar svarta och omarkerade. Stödlinjen gäller hela ordet och kan dras vertikalt med musen.</small></div>
 </div>
 <div id='cards'></div>
 <script>
@@ -113,7 +204,7 @@ const known=new Set(DATA.facit.glyphs.map(keyOf));
 function renderCard(row){{
  const d=document.createElement('div');d.className='card'+(row.fully_exact?' done':'');d.dataset.done=row.fully_exact?'1':'0';
  const title=document.createElement('div');title.innerHTML='<b>'+escapeHtml(row.expected)+'</b> <span class="meta">sida '+(row.page??'')+' · '+(row.fully_exact?'<span class="ok">helt exakt</span>':'<span class="warn">ofullständig</span>')+'</span>';d.appendChild(title);
- let manualBaseline=!Number.isInteger(row.baseline);
+ let manualBaseline=false;
  let currentBaseline=Number.isInteger(row.baseline)?row.baseline:Math.max(0,row.height-2);
  const info=document.createElement('div');info.className='meta';d.appendChild(info);
  const note=document.createElement('div');note.className='baseline-note';d.appendChild(note);
@@ -122,8 +213,8 @@ function renderCard(row){{
  const exactPixels=new Set();
  for(const m of row.exact)for(const [x,y] of m.pixels)exactPixels.add(x+','+y);
  function updateInfo(){{
-   info.textContent='Baseline: '+currentBaseline+(manualBaseline?' (manuell)':'')+' · perfekta glyphar: '+row.exact.map(m=>m.label+'@'+m.x).join('  ');
-   note.textContent=manualBaseline?'Dra den röda stödlinjen vertikalt till rätt läge innan du märker nya glyphar.':'Dra stödlinjen om du behöver korrigera den.';
+   info.textContent='Baseline: '+currentBaseline+(manualBaseline?' (manuell)':' ('+row.baseline_source+')')+' · perfekta glyphar: '+row.exact.map(m=>m.label+'@'+m.x).join('  ');
+   note.textContent='Dra den röda stödlinjen om du behöver korrigera den innan du märker nya glyphar.';
  }}
  function baselineCanvasY(){{return (currentBaseline+1+M)*SCALE;}}
  function draw(){{
@@ -175,7 +266,11 @@ function escapeHtml(s){{return String(s).replace(/[&<>"']/g,c=>({{'&':'&amp;','<
 DATA.rows.forEach(r=>cards.appendChild(renderCard(r)));
 function stats(){{const total=DATA.rows.length,done=DATA.rows.filter(r=>r.fully_exact).length;document.getElementById('stats').textContent=' · '+done+'/'+total+' helt exakta · '+(total-done)+' att granska · '+additions.length+' nya varianter';}}
 document.getElementById('showDone').onchange=e=>document.querySelectorAll('.card.done').forEach(c=>c.style.display=e.target.checked?'block':'none');
-document.getElementById('save').onclick=()=>{{const out=structuredClone(DATA.facit);out.glyphs.push(...additions);out.glyphs.sort((a,b)=>a.style.localeCompare(b.style)||a.label.localeCompare(b.label)||JSON.stringify(a.pixels_relative_to_baseline).localeCompare(JSON.stringify(b.pixels_relative_to_baseline)));const blob=new Blob([JSON.stringify(out,null,2)+'\\n'],{{type:'application/json'}});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='saol14-manual-glyph-facit-expanded.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}};
+document.getElementById('save').onclick=()=>{{
+  const out=structuredClone(DATA.facit);out.glyphs.push(...additions);out.glyphs.sort((a,b)=>a.style.localeCompare(b.style)||a.label.localeCompare(b.label)||JSON.stringify(a.pixels_relative_to_baseline).localeCompare(JSON.stringify(b.pixels_relative_to_baseline)));
+  const now=new Date();const stamp=now.getFullYear()+String(now.getMonth()+1).padStart(2,'0')+String(now.getDate()).padStart(2,'0')+'-'+String(now.getHours()).padStart(2,'0')+String(now.getMinutes()).padStart(2,'0')+String(now.getSeconds()).padStart(2,'0');
+  const blob=new Blob([JSON.stringify(out,null,2)+'\\n'],{{type:'application/json'}});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='saol14-manual-glyph-facit-expanded-'+out.glyphs.length+'-'+stamp+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}};
 stats();
 </script>
 """
@@ -191,8 +286,11 @@ def main() -> int:
     if not files:
         raise SystemExit("no word-debug JSON files found")
     args.out.write_text(build_html(files, args.facit), encoding="utf-8")
+    facit_html = args.out.parent / "glyph-facit-table.html"
+    facit_html.write_text(build_facit_html(args.facit), encoding="utf-8")
     print(f"debug_files={len(files)}")
     print(args.out)
+    print(f"glyph_facit={facit_html}")
     return 0
 
 
