@@ -7,7 +7,7 @@ from .ocr_exact_glyph_review_queue import _expand_inputs, _raw_baseline_guess
 from . import ocr_exact_glyph_review_queue_v5 as v5
 from .ocr_exact_glyph_review_queue_v6 import build_html as build_html_v6
 from .ocr_glyph_facit_table import build_html as build_facit_html
-from .ocr_glyph_matcher import GlyphModel, load_facit, load_word_debug, select_best_baseline_partition
+from .ocr_glyph_matcher import GlyphModel, Match, load_facit, load_word_debug, select_best_baseline_partition
 
 ACCENTED_TOP = set("åäöÅÄÖ")
 DESCENDER_LABELS = set("gjpqyQ")
@@ -45,12 +45,12 @@ def _style_normal_extents(models: list[GlyphModel], style: str) -> tuple[int, in
     return above, below
 
 
-def _x_span(comp: set[tuple[int, int]]) -> tuple[int, int]:
-    xs = [x for x, _ in comp]
+def _x_span(points: set[tuple[int, int]] | frozenset[tuple[int, int]]) -> tuple[int, int]:
+    xs = [x for x, _ in points]
     return min(xs), max(xs)
 
 
-def _overlap_x(a: set[tuple[int, int]], b: set[tuple[int, int]]) -> bool:
+def _overlap_x(a: set[tuple[int, int]] | frozenset[tuple[int, int]], b: set[tuple[int, int]] | frozenset[tuple[int, int]]) -> bool:
     a0, a1 = _x_span(a)
     b0, b1 = _x_span(b)
     return max(a0, b0) <= min(a1, b1)
@@ -61,31 +61,41 @@ def _trim_neighbor_noise(
     baseline: int,
     models: list[GlyphModel],
     style: str,
-    protected_pixels: set[tuple[int, int]],
+    seed_matches: list[Match],
 ) -> tuple[set[tuple[int, int]], set[tuple[int, int]], tuple[int, int]]:
-    """Remove only detached components that are clearly outside the normal line band.
+    """Remove detached components clearly belonging to neighboring text rows.
 
-    The broad source crop is intentionally kept.  We infer a normal vertical band
-    for the source style from learned glyphs, excluding accented ÅÄÖ/åäö from the
-    upper bound and ordinary descenders from the lower bound.  A component is kept
-    when it intersects that normal band, belongs to an already exact glyph match,
-    or overlaps horizontally with a main-band component (so detached i-dots,
-    rings/dots over unknown å/ä/ö, etc. survive).  Only detached, unprotected
-    components wholly outside the band are removed as likely neighboring-line ink.
+    The crop stays deliberately generous.  Learned ordinary glyphs define a
+    normal vertical band for the current style.  Components intersecting that
+    band are kept.  Components already owned by an exact seed match are kept.
+
+    A detached component outside the band is also kept when it is horizontally
+    aligned with main-line ink *unless* that x-range is already occupied by a
+    complete exact glyph match.  The latter case is strong generic evidence that
+    the detached component belongs to a neighboring row: a recognized glyph does
+    not need extra pixels that are absent from its model.  This removes, for
+    example, stray ink above a known ``g`` while preserving a detached ring above
+    an as-yet unknown ``å``.
     """
     above, below = _style_normal_extents(models, style)
     y0 = baseline - above
     y1 = baseline + below
     comps = _components(ink)
     main = [c for c in comps if any(y0 <= y <= y1 for _, y in c)]
+    protected_pixels = set().union(*(m.pixels for m in seed_matches)) if seed_matches else set()
+    known_spans = [m.pixels for m in seed_matches]
 
     kept: set[tuple[int, int]] = set()
     removed: set[tuple[int, int]] = set()
     for comp in comps:
         intersects_band = comp in main
         protected = bool(comp & protected_pixels)
-        aligned = any(_overlap_x(comp, m) for m in main) if not intersects_band else True
-        if intersects_band or protected or aligned:
+        aligned_main = any(_overlap_x(comp, m) for m in main) if not intersects_band else True
+        aligned_known = any(_overlap_x(comp, pts) for pts in known_spans) if not intersects_band else False
+
+        if intersects_band or protected:
+            kept.update(comp)
+        elif aligned_main and not aligned_known:
             kept.update(comp)
         else:
             removed.update(comp)
@@ -105,8 +115,7 @@ def _analyse_one(path: Path, models: list[GlyphModel]):
         removed: set[tuple[int, int]] = set()
         ext = (0, 0)
     else:
-        protected = set().union(*(m.pixels for m in seed)) if seed else set()
-        cleaned, removed, ext = _trim_neighbor_noise(raw_ink, baseline0, models, style, protected)
+        cleaned, removed, ext = _trim_neighbor_noise(raw_ink, baseline0, models, style, seed)
 
     baseline, shown = select_best_baseline_partition(cleaned, width, height, models)
     if baseline is None:
