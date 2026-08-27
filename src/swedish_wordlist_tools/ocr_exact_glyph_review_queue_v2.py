@@ -18,8 +18,8 @@ def _analyse_one(path: Path, models):
     expected = str(debug.get("expected_word") or debug.get("headword") or "")
     word_style = str(debug.get("style") or (debug.get("card_dataset") or {}).get("style") or "bold")
 
-    # Deliberately match all learned styles freely.  Style belongs to each glyph,
-    # not to the whole word/card.  This also lets mixed-style source rows work
+    # Deliberately match all learned styles freely. Style belongs to each glyph,
+    # not to the whole word/card. This also lets mixed-style source rows work
     # without a separate per-word style mode.
     cover = exact_sequence_cover(ink, width, height, models, expected) if expected else None
     if cover:
@@ -98,7 +98,7 @@ const styleShort={{bold:'b',roman:'r',italic:'i'}};
 
 function parseStyledLabel(raw, fallbackStyle){{
  const s=raw.trim();
- const m=s.match(/^(.*)\{{([bri])\}}$/i);
+ const m=s.match(/^(.*)\\{{([bri])\\}}$/i);
  if(!m)return {{label:s,style:fallbackStyle}};
  const style={{b:'bold',r:'roman',i:'italic'}}[m[2].toLowerCase()];
  return {{label:m[1],style}};
@@ -152,7 +152,7 @@ function esc(s){{return String(s).replace(/[&<>"']/g,c=>({{'&':'&amp;','<':'&lt;
 DATA.rows.forEach(r=>cards.appendChild(renderCard(r)));
 function stats(){{const total=DATA.rows.length,done=DATA.rows.filter(r=>r.fully_exact).length;document.getElementById('stats').textContent=' · '+done+'/'+total+' helt exakta · '+(total-done)+' att granska · '+additions.length+' nya varianter';}}
 document.getElementById('showDone').onchange=e=>document.querySelectorAll('.card.done').forEach(c=>c.style.display=e.target.checked?'block':'none');
-document.getElementById('save').onclick=()=>{{const out=structuredClone(DATA.facit);out.glyphs.push(...additions);out.glyphs.sort((a,b)=>a.style.localeCompare(b.style)||a.label.localeCompare(b.label)||JSON.stringify(a.pixels_relative_to_baseline).localeCompare(JSON.stringify(b.pixels_relative_to_baseline)));const stamp=new Date().toISOString().replace(/[-:]/g,'').replace(/\.\d{{3}}Z$/,'Z');const name='saol14-manual-glyph-facit-expanded-'+out.glyphs.length+'-'+stamp+'.json';const blob=new Blob([JSON.stringify(out,null,2)+'\\n'],{{type:'application/json'}});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}};
+document.getElementById('save').onclick=()=>{{const out=structuredClone(DATA.facit);out.glyphs.push(...additions);out.glyphs.sort((a,b)=>a.style.localeCompare(b.style)||a.label.localeCompare(b.label)||JSON.stringify(a.pixels_relative_to_baseline).localeCompare(JSON.stringify(b.pixels_relative_to_baseline)));const stamp=new Date().toISOString().replace(/[-:]/g,'').replace(/\\.\\d{{3}}Z$/,'Z');const name='saol14-manual-glyph-facit-expanded-'+out.glyphs.length+'-'+stamp+'.json';const blob=new Blob([JSON.stringify(out,null,2)+'\\n'],{{type:'application/json'}});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}};
 stats();
 </script>"""
 
