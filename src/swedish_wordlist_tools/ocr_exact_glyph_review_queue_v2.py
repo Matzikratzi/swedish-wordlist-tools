@@ -10,15 +10,18 @@ from .ocr_glyph_facit_table import build_html as build_facit_html
 from .ocr_glyph_matcher import exact_matches, exact_sequence_cover, load_facit, load_word_debug
 
 VALID_STYLES = {"bold", "roman", "italic"}
+STYLE_SHORT = {"bold": "b", "roman": "r", "italic": "i"}
 
 
 def _analyse_one(path: Path, models):
     ink, width, height, debug = load_word_debug(path)
     expected = str(debug.get("expected_word") or debug.get("headword") or "")
     word_style = str(debug.get("style") or (debug.get("card_dataset") or {}).get("style") or "bold")
-    styles = {word_style} if word_style in VALID_STYLES else None
 
-    cover = exact_sequence_cover(ink, width, height, models, expected, styles=styles) if expected else None
+    # Deliberately match all learned styles freely.  Style belongs to each glyph,
+    # not to the whole word/card.  This also lets mixed-style source rows work
+    # without a separate per-word style mode.
+    cover = exact_sequence_cover(ink, width, height, models, expected) if expected else None
     if cover:
         baseline = cover[0].baseline
         shown = cover
@@ -30,7 +33,7 @@ def _analyse_one(path: Path, models):
             shown = []
         else:
             shown = _expected_partial(
-                exact_matches(ink, width, height, models, styles=styles, baseline_only=baseline),
+                exact_matches(ink, width, height, models, baseline_only=baseline),
                 expected,
             )
 
@@ -74,15 +77,16 @@ body{{font-family:system-ui,sans-serif;margin:18px;background:#f4f4f4;color:#111
 .top{{position:sticky;top:0;z-index:5;background:white;border:1px solid #bbb;padding:10px;margin-bottom:14px}}
 .card{{background:white;border:1px solid #bbb;padding:12px;margin:12px 0}} .card.done{{display:none}}
 canvas{{image-rendering:pixelated;border:1px solid #888;background:white;display:block;margin:8px 0;cursor:crosshair}}
-.controls{{display:flex;gap:8px;align-items:center;flex-wrap:wrap}} input,select,button{{font:inherit;padding:5px}}
+.controls{{display:flex;gap:8px;align-items:center;flex-wrap:wrap}} input,button{{font:inherit;padding:5px}}
 .meta{{color:#555;font-size:.92em}} .ok{{color:#075}} .warn{{color:#a40}} .added{{background:#efe}} .note{{color:#765;font-size:.9em}}
+code{{background:#eee;padding:1px 4px;border-radius:3px}}
 </style>
 <div class='top'>
 <b>SAOL – exakta glyphar</b> <span id='stats'></span>
 <label><input type='checkbox' id='showDone'> Visa även helt exakta ord</label>
 <button id='save'>Spara uppdaterat facit</button>
 <a href='glyph-facit-table.html' target='_blank'>Glyphfacit</a>
-<div><small>Automatiska träffar måste vara 100 % exakta och ha rätt stil. Dra en box för en ny glyph. <b>Alt-dra</b> tar bort svarta pixlar ur markeringen, <b>Shift-dra</b> lägger till dem. Den gröna pixelmängden är exakt det som sparas.</small></div>
+<div><small>Automatiska träffar söker fritt bland alla stilar men måste vara 100 % exakta och ligga i rätt ordningsföljd. Vid manuell märkning skriv stil i etiketten: <code>f{{i}}</code> kursiv, <code>f{{r}}</code> roman, <code>f{{b}}</code> fet. Alt-dra tar bort pixlar; Shift-dra lägger tillbaka dem.</small></div>
 </div><div id='cards'></div>
 <script>
 const DATA={data}; const SCALE=14,M=2; let additions=[];
@@ -90,10 +94,20 @@ const cards=document.getElementById('cards');
 const keyOf=g=>JSON.stringify([g.label,g.style,g.pixels_relative_to_baseline]);
 const known=new Set(DATA.facit.glyphs.map(keyOf));
 const pkey=(x,y)=>x+','+y;
+const styleShort={{bold:'b',roman:'r',italic:'i'}};
+
+function parseStyledLabel(raw, fallbackStyle){{
+ const s=raw.trim();
+ const m=s.match(/^(.*)\{{([bri])\}}$/i);
+ if(!m)return {{label:s,style:fallbackStyle}};
+ const style={{b:'bold',r:'roman',i:'italic'}}[m[2].toLowerCase()];
+ return {{label:m[1],style}};
+}}
+function styledLabel(label,style){{return label+'{{'+(styleShort[style]||'?')+'}}';}}
 
 function renderCard(row){{
  const d=document.createElement('div'); d.className='card'+(row.fully_exact?' done':'');
- d.innerHTML='<b>'+esc(row.expected)+'</b> <span class="meta">sida '+(row.page??'')+' · '+(row.fully_exact?'<span class="ok">helt exakt</span>':'<span class="warn">ofullständig</span>')+' · stil '+esc(row.style)+'</span>';
+ d.innerHTML='<b>'+esc(row.expected)+'</b> <span class="meta">sida '+(row.page??'')+' · '+(row.fully_exact?'<span class="ok">helt exakt</span>':'<span class="warn">ofullständig</span>')+'</span>';
  let baseline=Number.isInteger(row.baseline)?row.baseline:Math.max(0,row.height-2), manual=false;
  const info=document.createElement('div'); info.className='meta'; d.appendChild(info);
  const note=document.createElement('div'); note.className='note'; note.textContent='Dra den röda stödlinjen vid behov.'; d.appendChild(note);
@@ -102,7 +116,7 @@ function renderCard(row){{
  const exactSet=new Set(); for(const m of row.exact)for(const [x,y] of m.pixels)exactSet.add(pkey(x,y));
  let rect=null, dragRect=false, dragBaseline=false, pixelMode=null; const selected=new Set();
  const baseY=()=> (baseline+1+M)*SCALE;
- function updateInfo(){{info.textContent='Baseline: '+baseline+(manual?' (manuell)':' ('+row.baseline_source+')')+' · perfekta glyphar: '+row.exact.map(m=>m.label+'@'+m.x).join('  ');}}
+ function updateInfo(){{info.textContent='Baseline: '+baseline+(manual?' (manuell)':' ('+row.baseline_source+')')+' · perfekta glyphar: '+row.exact.map(m=>styledLabel(m.label,m.style)+'@'+m.x).join('  ');}}
  function draw(){{
   ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);ctx.strokeStyle='#e4e4e4';ctx.lineWidth=1;
   for(let x=0;x<=row.width+2*M;x++){{let xx=x*SCALE+.5;ctx.beginPath();ctx.moveTo(xx,0);ctx.lineTo(xx,c.height);ctx.stroke();}}
@@ -117,10 +131,21 @@ function renderCard(row){{
  c.onmousedown=e=>{{const p=pt(e);if(e.altKey||e.shiftKey){{pixelMode=e.altKey?'remove':'add';editPixel(p,pixelMode);draw();return;}}if(Math.abs(p.cy-baseY())<=Math.max(6,SCALE/2)){{dragBaseline=true;rect=null;selected.clear();draw();return;}}dragRect=true;rect={{x0:p.x,y0:p.y,x1:p.x,y1:p.y}};selected.clear();draw();}};
  c.onmousemove=e=>{{const p=pt(e);if(pixelMode){{editPixel(p,pixelMode);draw();return;}}if(dragBaseline){{baseline=Math.max(0,Math.min(row.height-1,Math.round(p.cy/SCALE-M-1)));manual=true;updateInfo();draw();return;}}if(dragRect){{rect.x1=p.x;rect.y1=p.y;draw();}}}};
  c.onmouseup=()=>{{if(dragRect)fillRectSelection();dragRect=false;dragBaseline=false;pixelMode=null;draw();}}; c.onmouseleave=()=>{{if(dragRect)fillRectSelection();dragRect=false;dragBaseline=false;pixelMode=null;draw();}};
- const ctrl=document.createElement('div');ctrl.className='controls';ctrl.innerHTML='<label>Etikett <input class="label" size="6"></label><label>Stil <select class="style"><option>bold</option><option>roman</option><option>italic</option></select></label><button class="add">Lägg till markerad variant</button><button class="clear">Rensa markering</button><span class="msg"></span>';d.appendChild(ctrl);
- const style=ctrl.querySelector('.style');style.value=['bold','roman','italic'].includes(row.style)?row.style:'bold';
+ const ctrl=document.createElement('div');ctrl.className='controls';ctrl.innerHTML='<label>Etikett <input class="label" size="10" placeholder="f{{i}}"></label><button class="add">Lägg till markerad variant</button><button class="clear">Rensa markering</button><span class="msg"></span>';d.appendChild(ctrl);
+ const labelInput=ctrl.querySelector('.label');
  ctrl.querySelector('.clear').onclick=()=>{{selected.clear();rect=null;draw();}};
- ctrl.querySelector('.add').onclick=()=>{{const label=ctrl.querySelector('.label').value.trim();if(!label||!selected.size){{ctrl.querySelector('.msg').textContent='Markera pixlar och skriv etikett.';return;}}const pts=[...selected].map(k=>k.split(',').map(Number));const minx=Math.min(...pts.map(p=>p[0]));const rel=pts.map(([x,y])=>[x-minx,y-baseline]).sort((a,b)=>a[0]-b[0]||a[1]-b[1]);const g={{label,style:style.value,pixels_relative_to_baseline:rel,sources:[row.source]}};const k=keyOf(g);if(known.has(k)||additions.some(a=>keyOf(a)===k)){{ctrl.querySelector('.msg').textContent='Den varianten finns redan.';return;}}additions.push(g);ctrl.querySelector('.msg').textContent='Tillagd: '+label+' '+style.value+' ('+rel.length+' pixlar).';d.classList.add('added');stats();}};
+ ctrl.querySelector('.add').onclick=()=>{{
+   const parsed=parseStyledLabel(labelInput.value,row.style);
+   const label=parsed.label, style=parsed.style;
+   if(!label||!selected.size){{ctrl.querySelector('.msg').textContent='Markera pixlar och skriv etikett, t.ex. f{{i}}.';return;}}
+   const pts=[...selected].map(k=>k.split(',').map(Number));
+   const minx=Math.min(...pts.map(p=>p[0]));
+   const rel=pts.map(([x,y])=>[x-minx,y-baseline]).sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
+   const g={{label,style,pixels_relative_to_baseline:rel,sources:[row.source]}};
+   const k=keyOf(g);
+   if(known.has(k)||additions.some(a=>keyOf(a)===k)){{ctrl.querySelector('.msg').textContent='Den varianten finns redan.';return;}}
+   additions.push(g);ctrl.querySelector('.msg').textContent='Tillagd: '+styledLabel(label,style)+' ('+rel.length+' pixlar).';d.classList.add('added');stats();
+ }};
  updateInfo();draw();return d;
 }}
 function esc(s){{return String(s).replace(/[&<>"']/g,c=>({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[c]));}}
@@ -133,7 +158,7 @@ stats();
 
 
 def main() -> int:
-    ap=argparse.ArgumentParser(description="Review exact SAOL glyphs with pixel-refinable manual selection.")
+    ap=argparse.ArgumentParser(description="Review exact SAOL glyphs with per-glyph style labels and pixel-refinable manual selection.")
     ap.add_argument("inputs",nargs="+",type=Path)
     ap.add_argument("--facit",type=Path,default=Path("glyphs/saol14-manual-glyph-facit.json"))
     ap.add_argument("--out",type=Path,required=True)
