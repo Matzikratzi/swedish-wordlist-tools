@@ -88,12 +88,11 @@ def exact_matches(
     styles: set[str] | None = None,
     baseline_only: int | None = None,
 ) -> list[Match]:
-    """Return pixel-perfect placements of learned glyph models.
+    """Return all pixel-perfect placements of learned glyph models.
 
-    A model is exact when every one of its pixels lands on source ink.  Other
-    source pixels may exist inside the same x span: neighbouring glyphs can
-    overlap horizontally (especially italic glyphs) without sharing actual
-    black pixels.  Pixel ownership is resolved later when matches are combined.
+    Exact means every model pixel lands on source ink. Neighbouring glyphs may
+    overlap in x, which is required for italic type, but selected glyphs may not
+    share actual black pixels. That ownership decision is made later.
     """
     out: list[Match] = []
     for model in models:
@@ -126,19 +125,101 @@ def exact_matches(
     return out
 
 
-def select_non_overlapping_exact(matches: Iterable[Match]) -> list[Match]:
-    ranked = sorted(
-        matches,
-        key=lambda m: (-m.score, -m.model_pixels, -m.sources, m.x, m.baseline, m.label, m.style),
+def _partition_key(matches: Iterable[Match]) -> tuple[int, int, int, int]:
+    rows = list(matches)
+    return (
+        sum(m.model_pixels for m in rows),
+        sum(m.model_pixels * m.model_pixels for m in rows),
+        sum(m.sources for m in rows),
+        -len(rows),
     )
-    occupied: set[tuple[int, int]] = set()
-    chosen: list[Match] = []
-    for m in ranked:
-        if occupied.intersection(m.pixels):
-            continue
-        chosen.append(m)
-        occupied.update(m.pixels)
-    return sorted(chosen, key=lambda m: (m.x, m.baseline, m.label, m.style))
+
+
+def select_best_disjoint_exact(matches: Iterable[Match], *, beam_width: int = 512) -> list[Match]:
+    """Choose the best pixel-disjoint set of exact glyph placements.
+
+    The objective is deliberately generic OCR geometry, with no knowledge of the
+    expected word:
+
+    1. explain as many source pixels as possible;
+    2. for equal coverage, prefer larger whole glyphs over mosaics of fragments
+       via sum(pixel_count**2);
+    3. then prefer better-supported facit models;
+    4. then fewer glyphs.
+
+    A bounded beam keeps the search practical even when tiny models generate many
+    exact submatches. The state itself contains only pixel ownership and chosen
+    model placements; there are no word-specific exceptions.
+    """
+    rows = sorted(
+        matches,
+        key=lambda m: (-m.model_pixels, -m.score, -m.sources, m.x, m.label, m.style),
+    )
+    # state = (chosen tuple, occupied frozenset)
+    states: list[tuple[tuple[Match, ...], frozenset[tuple[int, int]]]] = [((), frozenset())]
+    for m in rows:
+        expanded = list(states)
+        for chosen, occupied in states:
+            if occupied.intersection(m.pixels):
+                continue
+            expanded.append((chosen + (m,), frozenset(set(occupied) | set(m.pixels))))
+
+        # Collapse states with identical pixel ownership, keeping the strongest
+        # decomposition of those pixels. This is especially important when a
+        # whole glyph and several small fragments cover the same raster.
+        best_by_occupied: dict[frozenset[tuple[int, int]], tuple[Match, ...]] = {}
+        for chosen, occupied in expanded:
+            previous = best_by_occupied.get(occupied)
+            if previous is None or _partition_key(chosen) > _partition_key(previous):
+                best_by_occupied[occupied] = chosen
+        ranked = sorted(
+            ((chosen, occupied) for occupied, chosen in best_by_occupied.items()),
+            key=lambda state: _partition_key(state[0]),
+            reverse=True,
+        )
+        states = ranked[:beam_width]
+
+    best = max(states, key=lambda state: _partition_key(state[0]))[0] if states else ()
+    return sorted(best, key=lambda m: (m.x, m.baseline, m.label, m.style))
+
+
+def select_best_baseline_partition(
+    ink: set[tuple[int, int]],
+    width: int,
+    height: int,
+    models: Iterable[GlyphModel],
+    *,
+    beam_width: int = 512,
+) -> tuple[int | None, list[Match]]:
+    """Find the support baseline and exact glyph partition jointly.
+
+    Every glyph in a word uses one common support baseline. We therefore evaluate
+    each baseline implied by any exact model placement and choose the baseline
+    whose best pixel-disjoint glyph set has the strongest generic OCR objective.
+    """
+    all_matches = exact_matches(ink, width, height, models)
+    if not all_matches:
+        return None, []
+    by_baseline: dict[int, list[Match]] = {}
+    for m in all_matches:
+        by_baseline.setdefault(m.baseline, []).append(m)
+
+    best_baseline: int | None = None
+    best_rows: list[Match] = []
+    best_key: tuple[int, int, int, int] | None = None
+    for baseline, candidates in sorted(by_baseline.items()):
+        selected = select_best_disjoint_exact(candidates, beam_width=beam_width)
+        key = _partition_key(selected)
+        if best_key is None or key > best_key:
+            best_key = key
+            best_baseline = baseline
+            best_rows = selected
+    return best_baseline, best_rows
+
+
+def select_non_overlapping_exact(matches: Iterable[Match]) -> list[Match]:
+    """Compatibility wrapper: use the generic best-disjoint selector."""
+    return select_best_disjoint_exact(matches)
 
 
 def exact_sequence_cover(
@@ -150,12 +231,10 @@ def exact_sequence_cover(
     *,
     styles: set[str] | None = None,
 ) -> list[Match] | None:
-    """Return an exact ordered cover whose labels concatenate to expected.
+    """Legacy diagnostic helper using an expected transcription.
 
-    Every selected glyph must imply the same support baseline for the whole word.
-    Multi-character models such as ``tt`` are valid alternatives to separate
-    ``t`` + ``t`` models.  Horizontal bounding boxes may overlap, but selected
-    glyphs may never share an actual source pixel.
+    The OCR reviewer no longer uses this function for recognition; it remains
+    available only for comparisons/tests against a known transcription.
     """
     if not expected:
         return None
@@ -171,12 +250,7 @@ def exact_sequence_cover(
     target = frozenset(ink)
     seen: set[tuple[int, int, int | None, frozenset[tuple[int, int]]]] = set()
 
-    def dfs(
-        pos: int,
-        min_anchor_x: int,
-        word_baseline: int | None,
-        used: frozenset[tuple[int, int]],
-    ) -> list[Match] | None:
+    def dfs(pos: int, min_anchor_x: int, word_baseline: int | None, used: frozenset[tuple[int, int]]) -> list[Match] | None:
         state = (pos, min_anchor_x, word_baseline, used)
         if state in seen:
             return None
@@ -189,11 +263,6 @@ def exact_sequence_cover(
             if word_baseline is not None and m.baseline != word_baseline:
                 continue
             if used.intersection(m.pixels):
-                continue
-            # Do not jump past wholly unexplained ink.  X-overlap is allowed, so
-            # ordering follows glyph anchors rather than right bounding edges.
-            left_unexplained = any(x < m.x and (x, y) not in used for x, y in ink)
-            if left_unexplained:
                 continue
             new_used = frozenset(set(used) | set(m.pixels))
             baseline = m.baseline if word_baseline is None else word_baseline
@@ -242,25 +311,23 @@ def model_inventory(models: Iterable[GlyphModel]) -> dict[str, dict[str, int]]:
 
 
 def analyse(ink: set[tuple[int, int]], width: int, height: int, models: list[GlyphModel], expected: str | None = None) -> dict[str, Any]:
-    exact = exact_matches(ink, width, height, models)
-    seed_selected = select_non_overlapping_exact(exact)
-    votes = baseline_votes(seed_selected)
-    baseline = choose_baseline(seed_selected)
-    cover = exact_sequence_cover(ink, width, height, models, expected) if expected else None
+    baseline, selected = select_best_baseline_partition(ink, width, height, models)
+    covered = set().union(*(m.pixels for m in selected)) if selected else set()
     return {
         "baseline": baseline,
-        "baseline_votes": dict(sorted(votes.items())),
-        "exact_candidates": len(exact),
-        "seed_selected_exact": _rows(seed_selected),
-        "exact_sequence_cover": _rows(cover or []),
-        "fully_exact": cover is not None,
-        "selected_exact": _rows(cover or seed_selected),
+        "exact_candidates": len(exact_matches(ink, width, height, models)),
+        "selected_exact": _rows(selected),
+        "covered_pixels": len(covered),
+        "source_pixels": len(ink),
+        "fully_exact": covered == ink,
+        "recognized": "".join(m.label for m in selected),
+        "expected_word": expected,
         "fuzzy_diagnostics": [],
     }
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Minimal SAOL glyph matcher: exact glyphs only; one support baseline per word.")
+    ap = argparse.ArgumentParser(description="Minimal SAOL glyph OCR: exact models, one support baseline, maximum raster coverage.")
     ap.add_argument("word_debug", type=Path)
     ap.add_argument("--facit", type=Path, default=Path("glyphs/saol14-manual-glyph-facit.json"))
     ap.add_argument("--out", type=Path)
@@ -274,8 +341,7 @@ def main() -> int:
     expected_labels = sorted(set(expected))
     result.update(
         {
-            "format": "saol14-minimal-glyph-match-v8",
-            "expected_word": debug.get("expected_word"),
+            "format": "saol14-minimal-glyph-match-v9",
             "headword": debug.get("headword"),
             "page": debug.get("page"),
             "subnr": debug.get("subnr"),
