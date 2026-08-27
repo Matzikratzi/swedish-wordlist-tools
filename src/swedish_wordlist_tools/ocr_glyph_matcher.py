@@ -9,7 +9,6 @@ from typing import Any, Iterable
 
 FACIT_FORMAT = "saol14-manual-glyph-facit-v1"
 DEBUG_FORMAT = "saol14-word-debug-v1"
-TINY_FRAGMENT_LABELS = frozenset({".", "·", "-", ",", "¤", "|"})
 
 
 @dataclass(frozen=True)
@@ -80,8 +79,14 @@ def load_word_debug(path: Path) -> tuple[set[tuple[int, int]], int, int, dict[st
     return ink, int(payload["width"]), int(payload["height"]), payload
 
 
-def _bbox_pixels(ink: set[tuple[int, int]], x0: int, x1: int, y0: int, y1: int) -> set[tuple[int, int]]:
-    return {(x, y) for x, y in ink if x0 <= x <= x1 and y0 <= y <= y1}
+def _vertical_strip_pixels(ink: set[tuple[int, int]], x0: int, x1: int) -> set[tuple[int, int]]:
+    """All source ink in the candidate glyph's x span, at every y.
+
+    A perfect glyph must own the full source raster in its horizontal span.
+    This prevents a small model from matching only the middle/top/bottom of a
+    larger glyph while ignoring extra black pixels outside the model's height.
+    """
+    return {(x, y) for x, y in ink if x0 <= x <= x1}
 
 
 def exact_matches(
@@ -101,6 +106,7 @@ def exact_matches(
         if mw > width:
             continue
         for x0 in range(0, width - mw + 1):
+            source_strip = _vertical_strip_pixels(ink, x0, x0 + mw - 1)
             b_lo = -model.min_y
             b_hi = height - 1 - model.max_y
             baselines = (baseline_only,) if baseline_only is not None else range(b_lo, b_hi + 1)
@@ -108,12 +114,10 @@ def exact_matches(
                 if baseline < b_lo or baseline > b_hi:
                     continue
                 placed = frozenset((x0 + x, baseline + y) for x, y in model.pixels)
-                if not placed.issubset(ink):
-                    continue
-                y0 = baseline + model.min_y
-                y1 = baseline + model.max_y
-                box = _bbox_pixels(ink, x0, x0 + mw - 1, y0, y1)
-                if box != set(placed):
+                # Perfect means exactly perfect: every model pixel is black and
+                # there is no additional black source pixel anywhere above or
+                # below it inside the glyph's horizontal span.
+                if source_strip != set(placed):
                     continue
                 out.append(
                     Match(
@@ -190,7 +194,6 @@ def exact_sequence_cover(
                 continue
             if used.intersection(m.pixels):
                 continue
-            # Do not skip unexplained ink to the left of the next candidate.
             left_unexplained = any(x < m.x and (x, y) not in used for x, y in ink)
             if left_unexplained:
                 continue
@@ -273,7 +276,7 @@ def main() -> int:
     expected_labels = sorted(set(expected))
     result.update(
         {
-            "format": "saol14-minimal-glyph-match-v5",
+            "format": "saol14-minimal-glyph-match-v6",
             "expected_word": debug.get("expected_word"),
             "headword": debug.get("headword"),
             "page": debug.get("page"),
