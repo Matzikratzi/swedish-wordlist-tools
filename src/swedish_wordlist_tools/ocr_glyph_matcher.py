@@ -79,10 +79,6 @@ def load_word_debug(path: Path) -> tuple[set[tuple[int, int]], int, int, dict[st
     return ink, int(payload["width"]), int(payload["height"]), payload
 
 
-def _vertical_strip_pixels(ink: set[tuple[int, int]], x0: int, x1: int) -> set[tuple[int, int]]:
-    return {(x, y) for x, y in ink if x0 <= x <= x1}
-
-
 def exact_matches(
     ink: set[tuple[int, int]],
     width: int,
@@ -92,6 +88,13 @@ def exact_matches(
     styles: set[str] | None = None,
     baseline_only: int | None = None,
 ) -> list[Match]:
+    """Return pixel-perfect placements of learned glyph models.
+
+    A model is exact when every one of its pixels lands on source ink.  Other
+    source pixels may exist inside the same x span: neighbouring glyphs can
+    overlap horizontally (especially italic glyphs) without sharing actual
+    black pixels.  Pixel ownership is resolved later when matches are combined.
+    """
     out: list[Match] = []
     for model in models:
         if styles is not None and model.style not in styles:
@@ -100,7 +103,6 @@ def exact_matches(
         if mw > width:
             continue
         for x0 in range(0, width - mw + 1):
-            source_strip = _vertical_strip_pixels(ink, x0, x0 + mw - 1)
             b_lo = -model.min_y
             b_hi = height - 1 - model.max_y
             baselines = (baseline_only,) if baseline_only is not None else range(b_lo, b_hi + 1)
@@ -108,7 +110,7 @@ def exact_matches(
                 if baseline < b_lo or baseline > b_hi:
                     continue
                 placed = frozenset((x0 + x, baseline + y) for x, y in model.pixels)
-                if source_strip != set(placed):
+                if not placed.issubset(ink):
                     continue
                 out.append(
                     Match(
@@ -148,12 +150,12 @@ def exact_sequence_cover(
     *,
     styles: set[str] | None = None,
 ) -> list[Match] | None:
-    """Return an exact left-to-right cover whose labels concatenate to expected.
+    """Return an exact ordered cover whose labels concatenate to expected.
 
     Every selected glyph must imply the same support baseline for the whole word.
     Multi-character models such as ``tt`` are valid alternatives to separate
-    ``t`` + ``t`` models.  If ``styles`` is supplied, only those stored styles
-    may participate in the cover.
+    ``t`` + ``t`` models.  Horizontal bounding boxes may overlap, but selected
+    glyphs may never share an actual source pixel.
     """
     if not expected:
         return None
@@ -171,29 +173,31 @@ def exact_sequence_cover(
 
     def dfs(
         pos: int,
-        min_x: int,
+        min_anchor_x: int,
         word_baseline: int | None,
         used: frozenset[tuple[int, int]],
     ) -> list[Match] | None:
-        state = (pos, min_x, word_baseline, used)
+        state = (pos, min_anchor_x, word_baseline, used)
         if state in seen:
             return None
         seen.add(state)
         if pos == len(expected):
             return [] if used == target else None
         for m in by_pos.get(pos, []):
-            if m.x < min_x:
+            if m.x < min_anchor_x:
                 continue
             if word_baseline is not None and m.baseline != word_baseline:
                 continue
             if used.intersection(m.pixels):
                 continue
+            # Do not jump past wholly unexplained ink.  X-overlap is allowed, so
+            # ordering follows glyph anchors rather than right bounding edges.
             left_unexplained = any(x < m.x and (x, y) not in used for x, y in ink)
             if left_unexplained:
                 continue
             new_used = frozenset(set(used) | set(m.pixels))
             baseline = m.baseline if word_baseline is None else word_baseline
-            tail = dfs(pos + len(m.label), m.x1 + 1, baseline, new_used)
+            tail = dfs(pos + len(m.label), m.x + 1, baseline, new_used)
             if tail is not None:
                 return [m] + tail
         return None
@@ -270,7 +274,7 @@ def main() -> int:
     expected_labels = sorted(set(expected))
     result.update(
         {
-            "format": "saol14-minimal-glyph-match-v7",
+            "format": "saol14-minimal-glyph-match-v8",
             "expected_word": debug.get("expected_word"),
             "headword": debug.get("headword"),
             "page": debug.get("page"),
