@@ -47,6 +47,10 @@ class Match:
     def score(self) -> float:
         return float(self.model_pixels * self.model_pixels)
 
+    @property
+    def x1(self) -> int:
+        return max(x for x, _ in self.pixels)
+
 
 def load_facit(path: Path) -> list[GlyphModel]:
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -139,32 +143,6 @@ def exact_matches(
     return out
 
 
-def reject_embedded_tiny(matches: Iterable[Match], ink: set[tuple[int, int]]) -> list[Match]:
-    out: list[Match] = []
-    cache: dict[tuple[int, int], set[tuple[int, int]]] = {}
-    for m in matches:
-        if m.label not in TINY_FRAGMENT_LABELS:
-            out.append(m)
-            continue
-        comps: list[set[tuple[int, int]]] = []
-        seen_ids: set[frozenset[tuple[int, int]]] = set()
-        for p in m.pixels:
-            comp = cache.get(p)
-            if comp is None:
-                comp = _component(ink, p)
-                for q in comp:
-                    cache[q] = comp
-            key = frozenset(comp)
-            if key not in seen_ids:
-                seen_ids.add(key)
-                comps.append(comp)
-        union = set().union(*comps) if comps else set()
-        if union and m.pixels.issubset(union) and len(union) >= m.model_pixels + 6:
-            continue
-        out.append(m)
-    return out
-
-
 def select_non_overlapping_exact(matches: Iterable[Match]) -> list[Match]:
     ranked = sorted(
         matches,
@@ -178,6 +156,58 @@ def select_non_overlapping_exact(matches: Iterable[Match]) -> list[Match]:
         chosen.append(m)
         occupied.update(m.pixels)
     return sorted(chosen, key=lambda m: (m.x, m.baseline, m.label, m.style))
+
+
+def exact_sequence_cover(
+    ink: set[tuple[int, int]],
+    width: int,
+    height: int,
+    models: list[GlyphModel],
+    expected: str,
+) -> list[Match] | None:
+    """Return an exact left-to-right cover whose labels concatenate to expected.
+
+    Baseline is deliberately local to each glyph. A later part of a word may be
+    shifted vertically and still be an exact cover. Multi-character models such
+    as ``tt`` are valid alternatives to separate ``t`` + ``t`` models.
+    """
+    if not expected:
+        return None
+    candidates = exact_matches(ink, width, height, models)
+    by_pos: dict[int, list[Match]] = {i: [] for i in range(len(expected))}
+    for m in candidates:
+        for pos in range(len(expected)):
+            if expected.startswith(m.label, pos):
+                by_pos[pos].append(m)
+    for rows in by_pos.values():
+        rows.sort(key=lambda m: (m.x, -len(m.label), -m.model_pixels, -m.sources, m.baseline, m.style))
+
+    target = frozenset(ink)
+    seen: set[tuple[int, int, frozenset[tuple[int, int]]]] = set()
+
+    def dfs(pos: int, min_x: int, used: frozenset[tuple[int, int]]) -> list[Match] | None:
+        state = (pos, min_x, used)
+        if state in seen:
+            return None
+        seen.add(state)
+        if pos == len(expected):
+            return [] if used == target else None
+        for m in by_pos.get(pos, []):
+            if m.x < min_x:
+                continue
+            if used.intersection(m.pixels):
+                continue
+            # Do not skip unexplained ink to the left of the next candidate.
+            left_unexplained = any(x < m.x and (x, y) not in used for x, y in ink)
+            if left_unexplained:
+                continue
+            new_used = frozenset(set(used) | set(m.pixels))
+            tail = dfs(pos + len(m.label), m.x1 + 1, new_used)
+            if tail is not None:
+                return [m] + tail
+        return None
+
+    return dfs(0, 0, frozenset())
 
 
 def baseline_votes(matches: Iterable[Match]) -> Counter[int]:
@@ -216,108 +246,26 @@ def model_inventory(models: Iterable[GlyphModel]) -> dict[str, dict[str, int]]:
     return {label: dict(sorted(styles.items())) for label, styles in sorted(out.items())}
 
 
-def fuzzy_diagnostics(
-    ink: set[tuple[int, int]],
-    width: int,
-    height: int,
-    models: Iterable[GlyphModel],
-    baseline: int,
-    occupied: set[tuple[int, int]],
-    *,
-    limit: int = 20,
-) -> list[dict[str, Any]]:
-    """Report near matches on the chosen baseline without selecting them.
-
-    This is diagnostic only. It intentionally does not alter the exact result.
-    Candidates must explain at least half of their model pixels and at least half
-    of their matched pixels must lie outside already-selected exact glyphs.
-    """
-    rows: list[dict[str, Any]] = []
-    for model in models:
-        mw = model.width
-        if mw > width:
-            continue
-        y0 = baseline + model.min_y
-        y1 = baseline + model.max_y
-        if y0 < 0 or y1 >= height:
-            continue
-        for x0 in range(0, width - mw + 1):
-            placed = {(x0 + x, baseline + y) for x, y in model.pixels}
-            matched_set = placed & ink
-            matched = len(matched_set)
-            if matched == 0:
-                continue
-            missing = len(placed - ink)
-            box = _bbox_pixels(ink, x0, x0 + mw - 1, y0, y1)
-            extra = len(box - placed)
-            model_n = len(model.pixels)
-            coverage = matched / model_n
-            union_n = matched + missing + extra
-            quality = matched / union_n if union_n else 0.0
-            unexplained_matched = len(matched_set - occupied)
-            if coverage < 0.50 or unexplained_matched < max(1, matched // 2):
-                continue
-            rows.append(
-                {
-                    "label": model.label,
-                    "style": model.style,
-                    "x": x0,
-                    "baseline": baseline,
-                    "model_pixels": model_n,
-                    "matched": matched,
-                    "missing": missing,
-                    "extra": extra,
-                    "coverage": round(coverage, 4),
-                    "quality": round(quality, 4),
-                    "unexplained_matched": unexplained_matched,
-                    "sources": model.sources,
-                }
-            )
-    rows.sort(
-        key=lambda r: (
-            -r["quality"],
-            -r["coverage"],
-            r["missing"] + r["extra"],
-            -r["model_pixels"],
-            -r["sources"],
-            r["x"],
-            r["label"],
-            r["style"],
-        )
-    )
-    return rows[:limit]
-
-
-def analyse(ink: set[tuple[int, int]], width: int, height: int, models: list[GlyphModel]) -> dict[str, Any]:
+def analyse(ink: set[tuple[int, int]], width: int, height: int, models: list[GlyphModel], expected: str | None = None) -> dict[str, Any]:
     exact = exact_matches(ink, width, height, models)
     seed_selected = select_non_overlapping_exact(exact)
     votes = baseline_votes(seed_selected)
     baseline = choose_baseline(seed_selected)
-
-    if baseline is None:
-        baseline_exact: list[Match] = []
-        final_selected: list[Match] = []
-        fuzzy: list[dict[str, Any]] = []
-    else:
-        baseline_exact = exact_matches(ink, width, height, models, baseline_only=baseline)
-        baseline_exact = reject_embedded_tiny(baseline_exact, ink)
-        final_selected = select_non_overlapping_exact(baseline_exact)
-        occupied = set().union(*(m.pixels for m in final_selected)) if final_selected else set()
-        fuzzy = fuzzy_diagnostics(ink, width, height, models, baseline, occupied)
-
+    cover = exact_sequence_cover(ink, width, height, models, expected) if expected else None
     return {
         "baseline": baseline,
         "baseline_votes": dict(sorted(votes.items())),
         "exact_candidates": len(exact),
         "seed_selected_exact": _rows(seed_selected),
-        "baseline_exact_candidates": len(baseline_exact),
-        "selected_exact": _rows(final_selected),
-        "fuzzy_diagnostics": fuzzy,
+        "exact_sequence_cover": _rows(cover or []),
+        "fully_exact": cover is not None,
+        "selected_exact": _rows(cover or seed_selected),
+        "fuzzy_diagnostics": [],
     }
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Minimal SAOL glyph matcher: exact whole-glyph matches first, baseline inferred from them.")
+    ap = argparse.ArgumentParser(description="Minimal SAOL glyph matcher: exact glyphs only; local baselines allowed.")
     ap.add_argument("word_debug", type=Path)
     ap.add_argument("--facit", type=Path, default=Path("glyphs/saol14-manual-glyph-facit.json"))
     ap.add_argument("--out", type=Path)
@@ -325,13 +273,13 @@ def main() -> int:
 
     ink, width, height, debug = load_word_debug(args.word_debug)
     models = load_facit(args.facit)
-    result = analyse(ink, width, height, models)
     expected = str(debug.get("expected_word") or "")
+    result = analyse(ink, width, height, models, expected=expected)
     inventory = model_inventory(models)
     expected_labels = sorted(set(expected))
     result.update(
         {
-            "format": "saol14-minimal-glyph-match-v3",
+            "format": "saol14-minimal-glyph-match-v4",
             "expected_word": debug.get("expected_word"),
             "headword": debug.get("headword"),
             "page": debug.get("page"),
