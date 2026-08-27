@@ -1,6 +1,7 @@
 import unittest
+from pathlib import Path
 
-from swedish_wordlist_tools.ocr_glyph_matcher import GlyphModel, analyse
+from swedish_wordlist_tools.ocr_glyph_matcher import GlyphModel, analyse, load_facit
 
 
 class GlyphMatcherTests(unittest.TestCase):
@@ -42,6 +43,29 @@ class GlyphMatcherTests(unittest.TestCase):
                 }
             ],
         )
+
+    def test_qigong_is_six_exact_bold_glyphs_on_one_baseline(self):
+        facit = Path(__file__).resolve().parents[1] / "glyphs" / "saol14-manual-glyph-facit.json"
+        models = load_facit(facit)
+        by_label = {(m.label, m.style): m for m in models}
+
+        labels = ["q", "i", "g", "o", "n", "g"]
+        xs = [0, 8, 13, 21, 30, 38]
+        baseline = 11
+        source_pixels = set()
+        for label, x0 in zip(labels, xs):
+            model = by_label[(label, "bold")]
+            source_pixels.update((x0 + x, baseline + y) for x, y in model.pixels)
+
+        width = max(x for x, _ in source_pixels) + 1
+        height = max(y for _, y in source_pixels) + 1
+        result = analyse(source_pixels, width, height, models)
+
+        self.assertEqual(result["baseline"], 11)
+        self.assertEqual([row["label"] for row in result["selected_exact"]], labels)
+        self.assertTrue(all(row["style"] == "bold" for row in result["selected_exact"]))
+        self.assertTrue(all(row["baseline"] == 11 for row in result["selected_exact"]))
+        self.assertEqual(result["fuzzy_diagnostics"], [])
 
 
 if __name__ == "__main__":
