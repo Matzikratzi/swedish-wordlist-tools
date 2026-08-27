@@ -7,7 +7,7 @@ from . import ocr_exact_glyph_review_queue_v5 as v5
 from .ocr_exact_glyph_review_queue import _expand_inputs, _raw_baseline_guess
 from .ocr_exact_glyph_review_queue_v6 import build_html as build_html_v6
 from .ocr_glyph_facit_table import build_html as build_facit_html
-from .ocr_glyph_matcher import GlyphModel, load_facit, load_word_debug, select_best_baseline_partition
+from .ocr_glyph_matcher import GlyphModel, Match, load_facit, load_word_debug, select_best_baseline_partition
 
 
 def _components(points: set[tuple[int, int]] | frozenset[tuple[int, int]]) -> list[set[tuple[int, int]]]:
@@ -32,7 +32,7 @@ def _model_geometry(models: list[GlyphModel], style: str) -> tuple[int, int, int
     """Learn current-row body band plus plausible detached-mark geometry.
 
     Returns body_above, body_below, max_top_gap, max_bottom_gap and the largest
-    detached-component pixel count observed in the style.  These are typography
+    detached-component pixel count observed in the style. These are typography
     measurements only; no character identities are used.
     """
     rows = [m for m in models if m.style == style] or list(models)
@@ -62,7 +62,7 @@ def _model_geometry(models: list[GlyphModel], style: str) -> tuple[int, int, int
     return body_above, body_below, top_gap, bottom_gap, max_detached_size
 
 
-def _horizontal_overlap(a: set[tuple[int, int]], b: set[tuple[int, int]]) -> bool:
+def _horizontal_overlap(a: set[tuple[int, int]] | frozenset[tuple[int, int]], b: set[tuple[int, int]] | frozenset[tuple[int, int]]) -> bool:
     ax0, ax1 = min(x for x, _ in a), max(x for x, _ in a)
     bx0, bx1 = min(x for x, _ in b), max(x for x, _ in b)
     return max(ax0, bx0) <= min(ax1, bx1)
@@ -73,6 +73,7 @@ def _classify_rows(
     baseline: int,
     models: list[GlyphModel],
     style: str,
+    seed_matches: list[Match],
     *,
     gap_tolerance: int = 1,
 ) -> tuple[set[tuple[int, int]], set[tuple[int, int]], set[tuple[int, int]], set[tuple[int, int]], dict[str, int]]:
@@ -80,15 +81,20 @@ def _classify_rows(
 
     Components intersecting the learned body band belong to the current line.
     Detached components outside it remain uncertain only when they are small
-    enough and close enough to be plausible dots/rings/accents/other detached
-    marks of this typeface.  Large or distant components are assigned to the
-    neighbouring row above or below.  The decision is deliberately label-free.
+    enough and close enough to be plausible detached marks of this typeface.
+
+    There is one stronger generic rule: if detached ink lies in the x-range of
+    an already pixel-perfect glyph match but is not part of that match, it cannot
+    belong to that glyph. It is therefore assigned to the neighbouring row rather
+    than kept as a hypothetical extra diacritic. This uses only raster evidence,
+    never the known transcription.
     """
     above, below, top_gap, bottom_gap, max_detached = _model_geometry(models, style)
     y0 = baseline - above
     y1 = baseline + below
     comps = _components(ink)
     main = [c for c in comps if any(y0 <= y <= y1 for _, y in c)]
+    protected_pixels = set().union(*(m.pixels for m in seed_matches)) if seed_matches else set()
 
     current: set[tuple[int, int]] = set()
     previous: set[tuple[int, int]] = set()
@@ -96,7 +102,7 @@ def _classify_rows(
     uncertain: set[tuple[int, int]] = set()
 
     for comp in comps:
-        if comp in main:
+        if comp in main or comp & protected_pixels:
             current.update(comp)
             continue
 
@@ -112,6 +118,17 @@ def _classify_rows(
             nearest = ctop - y1 - 1
         else:
             current.update(comp)
+            continue
+
+        # A perfect matched glyph is complete by definition. Extra detached ink
+        # in its horizontal span is evidence from the neighbouring line, not an
+        # additional part of the current glyph.
+        over_known = any(_horizontal_overlap(comp, m.pixels) for m in seed_matches)
+        if over_known:
+            if side == "top":
+                previous.update(comp)
+            else:
+                nxt.update(comp)
             continue
 
         aligned = any(_horizontal_overlap(comp, body) for body in main)
@@ -142,9 +159,10 @@ def _analyse_one(path: Path, models: list[GlyphModel]):
     expected = str(debug.get("expected_word") or debug.get("headword") or "")
     style = str(debug.get("style") or (debug.get("card_dataset") or {}).get("style") or "bold")
 
-    baseline0, _seed = select_best_baseline_partition(raw_ink, width, height, models)
+    baseline0, seed = select_best_baseline_partition(raw_ink, width, height, models)
     if baseline0 is None:
         baseline0 = _raw_baseline_guess(raw_ink, height)
+        seed = []
 
     if baseline0 is None:
         current = set(raw_ink)
@@ -153,7 +171,7 @@ def _analyse_one(path: Path, models: list[GlyphModel]):
         uncertain: set[tuple[int, int]] = set()
         row_meta = {"body_above": 0, "body_below": 0, "top_gap": 0, "bottom_gap": 0, "max_detached_pixels": 0}
     else:
-        current, previous, nxt, uncertain, row_meta = _classify_rows(raw_ink, baseline0, models, style)
+        current, previous, nxt, uncertain, row_meta = _classify_rows(raw_ink, baseline0, models, style, seed)
 
     ocr_ink = current | uncertain
     baseline, shown = select_best_baseline_partition(ocr_ink, width, height, models)
@@ -213,7 +231,6 @@ def build_html(paths: list[Path], facit_path: Path) -> str:
     finally:
         v5._analyse_one = original
 
-    # Extend Rastertext with row-segmentation diagnostics without changing v6.
     old = "lines.push('legend: #=black-unrecognized  X=black-recognized  .=white');"
     new = """lines.push('row_segmentation='+JSON.stringify(row.row_segmentation||{}));
  lines.push('previous_row_pixels='+(row.previous_row||[]).length+' next_row_pixels='+(row.next_row||[]).length+' uncertain_pixels='+(row.uncertain_row||[]).length);
