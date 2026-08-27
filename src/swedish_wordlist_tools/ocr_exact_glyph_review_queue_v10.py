@@ -105,11 +105,11 @@ def _classify_rows(
         if cbottom < y0:
             side = "top"
             allowed_gap = top_gap + gap_tolerance
-            nearest = min((y0 - cbottom - 1), default=999)
+            nearest = y0 - cbottom - 1
         elif ctop > y1:
             side = "bottom"
             allowed_gap = bottom_gap + gap_tolerance
-            nearest = min((ctop - y1 - 1), default=999)
+            nearest = ctop - y1 - 1
         else:
             current.update(comp)
             continue
