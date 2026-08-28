@@ -96,16 +96,29 @@ def _looks_like_saol_jsonl(path: Path) -> tuple[int, int]:
     return (score, path.stat().st_size if score else 0)
 
 
+def _is_discovery_noise(path: Path) -> bool:
+    parts = {part.lower() for part in path.parts}
+    if parts.intersection({".git", ".venv", "venv", "node_modules", "tests", "test", "fixtures", "fixture"}):
+        return True
+    name = path.name.lower()
+    return name.startswith("sample") or "fixture" in name or name.startswith("test_")
+
+
 def discover_jsonl(root: Path = Path(".")) -> Path:
     candidates: list[tuple[int, int, Path]] = []
     for path in root.rglob("*.jsonl"):
-        if any(part in {".git", ".venv", "venv", "node_modules"} for part in path.parts):
+        if _is_discovery_noise(path):
             continue
         score, size = _looks_like_saol_jsonl(path)
         if score:
             candidates.append((score, size, path))
     if not candidates:
-        raise FileNotFoundError("could not auto-discover a SAOL JSONL under the current directory")
+        raise FileNotFoundError(
+            "could not auto-discover a non-test SAOL JSONL under the current directory; pass the JSONL path explicitly"
+        )
+    # Prefer a genuinely SAOL-looking file, then the largest dataset. This avoids
+    # tiny synthetic files winning merely because their first few rows happen to
+    # contain all expected fields.
     candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
     return candidates[0][2]
 
