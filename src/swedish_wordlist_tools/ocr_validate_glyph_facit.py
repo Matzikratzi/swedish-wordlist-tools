@@ -17,6 +17,22 @@ def _shape_key(row: dict[str, Any]) -> tuple[tuple[int, int], ...]:
     return tuple(sorted((x - min_x, y) for x, y in pts))
 
 
+def _render_shape(shape: tuple[tuple[int, int], ...]) -> str:
+    if not shape:
+        return "(empty raster)"
+
+    xs = [x for x, _ in shape]
+    ys = [y for _, y in shape]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    points = set(shape)
+
+    lines = []
+    for y in range(min_y, max_y + 1):
+        lines.append("".join("#" if (x, y) in points else "." for x in range(min_x, max_x + 1)))
+    return "\n".join(lines)
+
+
 def validate_facit(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("format") != FACIT_FORMAT:
@@ -52,6 +68,7 @@ def validate_facit(path: Path) -> dict[str, Any]:
         styles = {r["style"] for r in rows}
         collision = {
             "pixels": len(shape),
+            "raster": _render_shape(shape),
             "models": rows,
         }
         if len(identities) == 1:
@@ -84,6 +101,25 @@ def validate_facit(path: Path) -> dict[str, Any]:
     }
 
 
+def _print_collision_group(title: str, groups: list[dict[str, Any]]) -> None:
+    if not groups:
+        return
+
+    print(f"\n{title}:")
+    for i, group in enumerate(groups, 1):
+        print(f"\n[{i}] {group['pixels']} px")
+        for model in group["models"]:
+            print(
+                f"  index={model['index']} "
+                f"label={model['label']!r} "
+                f"style={model['style']} "
+                f"sources={model['sources']}"
+            )
+        print("  raster:")
+        for line in str(group["raster"]).splitlines():
+            print(f"    {line}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Validate SAOL glyph facit for duplicate and ambiguous exact raster shapes.")
     ap.add_argument("facit", type=Path)
@@ -97,23 +133,16 @@ def main() -> int:
     print(f"cross_label_collisions={len(result['cross_label_collisions'])}")
     print(f"cross_style_same_label_shapes={len(result['cross_style_same_label_shapes'])}")
 
-    if result["cross_label_collisions"]:
-        print("\nAMBIGUOUS EXACT SHAPES:")
-        for group in result["cross_label_collisions"]:
-            names = ", ".join(f"{m['label']!r}/{m['style']}" for m in group["models"])
-            print(f"  {group['pixels']} px: {names}")
-
-    if result["exact_duplicate_groups"]:
-        print("\nREDUNDANT DUPLICATES:")
-        for group in result["exact_duplicate_groups"]:
-            m = group["models"][0]
-            print(f"  {m['label']!r}/{m['style']}: {len(group['models'])} identical models ({group['pixels']} px)")
+    _print_collision_group("AMBIGUOUS EXACT SHAPES", result["cross_label_collisions"])
+    _print_collision_group("SAME RASTER, DIFFERENT STYLES (ERROR)", result["cross_style_same_label_shapes"])
+    _print_collision_group("REDUNDANT DUPLICATES", result["exact_duplicate_groups"])
 
     if args.json_out:
         args.json_out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(f"json={args.json_out}")
 
-    return 1 if result["cross_label_collisions"] else 0
+    has_error = bool(result["cross_label_collisions"] or result["cross_style_same_label_shapes"])
+    return 1 if has_error else 0
 
 
 if __name__ == "__main__":
