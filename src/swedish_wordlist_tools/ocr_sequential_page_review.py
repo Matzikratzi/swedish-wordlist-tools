@@ -11,6 +11,7 @@ from . import ocr_exact_glyph_review_queue_v11 as review_v11
 from . import ocr_prepare_sequential_page as sequential_page
 from .ocr_glyph_facit_table import build_html as build_facit_html
 from .ocr_glyph_matcher import load_facit
+from .ocr_unique_unknown_glyph_review import build_html as build_unique_unknown_html, collect_candidates
 
 
 def _safe_load_source_image(source: str) -> Image.Image | None:
@@ -35,7 +36,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
             "Read one SAOL facsimile page in sequence, accept all exact known glyphs, "
-            "and build a review page for only the incomplete OCR word rasters."
+            "and build a review page containing only unique unexplained glyph rasters."
         )
     )
     ap.add_argument("jsonl", type=Path)
@@ -56,8 +57,6 @@ def main() -> int:
     review_html = args.review_html or (args.out_dir / "unknown-glyph-review.html")
     facit_html = args.facit_html or (args.out_dir / "glyph-facit-table.html")
 
-    # The older shared loader interprets Path("") as the current directory.
-    # Override only this page-review path with a loader that requires a real file.
     sequential_page._load_source_image = _safe_load_source_image
     report = sequential_page.prepare_page(
         args.jsonl,
@@ -79,15 +78,19 @@ def main() -> int:
     analysed = [review_v11._analyse_one(path, models) for path in debug_files]
     exact = sum(1 for row in analysed if row.get("fully_exact"))
     incomplete = len(analysed) - exact
+    candidates = collect_candidates(analysed)
+    occurrences = sum(int(c.get("occurrences") or 0) for c in candidates)
 
-    review_html.write_text(review_v11.build_html(debug_files, args.facit), encoding="utf-8")
+    review_html.write_text(build_unique_unknown_html(analysed, args.facit), encoding="utf-8")
     facit_html.write_text(build_facit_html(args.facit), encoding="utf-8")
 
     print(f"page={args.page}")
     print(f"source={report['source']}")
     print(f"ocr_words={len(debug_files)}")
     print(f"fully_exact={exact}")
-    print(f"needs_review={incomplete}")
+    print(f"incomplete_words={incomplete}")
+    print(f"unknown_occurrences={occurrences}")
+    print(f"unique_unknown_rasters={len(candidates)}")
     print(f"review_html={review_html}")
     print(f"facit_html={facit_html}")
     return 0
