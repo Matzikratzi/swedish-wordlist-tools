@@ -74,10 +74,19 @@ def _analyse_one(path: Path, models: list[GlyphModel]):
     covered = set()
     for match in kept:
         covered.update(tuple(p) for p in match.get("pixels") or [])
+
     ink = set(tuple(p) for p in row.get("ink") or [])
-    row["unexplained"] = sorted([list(p) for p in ink - covered])
+    previous_row = set(tuple(p) for p in row.get("previous_row") or [])
+    next_row = set(tuple(p) for p in row.get("next_row") or [])
+    current_row_ink = ink - previous_row - next_row
+
+    # v10 has already segmented neighboring rows.  Never reintroduce those
+    # pixels when v11 recomputes unexplained ink after guarding a partial body
+    # match.  Detached marks may belong above a glyph, but ink from a lower row
+    # is not a downward diacritic.
+    row["unexplained"] = sorted([list(p) for p in current_row_ink - covered])
     row["recognized"] = "".join(str(m.get("label") or "") for m in kept)
-    row["fully_exact"] = covered == ink
+    row["fully_exact"] = covered == current_row_ink
     if guarded:
         row["baseline_source"] = str(row.get("baseline_source") or "") + f"+guard-detached({len(guarded)})"
     return row
