@@ -47,22 +47,63 @@ def _is_jsonl_anchored(row: dict) -> bool:
     return isinstance(hint, dict) and bool(str(hint.get("text") or "").strip())
 
 
-def _exact_styles(row: dict) -> set[str]:
-    """Return the styles of all exact glyph matches in one OCR word.
+def _ordered_exact(row: dict) -> list[dict]:
+    return sorted(
+        [m for m in row.get("exact") or [] if str(m.get("label") or "")],
+        key=lambda m: (int(m.get("x") or 0), str(m.get("label") or "")),
+    )
 
-    SAOL words are assumed to use one typographic style throughout.  Seeing
-    multiple exact-match styles in one word therefore indicates a bad facit
-    label or another matching error; it is not a legitimate mixed-style word.
+
+def _styles(matches: list[dict]) -> set[str]:
+    return {str(match.get("style") or "roman") for match in matches}
+
+
+def _split_exact_headword(row: dict) -> tuple[list[dict], list[dict]] | None:
+    """Split exact matches into JSONL headword and any trailing material.
+
+    Tesseract may put the roman part-of-speech marker in the same OCR box as a
+    bold headword, e.g. ``A-av·drag s.``.  JSONL ``ord`` gives us the semantic
+    boundary; matching remains raster-driven, but the hint lets the style
+    validator avoid treating the following ``s.`` as part of the headword.
     """
-    return {
-        str(match.get("style") or "roman")
-        for match in row.get("exact") or []
-        if str(match.get("label") or "")
-    }
+    hint = row.get("jsonl_hint")
+    if not isinstance(hint, dict) or int(hint.get("token_index") or 0) != 0:
+        return None
+    headword = str(hint.get("ord") or "").strip()
+    if not headword:
+        return None
+
+    exact = _ordered_exact(row)
+    built = ""
+    for i, match in enumerate(exact):
+        built += str(match.get("label") or "")
+        if built == headword:
+            return exact[: i + 1], exact[i + 1 :]
+        if not headword.startswith(built):
+            return None
+    return None
+
+
+def _has_illegal_style_mix(row: dict) -> bool:
+    """Check style consistency without confusing a roman POS marker with the word.
+
+    A lexical word is expected to have one style.  For the article's first OCR
+    token, an exact JSONL headword may however be followed in the same box by a
+    roman grammatical marker such as ``s.``.  The headword itself must still be
+    uniform, and any exact trailing material in that box must be roman.
+    """
+    split = _split_exact_headword(row)
+    if split is not None:
+        headword, trailing = split
+        if len(_styles(headword)) > 1:
+            return True
+        return bool(trailing) and _styles(trailing) != {"roman"}
+
+    return len(_styles(_ordered_exact(row))) > 1
 
 
 def _mixed_style_rows(rows: list[dict]) -> list[dict]:
-    return [row for row in rows if len(_exact_styles(row)) > 1]
+    return [row for row in rows if _has_illegal_style_mix(row)]
 
 
 def _row_name(row: dict) -> str:
@@ -150,12 +191,13 @@ def main() -> int:
     if mixed_style:
         print("\nMIXED-STYLE WORDS (ERROR):")
         for row in mixed_style:
-            styles = ", ".join(sorted(_exact_styles(row)))
+            exact_matches = _ordered_exact(row)
+            style_names = ", ".join(sorted(_styles(exact_matches)))
             exact_labels = " ".join(
                 f"{match.get('label', '')}{{{str(match.get('style') or 'roman')[0]}}}"
-                for match in row.get("exact") or []
+                for match in exact_matches
             )
-            print(f"  {_row_name(row)!r}: styles={styles}; exact={exact_labels}")
+            print(f"  {_row_name(row)!r}: styles={style_names}; exact={exact_labels}")
 
     print(f"review_html={review_html}")
     print(f"facit_html={facit_html}")
