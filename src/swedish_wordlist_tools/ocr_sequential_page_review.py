@@ -32,6 +32,63 @@ def _safe_load_source_image(source: str) -> Image.Image | None:
         return None
 
 
+def _add_raster_text_ui(html: str) -> str:
+    """Add a copyable text raster to every unique unknown-glyph card."""
+    html = html.replace(
+        ".badge{font-weight:700} .examples{margin-top:4px}",
+        ".badge{font-weight:700} .examples{margin-top:4px} "
+        ".rasterdump{display:none;white-space:pre;font:12px/1.05 monospace;background:#fafafa;border:1px solid #bbb;padding:8px;overflow:auto;max-width:100%;user-select:text}",
+        1,
+    )
+
+    marker = "function stats(){const done=decisions.size;"
+    helper = r'''function rasterText(c){
+ const row=c.context;
+ const ink=new Set((row.ink||[]).map(([x,y])=>pkey(x,y)));
+ const exact=new Set(); for(const m of (row.exact||[]))for(const [x,y] of m.pixels)exact.add(pkey(x,y));
+ const cur=new Set((row.candidate_pixels||[]).map(([x,y])=>pkey(x,y)));
+ const lines=[];
+ lines.push('unknown_id='+c.id+' occurrences='+c.occurrences);
+ lines.push('examples='+c.sources.slice(0,8).map(s=>String(s.expected_word??'')+'@p'+String(s.page??'')).join(', '));
+ lines.push('context_word='+String(row.expected??''));
+ lines.push('size='+row.width+'x'+row.height+' baseline='+row.baseline);
+ lines.push('candidate_shape_relative_to_baseline='+JSON.stringify(c.shape));
+ lines.push('legend: #=other-unrecognized  X=known-exact  G=current-unknown  .=white');
+ for(let y=0;y<row.height;y++){
+   let s=String(y).padStart(2,'0')+' ';
+   for(let x=0;x<row.width;x++){
+     const k=pkey(x,y);
+     s+=cur.has(k)?'G':(exact.has(k)?'X':(ink.has(k)?'#':'.'));
+   }
+   lines.push(s+(y===row.baseline?'  < baseline':''));
+ }
+ return lines.join('\n');
+}
+'''
+    if marker not in html:
+        raise RuntimeError("could not inject rasterText helper")
+    html = html.replace(marker, helper + marker, 1)
+
+    old_controls = '<button class="approve">Godkänn</button><button class="skip">Hoppa över</button><span class="msg"></span>'
+    new_controls = '<button class="approve">Godkänn</button><button class="skip">Hoppa över</button><button class="raster">Rastertext</button><span class="msg"></span>'
+    if old_controls not in html:
+        raise RuntimeError("could not inject raster-text button")
+    html = html.replace(old_controls, new_controls)
+
+    old_input = "const input=ctrl.querySelector('input');ctrl.querySelector('.approve').onclick="
+    new_input = r'''const input=ctrl.querySelector('input');
+ const dump=document.createElement('pre');dump.className='rasterdump';d.appendChild(dump);
+ ctrl.querySelector('.raster').onclick=async()=>{
+   const text=rasterText(c);dump.textContent=text;dump.style.display='block';
+   try{await navigator.clipboard.writeText(text);ctrl.querySelector('.msg').textContent='Rastertext visad och kopierad.';}
+   catch(_){ctrl.querySelector('.msg').textContent='Rastertext visad; markera texten nedan för att kopiera.';}
+ };
+ ctrl.querySelector('.approve').onclick='''
+    if old_input not in html:
+        raise RuntimeError("could not inject raster-text handler")
+    return html.replace(old_input, new_input, 1)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
@@ -81,7 +138,8 @@ def main() -> int:
     candidates = collect_candidates(analysed)
     occurrences = sum(int(c.get("occurrences") or 0) for c in candidates)
 
-    review_html.write_text(build_unique_unknown_html(analysed, args.facit), encoding="utf-8")
+    html = build_unique_unknown_html(analysed, args.facit)
+    review_html.write_text(_add_raster_text_ui(html), encoding="utf-8")
     facit_html.write_text(build_facit_html(args.facit), encoding="utf-8")
 
     print(f"page={args.page}")
