@@ -40,11 +40,23 @@ def _analyse_with_debug_metadata(path: Path, models):
     return row
 
 
+def _is_jsonl_anchored(row: dict) -> bool:
+    """Return true only for OCR boxes aligned to dictionary text in JSONL.
+
+    Page headers, page numbers, homonym markers and other marginal/structural
+    printing may be found by Tesseract, but they are not part of the JSONL text
+    excerpt used for glyph learning.  Such boxes deliberately contribute no
+    unknown-glyph candidates.
+    """
+    hint = row.get("jsonl_hint")
+    return isinstance(hint, dict) and bool(str(hint.get("text") or "").strip())
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
             "Read one SAOL facsimile page in sequence, accept all exact known glyphs, "
-            "and review only unique unexplained rasters with JSONL transcription hints."
+            "and review only unique unexplained rasters anchored to JSONL dictionary text."
         )
     )
     ap.add_argument("jsonl", type=Path)
@@ -83,7 +95,10 @@ def main() -> int:
         raise SystemExit("page preparation produced no word-debug files")
 
     models = load_facit(args.facit)
-    analysed = [_analyse_with_debug_metadata(path, models) for path in debug_files]
+    analysed_all = [_analyse_with_debug_metadata(path, models) for path in debug_files]
+    analysed = [row for row in analysed_all if _is_jsonl_anchored(row)]
+    excluded_unanchored = len(analysed_all) - len(analysed)
+
     exact = sum(1 for row in analysed if row.get("fully_exact"))
     incomplete = len(analysed) - exact
     candidates = collect_candidates(analysed)
@@ -99,6 +114,8 @@ def main() -> int:
     print(f"jsonl_reference_tokens={report.get('jsonl_reference_tokens', 0)}")
     print(f"ocr_words={len(debug_files)}")
     print(f"hinted_words={report.get('hinted_words', 0)}")
+    print(f"review_words={len(analysed)}")
+    print(f"excluded_unanchored_words={excluded_unanchored}")
     print(f"fully_exact={exact}")
     print(f"incomplete_words={incomplete}")
     print(f"unknown_occurrences={occurrences}")
