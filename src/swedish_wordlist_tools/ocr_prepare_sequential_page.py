@@ -85,6 +85,13 @@ def _run_tesseract(page_image: Image.Image, *, lang: str, psm: int) -> list[OcrW
         return read_words(io.StringIO(proc.stdout))
 
 
+def _load_source_image(source: str) -> Image.Image | None:
+    local = Path(source)
+    if local.exists():
+        return _load_page_image({"page_image": str(local)})
+    return _load_page_image({"source": source})
+
+
 def _crop_box(word: OcrWord, page: Image.Image, pad_x: int, pad_y: int) -> tuple[int, int, int, int]:
     x0 = max(0, word.left - pad_x)
     y0 = max(0, word.top - pad_y)
@@ -109,7 +116,7 @@ def prepare_page(
     if not source:
         raise LookupError(f"no source found for page {page_number}")
 
-    page_image = _load_page_image({"source": source})
+    page_image = _load_source_image(source)
     if page_image is None:
         raise RuntimeError(f"could not load page image: {source}")
 
