@@ -9,7 +9,7 @@ from swedish_wordlist_tools.ocr_editable_unknown_glyph_review import build_html
 
 
 class EditableUnknownGlyphReviewTests(unittest.TestCase):
-    def test_prefills_jsonl_suggestion_and_exposes_pixel_editor(self) -> None:
+    def test_prefills_jsonl_suggestion_and_exposes_component_safe_editor(self) -> None:
         row = {
             "expected": "x:y",
             "page": 1,
@@ -30,8 +30,11 @@ class EditableUnknownGlyphReviewTests(unittest.TestCase):
             html = build_html([row], facit)
 
         self.assertIn("JSONL-förslag", html)
-        self.assertIn("Shift-dra", html)
-        self.assertIn("Alt-dra", html)
+        self.assertIn("Sammanhängande svarta komponenter är odelbara", html)
+        self.assertIn("En glyph får bestå av flera komponenter", html)
+        self.assertIn("Ctrl+Shift/Ctrl+Alt", html)
+        self.assertIn("componentsOf", html)
+        self.assertIn("toggleComponentAt", html)
         self.assertIn("Godkänn markering", html)
         self.assertIn("Återställ gissning", html)
         self.assertIn("Rastertext", html)
