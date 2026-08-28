@@ -1,12 +1,34 @@
 from __future__ import annotations
 
 import argparse
+import urllib.request
 from pathlib import Path
+from tempfile import NamedTemporaryFile
+
+from PIL import Image
 
 from . import ocr_exact_glyph_review_queue_v11 as review_v11
+from . import ocr_prepare_sequential_page as sequential_page
 from .ocr_glyph_facit_table import build_html as build_facit_html
 from .ocr_glyph_matcher import load_facit
-from .ocr_prepare_sequential_page import prepare_page
+
+
+def _safe_load_source_image(source: str) -> Image.Image | None:
+    """Load a local page image or URL without treating an empty path as '.'."""
+    if not source:
+        return None
+
+    local = Path(source)
+    if local.is_file():
+        return Image.open(local).convert("L")
+
+    try:
+        with urllib.request.urlopen(source, timeout=30) as response, NamedTemporaryFile(suffix=".png") as tmp:
+            tmp.write(response.read())
+            tmp.flush()
+            return Image.open(tmp.name).convert("L")
+    except Exception:
+        return None
 
 
 def main() -> int:
@@ -34,7 +56,10 @@ def main() -> int:
     review_html = args.review_html or (args.out_dir / "unknown-glyph-review.html")
     facit_html = args.facit_html or (args.out_dir / "glyph-facit-table.html")
 
-    report = prepare_page(
+    # The older shared loader interprets Path("") as the current directory.
+    # Override only this page-review path with a loader that requires a real file.
+    sequential_page._load_source_image = _safe_load_source_image
+    report = sequential_page.prepare_page(
         args.jsonl,
         args.page,
         args.out_dir,
