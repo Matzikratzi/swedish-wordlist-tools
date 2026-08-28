@@ -64,6 +64,52 @@ def read_jsonl(path: Path) -> Iterable[dict[str, Any]]:
                 yield value
 
 
+def _looks_like_saol_jsonl(path: Path) -> tuple[int, int]:
+    """Return (SAOL-likeness score, size) from a small prefix only."""
+    score = 0
+    checked = 0
+    try:
+        with path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    return (0, 0)
+                if not isinstance(row, dict):
+                    continue
+                checked += 1
+                if _word(row):
+                    score += 1
+                if "record_id" in row:
+                    score += 1
+                if "stycke" in row:
+                    score += 2
+                if "SAOL14_" in str(row.get("source") or ""):
+                    score += 3
+                if checked >= 25:
+                    break
+    except (OSError, UnicodeError):
+        return (0, 0)
+    return (score, path.stat().st_size if score else 0)
+
+
+def discover_jsonl(root: Path = Path(".")) -> Path:
+    candidates: list[tuple[int, int, Path]] = []
+    for path in root.rglob("*.jsonl"):
+        if any(part in {".git", ".venv", "venv", "node_modules"} for part in path.parts):
+            continue
+        score, size = _looks_like_saol_jsonl(path)
+        if score:
+            candidates.append((score, size, path))
+    if not candidates:
+        raise FileNotFoundError("could not auto-discover a SAOL JSONL under the current directory")
+    candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    return candidates[0][2]
+
+
 def select(rows: Iterable[dict[str, Any]], known: set[str], *, per_label: int = 6, max_labels: int = 30) -> dict[str, Any]:
     groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     seen_sources: set[tuple[str, int | None, str]] = set()
@@ -99,8 +145,6 @@ def select(rows: Iterable[dict[str, Any]], known: set[str], *, per_label: int = 
 
     eligible = []
     for label, candidates in groups.items():
-        # Need at least two distinct source records so discovery and verification
-        # can never be the same occurrence.
         if len(candidates) < 2:
             continue
         candidates.sort(key=lambda r: (r["page"] is None, r["page"] or 0, r["subnr"], r["expected_word"]))
@@ -129,15 +173,18 @@ def select(rows: Iterable[dict[str, Any]], known: set[str], *, per_label: int = 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Select SAOL JSONL entries that contain exactly one glyph label absent from facit.")
-    ap.add_argument("jsonl", type=Path)
+    ap.add_argument("jsonl", nargs="?", type=Path, help="SAOL JSONL; if omitted, auto-discover under current directory")
     ap.add_argument("--facit", type=Path, default=Path("glyphs/saol14-manual-glyph-facit.json"))
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--per-label", type=int, default=6)
     ap.add_argument("--max-labels", type=int, default=30)
     args = ap.parse_args()
+    jsonl = args.jsonl or discover_jsonl()
     known = _atomic_known(args.facit)
-    report = select(read_jsonl(args.jsonl), known, per_label=args.per_label, max_labels=args.max_labels)
+    report = select(read_jsonl(jsonl), known, per_label=args.per_label, max_labels=args.max_labels)
+    report["jsonl"] = str(jsonl)
     args.out.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(f"jsonl={jsonl}")
     print(f"scanned_rows={report['scanned_rows']}")
     print(f"single_unknown_rows={report['single_unknown_rows']}")
     print(f"eligible_labels={report['eligible_labels']}")
