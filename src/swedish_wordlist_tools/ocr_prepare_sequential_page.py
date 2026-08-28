@@ -11,6 +11,7 @@ from typing import Any, Iterable
 
 from PIL import Image
 
+from .ocr_jsonl_page_hints import align_ocr_words, reference_tokens
 from .ocr_prepare_next20_glyph_words import _load_page_image
 from .ocr_tsv_articles import OcrWord, read_words
 
@@ -100,6 +101,13 @@ def _crop_box(word: OcrWord, page: Image.Image, pad_x: int, pad_y: int) -> tuple
     return x0, y0, x1, y1
 
 
+def _reading_order_key(word: OcrWord, page_width: int) -> tuple[int, int, int, int, int, int, int]:
+    """Approximate SAOL's three-column reading order using page geometry."""
+    center = word.left + word.width / 2
+    col = max(0, min(2, int((3 * center) / max(1, page_width))))
+    return (col, word.top, word.left, word.block, word.paragraph, word.line, word.word)
+
+
 def prepare_page(
     jsonl: Path,
     page_number: int,
@@ -112,17 +120,22 @@ def prepare_page(
     pad_y: int = 5,
     min_confidence: float = -1.0,
 ) -> dict[str, Any]:
-    source = source_for_page(read_jsonl(jsonl), page_number)
+    all_rows = list(read_jsonl(jsonl))
+    source = source_for_page(all_rows, page_number)
     if not source:
         raise LookupError(f"no source found for page {page_number}")
 
+    page_rows = [row for row in all_rows if _page_from_row(row) == page_number]
     page_image = _load_source_image(source)
     if page_image is None:
         raise RuntimeError(f"could not load page image: {source}")
 
     words = _run_tesseract(page_image, lang=lang, psm=psm)
     words = [w for w in words if w.text.strip() and w.confidence >= min_confidence]
-    words.sort(key=lambda w: (w.top, w.left, w.block, w.paragraph, w.line, w.word))
+    words.sort(key=lambda w: _reading_order_key(w, page_image.width))
+
+    refs = reference_tokens(page_rows, text_limit=50)
+    hints = align_ocr_words([w.text for w in words], refs) if refs else [None] * len(words)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     png_dir = out_dir / "png"
@@ -130,7 +143,8 @@ def prepare_page(
 
     written = 0
     skipped_blank = 0
-    for i, word in enumerate(words):
+    hinted = 0
+    for i, (word, hint) in enumerate(zip(words, hints)):
         x0, y0, x1, y1 = _crop_box(word, page_image, pad_x, pad_y)
         crop = page_image.crop((x0, y0, x1, y1)).convert("L")
         ink = _black_pixels(crop, threshold)
@@ -154,6 +168,7 @@ def prepare_page(
             "word_file": f"png/{stem}.png",
             "page_source": source,
             "page_word_bbox": [x0, y0, x1 - x0, y1 - y0],
+            "jsonl_hint": hint,
             "tesseract": {
                 "text": word.text,
                 "confidence": word.confidence,
@@ -164,6 +179,8 @@ def prepare_page(
                 "raw_bbox": [word.left, word.top, word.width, word.height],
             },
         }
+        if hint:
+            hinted += 1
         (out_dir / f"{stem}.json").write_text(
             json.dumps(debug, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
@@ -171,12 +188,15 @@ def prepare_page(
         written += 1
 
     report = {
-        "format": "saol14-sequential-page-preparation-v1",
+        "format": "saol14-sequential-page-preparation-v2",
         "jsonl": str(jsonl),
         "page": page_number,
         "source": source,
         "page_size": [page_image.width, page_image.height],
+        "jsonl_rows": len(page_rows),
+        "jsonl_reference_tokens": len(refs),
         "tesseract_words": len(words),
+        "hinted_words": hinted,
         "word_debug_files": written,
         "skipped_blank": skipped_blank,
         "out_dir": str(out_dir),
@@ -217,7 +237,10 @@ def main() -> int:
     print(f"page={report['page']}")
     print(f"source={report['source']}")
     print(f"page_size={report['page_size'][0]}x{report['page_size'][1]}")
+    print(f"jsonl_rows={report['jsonl_rows']}")
+    print(f"jsonl_reference_tokens={report['jsonl_reference_tokens']}")
     print(f"tesseract_words={report['tesseract_words']}")
+    print(f"hinted_words={report['hinted_words']}")
     print(f"word_debug_files={report['word_debug_files']}")
     print(args.out_dir)
     return 0 if report["word_debug_files"] else 3
