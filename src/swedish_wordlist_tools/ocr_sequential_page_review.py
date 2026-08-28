@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import urllib.request
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -18,11 +19,9 @@ def _safe_load_source_image(source: str) -> Image.Image | None:
     """Load a local page image or URL without treating an empty path as '.'."""
     if not source:
         return None
-
     local = Path(source)
     if local.is_file():
         return Image.open(local).convert("L")
-
     try:
         with urllib.request.urlopen(source, timeout=30) as response, NamedTemporaryFile(suffix=".png") as tmp:
             tmp.write(response.read())
@@ -32,68 +31,20 @@ def _safe_load_source_image(source: str) -> Image.Image | None:
         return None
 
 
-def _add_raster_text_ui(html: str) -> str:
-    """Add a copyable text raster to every unique unknown-glyph card."""
-    html = html.replace(
-        ".badge{font-weight:700} .examples{margin-top:4px}",
-        ".badge{font-weight:700} .examples{margin-top:4px} "
-        ".rasterdump{display:none;white-space:pre;font:12px/1.05 monospace;background:#fafafa;border:1px solid #bbb;padding:8px;overflow:auto;max-width:100%;user-select:text}",
-        1,
-    )
-
-    marker = "function stats(){const done=decisions.size;"
-    helper = r'''function rasterText(c){
- const row=c.context;
- const ink=new Set((row.ink||[]).map(([x,y])=>pkey(x,y)));
- const exact=new Set(); for(const m of (row.exact||[]))for(const [x,y] of m.pixels)exact.add(pkey(x,y));
- const cur=new Set((row.candidate_pixels||[]).map(([x,y])=>pkey(x,y)));
- const lines=[];
- lines.push('unknown_id='+c.id+' occurrences='+c.occurrences);
- lines.push('examples='+c.sources.slice(0,8).map(s=>String(s.expected_word??'')+'@p'+String(s.page??'')).join(', '));
- lines.push('context_word='+String(row.expected??''));
- lines.push('size='+row.width+'x'+row.height+' baseline='+row.baseline);
- lines.push('candidate_shape_relative_to_baseline='+JSON.stringify(c.shape));
- lines.push('legend: #=other-unrecognized  X=known-exact  G=current-unknown  .=white');
- for(let y=0;y<row.height;y++){
-   let s=String(y).padStart(2,'0')+' ';
-   for(let x=0;x<row.width;x++){
-     const k=pkey(x,y);
-     s+=cur.has(k)?'G':(exact.has(k)?'X':(ink.has(k)?'#':'.'));
-   }
-   lines.push(s+(y===row.baseline?'  < baseline':''));
- }
- return lines.join('\n');
-}
-'''
-    if marker not in html:
-        raise RuntimeError("could not inject rasterText helper")
-    html = html.replace(marker, helper + marker, 1)
-
-    old_controls = '<button class="approve">Godkänn</button><button class="skip">Hoppa över</button><span class="msg"></span>'
-    new_controls = '<button class="approve">Godkänn</button><button class="skip">Hoppa över</button><button class="raster">Rastertext</button><span class="msg"></span>'
-    if old_controls not in html:
-        raise RuntimeError("could not inject raster-text button")
-    html = html.replace(old_controls, new_controls)
-
-    old_input = "const input=ctrl.querySelector('input');ctrl.querySelector('.approve').onclick="
-    new_input = r'''const input=ctrl.querySelector('input');
- const dump=document.createElement('pre');dump.className='rasterdump';d.appendChild(dump);
- ctrl.querySelector('.raster').onclick=async()=>{
-   const text=rasterText(c);dump.textContent=text;dump.style.display='block';
-   try{await navigator.clipboard.writeText(text);ctrl.querySelector('.msg').textContent='Rastertext visad och kopierad.';}
-   catch(_){ctrl.querySelector('.msg').textContent='Rastertext visad; markera texten nedan för att kopiera.';}
- };
- ctrl.querySelector('.approve').onclick='''
-    if old_input not in html:
-        raise RuntimeError("could not inject raster-text handler")
-    return html.replace(old_input, new_input, 1)
+def _analyse_with_debug_metadata(path: Path, models):
+    row = review_v11._analyse_one(path, models)
+    debug = json.loads(path.read_text(encoding="utf-8"))
+    row["jsonl_hint"] = debug.get("jsonl_hint")
+    row["page_word_bbox"] = debug.get("page_word_bbox")
+    row["page_source"] = debug.get("page_source")
+    return row
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
             "Read one SAOL facsimile page in sequence, accept all exact known glyphs, "
-            "and build a review page containing only unique unexplained glyph rasters."
+            "and review only unique unexplained rasters with JSONL transcription hints."
         )
     )
     ap.add_argument("jsonl", type=Path)
@@ -132,23 +83,27 @@ def main() -> int:
         raise SystemExit("page preparation produced no word-debug files")
 
     models = load_facit(args.facit)
-    analysed = [review_v11._analyse_one(path, models) for path in debug_files]
+    analysed = [_analyse_with_debug_metadata(path, models) for path in debug_files]
     exact = sum(1 for row in analysed if row.get("fully_exact"))
     incomplete = len(analysed) - exact
     candidates = collect_candidates(analysed)
     occurrences = sum(int(c.get("occurrences") or 0) for c in candidates)
+    suggested = sum(1 for c in candidates if c.get("suggestion"))
 
-    html = build_unique_unknown_html(analysed, args.facit)
-    review_html.write_text(_add_raster_text_ui(html), encoding="utf-8")
+    review_html.write_text(build_unique_unknown_html(analysed, args.facit), encoding="utf-8")
     facit_html.write_text(build_facit_html(args.facit), encoding="utf-8")
 
     print(f"page={args.page}")
     print(f"source={report['source']}")
+    print(f"jsonl_rows={report.get('jsonl_rows', 0)}")
+    print(f"jsonl_reference_tokens={report.get('jsonl_reference_tokens', 0)}")
     print(f"ocr_words={len(debug_files)}")
+    print(f"hinted_words={report.get('hinted_words', 0)}")
     print(f"fully_exact={exact}")
     print(f"incomplete_words={incomplete}")
     print(f"unknown_occurrences={occurrences}")
     print(f"unique_unknown_rasters={len(candidates)}")
+    print(f"candidates_with_jsonl_suggestion={suggested}")
     print(f"review_html={review_html}")
     print(f"facit_html={facit_html}")
     return 0
