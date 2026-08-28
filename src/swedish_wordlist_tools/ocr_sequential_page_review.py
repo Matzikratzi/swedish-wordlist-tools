@@ -47,6 +47,34 @@ def _is_jsonl_anchored(row: dict) -> bool:
     return isinstance(hint, dict) and bool(str(hint.get("text") or "").strip())
 
 
+def _exact_styles(row: dict) -> set[str]:
+    """Return the styles of all exact glyph matches in one OCR word.
+
+    SAOL words are assumed to use one typographic style throughout.  Seeing
+    multiple exact-match styles in one word therefore indicates a bad facit
+    label or another matching error; it is not a legitimate mixed-style word.
+    """
+    return {
+        str(match.get("style") or "roman")
+        for match in row.get("exact") or []
+        if str(match.get("label") or "")
+    }
+
+
+def _mixed_style_rows(rows: list[dict]) -> list[dict]:
+    return [row for row in rows if len(_exact_styles(row)) > 1]
+
+
+def _row_name(row: dict) -> str:
+    hint = row.get("jsonl_hint")
+    if isinstance(hint, dict):
+        for key in ("ord", "text", "token"):
+            value = str(hint.get(key) or "").strip()
+            if value:
+                return value
+    return str(row.get("word") or row.get("expected") or "?")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
@@ -99,6 +127,7 @@ def main() -> int:
     candidates = collect_candidates(analysed)
     occurrences = sum(int(c.get("occurrences") or 0) for c in candidates)
     suggested = sum(1 for c in candidates if c.get("suggestion"))
+    mixed_style = _mixed_style_rows(analysed)
 
     review_html.write_text(build_editable_unknown_html(analysed, args.facit), encoding="utf-8")
     facit_html.write_text(build_facit_html(args.facit), encoding="utf-8")
@@ -116,9 +145,21 @@ def main() -> int:
     print(f"unknown_occurrences={occurrences}")
     print(f"unique_unknown_rasters={len(candidates)}")
     print(f"candidates_with_jsonl_suggestion={suggested}")
+    print(f"mixed_style_words={len(mixed_style)}")
+
+    if mixed_style:
+        print("\nMIXED-STYLE WORDS (ERROR):")
+        for row in mixed_style:
+            styles = ", ".join(sorted(_exact_styles(row)))
+            exact_labels = " ".join(
+                f"{match.get('label', '')}{{{str(match.get('style') or 'roman')[0]}}}"
+                for match in row.get("exact") or []
+            )
+            print(f"  {_row_name(row)!r}: styles={styles}; exact={exact_labels}")
+
     print(f"review_html={review_html}")
     print(f"facit_html={facit_html}")
-    return 0
+    return 1 if mixed_style else 0
 
 
 if __name__ == "__main__":
