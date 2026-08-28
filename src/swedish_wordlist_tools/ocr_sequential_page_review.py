@@ -10,9 +10,10 @@ from PIL import Image
 
 from . import ocr_exact_glyph_review_queue_v11 as review_v11
 from . import ocr_prepare_sequential_page as sequential_page
+from .ocr_editable_unknown_glyph_review import build_html as build_editable_unknown_html
 from .ocr_glyph_facit_table import build_html as build_facit_html
 from .ocr_glyph_matcher import load_facit
-from .ocr_unique_unknown_glyph_review import build_html as build_unique_unknown_html, collect_candidates
+from .ocr_unique_unknown_glyph_review import collect_candidates
 
 
 def _safe_load_source_image(source: str) -> Image.Image | None:
@@ -41,13 +42,7 @@ def _analyse_with_debug_metadata(path: Path, models):
 
 
 def _is_jsonl_anchored(row: dict) -> bool:
-    """Return true only for OCR boxes aligned to dictionary text in JSONL.
-
-    Page headers, page numbers, homonym markers and other marginal/structural
-    printing may be found by Tesseract, but they are not part of the JSONL text
-    excerpt used for glyph learning.  Such boxes deliberately contribute no
-    unknown-glyph candidates.
-    """
+    """Return true only for OCR boxes aligned to dictionary text in JSONL."""
     hint = row.get("jsonl_hint")
     return isinstance(hint, dict) and bool(str(hint.get("text") or "").strip())
 
@@ -55,8 +50,8 @@ def _is_jsonl_anchored(row: dict) -> bool:
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
-            "Read one SAOL facsimile page in sequence, accept all exact known glyphs, "
-            "and review only unique unexplained rasters anchored to JSONL dictionary text."
+            "Read one SAOL facsimile page in sequence, accept exact known glyphs, "
+            "and edit only unexplained rasters anchored to JSONL dictionary text."
         )
     )
     ap.add_argument("jsonl", type=Path)
@@ -105,7 +100,7 @@ def main() -> int:
     occurrences = sum(int(c.get("occurrences") or 0) for c in candidates)
     suggested = sum(1 for c in candidates if c.get("suggestion"))
 
-    review_html.write_text(build_unique_unknown_html(analysed, args.facit), encoding="utf-8")
+    review_html.write_text(build_editable_unknown_html(analysed, args.facit), encoding="utf-8")
     facit_html.write_text(build_facit_html(args.facit), encoding="utf-8")
 
     print(f"page={args.page}")
