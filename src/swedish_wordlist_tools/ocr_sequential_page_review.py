@@ -8,7 +8,7 @@ from tempfile import NamedTemporaryFile
 
 from PIL import Image
 
-from . import ocr_exact_glyph_review_queue_v11 as review_v11
+from . import ocr_exact_glyph_review_queue_v12 as review_v12
 from . import ocr_prepare_sequential_page as sequential_page
 from .ocr_editable_unknown_glyph_review import build_html as build_editable_unknown_html
 from .ocr_glyph_facit_table import build_html as build_facit_html
@@ -33,7 +33,7 @@ def _safe_load_source_image(source: str) -> Image.Image | None:
 
 
 def _analyse_with_debug_metadata(path: Path, models):
-    row = review_v11._analyse_one(path, models)
+    row = review_v12._analyse_one(path, models)
     debug = json.loads(path.read_text(encoding="utf-8"))
     row["jsonl_hint"] = debug.get("jsonl_hint")
     row["page_word_bbox"] = debug.get("page_word_bbox")
@@ -169,6 +169,7 @@ def main() -> int:
     occurrences = sum(int(c.get("occurrences") or 0) for c in candidates)
     suggested = sum(1 for c in candidates if c.get("suggestion"))
     mixed_style = _mixed_style_rows(analysed)
+    five_row_used = sum(1 for row in analysed if row.get("five_row_context_used"))
 
     review_html.write_text(build_editable_unknown_html(analysed, args.facit), encoding="utf-8")
     facit_html.write_text(build_facit_html(args.facit), encoding="utf-8")
@@ -179,6 +180,8 @@ def main() -> int:
     print(f"jsonl_reference_tokens={report.get('jsonl_reference_tokens', 0)}")
     print(f"ocr_words={len(debug_files)}")
     print(f"hinted_words={report.get('hinted_words', 0)}")
+    print(f"five_row_context_words={report.get('five_row_context_words', 0)}")
+    print(f"five_row_review_words={five_row_used}")
     print(f"review_words={len(analysed)}")
     print(f"excluded_unanchored_words={excluded_unanchored}")
     print(f"fully_exact={exact}")
