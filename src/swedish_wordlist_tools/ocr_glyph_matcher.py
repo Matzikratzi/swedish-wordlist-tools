@@ -80,14 +80,7 @@ def load_word_debug(path: Path) -> tuple[set[tuple[int, int]], int, int, dict[st
 
 
 def _ink_components(ink: set[tuple[int, int]]) -> tuple[list[frozenset[tuple[int, int]]], dict[tuple[int, int], int]]:
-    """Return 4-connected source-ink components and a pixel->component index.
-
-    A learned glyph placement is allowed to contain several disconnected source
-    components (for example the stem and dot of ``i``), but it may not claim only
-    part of a component.  That rejects exact-looking fragments embedded inside a
-    larger unknown glyph while still allowing neighbouring glyphs whose x-ranges
-    overlap without touching in actual ink.
-    """
+    """Return 4-connected source-ink components and a pixel->component index."""
     remaining = set(ink)
     components: list[frozenset[tuple[int, int]]] = []
     by_pixel: dict[tuple[int, int], int] = {}
@@ -127,17 +120,25 @@ def exact_matches(
     *,
     styles: set[str] | None = None,
     baseline_only: int | None = None,
+    require_whole_components: bool = True,
 ) -> list[Match]:
-    """Return all whole-component, pixel-perfect placements of learned models.
+    """Return pixel-perfect placements of learned models.
 
-    Every model pixel must land on source ink.  In addition, if the placement
-    touches a 4-connected source-ink component it must own that entire component;
-    otherwise a small learned shape could be hallucinated inside a larger unknown
-    glyph.  A model may own several disconnected components, and neighbouring
-    glyphs may overlap in x as long as their source ink is not connected/shared.
+    By default a placement must own every 4-connected source component it
+    touches.  This is the conservative single-row behaviour and prevents a
+    small learned shape from being hallucinated inside a larger unknown glyph.
+
+    Multi-row review may set ``require_whole_components=False``.  That permits
+    several already-known glyph rasters to be extracted from one connected
+    source-ink tangle, for example when descenders/ascenders on neighbouring
+    printed rows physically touch.  Pixel perfection and disjoint ownership are
+    still enforced by the caller; no geometric cut through a glyph is invented.
     """
     out: list[Match] = []
-    components, by_pixel = _ink_components(ink)
+    components: list[frozenset[tuple[int, int]]] = []
+    by_pixel: dict[tuple[int, int], int] = {}
+    if require_whole_components:
+        components, by_pixel = _ink_components(ink)
     for model in models:
         if styles is not None and model.style not in styles:
             continue
@@ -154,7 +155,7 @@ def exact_matches(
                 placed = frozenset((x0 + x, baseline + y) for x, y in model.pixels)
                 if not placed.issubset(ink):
                     continue
-                if not _owns_whole_touched_components(placed, components, by_pixel):
+                if require_whole_components and not _owns_whole_touched_components(placed, components, by_pixel):
                     continue
                 out.append(
                     Match(
@@ -181,17 +182,7 @@ def _partition_key(matches: Iterable[Match]) -> tuple[int, int, int, int]:
 
 
 def select_best_disjoint_exact(matches: Iterable[Match], *, beam_width: int = 512) -> list[Match]:
-    """Choose the best pixel-disjoint set of exact glyph placements.
-
-    The objective is deliberately generic OCR geometry, with no knowledge of the
-    expected word:
-
-    1. explain as many source pixels as possible;
-    2. for equal coverage, prefer larger whole glyphs over mosaics of fragments
-       via sum(pixel_count**2);
-    3. then prefer better-supported facit models;
-    4. then fewer glyphs.
-    """
+    """Choose the best pixel-disjoint set of exact glyph placements."""
     rows = sorted(matches, key=lambda m: (-m.model_pixels, -m.score, -m.sources, m.x, m.label, m.style))
     states: list[tuple[tuple[Match, ...], frozenset[tuple[int, int]]]] = [((), frozenset())]
     for m in rows:
