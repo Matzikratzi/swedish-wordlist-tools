@@ -93,18 +93,96 @@ def _load_source_image(source: str) -> Image.Image | None:
     return _load_page_image({"source": source})
 
 
-def _crop_box(word: OcrWord, page: Image.Image, pad_x: int, pad_y: int) -> tuple[int, int, int, int]:
+def _column_index(word: OcrWord, page_width: int) -> int:
+    center = word.left + word.width / 2
+    return max(0, min(2, int((3 * center) / max(1, page_width))))
+
+
+def _line_key(word: OcrWord, page_width: int) -> tuple[int, int, int, int]:
+    return (_column_index(word, page_width), word.block, word.paragraph, word.line)
+
+
+def _physical_lines(words: list[OcrWord], page_width: int) -> dict[tuple[int, int, int, int], dict[str, Any]]:
+    grouped: dict[tuple[int, int, int, int], list[OcrWord]] = {}
+    for word in words:
+        grouped.setdefault(_line_key(word, page_width), []).append(word)
+
+    out: dict[tuple[int, int, int, int], dict[str, Any]] = {}
+    by_col: dict[int, list[tuple[tuple[int, int, int, int], dict[str, Any]]]] = {}
+    for key, line_words in grouped.items():
+        top = min(w.top for w in line_words)
+        bottom = max(w.top + w.height for w in line_words)
+        item = {
+            "key": list(key),
+            "top": top,
+            "bottom": bottom,
+            "left": min(w.left for w in line_words),
+            "right": max(w.left + w.width for w in line_words),
+            "text": " ".join(w.text for w in sorted(line_words, key=lambda w: (w.left, w.word))),
+        }
+        by_col.setdefault(key[0], []).append((key, item))
+
+    for col, rows in by_col.items():
+        rows.sort(key=lambda pair: (pair[1]["top"], pair[1]["left"], pair[0][1:]))
+        for index, (key, item) in enumerate(rows):
+            lo = max(0, index - 2)
+            hi = min(len(rows), index + 3)
+            context_rows = [dict(candidate) for _, candidate in rows[lo:hi]]
+            out[key] = {
+                "column": col,
+                "target_index": index - lo,
+                "bands_page": context_rows,
+            }
+    return out
+
+
+def _crop_box(
+    word: OcrWord,
+    page: Image.Image,
+    pad_x: int,
+    pad_y: int,
+    line_context: dict[str, Any] | None = None,
+) -> tuple[int, int, int, int]:
     x0 = max(0, word.left - pad_x)
-    y0 = max(0, word.top - pad_y)
     x1 = min(page.width, word.left + word.width + pad_x)
-    y1 = min(page.height, word.top + word.height + pad_y)
+    if line_context and line_context.get("bands_page"):
+        bands = line_context["bands_page"]
+        y0 = max(0, min(int(b["top"]) for b in bands) - pad_y)
+        y1 = min(page.height, max(int(b["bottom"]) for b in bands) + pad_y)
+    else:
+        y0 = max(0, word.top - pad_y)
+        y1 = min(page.height, word.top + word.height + pad_y)
     return x0, y0, x1, y1
+
+
+def _relative_five_row_context(
+    line_context: dict[str, Any] | None,
+    crop_box: tuple[int, int, int, int],
+) -> dict[str, Any] | None:
+    if not line_context or not line_context.get("bands_page"):
+        return None
+    x0, y0, x1, y1 = crop_box
+    bands = []
+    for band in line_context["bands_page"]:
+        bands.append(
+            {
+                "top": max(0, int(band["top"]) - y0),
+                "bottom": min(y1 - y0, int(band["bottom"]) - y0),
+                "page_top": int(band["top"]),
+                "page_bottom": int(band["bottom"]),
+                "text": str(band.get("text") or ""),
+            }
+        )
+    return {
+        "column": int(line_context["column"]),
+        "target_index": int(line_context["target_index"]),
+        "bands": bands,
+    }
 
 
 def _reading_order_key(word: OcrWord, page_width: int) -> tuple[int, int, int, int, int, int, int]:
     """Approximate SAOL's three-column reading order using page geometry."""
-    center = word.left + word.width / 2
-    col = max(0, min(2, int((3 * center) / max(1, page_width))))
+    col = _column_index(word, page_width)
     return (col, word.top, word.left, word.block, word.paragraph, word.line, word.word)
 
 
@@ -132,6 +210,7 @@ def prepare_page(
 
     words = _run_tesseract(page_image, lang=lang, psm=psm)
     words = [w for w in words if w.text.strip() and w.confidence >= min_confidence]
+    line_contexts = _physical_lines(words, page_image.width)
     words.sort(key=lambda w: _reading_order_key(w, page_image.width))
 
     refs = reference_tokens(page_rows, text_limit=50)
@@ -144,13 +223,20 @@ def prepare_page(
     written = 0
     skipped_blank = 0
     hinted = 0
+    five_row_words = 0
     for i, (word, hint) in enumerate(zip(words, hints)):
-        x0, y0, x1, y1 = _crop_box(word, page_image, pad_x, pad_y)
-        crop = page_image.crop((x0, y0, x1, y1)).convert("L")
+        line_context = line_contexts.get(_line_key(word, page_image.width))
+        box = _crop_box(word, page_image, pad_x, pad_y, line_context)
+        x0, y0, x1, y1 = box
+        crop = page_image.crop(box).convert("L")
         ink = _black_pixels(crop, threshold)
         if not ink:
             skipped_blank += 1
             continue
+
+        five_row_context = _relative_five_row_context(line_context, box)
+        if five_row_context:
+            five_row_words += 1
 
         stem = f"saol14-word-debug-p{page_number:05d}-{i:04d}"
         crop.save(png_dir / f"{stem}.png")
@@ -168,6 +254,8 @@ def prepare_page(
             "word_file": f"png/{stem}.png",
             "page_source": source,
             "page_word_bbox": [x0, y0, x1 - x0, y1 - y0],
+            "target_word_bbox_in_crop": [word.left - x0, word.top - y0, word.width, word.height],
+            "five_row_context": five_row_context,
             "jsonl_hint": hint,
             "tesseract": {
                 "text": word.text,
@@ -188,7 +276,7 @@ def prepare_page(
         written += 1
 
     report = {
-        "format": "saol14-sequential-page-preparation-v2",
+        "format": "saol14-sequential-page-preparation-v3",
         "jsonl": str(jsonl),
         "page": page_number,
         "source": source,
@@ -197,6 +285,7 @@ def prepare_page(
         "jsonl_reference_tokens": len(refs),
         "tesseract_words": len(words),
         "hinted_words": hinted,
+        "five_row_context_words": five_row_words,
         "word_debug_files": written,
         "skipped_blank": skipped_blank,
         "out_dir": str(out_dir),
@@ -241,6 +330,7 @@ def main() -> int:
     print(f"jsonl_reference_tokens={report['jsonl_reference_tokens']}")
     print(f"tesseract_words={report['tesseract_words']}")
     print(f"hinted_words={report['hinted_words']}")
+    print(f"five_row_context_words={report['five_row_context_words']}")
     print(f"word_debug_files={report['word_debug_files']}")
     print(args.out_dir)
     return 0 if report["word_debug_files"] else 3
