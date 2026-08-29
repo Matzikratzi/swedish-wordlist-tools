@@ -2,6 +2,7 @@ import unittest
 
 from swedish_wordlist_tools.ocr_exact_glyph_review_queue_v12 import (
     _assign_components_to_rows,
+    _baseline_row_index,
     _extract_exact_rows_from_tangle,
 )
 from swedish_wordlist_tools.ocr_glyph_matcher import GlyphModel, exact_matches
@@ -42,6 +43,16 @@ class FiveRowContextTest(unittest.TestCase):
         current, assigned = _assign_components_to_rows(accent | body, bands, 2)
         self.assertEqual(current, accent | body)
         self.assertEqual(sum(len(row) for row in assigned), len(accent | body))
+
+    def test_baseline_is_owned_by_exactly_one_physical_row_even_if_bands_overlap(self):
+        bands = [
+            {"top": 2, "bottom": 8},
+            {"top": 7, "bottom": 13},
+            {"top": 12, "bottom": 18},
+        ]
+        self.assertEqual(_baseline_row_index(5, bands), 0)
+        self.assertEqual(_baseline_row_index(10, bands), 1)
+        self.assertEqual(_baseline_row_index(15, bands), 2)
 
     def test_extracts_two_known_glyphs_from_one_connected_cross_row_tangle(self):
         # A is horizontal on the upper row and B is vertical on the lower row.
