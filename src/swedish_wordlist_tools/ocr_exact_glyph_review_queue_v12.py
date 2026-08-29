@@ -60,11 +60,25 @@ def _partition_key(matches: list[Match]) -> tuple[int, int, int, int]:
     )
 
 
-def _baseline_belongs_to_band(baseline: int, band: dict) -> bool:
-    # Tesseract's physical line box normally contains the print baseline.  One
-    # pixel of tolerance handles rounding at the lower edge without allowing a
-    # baseline to migrate to the neighbouring physical row.
-    return int(band["top"]) - 1 <= baseline <= int(band["bottom"])
+def _baseline_row_index(baseline: int, bands: list[dict]) -> int:
+    """Return the one physical row whose vertical centre owns this baseline.
+
+    Tesseract line boxes may overlap slightly.  Treating each box independently
+    therefore lets the same baseline qualify for more than one row.  Instead we
+    partition vertical space into Voronoi regions around the physical line
+    centres: every possible baseline belongs to exactly one row before any glyph
+    selection takes place.
+    """
+    return min(
+        range(len(bands)),
+        key=lambda i: (
+            abs(
+                float(baseline)
+                - (float(bands[i]["top"]) + float(bands[i]["bottom"])) / 2.0
+            ),
+            i,
+        ),
+    )
 
 
 def _extract_exact_rows_from_tangle(
@@ -77,8 +91,9 @@ def _extract_exact_rows_from_tangle(
     """Extract known glyphs from a multi-row connected raster tangle.
 
     Source connected components are intentionally ignored while proposing exact
-    glyph placements.  Candidates are constrained by physical row and one
-    baseline per row.  The final selection is pixel-disjoint, so two glyphs can
+    glyph placements.  Before choosing glyphs, every candidate baseline is bound
+    to exactly one physical row by the row geometry.  Within each row only one
+    baseline may win.  The final selection is pixel-disjoint, so two glyphs can
     be pulled from the same connected source component but cannot claim the same
     black pixel.
     """
@@ -92,10 +107,8 @@ def _extract_exact_rows_from_tangle(
 
     per_row_by_baseline: list[dict[int, list[Match]]] = [dict() for _ in bands]
     for match in candidates:
-        for row_index, band in enumerate(bands):
-            if _baseline_belongs_to_band(match.baseline, band):
-                per_row_by_baseline[row_index].setdefault(match.baseline, []).append(match)
-                break
+        row_index = _baseline_row_index(match.baseline, bands)
+        per_row_by_baseline[row_index].setdefault(match.baseline, []).append(match)
 
     proposed: list[list[Match]] = []
     for by_baseline in per_row_by_baseline:
@@ -160,7 +173,7 @@ def _analyse_one(path: Path, models: list[GlyphModel]):
     baselines = {m.baseline for m in shown}
     if len(baselines) == 1:
         baseline = next(iter(baselines))
-        source = "five-row-tangle+exact-row-baseline"
+        source = "five-row-tangle+row-bound-exact-baseline"
     else:
         baseline = _raw_baseline_guess(current, height)
         source = "five-row-tangle+raw-density-manual-seed"
@@ -182,7 +195,7 @@ def _analyse_one(path: Path, models: list[GlyphModel]):
         "uncertain_row": [],
         "removed_noise": sorted([list(p) for p in previous | nxt]),
         "row_segmentation": {
-            "method": "five-row-exact-tangle-extraction",
+            "method": "five-row-row-bound-tangle-extraction",
             "bands": bands,
             "target_index": target_index,
             "row_pixel_counts": [len(p) for p in row_ink],
@@ -234,7 +247,7 @@ def build_html(paths: list[Path], facit_path: Path) -> str:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Exact-raster OCR review using five physical rows and tangle extraction.")
+    ap = argparse.ArgumentParser(description="Exact-raster OCR review using five physical rows and row-bound tangle extraction.")
     ap.add_argument("inputs", nargs="+", type=Path)
     ap.add_argument("--facit", type=Path, default=Path("glyphs/saol14-manual-glyph-facit.json"))
     ap.add_argument("--out", type=Path, required=True)
