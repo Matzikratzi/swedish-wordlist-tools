@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-FACIT_FORMAT = "saol14-manual-glyph-facit-v1"
+FACIT_FORMAT_V1 = "saol14-manual-glyph-facit-v1"
+FACIT_FORMAT_V2 = "saol14-manual-glyph-facit-v2"
 DEBUG_FORMAT = "saol14-word-debug-v1"
 
 
@@ -53,17 +54,22 @@ class Match:
 
 def load_facit(path: Path) -> list[GlyphModel]:
     payload = json.loads(path.read_text(encoding="utf-8"))
-    if payload.get("format") != FACIT_FORMAT:
-        raise ValueError(f"unsupported facit format: {payload.get('format')!r}")
+    fmt = payload.get("format")
+    if fmt not in {FACIT_FORMAT_V1, FACIT_FORMAT_V2}:
+        raise ValueError(f"unsupported facit format: {fmt!r}")
     out: list[GlyphModel] = []
     for row in payload.get("glyphs") or []:
         pts = frozenset((int(x), int(y)) for x, y in row.get("pixels_relative_to_baseline") or [])
         if not pts:
             continue
+        if fmt == FACIT_FORMAT_V2:
+            role = str(row.get("role") or "unknown")
+        else:
+            role = str(row.get("style") or "roman")
         out.append(
             GlyphModel(
                 label=str(row.get("label") or ""),
-                style=str(row.get("style") or "roman"),
+                style=role,
                 pixels=pts,
                 sources=len(row.get("sources") or []),
             )
@@ -124,15 +130,13 @@ def exact_matches(
 ) -> list[Match]:
     """Return pixel-perfect placements of learned models.
 
-    By default a placement must own every 4-connected source component it
-    touches.  This is the conservative single-row behaviour and prevents a
-    small learned shape from being hallucinated inside a larger unknown glyph.
+    ``style`` is retained as the internal compatibility name for typography
+    classification.  For facit v2 its value is the semantic ``role`` instead
+    (for example ``headword-bold`` or ``unknown``).
 
-    Multi-row review may set ``require_whole_components=False``.  That permits
-    several already-known glyph rasters to be extracted from one connected
-    source-ink tangle, for example when descenders/ascenders on neighbouring
-    printed rows physically touch.  Pixel perfection and disjoint ownership are
-    still enforced by the caller; no geometric cut through a glyph is invented.
+    By default a placement must own every 4-connected source component it
+    touches. Multi-row review may set ``require_whole_components=False`` so
+    known exact glyphs can be peeled from one connected cross-row tangle.
     """
     out: list[Match] = []
     components: list[frozenset[tuple[int, int]]] = []
@@ -326,7 +330,7 @@ def analyse(ink: set[tuple[int, int]], width: int, height: int, models: list[Gly
 def main() -> int:
     ap = argparse.ArgumentParser(description="Minimal SAOL glyph OCR: exact whole-component models, one support baseline, maximum raster coverage.")
     ap.add_argument("word_debug", type=Path)
-    ap.add_argument("--facit", type=Path, default=Path("glyphs/saol14-manual-glyph-facit.json"))
+    ap.add_argument("--facit", type=Path, default=Path("glyphs/saol14-manual-glyph-facit-v2.json"))
     ap.add_argument("--out", type=Path)
     args = ap.parse_args()
     ink, width, height, debug = load_word_debug(args.word_debug)
