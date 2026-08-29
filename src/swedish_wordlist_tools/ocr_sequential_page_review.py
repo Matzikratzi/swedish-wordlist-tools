@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import urllib.request
+from collections import Counter
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -54,56 +55,46 @@ def _ordered_exact(row: dict) -> list[dict]:
     )
 
 
-def _styles(matches: list[dict]) -> set[str]:
-    return {str(match.get("style") or "roman") for match in matches}
+def _style_runs(row: dict) -> list[dict]:
+    """Collapse exact glyphs into adjacent typography runs.
 
-
-def _split_exact_headword(row: dict) -> tuple[list[dict], list[dict]] | None:
-    """Split exact matches into JSONL headword and any trailing material.
-
-    Tesseract may put the roman part-of-speech marker in the same OCR box as a
-    bold headword, e.g. ``A-av·drag s.``.  JSONL ``ord`` gives us the semantic
-    boundary; matching remains raster-driven, but the hint lets the style
-    validator avoid treating the following ``s.`` as part of the headword.
+    This is deliberately descriptive, not normative. Mixed styles in one OCR
+    box are normal in SAOL (headword, POS marker, inflection, explanation). We
+    therefore record what the exact raster matches show instead of treating
+    style changes as errors.
     """
-    hint = row.get("jsonl_hint")
-    if not isinstance(hint, dict) or int(hint.get("token_index") or 0) != 0:
-        return None
-    headword = str(hint.get("ord") or "").strip()
-    if not headword:
-        return None
-
-    exact = _ordered_exact(row)
-    built = ""
-    for i, match in enumerate(exact):
-        built += str(match.get("label") or "")
-        if built == headword:
-            return exact[: i + 1], exact[i + 1 :]
-        if not headword.startswith(built):
-            return None
-    return None
+    runs: list[dict] = []
+    for match in _ordered_exact(row):
+        style = str(match.get("style") or "roman")
+        label = str(match.get("label") or "")
+        if runs and runs[-1]["style"] == style:
+            runs[-1]["text"] += label
+            runs[-1]["glyphs"] += 1
+        else:
+            runs.append({"style": style, "text": label, "glyphs": 1})
+    return runs
 
 
-def _has_illegal_style_mix(row: dict) -> bool:
-    """Check style consistency without confusing a roman POS marker with the word.
-
-    A lexical word is expected to have one style.  For the article's first OCR
-    token, an exact JSONL headword may however be followed in the same box by a
-    roman grammatical marker such as ``s.``.  The headword itself must still be
-    uniform, and any exact trailing material in that box must be roman.
-    """
-    split = _split_exact_headword(row)
-    if split is not None:
-        headword, trailing = split
-        if len(_styles(headword)) > 1:
-            return True
-        return bool(trailing) and _styles(trailing) != {"roman"}
-
-    return len(_styles(_ordered_exact(row))) > 1
+def _style_sequence(row: dict) -> tuple[str, ...]:
+    return tuple(run["style"] for run in _style_runs(row))
 
 
-def _mixed_style_rows(rows: list[dict]) -> list[dict]:
-    return [row for row in rows if _has_illegal_style_mix(row)]
+def _style_sequence_counts(rows: list[dict]) -> Counter[tuple[str, ...]]:
+    counts: Counter[tuple[str, ...]] = Counter()
+    for row in rows:
+        sequence = _style_sequence(row)
+        if sequence:
+            counts[sequence] += 1
+    return counts
+
+
+def _style_transition_counts(rows: list[dict]) -> Counter[tuple[str, str]]:
+    counts: Counter[tuple[str, str]] = Counter()
+    for row in rows:
+        sequence = _style_sequence(row)
+        for left, right in zip(sequence, sequence[1:]):
+            counts[(left, right)] += 1
+    return counts
 
 
 def _row_name(row: dict) -> str:
@@ -114,6 +105,13 @@ def _row_name(row: dict) -> str:
             if value:
                 return value
     return str(row.get("word") or row.get("expected") or "?")
+
+
+def _format_style_runs(row: dict) -> str:
+    return " | ".join(
+        f"{run['style']}:{run['text']}"
+        for run in _style_runs(row)
+    )
 
 
 def main() -> int:
@@ -168,8 +166,10 @@ def main() -> int:
     candidates = collect_candidates(analysed)
     occurrences = sum(int(c.get("occurrences") or 0) for c in candidates)
     suggested = sum(1 for c in candidates if c.get("suggestion"))
-    mixed_style = _mixed_style_rows(analysed)
     five_row_used = sum(1 for row in analysed if row.get("five_row_context_used"))
+    sequence_counts = _style_sequence_counts(analysed)
+    transition_counts = _style_transition_counts(analysed)
+    multi_style_rows = [row for row in analysed if len(_style_sequence(row)) > 1]
 
     review_html.write_text(build_editable_unknown_html(analysed, args.facit), encoding="utf-8")
     facit_html.write_text(build_facit_html(args.facit), encoding="utf-8")
@@ -189,22 +189,28 @@ def main() -> int:
     print(f"unknown_occurrences={occurrences}")
     print(f"unique_unknown_rasters={len(candidates)}")
     print(f"candidates_with_jsonl_suggestion={suggested}")
-    print(f"mixed_style_words={len(mixed_style)}")
+    print(f"multi_style_words={len(multi_style_rows)}")
+    print(f"style_sequences={len(sequence_counts)}")
+    print(f"style_transitions={sum(transition_counts.values())}")
 
-    if mixed_style:
-        print("\nMIXED-STYLE WORDS (ERROR):")
-        for row in mixed_style:
-            exact_matches = _ordered_exact(row)
-            style_names = ", ".join(sorted(_styles(exact_matches)))
-            exact_labels = " ".join(
-                f"{match.get('label', '')}{{{str(match.get('style') or 'roman')[0]}}}"
-                for match in exact_matches
-            )
-            print(f"  {_row_name(row)!r}: styles={style_names}; exact={exact_labels}")
+    if sequence_counts:
+        print("\nTYPOGRAPHY SEQUENCES:")
+        for sequence, count in sequence_counts.most_common():
+            print(f"  {count:4d}  {' -> '.join(sequence)}")
+
+    if transition_counts:
+        print("\nTYPOGRAPHY TRANSITIONS:")
+        for (left, right), count in transition_counts.most_common():
+            print(f"  {count:4d}  {left} -> {right}")
+
+    if multi_style_rows:
+        print("\nMULTI-STYLE EXAMPLES:")
+        for row in multi_style_rows[:30]:
+            print(f"  {_row_name(row)!r}: {_format_style_runs(row)}")
 
     print(f"review_html={review_html}")
     print(f"facit_html={facit_html}")
-    return 1 if mixed_style else 0
+    return 0
 
 
 if __name__ == "__main__":
