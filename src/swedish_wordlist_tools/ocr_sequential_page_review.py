@@ -19,10 +19,11 @@ from .ocr_glyph_matcher import load_facit
 from .ocr_unique_unknown_glyph_review import collect_candidates
 
 _WORKER_MODELS = None
+UNKNOWN_ROLE = "unknown"
+DEFAULT_FACIT_V2 = Path("glyphs/saol14-manual-glyph-facit-v2.json")
 
 
 def _safe_load_source_image(source: str) -> Image.Image | None:
-    """Load a local page image or URL without treating an empty path as '.'."""
     if not source:
         return None
     local = Path(source)
@@ -47,12 +48,6 @@ def _analyse_with_debug_metadata(path: Path, models):
 
 
 def _debug_has_jsonl_anchor(path: Path) -> bool:
-    """Cheaply reject OCR boxes that will not participate in review.
-
-    Exact glyph matching is by far the expensive step. Page preparation already
-    wrote the JSONL alignment hint into every debug file, so inspect that first
-    and never raster-match unanchored page headers, page numbers, etc.
-    """
     debug = json.loads(path.read_text(encoding="utf-8"))
     hint = debug.get("jsonl_hint")
     return isinstance(hint, dict) and bool(str(hint.get("text") or "").strip())
@@ -82,8 +77,6 @@ def _print_progress(done: int, total: int, workers: int, *, force: bool = False)
     if total <= 0:
         return
     percent = (100 * done) // total
-    # Keep output useful rather than printing one line per word. Always show
-    # start/end and approximately every five percentage points.
     previous = (100 * max(0, done - 1)) // total
     if force or done == 0 or done == total or percent // 5 > previous // 5:
         print(f"[analyse] {done}/{total} ({percent}%) workers={workers}", flush=True)
@@ -128,16 +121,24 @@ def _ordered_exact(row: dict) -> list[dict]:
 
 
 def _style_runs(row: dict) -> list[dict]:
-    """Collapse exact glyphs into adjacent typography runs."""
+    """Collapse verified semantic typography-role matches into adjacent runs.
+
+    Facit-v2 models migrated from the old bold/roman/italic facit have role
+    ``unknown``. They remain valid exact raster evidence for OCR geometry, but
+    are deliberately omitted here so they cannot masquerade as semantic
+    typography evidence.
+    """
     runs: list[dict] = []
     for match in _ordered_exact(row):
-        style = str(match.get("style") or "roman")
+        role = str(match.get("style") or UNKNOWN_ROLE)
+        if role == UNKNOWN_ROLE:
+            continue
         label = str(match.get("label") or "")
-        if runs and runs[-1]["style"] == style:
+        if runs and runs[-1]["style"] == role:
             runs[-1]["text"] += label
             runs[-1]["glyphs"] += 1
         else:
-            runs.append({"style": style, "text": label, "glyphs": 1})
+            runs.append({"style": role, "text": label, "glyphs": 1})
     return runs
 
 
@@ -186,7 +187,7 @@ def main() -> int:
     )
     ap.add_argument("jsonl", type=Path)
     ap.add_argument("--page", type=int, default=1)
-    ap.add_argument("--facit", type=Path, default=Path("glyphs/saol14-manual-glyph-facit.json"))
+    ap.add_argument("--facit", type=Path, default=DEFAULT_FACIT_V2)
     ap.add_argument("--out-dir", type=Path, required=True)
     ap.add_argument("--review-html", type=Path)
     ap.add_argument("--facit-html", type=Path)
@@ -205,6 +206,11 @@ def main() -> int:
     args = ap.parse_args()
     if args.workers < 1:
         ap.error("--workers must be at least 1")
+    if not args.facit.is_file():
+        raise SystemExit(
+            f"facit not found: {args.facit}; create v2 first with "
+            "python -m swedish_wordlist_tools.ocr_migrate_glyph_facit_v2"
+        )
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     review_html = args.review_html or (args.out_dir / "unknown-glyph-review.html")
@@ -255,6 +261,7 @@ def main() -> int:
 
     print(f"page={args.page}")
     print(f"source={report['source']}")
+    print(f"facit={args.facit}")
     print(f"jsonl_rows={report.get('jsonl_rows', 0)}")
     print(f"jsonl_reference_tokens={report.get('jsonl_reference_tokens', 0)}")
     print(f"ocr_words={len(debug_files)}")
@@ -269,22 +276,22 @@ def main() -> int:
     print(f"unknown_occurrences={occurrences}")
     print(f"unique_unknown_rasters={len(candidates)}")
     print(f"candidates_with_jsonl_suggestion={suggested}")
-    print(f"multi_style_words={len(multi_style_rows)}")
-    print(f"style_sequences={len(sequence_counts)}")
-    print(f"style_transitions={sum(transition_counts.values())}")
+    print(f"semantic_multi_role_words={len(multi_style_rows)}")
+    print(f"semantic_role_sequences={len(sequence_counts)}")
+    print(f"semantic_role_transitions={sum(transition_counts.values())}")
 
     if sequence_counts:
-        print("\nTYPOGRAPHY SEQUENCES:")
+        print("\nSEMANTIC TYPOGRAPHY ROLE SEQUENCES:")
         for sequence, count in sequence_counts.most_common():
             print(f"  {count:4d}  {' -> '.join(sequence)}")
 
     if transition_counts:
-        print("\nTYPOGRAPHY TRANSITIONS:")
+        print("\nSEMANTIC TYPOGRAPHY ROLE TRANSITIONS:")
         for (left, right), count in transition_counts.most_common():
             print(f"  {count:4d}  {left} -> {right}")
 
     if multi_style_rows:
-        print("\nMULTI-STYLE EXAMPLES:")
+        print("\nMULTI-ROLE EXAMPLES:")
         for row in multi_style_rows[:30]:
             print(f"  {_row_name(row)!r}: {_format_style_runs(row)}")
 
