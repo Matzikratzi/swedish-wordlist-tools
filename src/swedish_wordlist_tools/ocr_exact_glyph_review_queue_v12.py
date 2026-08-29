@@ -8,15 +8,22 @@ from . import ocr_exact_glyph_review_queue_v10 as v10
 from .ocr_exact_glyph_review_queue import _expand_inputs, _raw_baseline_guess
 from .ocr_exact_glyph_review_queue_v6 import build_html as build_html_v6
 from .ocr_glyph_facit_table import build_html as build_facit_html
-from .ocr_glyph_matcher import GlyphModel, load_facit, load_word_debug, select_best_baseline_partition
+from .ocr_glyph_matcher import (
+    GlyphModel,
+    Match,
+    exact_matches,
+    load_facit,
+    load_word_debug,
+    select_best_disjoint_exact,
+)
 
 
 def _component_row_index(comp: set[tuple[int, int]], bands: list[dict]) -> int:
-    """Assign one indivisible connected component to one physical text row.
+    """Assign one residual connected component to one physical text row.
 
-    Prefer the row band containing most component pixels.  Detached marks that
-    fall in the whitespace between rows are assigned by vertical centre.  The
-    component itself is never split.
+    This is deliberately used only *after* all exact known glyphs have been
+    extracted from the five-row raster.  A source component may initially be a
+    tangle of glyphs from several rows and is therefore not a glyph boundary.
     """
     overlaps: list[int] = []
     for band in bands:
@@ -37,11 +44,84 @@ def _component_row_index(comp: set[tuple[int, int]], bands: list[dict]) -> int:
 def _assign_components_to_rows(
     ink: set[tuple[int, int]], bands: list[dict], target_index: int
 ) -> tuple[set[tuple[int, int]], list[set[tuple[int, int]]]]:
-    """Return target-row ink plus ink assigned to every context row."""
+    """Assign residual components whole to rows after exact tangle extraction."""
     assigned = [set() for _ in bands]
     for comp in v10._components(ink):
         assigned[_component_row_index(comp, bands)].update(comp)
     return assigned[target_index], assigned
+
+
+def _partition_key(matches: list[Match]) -> tuple[int, int, int, int]:
+    return (
+        sum(m.model_pixels for m in matches),
+        sum(m.model_pixels * m.model_pixels for m in matches),
+        sum(m.sources for m in matches),
+        -len(matches),
+    )
+
+
+def _baseline_belongs_to_band(baseline: int, band: dict) -> bool:
+    # Tesseract's physical line box normally contains the print baseline.  One
+    # pixel of tolerance handles rounding at the lower edge without allowing a
+    # baseline to migrate to the neighbouring physical row.
+    return int(band["top"]) - 1 <= baseline <= int(band["bottom"])
+
+
+def _extract_exact_rows_from_tangle(
+    ink: set[tuple[int, int]],
+    width: int,
+    height: int,
+    models: list[GlyphModel],
+    bands: list[dict],
+) -> tuple[list[list[Match]], list[Match]]:
+    """Extract known glyphs from a multi-row connected raster tangle.
+
+    Source connected components are intentionally ignored while proposing exact
+    glyph placements.  Candidates are constrained by physical row and one
+    baseline per row.  The final selection is pixel-disjoint, so two glyphs can
+    be pulled from the same connected source component but cannot claim the same
+    black pixel.
+    """
+    candidates = exact_matches(
+        ink,
+        width,
+        height,
+        models,
+        require_whole_components=False,
+    )
+
+    per_row_by_baseline: list[dict[int, list[Match]]] = [dict() for _ in bands]
+    for match in candidates:
+        for row_index, band in enumerate(bands):
+            if _baseline_belongs_to_band(match.baseline, band):
+                per_row_by_baseline[row_index].setdefault(match.baseline, []).append(match)
+                break
+
+    proposed: list[list[Match]] = []
+    for by_baseline in per_row_by_baseline:
+        best: list[Match] = []
+        best_key: tuple[int, int, int, int] | None = None
+        for baseline in sorted(by_baseline):
+            selected = select_best_disjoint_exact(by_baseline[baseline])
+            key = _partition_key(selected)
+            if best_key is None or key > best_key:
+                best = selected
+                best_key = key
+        proposed.append(best)
+
+    # A joining source pixel can in principle be present in two independently
+    # proposed placements.  Resolve that globally while retaining the already
+    # chosen per-row baselines.
+    globally_selected = select_best_disjoint_exact(match for row in proposed for match in row)
+    selected_keys = {
+        (m.label, m.style, m.x, m.baseline, m.pixels)
+        for m in globally_selected
+    }
+    per_row_selected = [
+        [m for m in row if (m.label, m.style, m.x, m.baseline, m.pixels) in selected_keys]
+        for row in proposed
+    ]
+    return per_row_selected, globally_selected
 
 
 def _analyse_one(path: Path, models: list[GlyphModel]):
@@ -57,17 +137,36 @@ def _analyse_one(path: Path, models: list[GlyphModel]):
         row["five_row_context_used"] = False
         return row
 
-    current, assigned = _assign_components_to_rows(set(raw_ink), bands, target_index)
-    baseline, shown = select_best_baseline_partition(current, width, height, models)
-    if baseline is None:
-        baseline = _raw_baseline_guess(current, height)
-        source = "five-row-context+raw-density-manual-seed"
-    else:
-        source = "five-row-context+max-exact-raster-coverage"
+    per_row_exact, all_exact = _extract_exact_rows_from_tangle(
+        set(raw_ink), width, height, models, bands
+    )
+    covered_all = set().union(*(m.pixels for m in all_exact)) if all_exact else set()
 
+    # Only after exact known glyphs have been peeled out do connected components
+    # become useful for assigning the still-unexplained residual ink to rows.
+    residual = set(raw_ink) - covered_all
+    _, residual_by_row = _assign_components_to_rows(residual, bands, target_index)
+
+    row_ink: list[set[tuple[int, int]]] = []
+    for row_index in range(len(bands)):
+        exact_pixels = set().union(*(m.pixels for m in per_row_exact[row_index])) if per_row_exact[row_index] else set()
+        row_ink.append(exact_pixels | residual_by_row[row_index])
+
+    shown = per_row_exact[target_index]
+    current = row_ink[target_index]
     covered = set().union(*(m.pixels for m in shown)) if shown else set()
-    previous = set().union(*assigned[:target_index]) if target_index else set()
-    nxt = set().union(*assigned[target_index + 1 :]) if target_index + 1 < len(assigned) else set()
+    unexplained = current - covered
+
+    baselines = {m.baseline for m in shown}
+    if len(baselines) == 1:
+        baseline = next(iter(baselines))
+        source = "five-row-tangle+exact-row-baseline"
+    else:
+        baseline = _raw_baseline_guess(current, height)
+        source = "five-row-tangle+raw-density-manual-seed"
+
+    previous = set().union(*row_ink[:target_index]) if target_index else set()
+    nxt = set().union(*row_ink[target_index + 1 :]) if target_index + 1 < len(row_ink) else set()
 
     return {
         "expected": str(debug.get("expected_word") or debug.get("headword") or ""),
@@ -83,15 +182,18 @@ def _analyse_one(path: Path, models: list[GlyphModel]):
         "uncertain_row": [],
         "removed_noise": sorted([list(p) for p in previous | nxt]),
         "row_segmentation": {
-            "method": "five-row-context",
+            "method": "five-row-exact-tangle-extraction",
             "bands": bands,
             "target_index": target_index,
-            "row_pixel_counts": [len(p) for p in assigned],
+            "row_pixel_counts": [len(p) for p in row_ink],
+            "row_exact_counts": [len(matches) for matches in per_row_exact],
+            "exact_pixels_all_rows": len(covered_all),
+            "residual_pixels": len(residual),
         },
         "five_row_context_used": True,
         "baseline": baseline,
         "baseline_source": source,
-        "fully_exact": covered == current,
+        "fully_exact": not unexplained,
         "exact": [
             {
                 "label": m.label,
@@ -102,8 +204,8 @@ def _analyse_one(path: Path, models: list[GlyphModel]):
             }
             for m in shown
         ],
-        "unexplained": sorted([list(p) for p in current - covered]),
-        "recognized": "".join(m.label for m in shown),
+        "unexplained": sorted([list(p) for p in unexplained]),
+        "recognized": "".join(m.label for m in sorted(shown, key=lambda m: (m.x, m.label, m.style))),
         "guarded_partial_matches": [],
         "source": {
             "expected_word": debug.get("expected_word"),
@@ -132,7 +234,7 @@ def build_html(paths: list[Path], facit_path: Path) -> str:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Exact-raster OCR review using a five-physical-row context window.")
+    ap = argparse.ArgumentParser(description="Exact-raster OCR review using five physical rows and tangle extraction.")
     ap.add_argument("inputs", nargs="+", type=Path)
     ap.add_argument("--facit", type=Path, default=Path("glyphs/saol14-manual-glyph-facit.json"))
     ap.add_argument("--out", type=Path, required=True)
