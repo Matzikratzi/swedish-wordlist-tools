@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import unittest
 
-from swedish_wordlist_tools.ocr_prepare_sequential_page import _crop_box, _page_from_row, source_for_page
+from swedish_wordlist_tools.ocr_prepare_sequential_page import (
+    _crop_box,
+    _line_key,
+    _page_from_row,
+    _physical_lines,
+    source_for_page,
+)
 from swedish_wordlist_tools.ocr_tsv_articles import OcrWord
 
 
@@ -42,6 +48,60 @@ class SequentialPagePreparationTests(unittest.TestCase):
             text="abc",
         )
         self.assertEqual(_crop_box(word, Page(), 1, 5), (0, 0, 13, 17))
+
+    def test_five_row_context_is_clipped_at_column_edges(self) -> None:
+        page_width = 300
+
+        def row(col: int, line: int, top: int) -> OcrWord:
+            left = (col * 100) + 10
+            return OcrWord(
+                block=1,
+                paragraph=1,
+                line=line,
+                word=1,
+                left=left,
+                top=top,
+                width=20,
+                height=8,
+                confidence=90.0,
+                text=f"c{col}r{line}",
+            )
+
+        # Six rows in column 0, plus two rows in column 1 close enough in y that
+        # a page-global neighbour search could accidentally cross the boundary.
+        col0 = [row(0, line, 10 + (line - 1) * 12) for line in range(1, 7)]
+        col1 = [row(1, line, 10 + (line - 1) * 12) for line in range(1, 3)]
+        contexts = _physical_lines(col0 + col1, page_width)
+
+        def context_for(word: OcrWord) -> dict:
+            return contexts[_line_key(word, page_width)]
+
+        first = context_for(col0[0])
+        second = context_for(col0[1])
+        penultimate = context_for(col0[-2])
+        last = context_for(col0[-1])
+
+        self.assertEqual(first["target_index"], 0)
+        self.assertEqual([b["text"] for b in first["bands_page"]], ["c0r1", "c0r2", "c0r3"])
+
+        self.assertEqual(second["target_index"], 1)
+        self.assertEqual(
+            [b["text"] for b in second["bands_page"]],
+            ["c0r1", "c0r2", "c0r3", "c0r4"],
+        )
+
+        self.assertEqual(penultimate["target_index"], 2)
+        self.assertEqual(
+            [b["text"] for b in penultimate["bands_page"]],
+            ["c0r3", "c0r4", "c0r5", "c0r6"],
+        )
+
+        self.assertEqual(last["target_index"], 2)
+        self.assertEqual([b["text"] for b in last["bands_page"]], ["c0r4", "c0r5", "c0r6"])
+
+        for context in (first, second, penultimate, last):
+            self.assertEqual(context["column"], 0)
+            self.assertTrue(all(str(b["text"]).startswith("c0") for b in context["bands_page"]))
 
 
 if __name__ == "__main__":
