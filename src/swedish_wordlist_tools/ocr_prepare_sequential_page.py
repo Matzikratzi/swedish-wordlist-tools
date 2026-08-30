@@ -73,6 +73,24 @@ def _black_pixels(im: Image.Image, threshold: int) -> list[list[int]]:
     ]
 
 
+def _components(ink: set[tuple[int, int]]) -> list[set[tuple[int, int]]]:
+    remaining = set(ink)
+    out: list[set[tuple[int, int]]] = []
+    while remaining:
+        seed = remaining.pop()
+        stack = [seed]
+        comp = {seed}
+        while stack:
+            x, y = stack.pop()
+            for point in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+                if point in remaining:
+                    remaining.remove(point)
+                    comp.add(point)
+                    stack.append(point)
+        out.append(comp)
+    return out
+
+
 def _run_tesseract(page_image: Image.Image, *, lang: str, psm: int) -> list[OcrWord]:
     with tempfile.TemporaryDirectory(prefix="saol-page-") as td:
         image_path = Path(td) / "page.png"
@@ -96,6 +114,10 @@ def _load_source_image(source: str) -> Image.Image | None:
 def _column_index(word: OcrWord, page_width: int) -> int:
     center = word.left + word.width / 2
     return max(0, min(2, int((3 * center) / max(1, page_width))))
+
+
+def _column_bounds(column: int, page_width: int) -> tuple[int, int]:
+    return (column * page_width // 3, (column + 1) * page_width // 3)
 
 
 def _line_key(word: OcrWord, page_width: int) -> tuple[int, int, int, int]:
@@ -124,16 +146,100 @@ def _physical_lines(words: list[OcrWord], page_width: int) -> dict[tuple[int, in
 
     for col, rows in by_col.items():
         rows.sort(key=lambda pair: (pair[1]["top"], pair[1]["left"], pair[0][1:]))
+        column_left, column_right = _column_bounds(col, page_width)
         for index, (key, item) in enumerate(rows):
             lo = max(0, index - 2)
             hi = min(len(rows), index + 3)
             context_rows = [dict(candidate) for _, candidate in rows[lo:hi]]
             out[key] = {
                 "column": col,
+                "column_left": column_left,
+                "column_right": column_right,
                 "target_index": index - lo,
                 "bands_page": context_rows,
             }
     return out
+
+
+def _nearest_row_index(y: int, bands: list[dict[str, Any]]) -> int:
+    return min(
+        range(len(bands)),
+        key=lambda i: (
+            abs(y - (float(bands[i]["top"]) + float(bands[i]["bottom"])) / 2.0),
+            i,
+        ),
+    )
+
+
+def _rows_share_black_component(
+    page: Image.Image,
+    bands: list[dict[str, Any]],
+    left_index: int,
+    right_index: int,
+    column_left: int,
+    column_right: int,
+    threshold: int,
+) -> bool:
+    if not bands:
+        return False
+    y0 = max(0, min(int(b["top"]) for b in bands))
+    y1 = min(page.height, max(int(b["bottom"]) for b in bands))
+    crop = page.crop((column_left, y0, column_right, y1)).convert("L")
+    ink = {
+        (x + column_left, y + y0)
+        for y in range(crop.height)
+        for x in range(crop.width)
+        if crop.getpixel((x, y)) < threshold
+    }
+    for comp in _components(ink):
+        owners = {_nearest_row_index(y, bands) for _, y in comp}
+        if left_index in owners and right_index in owners:
+            return True
+    return False
+
+
+def _active_line_context(
+    page: Image.Image,
+    line_context: dict[str, Any] | None,
+    threshold: int,
+) -> dict[str, Any] | None:
+    """Use target +/-1 rows normally and outer support rows only when needed.
+
+    The source context keeps up to five physical rows.  Analysis always includes
+    the target row and its immediate neighbours.  Row -2 or +2 is activated only
+    when a 4-connected black component crosses between that outer row's Voronoi
+    region and the nearer neighbour row.  This lets a glyph tangle spill across
+    rows without making remote rows free OCR search space.
+    """
+    if not line_context or not line_context.get("bands_page"):
+        return line_context
+    bands = list(line_context["bands_page"])
+    target = int(line_context["target_index"])
+    active = set(range(max(0, target - 1), min(len(bands), target + 2)))
+    column_left = int(line_context.get("column_left", 0))
+    column_right = int(line_context.get("column_right", page.width))
+
+    upper_outer = target - 2
+    if upper_outer >= 0 and _rows_share_black_component(
+        page, bands, upper_outer, upper_outer + 1, column_left, column_right, threshold
+    ):
+        active.add(upper_outer)
+
+    lower_outer = target + 2
+    if lower_outer < len(bands) and _rows_share_black_component(
+        page, bands, lower_outer - 1, lower_outer, column_left, column_right, threshold
+    ):
+        active.add(lower_outer)
+
+    indices = sorted(active)
+    selected = [dict(bands[i]) for i in indices]
+    return {
+        **line_context,
+        "bands_page": selected,
+        "target_index": indices.index(target),
+        "source_band_indices": indices,
+        "outer_support_rows": [i for i in indices if abs(i - target) == 2],
+    }
 
 
 def _crop_box(
@@ -143,13 +249,15 @@ def _crop_box(
     pad_y: int,
     line_context: dict[str, Any] | None = None,
 ) -> tuple[int, int, int, int]:
-    x0 = max(0, word.left - pad_x)
-    x1 = min(page.width, word.left + word.width + pad_x)
     if line_context and line_context.get("bands_page"):
         bands = line_context["bands_page"]
+        x0 = max(0, int(line_context.get("column_left", word.left)) - pad_x)
+        x1 = min(page.width, int(line_context.get("column_right", word.left + word.width)) + pad_x)
         y0 = max(0, min(int(b["top"]) for b in bands) - pad_y)
         y1 = min(page.height, max(int(b["bottom"]) for b in bands) + pad_y)
     else:
+        x0 = max(0, word.left - pad_x)
+        x1 = min(page.width, word.left + word.width + pad_x)
         y0 = max(0, word.top - pad_y)
         y1 = min(page.height, word.top + word.height + pad_y)
     return x0, y0, x1, y1
@@ -177,6 +285,8 @@ def _relative_five_row_context(
         "column": int(line_context["column"]),
         "target_index": int(line_context["target_index"]),
         "bands": bands,
+        "source_band_indices": list(line_context.get("source_band_indices") or []),
+        "outer_support_rows": list(line_context.get("outer_support_rows") or []),
     }
 
 
@@ -211,6 +321,10 @@ def prepare_page(
     words = _run_tesseract(page_image, lang=lang, psm=psm)
     words = [w for w in words if w.text.strip() and w.confidence >= min_confidence]
     line_contexts = _physical_lines(words, page_image.width)
+    active_contexts = {
+        key: _active_line_context(page_image, context, threshold)
+        for key, context in line_contexts.items()
+    }
     words.sort(key=lambda w: _reading_order_key(w, page_image.width))
 
     refs = reference_tokens(page_rows, text_limit=50)
@@ -224,8 +338,9 @@ def prepare_page(
     skipped_blank = 0
     hinted = 0
     five_row_words = 0
+    outer_support_words = 0
     for i, (word, hint) in enumerate(zip(words, hints)):
-        line_context = line_contexts.get(_line_key(word, page_image.width))
+        line_context = active_contexts.get(_line_key(word, page_image.width))
         box = _crop_box(word, page_image, pad_x, pad_y, line_context)
         x0, y0, x1, y1 = box
         crop = page_image.crop(box).convert("L")
@@ -237,6 +352,8 @@ def prepare_page(
         five_row_context = _relative_five_row_context(line_context, box)
         if five_row_context:
             five_row_words += 1
+            if five_row_context.get("outer_support_rows"):
+                outer_support_words += 1
 
         stem = f"saol14-word-debug-p{page_number:05d}-{i:04d}"
         crop.save(png_dir / f"{stem}.png")
@@ -276,7 +393,7 @@ def prepare_page(
         written += 1
 
     report = {
-        "format": "saol14-sequential-page-preparation-v3",
+        "format": "saol14-sequential-page-preparation-v4",
         "jsonl": str(jsonl),
         "page": page_number,
         "source": source,
@@ -286,6 +403,7 @@ def prepare_page(
         "tesseract_words": len(words),
         "hinted_words": hinted,
         "five_row_context_words": five_row_words,
+        "outer_support_words": outer_support_words,
         "word_debug_files": written,
         "skipped_blank": skipped_blank,
         "out_dir": str(out_dir),
@@ -331,6 +449,7 @@ def main() -> int:
     print(f"tesseract_words={report['tesseract_words']}")
     print(f"hinted_words={report['hinted_words']}")
     print(f"five_row_context_words={report['five_row_context_words']}")
+    print(f"outer_support_words={report['outer_support_words']}")
     print(f"word_debug_files={report['word_debug_files']}")
     print(args.out_dir)
     return 0 if report["word_debug_files"] else 3
