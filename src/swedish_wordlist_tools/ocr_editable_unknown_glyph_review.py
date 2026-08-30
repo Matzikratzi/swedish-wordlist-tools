@@ -7,9 +7,33 @@ from typing import Any
 from .ocr_unique_unknown_glyph_review import collect_candidates
 
 
+def _attach_context_images(candidates: list[dict[str, Any]], rows: list[dict[str, Any]]) -> None:
+    """Restore per-row facsimile metadata after unique-raster deduplication."""
+    by_source: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        source = row.get("source") or {}
+        source_id = str(source.get("source_id") or "") if isinstance(source, dict) else ""
+        if source_id and row.get("context_image"):
+            by_source[source_id] = row
+
+    for candidate in candidates:
+        context = candidate.get("context")
+        if not isinstance(context, dict):
+            continue
+        for source in candidate.get("sources") or []:
+            source_id = str(source.get("source_id") or "") if isinstance(source, dict) else ""
+            row = by_source.get(source_id)
+            if row is None:
+                continue
+            context["context_image"] = row.get("context_image")
+            context["context_image_bbox"] = row.get("context_image_bbox")
+            break
+
+
 def build_html(rows: list[dict[str, Any]], facit_path: Path) -> str:
     facit = json.loads(facit_path.read_text(encoding="utf-8"))
     candidates = collect_candidates(rows)
+    _attach_context_images(candidates, rows)
     payload = json.dumps({"candidates": candidates, "facit": facit}, ensure_ascii=False)
     return f"""<!doctype html>
 <meta charset='utf-8'>
