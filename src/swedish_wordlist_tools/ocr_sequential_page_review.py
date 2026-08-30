@@ -21,6 +21,9 @@ from .ocr_unique_unknown_glyph_review import collect_candidates
 _WORKER_MODELS = None
 UNKNOWN_ROLE = "unknown"
 DEFAULT_FACIT_V2 = Path("glyphs/saol14-manual-glyph-facit-v2.json")
+CONTEXT_COLUMNS = 3
+CONTEXT_ROWS = 4
+CONTEXT_OVERLAP_FRACTION = 0.08
 
 
 def _safe_load_source_image(source: str) -> Image.Image | None:
@@ -46,6 +49,9 @@ def _analyse_with_debug_metadata(path: Path, models):
     row["page_source"] = debug.get("page_source")
     row["five_row_context"] = debug.get("five_row_context")
     row["target_word_bbox_in_crop"] = debug.get("target_word_bbox_in_crop")
+    tesseract = debug.get("tesseract")
+    if isinstance(tesseract, dict):
+        row["target_page_word_bbox"] = tesseract.get("raw_bbox")
     return row
 
 
@@ -115,64 +121,83 @@ def _analyse_paths(paths: list[Path], facit_path: Path, workers: int) -> list[di
     return [row for row in rows if row is not None]
 
 
-def _three_line_context_box(
-    row: dict,
+def _segment_index_for_bbox(
+    bbox: list[int] | tuple[int, int, int, int] | None,
+    page_width: int,
+    page_height: int,
+) -> tuple[int, int] | None:
+    if not bbox or len(bbox) != 4:
+        return None
+    try:
+        left, top, width, height = (int(v) for v in bbox)
+    except (TypeError, ValueError):
+        return None
+    cx = left + width / 2
+    cy = top + height / 2
+    column = max(0, min(CONTEXT_COLUMNS - 1, int(CONTEXT_COLUMNS * cx / max(1, page_width))))
+    band = max(0, min(CONTEXT_ROWS - 1, int(CONTEXT_ROWS * cy / max(1, page_height))))
+    return column, band
+
+
+def _segment_box(
+    column: int,
+    band: int,
     page_width: int,
     page_height: int,
     *,
-    pad_y: int = 4,
-) -> tuple[int, int, int, int] | None:
-    context = row.get("five_row_context")
-    if not isinstance(context, dict):
-        return None
-    bands = context.get("bands")
-    target_index = context.get("target_index")
-    column = context.get("column")
-    if not isinstance(bands, list) or not bands:
-        return None
-    try:
-        target_index = int(target_index)
-        column = int(column)
-    except (TypeError, ValueError):
-        return None
-    if target_index < 0 or target_index >= len(bands):
-        return None
-
-    selected = bands[max(0, target_index - 1) : min(len(bands), target_index + 2)]
-    page_tops = [int(b["page_top"]) for b in selected if "page_top" in b]
-    page_bottoms = [int(b["page_bottom"]) for b in selected if "page_bottom" in b]
-    if not page_tops or not page_bottoms:
-        return None
-
-    # SAOL14 is laid out in three columns.  Use the complete column third so
-    # the reviewer sees the surrounding words, not just the Tesseract word box.
-    x0 = max(0, (column * page_width) // 3)
-    x1 = min(page_width, ((column + 1) * page_width) // 3)
-    y0 = max(0, min(page_tops) - pad_y)
-    y1 = min(page_height, max(page_bottoms) + pad_y)
-    if x1 <= x0 or y1 <= y0:
-        return None
-    return x0, y0, x1, y1
+    overlap_fraction: float = CONTEXT_OVERLAP_FRACTION,
+) -> tuple[int, int, int, int]:
+    core_x0 = (column * page_width) // CONTEXT_COLUMNS
+    core_x1 = ((column + 1) * page_width) // CONTEXT_COLUMNS
+    core_y0 = (band * page_height) // CONTEXT_ROWS
+    core_y1 = ((band + 1) * page_height) // CONTEXT_ROWS
+    pad_x = round((core_x1 - core_x0) * overlap_fraction)
+    pad_y = round((core_y1 - core_y0) * overlap_fraction)
+    return (
+        max(0, core_x0 - pad_x),
+        max(0, core_y0 - pad_y),
+        min(page_width, core_x1 + pad_x),
+        min(page_height, core_y1 + pad_y),
+    )
 
 
-def _write_three_line_context_images(
+def _write_page_context_segments(
     rows: list[dict],
     page_image: Image.Image,
     out_dir: Path,
 ) -> int:
+    """Write 3 x 4 overlapping facsimile segments and link each OCR row to one."""
     context_dir = out_dir / "context"
     context_dir.mkdir(exist_ok=True)
-    written = 0
-    for index, row in enumerate(rows):
-        box = _three_line_context_box(row, page_image.width, page_image.height)
-        if box is None:
+    segments: dict[tuple[int, int], tuple[str, tuple[int, int, int, int]]] = {}
+
+    for band in range(CONTEXT_ROWS):
+        for column in range(CONTEXT_COLUMNS):
+            box = _segment_box(column, band, page_image.width, page_image.height)
+            filename = f"page-segment-c{column + 1}-r{band + 1}.png"
+            page_image.crop(box).save(context_dir / filename)
+            segments[(column, band)] = (f"context/{filename}", box)
+
+    for row in rows:
+        index = _segment_index_for_bbox(
+            row.get("target_page_word_bbox"),
+            page_image.width,
+            page_image.height,
+        )
+        if index is None:
+            index = _segment_index_for_bbox(
+                row.get("page_word_bbox"),
+                page_image.width,
+                page_image.height,
+            )
+        if index is None:
             continue
-        filename = f"context-{index:04d}.png"
-        page_image.crop(box).save(context_dir / filename)
-        row["context_image"] = f"context/{filename}"
+        image_path, box = segments[index]
+        row["context_image"] = image_path
         row["context_image_bbox"] = list(box)
-        written += 1
-    return written
+        row["context_segment"] = [index[0] + 1, index[1] + 1]
+
+    return len(segments)
 
 
 def _ordered_exact(row: dict) -> list[dict]:
@@ -307,11 +332,11 @@ def main() -> int:
 
     analysed = _analyse_paths(anchored_paths, args.facit, args.workers)
 
-    print("[context] writing three-line facsimile crops...", flush=True)
+    print("[context] writing 12 overlapping facsimile page segments...", flush=True)
     page_image = _safe_load_source_image(str(report.get("source") or ""))
     context_images = 0
     if page_image is not None:
-        context_images = _write_three_line_context_images(analysed, page_image, args.out_dir)
+        context_images = _write_page_context_segments(analysed, page_image, args.out_dir)
 
     exact = sum(1 for row in analysed if row.get("fully_exact"))
     incomplete = len(analysed) - exact
