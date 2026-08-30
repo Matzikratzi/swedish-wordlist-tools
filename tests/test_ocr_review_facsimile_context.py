@@ -32,7 +32,7 @@ class ReviewFacsimileContextTests(unittest.TestCase):
         self.assertLessEqual(first[2], 900)
         self.assertLessEqual(first[3], 1200)
 
-    def test_writer_creates_exactly_twelve_images_and_links_rows(self) -> None:
+    def test_writer_creates_exactly_twelve_images_and_embeds_linked_segment(self) -> None:
         rows = [
             {"target_page_word_bbox": [10, 10, 20, 20]},
             {"target_page_word_bbox": [810, 1010, 20, 20]},
@@ -42,16 +42,18 @@ class ReviewFacsimileContextTests(unittest.TestCase):
             out = Path(td)
             written = _write_page_context_segments(rows, image, out)
             files = sorted((out / "context").glob("page-segment-*.png"))
-
-        self.assertEqual(written, 12)
-        self.assertEqual(len(files), 12)
-        self.assertEqual(rows[0]["context_image"], "context/page-segment-c1-r1.png")
-        self.assertEqual(rows[1]["context_image"], "context/page-segment-c3-r4.png")
+            self.assertEqual(written, 12)
+            self.assertEqual(len(files), 12)
+            self.assertTrue(rows[0]["context_image"].startswith("data:image/png;base64,"))
+            self.assertTrue(rows[1]["context_image"].startswith("data:image/png;base64,"))
+            self.assertEqual(rows[0]["context_image_file"], "context/page-segment-c1-r1.png")
+            self.assertEqual(rows[1]["context_image_file"], "context/page-segment-c3-r4.png")
 
     def test_facsimile_metadata_is_attached_to_unique_candidate_context(self) -> None:
+        embedded = "data:image/png;base64,ZmFrZQ=="
         rows = [{
             "source": {"source_id": "page:1:ocr:1"},
-            "context_image": "context/page-segment-c2-r3.png",
+            "context_image": embedded,
             "context_image_bbox": [280, 570, 620, 930],
         }]
         candidates = [{
@@ -59,10 +61,7 @@ class ReviewFacsimileContextTests(unittest.TestCase):
             "context": {},
         }]
         _attach_context_images(candidates, rows)
-        self.assertEqual(
-            candidates[0]["context"]["context_image"],
-            "context/page-segment-c2-r3.png",
-        )
+        self.assertEqual(candidates[0]["context"]["context_image"], embedded)
         self.assertEqual(
             candidates[0]["context"]["context_image_bbox"],
             [280, 570, 620, 930],
