@@ -22,7 +22,7 @@ def _component_row_index(comp: set[tuple[int, int]], bands: list[dict]) -> int:
     """Assign one residual connected component to one physical text row.
 
     This is deliberately used only *after* all exact known glyphs have been
-    extracted from the five-row raster.  A source component may initially be a
+    extracted from the multi-row raster. A source component may initially be a
     tangle of glyphs from several rows and is therefore not a glyph boundary.
     """
     overlaps: list[int] = []
@@ -42,13 +42,7 @@ def _component_row_index(comp: set[tuple[int, int]], bands: list[dict]) -> int:
 
 
 def _component_nearest_row_index(comp: set[tuple[int, int]], bands: list[dict]) -> int:
-    """Assign a residual component by centroid to the nearest physical row centre.
-
-    Tesseract line boxes can overlap enough that a fragment from the previous
-    line lies inside the target line box.  For review candidates we therefore
-    use the stricter Voronoi ownership of physical row centres instead of box
-    overlap.  Detached marks close to the target line still remain with it.
-    """
+    """Assign a residual component by centroid to the nearest physical row centre."""
     cy = sum(y for _, y in comp) / max(1, len(comp))
     return min(
         range(len(bands)),
@@ -62,12 +56,7 @@ def _component_nearest_row_index(comp: set[tuple[int, int]], bands: list[dict]) 
 def _filter_target_review_residual(
     unexplained: set[tuple[int, int]], bands: list[dict], target_index: int
 ) -> tuple[set[tuple[int, int]], set[tuple[int, int]]]:
-    """Keep only residual components geometrically owned by the target row.
-
-    This filter affects the unknown-glyph review queue only.  It does not alter
-    exact matching or the original five-row raster.  The rejected pixels remain
-    available as diagnostic context but are not offered as glyphs to learn.
-    """
+    """Keep only residual components geometrically owned by the target row."""
     if not unexplained or not bands or not (0 <= target_index < len(bands)):
         return set(unexplained), set()
 
@@ -101,14 +90,7 @@ def _partition_key(matches: list[Match]) -> tuple[int, int, int, int]:
 
 
 def _baseline_row_index(baseline: int, bands: list[dict]) -> int:
-    """Return the one physical row whose vertical centre owns this baseline.
-
-    Tesseract line boxes may overlap slightly.  Treating each box independently
-    therefore lets the same baseline qualify for more than one row.  Instead we
-    partition vertical space into Voronoi regions around the physical line
-    centres: every possible baseline belongs to exactly one row before any glyph
-    selection takes place.
-    """
+    """Return the one physical row whose vertical centre owns this baseline."""
     return min(
         range(len(bands)),
         key=lambda i: (
@@ -128,15 +110,7 @@ def _extract_exact_rows_from_tangle(
     models: list[GlyphModel],
     bands: list[dict],
 ) -> tuple[list[list[Match]], list[Match]]:
-    """Extract known glyphs from a multi-row connected raster tangle.
-
-    Source connected components are intentionally ignored while proposing exact
-    glyph placements.  Before choosing glyphs, every candidate baseline is bound
-    to exactly one physical row by the row geometry.  Within each row only one
-    baseline may win.  The final selection is pixel-disjoint, so two glyphs can
-    be pulled from the same connected source component but cannot claim the same
-    black pixel.
-    """
+    """Extract known glyphs from a multi-row connected raster tangle."""
     candidates = exact_matches(
         ink,
         width,
@@ -162,9 +136,6 @@ def _extract_exact_rows_from_tangle(
                 best_key = key
         proposed.append(best)
 
-    # A joining source pixel can in principle be present in two independently
-    # proposed placements.  Resolve that globally while retaining the already
-    # chosen per-row baselines.
     globally_selected = select_best_disjoint_exact(match for row in proposed for match in row)
     selected_keys = {
         (m.label, m.style, m.x, m.baseline, m.pixels)
@@ -177,14 +148,39 @@ def _extract_exact_rows_from_tangle(
     return per_row_selected, globally_selected
 
 
+def _target_x_span(debug: dict, width: int) -> tuple[int, int]:
+    bbox = debug.get("target_word_bbox_in_crop")
+    if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+        return 0, width
+    try:
+        left = max(0, int(bbox[0]))
+        right = min(width, left + max(0, int(bbox[2])))
+    except (TypeError, ValueError):
+        return 0, width
+    return (left, right) if right > left else (0, width)
+
+
+def _match_intersects_x(match: Match, left: int, right: int) -> bool:
+    return any(left <= x < right for x, _ in match.pixels)
+
+
+def _components_intersecting_x(
+    ink: set[tuple[int, int]], left: int, right: int
+) -> set[tuple[int, int]]:
+    """Keep whole residual components that intersect the target word's x span."""
+    kept: set[tuple[int, int]] = set()
+    for comp in v10._components(ink):
+        if any(left <= x < right for x, _ in comp):
+            kept.update(comp)
+    return kept
+
+
 def _analyse_one(path: Path, models: list[GlyphModel]):
     raw_ink, width, height, debug = load_word_debug(path)
     context = debug.get("five_row_context") or {}
     bands = list(context.get("bands") or [])
     target_index = int(context.get("target_index", -1))
 
-    # Old debug files remain readable.  Five-row page preparation is the new
-    # preferred path; v10 is the compatibility fallback.
     if not bands or not (0 <= target_index < len(bands)):
         row = v10._analyse_one(path, models)
         row["five_row_context_used"] = False
@@ -195,8 +191,6 @@ def _analyse_one(path: Path, models: list[GlyphModel]):
     )
     covered_all = set().union(*(m.pixels for m in all_exact)) if all_exact else set()
 
-    # Only after exact known glyphs have been peeled out do connected components
-    # become useful for assigning the still-unexplained residual ink to rows.
     residual = set(raw_ink) - covered_all
     _, residual_by_row = _assign_components_to_rows(residual, bands, target_index)
 
@@ -205,9 +199,22 @@ def _analyse_one(path: Path, models: list[GlyphModel]):
         exact_pixels = set().union(*(m.pixels for m in per_row_exact[row_index])) if per_row_exact[row_index] else set()
         row_ink.append(exact_pixels | residual_by_row[row_index])
 
-    shown = per_row_exact[target_index]
-    current = row_ink[target_index]
-    covered = set().union(*(m.pixels for m in shown)) if shown else set()
+    # The analysis raster is deliberately wide enough to contain complete
+    # neighbouring physical rows. Review ownership stays narrow: only glyphs and
+    # whole residual components intersecting the original target-word x span can
+    # become target-row output. Thus full neighbour rows explain spill without
+    # turning every word on the middle line into a duplicate review candidate.
+    target_left, target_right = _target_x_span(debug, width)
+    shown = [
+        m for m in per_row_exact[target_index]
+        if _match_intersects_x(m, target_left, target_right)
+    ]
+    target_residual = _components_intersecting_x(
+        residual_by_row[target_index], target_left, target_right
+    )
+    exact_target_pixels = set().union(*(m.pixels for m in shown)) if shown else set()
+    current = exact_target_pixels | target_residual
+    covered = exact_target_pixels
     raw_unexplained = current - covered
     unexplained, filtered_neighbor_residual = _filter_target_review_residual(
         raw_unexplained, bands, target_index
@@ -216,10 +223,10 @@ def _analyse_one(path: Path, models: list[GlyphModel]):
     baselines = {m.baseline for m in shown}
     if len(baselines) == 1:
         baseline = next(iter(baselines))
-        source = "five-row-tangle+row-bound-exact-baseline"
+        source = "wide-row-tangle+target-word+row-bound-exact-baseline"
     else:
         baseline = _raw_baseline_guess(current, height)
-        source = "five-row-tangle+raw-density-manual-seed"
+        source = "wide-row-tangle+target-word+raw-density-manual-seed"
 
     previous = set().union(*row_ink[:target_index]) if target_index else set()
     nxt = set().union(*row_ink[target_index + 1 :]) if target_index + 1 < len(row_ink) else set()
@@ -239,13 +246,17 @@ def _analyse_one(path: Path, models: list[GlyphModel]):
         "removed_noise": sorted([list(p) for p in previous | nxt | filtered_neighbor_residual]),
         "filtered_neighbor_residual": sorted([list(p) for p in filtered_neighbor_residual]),
         "row_segmentation": {
-            "method": "five-row-row-bound-tangle-extraction",
+            "method": "wide-physical-row-target-word-tangle-extraction",
             "bands": bands,
             "target_index": target_index,
+            "target_x_span": [target_left, target_right],
+            "source_band_indices": list(context.get("source_band_indices") or []),
+            "outer_support_rows": list(context.get("outer_support_rows") or []),
             "row_pixel_counts": [len(p) for p in row_ink],
             "row_exact_counts": [len(matches) for matches in per_row_exact],
             "exact_pixels_all_rows": len(covered_all),
             "residual_pixels": len(residual),
+            "target_residual_pixels": len(target_residual),
             "review_residual_pixels": len(unexplained),
             "filtered_neighbor_residual_pixels": len(filtered_neighbor_residual),
         },
@@ -293,7 +304,7 @@ def build_html(paths: list[Path], facit_path: Path) -> str:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Exact-raster OCR review using five physical rows and row-bound tangle extraction.")
+    ap = argparse.ArgumentParser(description="Exact-raster OCR review using physical neighbour rows and row-bound tangle extraction.")
     ap.add_argument("inputs", nargs="+", type=Path)
     ap.add_argument("--facit", type=Path, default=Path("glyphs/saol14-manual-glyph-facit.json"))
     ap.add_argument("--out", type=Path, required=True)
