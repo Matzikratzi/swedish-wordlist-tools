@@ -44,6 +44,8 @@ def _analyse_with_debug_metadata(path: Path, models):
     row["jsonl_hint"] = debug.get("jsonl_hint")
     row["page_word_bbox"] = debug.get("page_word_bbox")
     row["page_source"] = debug.get("page_source")
+    row["five_row_context"] = debug.get("five_row_context")
+    row["target_word_bbox_in_crop"] = debug.get("target_word_bbox_in_crop")
     return row
 
 
@@ -111,6 +113,66 @@ def _analyse_paths(paths: list[Path], facit_path: Path, workers: int) -> list[di
             _print_progress(done, len(paths), workers)
 
     return [row for row in rows if row is not None]
+
+
+def _three_line_context_box(
+    row: dict,
+    page_width: int,
+    page_height: int,
+    *,
+    pad_y: int = 4,
+) -> tuple[int, int, int, int] | None:
+    context = row.get("five_row_context")
+    if not isinstance(context, dict):
+        return None
+    bands = context.get("bands")
+    target_index = context.get("target_index")
+    column = context.get("column")
+    if not isinstance(bands, list) or not bands:
+        return None
+    try:
+        target_index = int(target_index)
+        column = int(column)
+    except (TypeError, ValueError):
+        return None
+    if target_index < 0 or target_index >= len(bands):
+        return None
+
+    selected = bands[max(0, target_index - 1) : min(len(bands), target_index + 2)]
+    page_tops = [int(b["page_top"]) for b in selected if "page_top" in b]
+    page_bottoms = [int(b["page_bottom"]) for b in selected if "page_bottom" in b]
+    if not page_tops or not page_bottoms:
+        return None
+
+    # SAOL14 is laid out in three columns.  Use the complete column third so
+    # the reviewer sees the surrounding words, not just the Tesseract word box.
+    x0 = max(0, (column * page_width) // 3)
+    x1 = min(page_width, ((column + 1) * page_width) // 3)
+    y0 = max(0, min(page_tops) - pad_y)
+    y1 = min(page_height, max(page_bottoms) + pad_y)
+    if x1 <= x0 or y1 <= y0:
+        return None
+    return x0, y0, x1, y1
+
+
+def _write_three_line_context_images(
+    rows: list[dict],
+    page_image: Image.Image,
+    out_dir: Path,
+) -> int:
+    context_dir = out_dir / "context"
+    context_dir.mkdir(exist_ok=True)
+    written = 0
+    for index, row in enumerate(rows):
+        box = _three_line_context_box(row, page_image.width, page_image.height)
+        if box is None:
+            continue
+        filename = f"context-{index:04d}.png"
+        page_image.crop(box).save(context_dir / filename)
+        row["context_image"] = f"context/{filename}"
+        row["context_image_bbox"] = list(box)
+        written += 1
+    return written
 
 
 def _ordered_exact(row: dict) -> list[dict]:
@@ -245,6 +307,12 @@ def main() -> int:
 
     analysed = _analyse_paths(anchored_paths, args.facit, args.workers)
 
+    print("[context] writing three-line facsimile crops...", flush=True)
+    page_image = _safe_load_source_image(str(report.get("source") or ""))
+    context_images = 0
+    if page_image is not None:
+        context_images = _write_three_line_context_images(analysed, page_image, args.out_dir)
+
     exact = sum(1 for row in analysed if row.get("fully_exact"))
     incomplete = len(analysed) - exact
     candidates = collect_candidates(analysed)
@@ -271,6 +339,7 @@ def main() -> int:
     print(f"review_words={len(analysed)}")
     print(f"excluded_unanchored_words={excluded_unanchored}")
     print(f"analysis_workers={args.workers}")
+    print(f"context_images={context_images}")
     print(f"fully_exact={exact}")
     print(f"incomplete_words={incomplete}")
     print(f"unknown_occurrences={occurrences}")
