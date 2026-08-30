@@ -157,9 +157,9 @@ def _row_has_unexplained_edge_ink(row: dict[str, Any], width: int) -> bool:
     """Reject review from a crop whose unknown raster reaches either x edge.
 
     A candidate can be separated from the edge-touching pixels by a small white
-    gap even though both are fragments of one printed glyph.  Therefore checking
+    gap even though both are fragments of one printed glyph. Therefore checking
     only the candidate group is insufficient: any unexplained ink at x=0 or
-    x=width-1 means the horizontal crop may have truncated the glyph inventory.
+    x=width-1 means the horizontal analysis crop may have truncated the glyph.
     """
     if width <= 0:
         return True
@@ -170,8 +170,57 @@ def _row_has_unexplained_edge_ink(row: dict[str, Any], width: int) -> bool:
     return False
 
 
-def _shift_pixels(pixels: list[list[int]] | list[tuple[int, int]], y0: int) -> list[list[int]]:
-    return [[int(x), int(y) - y0] for x, y in pixels]
+def _shift_pixels(
+    pixels: list[list[int]] | list[tuple[int, int]], x0: int = 0, y0: int = 0
+) -> list[list[int]]:
+    return [[int(x) - x0, int(y) - y0] for x, y in pixels]
+
+
+def _review_x_bounds(
+    ink: list[list[int]] | list[tuple[int, int]],
+    group: set[tuple[int, int]],
+    width: int,
+    *,
+    free_columns: int = 2,
+) -> tuple[int, int]:
+    """Bound review by runs of blank target-row columns around the candidate.
+
+    The analysis raster may span a whole dictionary column. The editor should
+    not. Starting at the candidate, walk outwards until ``free_columns`` wholly
+    blank x columns have been seen consecutively on each side. A single blank
+    column is deliberately not enough: if another target-row glyph follows, the
+    walk continues through it until a real two-column gap is found.
+    """
+    if width <= 0 or not group:
+        return 0, max(0, width - 1)
+
+    occupied_x = {int(x) for x, _ in ink}
+    gx0, gx1 = _xspan(group)
+    free_columns = max(1, int(free_columns))
+
+    left = 0
+    blank_run = 0
+    for x in range(gx0 - 1, -1, -1):
+        if x in occupied_x:
+            blank_run = 0
+            continue
+        blank_run += 1
+        if blank_run >= free_columns:
+            left = x
+            break
+
+    right = width - 1
+    blank_run = 0
+    for x in range(gx1 + 1, width):
+        if x in occupied_x:
+            blank_run = 0
+            continue
+        blank_run += 1
+        if blank_run >= free_columns:
+            right = x
+            break
+
+    return left, right
 
 
 def _cropped_review_context(
@@ -180,23 +229,45 @@ def _cropped_review_context(
     baseline: int,
     *,
     margin_y: int = 2,
+    free_columns_x: int = 2,
 ) -> dict[str, Any]:
-    """Build a vertically tight editor context without changing facit geometry."""
+    """Build a tight editor context without changing facit geometry.
+
+    Vertically we retain the established small margin. Horizontally we crop at
+    the first two-column blank run on each side of the candidate in the target
+    row raster. The full-width analysis remains untouched.
+    """
     ink = [list(map(int, p)) for p in (row.get("ink") or [])]
     if not ink:
         ink = [list(p) for p in sorted(group)]
 
+    xs = [x for x, _ in ink]
     ys = [y for _, y in ink]
+    original_width = int(row.get("width") or (max(xs) + 1 if xs else 1))
     original_height = int(row.get("height") or (max(ys) + 1 if ys else 1))
-    y0 = max(0, min(ys + [baseline]) - margin_y)
-    y1 = min(original_height - 1, max(ys + [baseline]) + margin_y)
+
+    x0, x1 = _review_x_bounds(
+        ink, group, original_width, free_columns=free_columns_x
+    )
+    local_ink = [[x, y] for x, y in ink if x0 <= x <= x1]
+    local_ys = [y for _, y in local_ink]
+    if not local_ys:
+        local_ink = [list(p) for p in sorted(group)]
+        local_ys = [y for _, y in local_ink]
+
+    y0 = max(0, min(local_ys + [baseline]) - margin_y)
+    y1 = min(original_height - 1, max(local_ys + [baseline]) + margin_y)
     if y1 < y0:
         y0 = y1 = max(0, min(original_height - 1, baseline))
 
     exact = []
     for match in row.get("exact") or []:
+        match_pixels = [list(map(int, p)) for p in (match.get("pixels") or [])]
+        if not match_pixels or not any(x0 <= x <= x1 for x, _ in match_pixels):
+            continue
         copied = dict(match)
-        copied["pixels"] = _shift_pixels(match.get("pixels") or [], y0)
+        copied["pixels"] = _shift_pixels(match_pixels, x0, y0)
+        copied["x"] = int(match.get("x") or 0) - x0
         if isinstance(match.get("baseline"), int):
             copied["baseline"] = int(match["baseline"]) - y0
         exact.append(copied)
@@ -206,13 +277,16 @@ def _cropped_review_context(
         "expected": row.get("expected"),
         "jsonl_hint": hint,
         "page_word_bbox": row.get("page_word_bbox"),
-        "width": row.get("width"),
+        "width": x1 - x0 + 1,
         "height": y1 - y0 + 1,
+        "original_width": original_width,
         "original_height": original_height,
+        "review_x_offset": x0,
         "review_y_offset": y0,
-        "ink": _shift_pixels(ink, y0),
+        "review_free_columns_x": free_columns_x,
+        "ink": _shift_pixels(local_ink, x0, y0),
         "exact": exact,
-        "candidate_pixels": _shift_pixels([list(p) for p in sorted(group)], y0),
+        "candidate_pixels": _shift_pixels([list(p) for p in sorted(group)], x0, y0),
         "baseline": baseline - y0,
     }
 
