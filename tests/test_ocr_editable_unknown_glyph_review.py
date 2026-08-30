@@ -57,6 +57,27 @@ class EditableUnknownGlyphReviewTests(unittest.TestCase):
 
         self.assertEqual(collect_candidates([row]), [])
 
+    def test_detached_edge_ink_rejects_other_candidate_from_same_crop(self) -> None:
+        row = {
+            "expected": "a",
+            "page": 1,
+            "subnr": "tilde-a",
+            "width": 16,
+            "height": 117,
+            "baseline": 60,
+            "ink": [[0, 57], [3, 58], [4, 58], [5, 58], [8, 60]],
+            "exact": [{"label": "a", "style": "unknown", "pixels": [[8, 60]]}],
+            "unexplained": [[0, 57], [3, 58], [4, 58], [5, 58]],
+            "jsonl_hint": {"text": "+a", "similarity": 1.0},
+            "source": {"source_id": "tilde-a"},
+        }
+
+        # The candidate at x=3..5 does not itself touch the crop edge, but the
+        # detached unexplained pixel at x=0 can be the clipped continuation of
+        # the same printed glyph (e.g. ~ before a).  Do not offer any glyph from
+        # this crop as complete facit material.
+        self.assertEqual(collect_candidates([row]), [])
+
     def test_review_context_is_trimmed_vertically_around_actual_ink(self) -> None:
         row = {
             "expected": "a",
