@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+from swedish_wordlist_tools.ocr_editable_unknown_glyph_review import _attach_context_images
 from swedish_wordlist_tools.ocr_sequential_page_review import _three_line_context_box
 
 
@@ -34,6 +35,20 @@ class ReviewFacsimileContextTests(unittest.TestCase):
             }
         }
         self.assertEqual(_three_line_context_box(row, 900, 1200), (0, 0, 300, 36))
+
+    def test_facsimile_metadata_is_attached_to_unique_candidate_context(self) -> None:
+        rows = [{
+            "source": {"source_id": "page:1:ocr:1"},
+            "context_image": "context/context-0000.png",
+            "context_image_bbox": [0, 10, 300, 70],
+        }]
+        candidates = [{
+            "sources": [{"source_id": "page:1:ocr:1"}],
+            "context": {},
+        }]
+        _attach_context_images(candidates, rows)
+        self.assertEqual(candidates[0]["context"]["context_image"], "context/context-0000.png")
+        self.assertEqual(candidates[0]["context"]["context_image_bbox"], [0, 10, 300, 70])
 
 
 if __name__ == "__main__":
