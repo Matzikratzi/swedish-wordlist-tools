@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import urllib.request
@@ -161,22 +162,41 @@ def _segment_box(
     )
 
 
+def _png_data_uri(path: Path) -> str:
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
 def _write_page_context_segments(
     rows: list[dict],
     page_image: Image.Image,
     out_dir: Path,
 ) -> int:
-    """Write 3 x 4 overlapping facsimile segments and link each OCR row to one."""
+    """Write 3 x 4 overlapping facsimile segments and link each OCR row to one.
+
+    The PNG files are retained for inspection, but each row receives an embedded
+    data URI so the generated review HTML remains self-contained.  This avoids
+    broken relative image links when desktop browsers open the HTML through a
+    document portal such as /run/user/.../doc/....
+    """
     context_dir = out_dir / "context"
     context_dir.mkdir(exist_ok=True)
-    segments: dict[tuple[int, int], tuple[str, tuple[int, int, int, int]]] = {}
+    segments: dict[
+        tuple[int, int],
+        tuple[str, str, tuple[int, int, int, int]],
+    ] = {}
 
     for band in range(CONTEXT_ROWS):
         for column in range(CONTEXT_COLUMNS):
             box = _segment_box(column, band, page_image.width, page_image.height)
             filename = f"page-segment-c{column + 1}-r{band + 1}.png"
-            page_image.crop(box).save(context_dir / filename)
-            segments[(column, band)] = (f"context/{filename}", box)
+            image_path = context_dir / filename
+            page_image.crop(box).save(image_path)
+            segments[(column, band)] = (
+                _png_data_uri(image_path),
+                f"context/{filename}",
+                box,
+            )
 
     for row in rows:
         index = _segment_index_for_bbox(
@@ -192,8 +212,9 @@ def _write_page_context_segments(
             )
         if index is None:
             continue
-        image_path, box = segments[index]
-        row["context_image"] = image_path
+        image_data, image_file, box = segments[index]
+        row["context_image"] = image_data
+        row["context_image_file"] = image_file
         row["context_image_bbox"] = list(box)
         row["context_segment"] = [index[0] + 1, index[1] + 1]
 
