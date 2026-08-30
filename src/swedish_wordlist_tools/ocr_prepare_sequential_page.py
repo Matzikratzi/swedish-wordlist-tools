@@ -205,10 +205,10 @@ def _active_line_context(
 ) -> dict[str, Any] | None:
     """Use target +/-1 rows normally and outer support rows only when needed.
 
-    The source context keeps up to five physical rows.  Analysis always includes
-    the target row and its immediate neighbours.  Row -2 or +2 is activated only
+    The source context keeps up to five physical rows. Analysis always includes
+    the target row and its immediate neighbours. Row -2 or +2 is activated only
     when a 4-connected black component crosses between that outer row's Voronoi
-    region and the nearer neighbour row.  This lets a glyph tangle spill across
+    region and the nearer neighbour row. This lets a glyph tangle spill across
     rows without making remote rows free OCR search space.
     """
     if not line_context or not line_context.get("bands_page"):
@@ -251,8 +251,10 @@ def _crop_box(
 ) -> tuple[int, int, int, int]:
     if line_context and line_context.get("bands_page"):
         bands = line_context["bands_page"]
-        x0 = max(0, int(line_context.get("column_left", word.left)) - pad_x)
-        x1 = min(page.width, int(line_context.get("column_right", word.left + word.width)) + pad_x)
+        # Column boundaries are already the safe horizontal context boundary.
+        # Do not pad across them into the neighbouring dictionary column.
+        x0 = max(0, int(line_context.get("column_left", word.left)))
+        x1 = min(page.width, int(line_context.get("column_right", word.left + word.width)))
         y0 = max(0, min(int(b["top"]) for b in bands) - pad_y)
         y1 = min(page.height, max(int(b["bottom"]) for b in bands) + pad_y)
     else:
