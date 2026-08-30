@@ -47,9 +47,10 @@ class HorizontalReviewCropTests(unittest.TestCase):
         context = _cropped_review_context(row, group, 6)
 
         self.assertEqual(context["review_x_offset"], 5)
+        self.assertEqual(context["review_y_offset"], 3)
         self.assertEqual(context["width"], 9)
         self.assertEqual(context["review_free_columns_x"], 2)
-        self.assertEqual(context["candidate_pixels"], [[5, 1], [6, 1]])
+        self.assertEqual(context["candidate_pixels"], [[5, 2], [6, 2]])
         self.assertEqual(context["exact"][0]["x"], 2)
 
         occupied_x = {x for x, _ in context["ink"]}
