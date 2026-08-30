@@ -41,6 +41,46 @@ def _component_row_index(comp: set[tuple[int, int]], bands: list[dict]) -> int:
     )
 
 
+def _component_nearest_row_index(comp: set[tuple[int, int]], bands: list[dict]) -> int:
+    """Assign a residual component by centroid to the nearest physical row centre.
+
+    Tesseract line boxes can overlap enough that a fragment from the previous
+    line lies inside the target line box.  For review candidates we therefore
+    use the stricter Voronoi ownership of physical row centres instead of box
+    overlap.  Detached marks close to the target line still remain with it.
+    """
+    cy = sum(y for _, y in comp) / max(1, len(comp))
+    return min(
+        range(len(bands)),
+        key=lambda i: (
+            abs(cy - (float(bands[i]["top"]) + float(bands[i]["bottom"])) / 2.0),
+            i,
+        ),
+    )
+
+
+def _filter_target_review_residual(
+    unexplained: set[tuple[int, int]], bands: list[dict], target_index: int
+) -> tuple[set[tuple[int, int]], set[tuple[int, int]]]:
+    """Keep only residual components geometrically owned by the target row.
+
+    This filter affects the unknown-glyph review queue only.  It does not alter
+    exact matching or the original five-row raster.  The rejected pixels remain
+    available as diagnostic context but are not offered as glyphs to learn.
+    """
+    if not unexplained or not bands or not (0 <= target_index < len(bands)):
+        return set(unexplained), set()
+
+    kept: set[tuple[int, int]] = set()
+    rejected: set[tuple[int, int]] = set()
+    for comp in v10._components(unexplained):
+        if _component_nearest_row_index(comp, bands) == target_index:
+            kept.update(comp)
+        else:
+            rejected.update(comp)
+    return kept, rejected
+
+
 def _assign_components_to_rows(
     ink: set[tuple[int, int]], bands: list[dict], target_index: int
 ) -> tuple[set[tuple[int, int]], list[set[tuple[int, int]]]]:
@@ -168,7 +208,10 @@ def _analyse_one(path: Path, models: list[GlyphModel]):
     shown = per_row_exact[target_index]
     current = row_ink[target_index]
     covered = set().union(*(m.pixels for m in shown)) if shown else set()
-    unexplained = current - covered
+    raw_unexplained = current - covered
+    unexplained, filtered_neighbor_residual = _filter_target_review_residual(
+        raw_unexplained, bands, target_index
+    )
 
     baselines = {m.baseline for m in shown}
     if len(baselines) == 1:
@@ -193,7 +236,8 @@ def _analyse_one(path: Path, models: list[GlyphModel]):
         "previous_row": sorted([list(p) for p in previous]),
         "next_row": sorted([list(p) for p in nxt]),
         "uncertain_row": [],
-        "removed_noise": sorted([list(p) for p in previous | nxt]),
+        "removed_noise": sorted([list(p) for p in previous | nxt | filtered_neighbor_residual]),
+        "filtered_neighbor_residual": sorted([list(p) for p in filtered_neighbor_residual]),
         "row_segmentation": {
             "method": "five-row-row-bound-tangle-extraction",
             "bands": bands,
@@ -202,6 +246,8 @@ def _analyse_one(path: Path, models: list[GlyphModel]):
             "row_exact_counts": [len(matches) for matches in per_row_exact],
             "exact_pixels_all_rows": len(covered_all),
             "residual_pixels": len(residual),
+            "review_residual_pixels": len(unexplained),
+            "filtered_neighbor_residual_pixels": len(filtered_neighbor_residual),
         },
         "five_row_context_used": True,
         "baseline": baseline,
