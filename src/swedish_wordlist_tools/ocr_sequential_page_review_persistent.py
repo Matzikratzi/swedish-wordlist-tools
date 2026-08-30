@@ -203,7 +203,7 @@ def _cached_analyse_paths(paths: list[Path], facit_path: Path, workers: int) -> 
 
     rows: list[dict | None] = [None] * len(paths)
     hits = 0
-    misses = 0
+    missing_areas: list[tuple[str, list[tuple[int, Path]], Path]] = []
     for area in sorted(by_area):
         items = by_area[area]
         area_paths = [path for _, path in items]
@@ -216,16 +216,25 @@ def _cached_analyse_paths(paths: list[Path], facit_path: Path, workers: int) -> 
                 for (index, _), row in zip(items, area_rows):
                     rows[index] = row
                 continue
+        missing_areas.append((area, items, cache_path))
 
-        misses += 1
-        area_rows = _ORIGINAL_ANALYSE_PATHS(area_paths, facit_path, workers)
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        cache_path.write_text(json.dumps(area_rows, ensure_ascii=False) + "\n", encoding="utf-8")
-        for (index, _), row in zip(items, area_rows):
-            rows[index] = row
+    if missing_areas:
+        missing_items = [item for _, items, _ in missing_areas for item in items]
+        missing_paths = [path for _, path in missing_items]
+        analysed_missing = _ORIGINAL_ANALYSE_PATHS(missing_paths, facit_path, workers)
+        analysed_by_index = {
+            original_index: row
+            for (original_index, _), row in zip(missing_items, analysed_missing)
+        }
+        for area, items, cache_path in missing_areas:
+            area_rows = [analysed_by_index[index] for index, _ in items]
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(json.dumps(area_rows, ensure_ascii=False) + "\n", encoding="utf-8")
+            for (index, _), row in zip(items, area_rows):
+                rows[index] = row
 
     print(
-        f"[analysis-cache] areas={len(by_area)} hits={hits} misses={misses} "
+        f"[analysis-cache] areas={len(by_area)} hits={hits} misses={len(missing_areas)} "
         f"facit={_facit_digest(facit_path)[:12]}",
         flush=True,
     )
