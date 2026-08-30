@@ -3,10 +3,13 @@ import unittest
 from swedish_wordlist_tools.ocr_exact_glyph_review_queue_v12 import (
     _assign_components_to_rows,
     _baseline_row_index,
+    _components_intersecting_x,
     _extract_exact_rows_from_tangle,
     _filter_target_review_residual,
+    _match_intersects_x,
+    _target_x_span,
 )
-from swedish_wordlist_tools.ocr_glyph_matcher import GlyphModel, exact_matches
+from swedish_wordlist_tools.ocr_glyph_matcher import GlyphModel, Match, exact_matches
 
 
 class FiveRowContextTest(unittest.TestCase):
@@ -88,9 +91,6 @@ class FiveRowContextTest(unittest.TestCase):
         self.assertEqual(_baseline_row_index(15, bands), 2)
 
     def test_extracts_two_known_glyphs_from_one_connected_cross_row_tangle(self):
-        # A is horizontal on the upper row and B is vertical on the lower row.
-        # Their placed rasters touch at (1,4)/(1,5), so all four black pixels
-        # form one 4-connected source component although they are two glyphs.
         upper_model = GlyphModel(
             label="A",
             style="roman",
@@ -109,8 +109,6 @@ class FiveRowContextTest(unittest.TestCase):
             {"top": 5, "bottom": 7},
         ]
 
-        # Conservative single-row matching must still reject a model that owns
-        # only part of a connected source component.
         conservative = exact_matches(ink, 3, 8, [upper_model, lower_model])
         self.assertEqual(conservative, [])
 
@@ -121,6 +119,36 @@ class FiveRowContextTest(unittest.TestCase):
         self.assertEqual([(m.label, m.baseline) for m in per_row[0]], [("A", 4)])
         self.assertEqual([(m.label, m.baseline) for m in per_row[1]], [("B", 5)])
         self.assertEqual({p for m in selected for p in m.pixels}, ink)
+
+    def test_wide_middle_row_output_is_scoped_to_target_word_x_span(self):
+        debug = {"target_word_bbox_in_crop": [20, 7, 10, 8]}
+        self.assertEqual(_target_x_span(debug, 100), (20, 30))
+
+        target_match = Match(
+            label="a",
+            style="definition-roman",
+            x=22,
+            baseline=12,
+            pixels=frozenset({(22, 11), (23, 12)}),
+            model_pixels=2,
+            sources=1,
+        )
+        other_word_match = Match(
+            label="b",
+            style="definition-roman",
+            x=70,
+            baseline=12,
+            pixels=frozenset({(70, 11), (71, 12)}),
+            model_pixels=2,
+            sources=1,
+        )
+        self.assertTrue(_match_intersects_x(target_match, 20, 30))
+        self.assertFalse(_match_intersects_x(other_word_match, 20, 30))
+
+        target_residual = {(19, 10), (20, 10), (20, 11)}
+        other_residual = {(60, 10), (61, 10)}
+        kept = _components_intersecting_x(target_residual | other_residual, 20, 30)
+        self.assertEqual(kept, target_residual)
 
 
 if __name__ == "__main__":
