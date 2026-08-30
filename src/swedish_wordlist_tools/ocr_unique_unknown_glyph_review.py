@@ -153,6 +153,23 @@ def _touches_horizontal_edge(group: set[tuple[int, int]], width: int) -> bool:
     return x0 <= 0 or x1 >= width - 1
 
 
+def _row_has_unexplained_edge_ink(row: dict[str, Any], width: int) -> bool:
+    """Reject review from a crop whose unknown raster reaches either x edge.
+
+    A candidate can be separated from the edge-touching pixels by a small white
+    gap even though both are fragments of one printed glyph.  Therefore checking
+    only the candidate group is insufficient: any unexplained ink at x=0 or
+    x=width-1 means the horizontal crop may have truncated the glyph inventory.
+    """
+    if width <= 0:
+        return True
+    for p in row.get("unexplained") or []:
+        x, _ = map(int, p)
+        if x <= 0 or x >= width - 1:
+            return True
+    return False
+
+
 def _shift_pixels(pixels: list[list[int]] | list[tuple[int, int]], y0: int) -> list[list[int]]:
     return [[int(x), int(y) - y0] for x, y in pixels]
 
@@ -164,12 +181,7 @@ def _cropped_review_context(
     *,
     margin_y: int = 2,
 ) -> dict[str, Any]:
-    """Build a vertically tight editor context without changing facit geometry.
-
-    The stored candidate shape remains relative to the original baseline.  Only
-    the UI copy of raster coordinates is shifted so the editor does not contain
-    dozens of completely empty rows above and below the useful ink.
-    """
+    """Build a vertically tight editor context without changing facit geometry."""
     ink = [list(map(int, p)) for p in (row.get("ink") or [])]
     if not ink:
         ink = [list(p) for p in sorted(group)]
@@ -214,10 +226,10 @@ def collect_candidates(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not isinstance(baseline, int):
             continue
         groups = unknown_groups(row)
+        if _row_has_unexplained_edge_ink(row, width):
+            continue
         suggestions = _jsonl_group_suggestions(row, groups)
         for group, suggestion in zip(groups, suggestions):
-            # There is no way to know whether a glyph is complete when its
-            # unknown raster reaches the left/right edge of the OCR crop.
             if _touches_horizontal_edge(group, width):
                 continue
 
@@ -275,7 +287,6 @@ def collect_candidates(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def build_html(rows: list[dict[str, Any]], facit_path: Path) -> str:
-    # Keep the historical entry point working while using the current editor.
     from .ocr_editable_unknown_glyph_review import build_html as build_editable_html
 
     return build_editable_html(rows, facit_path)
