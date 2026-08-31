@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from swedish_wordlist_tools.ocr_probe_white_gap_text import grouped_row_text
+from swedish_wordlist_tools.ocr_probe_white_gap_text import filter_rows, grouped_row_text
 
 
 class WhiteGapTextProbeTests(unittest.TestCase):
@@ -42,6 +42,15 @@ class WhiteGapTextProbeTests(unittest.TestCase):
         self.assertEqual(rows[0]["text"], "abborre s.")
         self.assertEqual(rows[0]["page_top"], 20)
         self.assertEqual(rows[0]["page_bottom"], 35)
+
+    def test_filters_after_grouping_by_column_and_case_insensitive_text(self) -> None:
+        rows = [
+            {"column": 0, "text": "aberration s."},
+            {"column": 1, "text": "Abessinier s."},
+            {"column": 2, "text": "abessinisk adj."},
+        ]
+        self.assertEqual(filter_rows(rows, contains="ABESSIN"), rows[1:])
+        self.assertEqual(filter_rows(rows, column=1, contains="abessin"), [rows[1]])
 
 
 if __name__ == "__main__":
