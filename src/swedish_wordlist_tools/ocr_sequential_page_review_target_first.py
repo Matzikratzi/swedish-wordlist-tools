@@ -16,19 +16,7 @@ def _target_first_line_context(
     line_context: dict[str, Any] | None,
     threshold: int,
 ) -> dict[str, Any] | None:
-    """Analyse only the target row unless ink really crosses into a neighbour.
-
-    The physical-line discovery may retain up to five source rows, but the
-    expensive glyph matcher should normally see only the middle/target row.
-    Immediate neighbours are activated only when one 4-connected black source
-    component owns pixels on both sides of the target/neighbour Voronoi boundary.
-    An outer row (-2/+2) can only be activated after its nearer neighbour has
-    already been activated and the same geometric crossing test requires it.
-
-    The complete original source-row geometry is retained separately so review
-    code can always know where the previous and next printed rows are without
-    opening those rows for glyph analysis.
-    """
+    """Analyse only the target row unless ink really crosses into a neighbour."""
     if not line_context or not line_context.get("bands_page"):
         return line_context
 
@@ -115,13 +103,11 @@ def main() -> int:
     from . import ocr_unique_unknown_glyph_review as unique
     from . import ocr_sequential_page_review_persistent as persistent
 
-    persistent.PREP_CACHE_VERSION = "saol-page-prep-target-first-v2"
+    persistent.PREP_CACHE_VERSION = "saol-page-prep-target-first-v3"
     persistent.ANALYSIS_CACHE_VERSION = "saol-row-analysis-target-first-v2"
 
     unique.unknown_groups = row_guides.target_unknown_groups
-    unique._cropped_review_context = row_guides.wrap_review_context(
-        unique._cropped_review_context
-    )
+    unique._cropped_review_context = row_guides.wrap_review_context(unique._cropped_review_context)
     unique._jsonl_group_suggestions = row_guides.wrap_jsonl_group_suggestions(
         unique._jsonl_group_suggestions
     )
@@ -136,7 +122,13 @@ def main() -> int:
     ) -> dict:
         report = cached_prepare(jsonl, page_number, out_dir, **kwargs)
         row_map_path = Path(out_dir) / "page-row-map.json"
-        row_map = row_guides.write_page_row_map(Path(out_dir), row_map_path)
+        page_image = sequential_page._load_source_image(str(report.get("source") or ""))
+        row_map = row_guides.write_page_row_map(
+            Path(out_dir),
+            row_map_path,
+            page_image=page_image,
+            threshold=int(kwargs.get("threshold", 210)),
+        )
         cache_dir = persistent._ACTIVE_PAGE_CACHE
         if cache_dir is not None:
             cached_path = cache_dir / "prepared" / "page-row-map.json"
@@ -144,7 +136,8 @@ def main() -> int:
             if row_map_path.resolve() != cached_path.resolve():
                 shutil.copy2(row_map_path, cached_path)
         print(
-            f"[row-map] {row_map.get('row_count', 0)} physical rows; "
+            f"[row-map] {row_map.get('row_count', 0)} physical rows "
+            f"({row_map.get('proposed_row_count', 0)} lattice); "
             f"cached={row_map_path}",
             flush=True,
         )
