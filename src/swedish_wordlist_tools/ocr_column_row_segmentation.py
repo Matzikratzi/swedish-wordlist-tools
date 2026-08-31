@@ -113,13 +113,7 @@ def _chapter_marker_for_block(
     right: int,
     row_pitch: float | None,
 ) -> dict[str, Any] | None:
-    """Recognise the large inverse chapter letter plaque.
-
-    SAOL's chapter plaque (A, B, ...) occurs only in the left column.  It is a
-    broad, tall and unusually dense black rectangle with a light letter cut out
-    of it, so treating it as several ordinary text rows badly over-segments the
-    page.  Keep it as page structure instead of feeding it to row splitting.
-    """
+    """Recognise the large inverse chapter letter plaque."""
     if column != 0 or not row_pitch:
         return None
     bbox = block.get("ink_bbox")
@@ -133,14 +127,8 @@ def _chapter_marker_for_block(
         return None
     density = float(block.get("ink_pixels") or 0) / area
     column_width = max(1, right - left)
-
-    if width < 0.55 * column_width:
+    if width < 0.55 * column_width or height < 2.0 * row_pitch or density < 0.65:
         return None
-    if height < 2.0 * row_pitch:
-        return None
-    if density < 0.65:
-        return None
-
     return {
         "source": "chapter-marker",
         "page_left": ink_left,
@@ -192,15 +180,9 @@ def _split_positions(
     top = int(block["upper_gap_bottom"])
     bottom = int(block["lower_gap_top"])
     counts = _horizontal_ink_counts(
-        page,
-        left=left,
-        right=right,
-        top=top,
-        bottom=bottom,
-        threshold=threshold,
+        page, left=left, right=right, top=top, bottom=bottom, threshold=threshold
     )
     positions: list[int] = []
-
     ink_bbox = block.get("ink_bbox")
     ink_top = int(ink_bbox[1]) if ink_bbox else top
     radius = max(1, _round_half_up(row_pitch * 0.30))
@@ -258,63 +240,77 @@ def rows_from_blocks(
     single_row_ink_height = estimate_single_row_ink_height(blocks, row_pitch)
     for block in blocks:
         estimated = _estimated_rows_for_block(
-            block,
-            row_pitch=row_pitch,
-            single_row_ink_height=single_row_ink_height,
+            block, row_pitch=row_pitch, single_row_ink_height=single_row_ink_height
         )
         if estimated == 1:
             bbox = block.get("ink_bbox")
             if not bbox:
                 continue
             _, top, _, bottom = map(int, bbox)
-            rows.append(
-                {
-                    "source": "white-gap-single",
-                    "page_top": top,
-                    "page_bottom": bottom,
-                    "center_y": (top + bottom - 1.0) / 2.0,
-                    "upper_hard_gap": [int(block["upper_gap_top"]), int(block["upper_gap_bottom"])],
-                    "lower_hard_gap": [int(block["lower_gap_top"]), int(block["lower_gap_bottom"])],
-                }
-            )
+            rows.append({
+                "source": "white-gap-single",
+                "page_top": top,
+                "page_bottom": bottom,
+                "center_y": (top + bottom - 1.0) / 2.0,
+                "upper_hard_gap": [int(block["upper_gap_top"]), int(block["upper_gap_bottom"])],
+                "lower_hard_gap": [int(block["lower_gap_top"]), int(block["lower_gap_bottom"])],
+            })
             continue
-
         boundaries = [int(block["upper_gap_bottom"])]
-        boundaries.extend(
-            _split_positions(
-                page,
-                block,
-                row_count=estimated,
-                row_pitch=row_pitch,
-                left=left,
-                right=right,
-                threshold=threshold,
-            )
-        )
+        boundaries.extend(_split_positions(
+            page, block, row_count=estimated, row_pitch=row_pitch,
+            left=left, right=right, threshold=threshold,
+        ))
         boundaries.append(int(block["lower_gap_top"]))
         for top, bottom in zip(boundaries, boundaries[1:]):
             bbox = _tight_ink_bbox(
-                page,
-                left=left,
-                right=right,
-                top=top,
-                bottom=bottom,
-                threshold=threshold,
+                page, left=left, right=right, top=top, bottom=bottom, threshold=threshold
             )
             if not bbox:
                 continue
             _, ink_top, _, ink_bottom = bbox
-            rows.append(
-                {
-                    "source": "white-gap-projection-split",
-                    "page_top": ink_top,
-                    "page_bottom": ink_bottom,
-                    "center_y": (ink_top + ink_bottom - 1.0) / 2.0,
-                    "parent_estimated_rows": estimated,
-                }
-            )
+            rows.append({
+                "source": "white-gap-projection-split",
+                "page_top": ink_top,
+                "page_bottom": ink_bottom,
+                "center_y": (ink_top + ink_bottom - 1.0) / 2.0,
+                "parent_estimated_rows": estimated,
+            })
     rows.sort(key=lambda row: (float(row["center_y"]), int(row["page_top"])))
     return rows
+
+
+def _apply_middle_column_content_start(
+    column_entries: list[dict[str, Any]],
+) -> tuple[int | None, int]:
+    """Drop page-header rows using the first real row in the middle column.
+
+    Running heads live only at the outer page edge: on even pages the word is
+    left and page number right, on odd pages vice versa.  The middle column has
+    no running head.  SAOL's three text columns start on the same baseline, so
+    the first middle-column row gives a page-local content-start anchor without
+    OCR or page-parity assumptions.
+    """
+    if not column_entries:
+        return None, 0
+    middle = column_entries[len(column_entries) // 2]
+    middle_rows = middle.get("rows") or []
+    if not middle_rows:
+        return None, 0
+    content_top = int(middle_rows[0]["page_top"])
+    pitch = float(middle.get("row_pitch") or 0.0)
+    guard = max(2, _round_half_up(pitch * 0.35)) if pitch else 2
+    cutoff = content_top - guard
+    discarded = 0
+    for entry in column_entries:
+        rows = list(entry.get("rows") or [])
+        kept = [row for row in rows if int(row["page_bottom"]) > cutoff]
+        discarded += len(rows) - len(kept)
+        for index, row in enumerate(kept):
+            row["index"] = index
+        entry["rows"] = kept
+        entry["header_row_count"] = len(rows) - len(kept)
+    return content_top, discarded
 
 
 def segment_page_rows(
@@ -326,7 +322,6 @@ def segment_page_rows(
     """Segment a SAOL page from pixels alone: columns -> structures -> rows."""
     column_entries: list[dict[str, Any]] = []
     total_blocks = 0
-    total_rows = 0
     total_multi_blocks = 0
     total_chapter_markers = 0
     for column in range(columns):
@@ -334,77 +329,56 @@ def segment_page_rows(
         right = (column + 1) * page.width // columns if column + 1 < columns else page.width
         blocks = column_blocks(page, left=left, right=right, threshold=threshold)
         pitch = estimate_row_pitch(blocks)
-
         chapter_markers = [
-            marker
-            for block in blocks
-            if (
-                marker := _chapter_marker_for_block(
-                    block,
-                    column=column,
-                    left=left,
-                    right=right,
-                    row_pitch=pitch,
-                )
-            )
-            is not None
+            marker for block in blocks
+            if (marker := _chapter_marker_for_block(
+                block, column=column, left=left, right=right, row_pitch=pitch
+            )) is not None
         ]
         marker_boxes = {
             (marker["page_left"], marker["page_top"], marker["page_right"], marker["page_bottom"])
             for marker in chapter_markers
         }
         row_blocks = [
-            block
-            for block in blocks
+            block for block in blocks
             if tuple(map(int, block.get("ink_bbox") or [])) not in marker_boxes
         ]
-
         single_row_ink_height = estimate_single_row_ink_height(row_blocks, pitch) if pitch else None
-        if pitch is None:
-            rows: list[dict[str, Any]] = []
-        else:
-            rows = rows_from_blocks(
-                page,
-                row_blocks,
-                left=left,
-                right=right,
-                row_pitch=pitch,
-                threshold=threshold,
-            )
+        rows = [] if pitch is None else rows_from_blocks(
+            page, row_blocks, left=left, right=right, row_pitch=pitch, threshold=threshold
+        )
         for index, row in enumerate(rows):
             row["index"] = index
         column_multi_blocks = sum(
-            1
-            for block in row_blocks
-            if pitch
-            and _estimated_rows_for_block(
-                block,
-                row_pitch=pitch,
-                single_row_ink_height=single_row_ink_height,
+            1 for block in row_blocks
+            if pitch and _estimated_rows_for_block(
+                block, row_pitch=pitch, single_row_ink_height=single_row_ink_height
             ) > 1
         )
         total_blocks += len(blocks)
-        total_rows += len(rows)
         total_multi_blocks += column_multi_blocks
         total_chapter_markers += len(chapter_markers)
-        column_entries.append(
-            {
-                "column": column,
-                "left": left,
-                "right": right,
-                "row_pitch": pitch,
-                "single_row_ink_height": single_row_ink_height,
-                "block_count": len(blocks),
-                "multi_row_block_count": column_multi_blocks,
-                "chapter_marker_count": len(chapter_markers),
-                "chapter_markers": chapter_markers,
-                "rows": rows,
-            }
-        )
+        column_entries.append({
+            "column": column,
+            "left": left,
+            "right": right,
+            "row_pitch": pitch,
+            "single_row_ink_height": single_row_ink_height,
+            "block_count": len(blocks),
+            "multi_row_block_count": column_multi_blocks,
+            "chapter_marker_count": len(chapter_markers),
+            "chapter_markers": chapter_markers,
+            "rows": rows,
+        })
+
+    content_top, header_row_count = _apply_middle_column_content_start(column_entries)
+    total_rows = sum(len(entry.get("rows") or []) for entry in column_entries)
     return {
-        "format": "saol-white-gap-row-map-v3",
+        "format": "saol-white-gap-row-map-v4",
         "page_size": [page.width, page.height],
         "column_count": columns,
+        "content_top": content_top,
+        "header_row_count": header_row_count,
         "block_count": total_blocks,
         "multi_row_block_count": total_multi_blocks,
         "chapter_marker_count": total_chapter_markers,
