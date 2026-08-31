@@ -34,9 +34,11 @@ def white_horizontal_bands(
 ) -> list[dict[str, Any]]:
     """Find completely ink-free horizontal bands in one dictionary column.
 
-    These are deliberately conservative separators: every pixel across the
-    inspected column width must be white.  A missing separator says nothing;
-    only a separator that actually exists is treated as hard evidence.
+    These are deliberately conservative separators: every image pixel across
+    the inspected column width must be white. A one-image-pixel separator is
+    therefore useful evidence even when the later glyph raster is coarser.
+    A missing separator says nothing; only a separator that actually exists is
+    treated as hard evidence.
     """
     gray = page.convert("L")
     x0 = max(0, int(left) + max(0, int(inset_x)))
@@ -74,7 +76,7 @@ def typical_row_pitch(rows: Iterable[dict[str, Any]]) -> float | None:
     if not diffs:
         return None
     med = median(diffs)
-    # Large gaps often mean Tesseract missed one or more rows.  Do not let those
+    # Large gaps often mean Tesseract missed one or more rows. Do not let those
     # gaps inflate the pitch we use to detect exactly that situation.
     close = [d for d in diffs if d <= med * 1.5]
     return float(median(close or diffs))
@@ -89,9 +91,9 @@ def blocks_between_white_bands(
     """Describe the text block between each pair of hard white separators.
 
     The distance between separator centres estimates how many physical rows are
-    enclosed.  This is the key property that lets two visible white bands imply
-    one, two, three, ... rows between them when intermediate separators are
-    absent.
+    enclosed. This lets two visible white bands imply one, two, three, ... rows
+    between them when intermediate separators are absent. The exact gap edges
+    are retained as hard crop boundaries for subsequent 2D ink inspection.
     """
     ordered = sorted(bands, key=lambda band: float(band["center_y"]))
     centers = sorted(float(row["center_y"]) for row in known_rows if "center_y" in row)
@@ -108,7 +110,11 @@ def blocks_between_white_bands(
             estimated = max(1, int(round(distance / row_pitch)))
         out.append(
             {
+                "upper_gap_top": int(upper["top"]),
+                "upper_gap_bottom": int(upper["bottom"]),
                 "upper_gap_center_y": upper_y,
+                "lower_gap_top": int(lower["top"]),
+                "lower_gap_bottom": int(lower["bottom"]),
                 "lower_gap_center_y": lower_y,
                 "distance": distance,
                 "estimated_row_count": estimated,
@@ -117,6 +123,131 @@ def blocks_between_white_bands(
                 "missing_row_count": (
                     max(0, estimated - len(known)) if estimated is not None else None
                 ),
+            }
+        )
+    return out
+
+
+def ink_extent_between_white_bands(
+    page: Image.Image,
+    block: dict[str, Any],
+    *,
+    left: int,
+    right: int,
+    threshold: int = 210,
+    inset_x: int = 2,
+) -> dict[str, Any]:
+    """Measure the 2D ink island enclosed by two hard horizontal white bands.
+
+    The returned bounding box also measures the blank margins to the left and
+    right. Thus a Tesseract-missed line can still be recognized as an isolated
+    text island when it is separated by white both horizontally and vertically.
+    """
+    gray = page.convert("L")
+    x0 = max(0, int(left) + max(0, int(inset_x)))
+    x1 = min(gray.width, int(right) - max(0, int(inset_x)))
+    y0 = max(0, int(block["upper_gap_bottom"]))
+    y1 = min(gray.height, int(block["lower_gap_top"]))
+    if x1 <= x0 or y1 <= y0:
+        return {
+            "ink_pixels": 0,
+            "ink_bbox": None,
+            "left_white_margin": max(0, x1 - x0),
+            "right_white_margin": max(0, x1 - x0),
+        }
+
+    pixels = gray.load()
+    ink = [
+        (x, y)
+        for y in range(y0, y1)
+        for x in range(x0, x1)
+        if pixels[x, y] < threshold
+    ]
+    if not ink:
+        return {
+            "ink_pixels": 0,
+            "ink_bbox": None,
+            "left_white_margin": x1 - x0,
+            "right_white_margin": x1 - x0,
+        }
+
+    xs = [x for x, _ in ink]
+    ys = [y for _, y in ink]
+    ink_left = min(xs)
+    ink_right = max(xs) + 1
+    ink_top = min(ys)
+    ink_bottom = max(ys) + 1
+    return {
+        "ink_pixels": len(ink),
+        "ink_bbox": [ink_left, ink_top, ink_right, ink_bottom],
+        "ink_width": ink_right - ink_left,
+        "ink_height": ink_bottom - ink_top,
+        "left_white_margin": ink_left - x0,
+        "right_white_margin": x1 - ink_right,
+    }
+
+
+def proposed_missing_rows(
+    page: Image.Image,
+    blocks: Iterable[dict[str, Any]],
+    *,
+    left: int,
+    right: int,
+    row_pitch: float | None,
+    threshold: int = 210,
+    min_ink_pixels: int = 12,
+) -> list[dict[str, Any]]:
+    """Propose clear one-row ink islands that Tesseract failed to report.
+
+    This first conservative step only promotes blocks whose white-gap geometry
+    says exactly one row belongs there and for which Tesseract reports none.
+    Multi-row recovery is deliberately left for a later lattice-fitting step.
+    """
+    if not row_pitch or row_pitch <= 0:
+        return []
+
+    out: list[dict[str, Any]] = []
+    for block in blocks:
+        if block.get("estimated_row_count") != 1 or block.get("known_row_count") != 0:
+            continue
+        extent = ink_extent_between_white_bands(
+            page,
+            block,
+            left=left,
+            right=right,
+            threshold=threshold,
+        )
+        bbox = extent.get("ink_bbox")
+        if not bbox or int(extent.get("ink_pixels") or 0) < min_ink_pixels:
+            continue
+
+        ink_width = int(extent["ink_width"])
+        ink_height = int(extent["ink_height"])
+        # Reject isolated specks. Real text may be short ("a", punctuation), so
+        # keep these bounds intentionally permissive and let later OCR decide.
+        if ink_width < max(3, int(row_pitch * 0.35)):
+            continue
+        if ink_height < max(2, int(row_pitch * 0.20)):
+            continue
+
+        ink_left, ink_top, ink_right, ink_bottom = map(int, bbox)
+        out.append(
+            {
+                "source": "white-gap-ink-island",
+                "page_top": ink_top,
+                "page_bottom": ink_bottom,
+                "center_y": (ink_top + ink_bottom - 1.0) / 2.0,
+                "ink_left": ink_left,
+                "ink_right": ink_right,
+                **extent,
+                "upper_hard_gap": [
+                    int(block["upper_gap_top"]),
+                    int(block["upper_gap_bottom"]),
+                ],
+                "lower_hard_gap": [
+                    int(block["lower_gap_top"]),
+                    int(block["lower_gap_bottom"]),
+                ],
             }
         )
     return out
@@ -139,6 +270,14 @@ def row_lattice_for_column(
         threshold=threshold,
     )
     blocks = blocks_between_white_bands(gaps, row_pitch=pitch, known_rows=rows)
+    proposed = proposed_missing_rows(
+        page,
+        blocks,
+        left=left,
+        right=right,
+        row_pitch=pitch,
+        threshold=threshold,
+    )
     return {
         "row_pitch": pitch,
         "white_gaps": gaps,
@@ -147,4 +286,6 @@ def row_lattice_for_column(
         "blocks_with_missing_rows": sum(
             1 for block in blocks if (block.get("missing_row_count") or 0) > 0
         ),
+        "proposed_rows": proposed,
+        "proposed_row_count": len(proposed),
     }
