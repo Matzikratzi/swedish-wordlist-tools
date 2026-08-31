@@ -244,7 +244,7 @@ def segment_page_rows(
     column_entries: list[dict[str, Any]] = []
     total_blocks = 0
     total_rows = 0
-    multi_blocks = 0
+    total_multi_blocks = 0
     for column in range(columns):
         left = column * page.width // columns
         right = (column + 1) * page.width // columns if column + 1 < columns else page.width
@@ -263,11 +263,12 @@ def segment_page_rows(
             )
         for index, row in enumerate(rows):
             row["index"] = index
-        total_blocks += len(blocks)
-        total_rows += len(rows)
-        multi_blocks += sum(
+        column_multi_blocks = sum(
             1 for block in blocks if pitch and _round_half_up(float(block["distance"]) / pitch) > 1
         )
+        total_blocks += len(blocks)
+        total_rows += len(rows)
+        total_multi_blocks += column_multi_blocks
         column_entries.append(
             {
                 "column": column,
@@ -275,7 +276,7 @@ def segment_page_rows(
                 "right": right,
                 "row_pitch": pitch,
                 "block_count": len(blocks),
-                "multi_row_block_count": multi_blocks,
+                "multi_row_block_count": column_multi_blocks,
                 "rows": rows,
             }
         )
@@ -284,7 +285,7 @@ def segment_page_rows(
         "page_size": [page.width, page.height],
         "column_count": columns,
         "block_count": total_blocks,
-        "multi_row_block_count": multi_blocks,
+        "multi_row_block_count": total_multi_blocks,
         "row_count": total_rows,
         "columns": column_entries,
     }
