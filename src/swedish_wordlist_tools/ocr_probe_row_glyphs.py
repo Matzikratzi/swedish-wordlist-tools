@@ -51,13 +51,13 @@ def _match_width(match) -> int:
     return max(xs) - min(xs) + 1
 
 
-def infer_space_gap(matches, *, minimum: int = 3) -> int:
+def infer_space_gap(matches, *, minimum: int = 4) -> int:
     """Infer a row-local minimum width for a real printed word space.
 
-    A fixed three-pixel rule is too aggressive for SAOL: normal letter spacing
-    inside a word can itself reach three pixels in some faces. Use half the
-    median exact-glyph width, rounded upward, while retaining three pixels as the
-    lower bound for very small glyphs.
+    SAOL's normal letter spacing can reach three completely white pixel columns,
+    as seen inside the bold headword ``abessin·ier``. Therefore three blank
+    columns are not enough evidence for a word boundary. Start at four and only
+    raise the threshold when unusually wide glyphs make that necessary.
     """
     widths = [_match_width(match) for match in matches if match.label not in {".", ",", ";", ":"}]
     if not widths:
