@@ -8,6 +8,7 @@ from swedish_wordlist_tools.ocr_glyph_matcher import GlyphModel, Match
 from swedish_wordlist_tools.ocr_probe_row_glyphs import (
     analyse_row_exact,
     exact_text_runs,
+    infer_space_gap,
     jsonl_like_fields,
     render_exact_markup,
     render_exact_text,
@@ -55,14 +56,14 @@ class RowGlyphProbeTests(unittest.TestCase):
         self.assertLess(result["covered_pixels"], result["source_pixels"])
 
     @staticmethod
-    def match(label: str, style: str, x: int) -> Match:
+    def match(label: str, style: str, x: int, width: int = 1) -> Match:
         return Match(
             label=label,
             style=style,
             x=x,
             baseline=7,
-            pixels=frozenset({(x, 7)}),
-            model_pixels=1,
+            pixels=frozenset((x + dx, 7) for dx in range(width)),
+            model_pixels=width,
             sources=1,
         )
 
@@ -97,6 +98,25 @@ class RowGlyphProbeTests(unittest.TestCase):
                 {"style": "roman", "text": "en"},
             ],
         )
+
+    def test_row_local_space_gap_does_not_split_wide_headword_letters(self) -> None:
+        matches = [
+            self.match("a", "bold", 0, width=7),
+            self.match("b", "bold", 10, width=7),  # three blank columns: letter spacing
+            self.match("s", "roman", 21, width=4),  # four blank columns: word space
+        ]
+        self.assertEqual(infer_space_gap(matches), 4)
+        self.assertEqual(render_exact_text(matches), "ab s")
+        self.assertEqual(render_exact_markup(matches), "<b>ab</b> s")
+
+    def test_unmatched_source_ink_is_not_rendered_as_whitespace(self) -> None:
+        matches = [
+            self.match("a", "roman", 0, width=2),
+            self.match("b", "roman", 8, width=2),
+        ]
+        source_ink = set().union(*(match.pixels for match in matches))
+        source_ink.add((5, 7))  # unknown glyph between the two exact matches
+        self.assertEqual(render_exact_text(matches, space_gap=3, source_ink=source_ink), "ab")
 
     def test_explanation_marker_ends_jsonl_text(self) -> None:
         matches = [
