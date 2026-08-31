@@ -36,6 +36,24 @@ class ColumnRowSegmentationTests(unittest.TestCase):
         self.assertEqual(len(rows), 3)
         self.assertTrue(all(row["source"] == "white-gap-single" for row in rows))
 
+    def test_large_gap_with_only_one_row_of_ink_is_not_split(self) -> None:
+        image = Image.new("L", (90, 100), 255)
+        # Two ordinary rows establish a 20 px pitch.
+        for center in (15, 35):
+            for y in range(center - 4, center + 5):
+                for x in range(8, 40):
+                    image.putpixel((x, y), 0)
+        # A final ordinary-height row sits after extra vertical white space.
+        # Gap-centre distance alone would suggest multiple rows here.
+        for y in range(71, 80):
+            for x in range(8, 40):
+                image.putpixel((x, y), 0)
+
+        blocks = column_blocks(image, left=0, right=90)
+        rows = rows_from_blocks(image, blocks, left=0, right=90, row_pitch=20.0)
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[-1]["source"], "white-gap-single")
+
     def test_merged_two_row_block_is_split_by_low_ink_projection(self) -> None:
         image = Image.new("L", (90, 70), 255)
         # First ordinary row establishes the 20 px pitch.
