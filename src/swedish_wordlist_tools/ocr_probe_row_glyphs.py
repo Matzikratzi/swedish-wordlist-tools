@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
+from statistics import median
 
 from .ocr_column_row_segmentation import segment_page_rows
 from .ocr_glyph_matcher import exact_matches, load_facit, select_best_baseline_partition
@@ -31,6 +33,7 @@ def analyse_row_exact(crop, models, *, threshold: int = 210) -> dict:
         "fully_exact": bool(ink) and covered == ink,
         "candidate_count": len(exact_matches(ink, crop.width, crop.height, models)),
         "selected": selected,
+        "ink": ink,
     }
 
 
@@ -41,18 +44,65 @@ def _render_style(match) -> str:
     return "plain" if match.label == "¤" else match.style
 
 
-def exact_text_runs(matches, *, space_gap: int = 3) -> list[dict]:
+def _match_width(match) -> int:
+    if not match.pixels:
+        return 1
+    xs = [x for x, _y in match.pixels]
+    return max(xs) - min(xs) + 1
+
+
+def infer_space_gap(matches, *, minimum: int = 3) -> int:
+    """Infer a row-local minimum width for a real printed word space.
+
+    A fixed three-pixel rule is too aggressive for SAOL: normal letter spacing
+    inside a word can itself reach three pixels in some faces. Use half the
+    median exact-glyph width, rounded upward, while retaining three pixels as the
+    lower bound for very small glyphs.
+    """
+    widths = [_match_width(match) for match in matches if match.label not in {".", ",", ";", ":"}]
+    if not widths:
+        return minimum
+    return max(minimum, int(math.ceil(float(median(widths)) / 2.0)))
+
+
+def _visible_blank_gap(
+    previous_right: int | None,
+    current_left: int,
+    *,
+    source_ink: set[tuple[int, int]] | None,
+) -> int:
+    if previous_right is None or current_left <= previous_right + 1:
+        return 0
+    left = previous_right + 1
+    right = current_left - 1
+    if source_ink is not None and any(left <= x <= right for x, _y in source_ink):
+        # An unmatched source glyph occupies this interval. It is not whitespace
+        # merely because the exact matcher has no model for that glyph yet.
+        return 0
+    return right - left + 1
+
+
+def exact_text_runs(
+    matches,
+    *,
+    space_gap: int | None = None,
+    source_ink: set[tuple[int, int]] | None = None,
+) -> list[dict]:
     """Render exact glyphs as compact visual-style runs.
 
     Formatting changes only when the rendered style changes. Printed ~, · and ¤
-    are emitted literally. The raised explanatory glyph ¤ gets a neutral run so
-    that surrounding italic/bold markup cannot leak onto it.
+    are emitted literally. Word spaces are inferred from row-local glyph size;
+    when source ink is available, unmatched ink can never be mistaken for a
+    blank gap.
     """
     rows = sorted(matches, key=lambda m: (m.x, m.baseline, m.label, m.style))
+    if space_gap is None:
+        space_gap = infer_space_gap(rows)
     runs: list[dict] = []
     previous_right: int | None = None
     for match in rows:
-        gap = previous_right is not None and match.x - previous_right - 1 >= space_gap
+        blank_gap = _visible_blank_gap(previous_right, match.x, source_ink=source_ink)
+        gap = blank_gap >= space_gap
         style = _render_style(match)
         if runs and runs[-1]["style"] == style:
             if gap:
@@ -76,12 +126,28 @@ def _render_run(run: dict, *, markup: bool) -> str:
     return text
 
 
-def render_exact_text(matches, *, space_gap: int = 3) -> str:
-    return "".join(_render_run(run, markup=False) for run in exact_text_runs(matches, space_gap=space_gap))
+def render_exact_text(
+    matches,
+    *,
+    space_gap: int | None = None,
+    source_ink: set[tuple[int, int]] | None = None,
+) -> str:
+    return "".join(
+        _render_run(run, markup=False)
+        for run in exact_text_runs(matches, space_gap=space_gap, source_ink=source_ink)
+    )
 
 
-def render_exact_markup(matches, *, space_gap: int = 3) -> str:
-    return "".join(_render_run(run, markup=True) for run in exact_text_runs(matches, space_gap=space_gap))
+def render_exact_markup(
+    matches,
+    *,
+    space_gap: int | None = None,
+    source_ink: set[tuple[int, int]] | None = None,
+) -> str:
+    return "".join(
+        _render_run(run, markup=True)
+        for run in exact_text_runs(matches, space_gap=space_gap, source_ink=source_ink)
+    )
 
 
 def text_boundary(matches) -> tuple[int, str | None]:
@@ -107,7 +173,12 @@ def text_boundary(matches) -> tuple[int, str | None]:
     return len(rows), None
 
 
-def jsonl_like_fields(matches, *, space_gap: int = 3) -> dict:
+def jsonl_like_fields(
+    matches,
+    *,
+    space_gap: int | None = None,
+    source_ink: set[tuple[int, int]] | None = None,
+) -> dict:
     """Project one exact physical row into the facsimile JSONL field convention.
 
     This is intentionally row-local. It reconstructs the initial bold stycke,
@@ -131,11 +202,19 @@ def jsonl_like_fields(matches, *, space_gap: int = 3) -> dict:
     text_rows = ordkl_rows[text_start:]
 
     return {
-        "stycke": render_exact_text(headword_rows, space_gap=space_gap).strip(),
-        "ordkl": render_exact_markup(ordkl_rows, space_gap=space_gap).strip(),
-        "text": render_exact_text(text_rows, space_gap=space_gap).strip(),
+        "stycke": render_exact_text(
+            headword_rows, space_gap=space_gap, source_ink=source_ink
+        ).strip(),
+        "ordkl": render_exact_markup(
+            ordkl_rows, space_gap=space_gap, source_ink=source_ink
+        ).strip(),
+        "text": render_exact_text(
+            text_rows, space_gap=space_gap, source_ink=source_ink
+        ).strip(),
         "boundary": boundary_reason,
-        "remainder": render_exact_markup(rows[boundary_index:], space_gap=space_gap).strip(),
+        "remainder": render_exact_markup(
+            rows[boundary_index:], space_gap=space_gap, source_ink=source_ink
+        ).strip(),
     }
 
 
@@ -176,24 +255,26 @@ def main() -> int:
     crop = page.crop(box).convert("L")
     models = load_facit(args.facit)
     result = analyse_row_exact(crop, models, threshold=args.threshold)
+    selected = result["selected"]
+    inferred_gap = infer_space_gap(selected) if selected else None
 
     print(
         f"page={args.page} column={args.column} row={args.row} "
         f"y={row['page_top']}..{row['page_bottom']} rule_x={rule_x} crop_left={box[0]} "
         f"models={len(models)} candidates={result['candidate_count']} "
         f"baseline={result['baseline']} covered={result['covered_pixels']}/{result['source_pixels']} "
-        f"fully_exact={result['fully_exact']}"
+        f"fully_exact={result['fully_exact']} space_gap={inferred_gap}"
     )
-    if result["selected"]:
-        print(f"text={render_exact_text(result['selected'])}")
-        print(f"markup={render_exact_markup(result['selected'])}")
-        fields = jsonl_like_fields(result["selected"])
+    if selected:
+        print(f"text={render_exact_text(selected, source_ink=result['ink'])}")
+        print(f"markup={render_exact_markup(selected, source_ink=result['ink'])}")
+        fields = jsonl_like_fields(selected, source_ink=result["ink"])
         print(f"stycke={fields['stycke']}")
         print(f"ordkl={fields['ordkl']}")
         print(f"jsonl_text={fields['text']}")
         print(f"boundary={fields['boundary']}")
         print(f"remainder={fields['remainder']}")
-    for index, match in enumerate(result["selected"]):
+    for index, match in enumerate(selected):
         page_x = box[0] + match.x
         print(
             f"{index:02d}\tx={page_x}\tlabel={match.label!r}\tstyle={match.style}\t"
