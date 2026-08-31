@@ -54,10 +54,9 @@ def _match_width(match) -> int:
 def infer_space_gap(matches, *, minimum: int = 4) -> int:
     """Infer a row-local minimum width for a real printed word space.
 
-    SAOL's normal letter spacing can reach three completely white pixel columns,
-    as seen inside the bold headword ``abessin·ier``. Therefore three blank
-    columns are not enough evidence for a word boundary. Start at four and only
-    raise the threshold when unusually wide glyphs make that necessary.
+    SAOL bold letter spacing can contain three wholly white pixel columns, so a
+    word space must contain at least four. Wider faces can raise that threshold
+    to half the median exact-glyph width.
     """
     widths = [_match_width(match) for match in matches if match.label not in {".", ",", ";", ":"}]
     if not widths:
@@ -71,15 +70,31 @@ def _visible_blank_gap(
     *,
     source_ink: set[tuple[int, int]] | None,
 ) -> int:
+    """Return the longest completely blank column run between two exact glyphs.
+
+    On incomplete rows there can be unmatched glyphs between two exact matches.
+    Such ink must not make the entire interval non-whitespace: real word spaces
+    can still exist on either side of the unknown glyph. Measuring the longest
+    run of source columns with no ink preserves those spaces while refusing to
+    invent a space through an unmatched glyph itself.
+    """
     if previous_right is None or current_left <= previous_right + 1:
         return 0
     left = previous_right + 1
     right = current_left - 1
-    if source_ink is not None and any(left <= x <= right for x, _y in source_ink):
-        # An unmatched source glyph occupies this interval. It is not whitespace
-        # merely because the exact matcher has no model for that glyph yet.
-        return 0
-    return right - left + 1
+    if source_ink is None:
+        return right - left + 1
+
+    occupied_x = {x for x, _y in source_ink if left <= x <= right}
+    longest = 0
+    current = 0
+    for x in range(left, right + 1):
+        if x in occupied_x:
+            current = 0
+        else:
+            current += 1
+            longest = max(longest, current)
+    return longest
 
 
 def exact_text_runs(
@@ -92,8 +107,8 @@ def exact_text_runs(
 
     Formatting changes only when the rendered style changes. Printed ~, · and ¤
     are emitted literally. Word spaces are inferred from row-local glyph size;
-    when source ink is available, unmatched ink can never be mistaken for a
-    blank gap.
+    on incomplete rows the source pixels decide whether there is a sufficiently
+    long completely blank column run between exact glyphs.
     """
     rows = sorted(matches, key=lambda m: (m.x, m.baseline, m.label, m.style))
     if space_gap is None:
