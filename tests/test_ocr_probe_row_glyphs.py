@@ -71,13 +71,13 @@ class RowGlyphProbeTests(unittest.TestCase):
         matches = [
             self.match("a", "bold", 0),
             self.match("b", "bold", 1),
-            self.match("s", "roman", 5),
-            self.match(".", "roman", 6),
-            self.match("~", "italic", 10),
-            self.match("n", "italic", 11),
-            self.match("¤", "italic", 15),
-            self.match("e", "roman", 19),
-            self.match("n", "roman", 20),
+            self.match("s", "roman", 6),
+            self.match(".", "roman", 7),
+            self.match("~", "italic", 12),
+            self.match("n", "italic", 13),
+            self.match("¤", "italic", 18),
+            self.match("e", "roman", 23),
+            self.match("n", "roman", 24),
         ]
         self.assertEqual(render_exact_text(matches), "ab s. ~n ¤ en")
         self.assertEqual(
@@ -115,20 +115,29 @@ class RowGlyphProbeTests(unittest.TestCase):
             self.match("b", "roman", 8, width=2),
         ]
         source_ink = set().union(*(match.pixels for match in matches))
-        source_ink.add((5, 7))  # unknown glyph between the two exact matches
-        self.assertEqual(render_exact_text(matches, space_gap=3, source_ink=source_ink), "ab")
+        source_ink.add((5, 7))  # unknown glyph splits the interval into runs shorter than four
+        self.assertEqual(render_exact_text(matches, space_gap=4, source_ink=source_ink), "ab")
+
+    def test_blank_run_survives_unmatched_ink_elsewhere_in_interval(self) -> None:
+        matches = [
+            self.match("a", "roman", 0, width=2),
+            self.match("b", "roman", 12, width=2),
+        ]
+        source_ink = set().union(*(match.pixels for match in matches))
+        source_ink.add((8, 7))
+        self.assertEqual(render_exact_text(matches, space_gap=4, source_ink=source_ink), "a b")
 
     def test_explanation_marker_ends_jsonl_text(self) -> None:
         matches = [
             self.match("a", "bold", 0),
             self.match("b", "bold", 1),
-            self.match("s", "roman", 5),
-            self.match(".", "roman", 6),
-            self.match("~", "italic", 10),
-            self.match("n", "italic", 11),
-            self.match("¤", "italic", 15),
-            self.match("e", "roman", 19),
-            self.match("n", "roman", 20),
+            self.match("s", "roman", 6),
+            self.match(".", "roman", 7),
+            self.match("~", "italic", 12),
+            self.match("n", "italic", 13),
+            self.match("¤", "italic", 18),
+            self.match("e", "roman", 23),
+            self.match("n", "roman", 24),
         ]
         fields = jsonl_like_fields(matches)
         self.assertEqual(fields["stycke"], "ab")
@@ -140,12 +149,12 @@ class RowGlyphProbeTests(unittest.TestCase):
     def test_number_ends_jsonl_text_as_numbered_explanation(self) -> None:
         matches = [
             self.match("a", "bold", 0),
-            self.match("s", "roman", 4),
-            self.match(".", "roman", 5),
-            self.match("~", "italic", 9),
-            self.match("n", "italic", 10),
-            self.match("1", "roman", 14),
-            self.match("x", "roman", 18),
+            self.match("s", "roman", 5),
+            self.match(".", "roman", 6),
+            self.match("~", "italic", 11),
+            self.match("n", "italic", 12),
+            self.match("1", "roman", 17),
+            self.match("x", "roman", 22),
         ]
         boundary_index, reason = text_boundary(matches)
         self.assertEqual(boundary_index, 5)
@@ -157,13 +166,13 @@ class RowGlyphProbeTests(unittest.TestCase):
     def test_new_bold_headword_ends_current_article(self) -> None:
         matches = [
             self.match("a", "bold", 0),
-            self.match("s", "roman", 4),
-            self.match(".", "roman", 5),
-            self.match("~", "italic", 9),
-            self.match("n", "italic", 10),
-            self.match("b", "bold", 15),
-            self.match("s", "roman", 19),
-            self.match(".", "roman", 20),
+            self.match("s", "roman", 5),
+            self.match(".", "roman", 6),
+            self.match("~", "italic", 11),
+            self.match("n", "italic", 12),
+            self.match("b", "bold", 17),
+            self.match("s", "roman", 22),
+            self.match(".", "roman", 23),
         ]
         fields = jsonl_like_fields(matches)
         self.assertEqual(fields["boundary"], "next-headword")
