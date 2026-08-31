@@ -281,8 +281,6 @@ def exact_sequence_cover(
                 continue
             if word_baseline is not None and m.baseline != word_baseline:
                 continue
-            if used.intersection(m.pixels):
-                continue
             new_used = frozenset(set(used) | set(m.pixels))
             baseline = m.baseline if word_baseline is None else word_baseline
             tail = dfs(pos + len(m.label), m.x + 1, baseline, new_used)
