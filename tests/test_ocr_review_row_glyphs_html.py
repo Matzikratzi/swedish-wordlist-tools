@@ -6,6 +6,7 @@ from swedish_wordlist_tools.ocr_review_row_glyphs_html import (
     glyph_from_points,
     normalize_points,
     relabel_exact_model,
+    render_html,
     selected_points,
 )
 
@@ -65,6 +66,31 @@ class RowGlyphHtmlReviewTests(unittest.TestCase):
                 new_label="(",
                 new_style="roman",
             )
+
+    def test_html_has_grid_baseline_and_only_typographic_styles(self) -> None:
+        state = {
+            "page": 1,
+            "column": 1,
+            "row": 33,
+            "covered_pixels": 1,
+            "source_pixels": 2,
+            "text": "x",
+            "markup": "x",
+            "crop_width": 10,
+            "crop_height": 5,
+            "image": "data:image/png;base64,AA==",
+            "baseline": 3,
+            "items": [],
+            "point_sets": {},
+            "matches": [],
+        }
+        html = render_html(state)
+        self.assertIn('id="showGrid"', html)
+        self.assertIn('id="showBaseline"', html)
+        self.assertIn("baseline '+S.baseline", html)
+        self.assertIn("<option>roman</option><option>italic</option><option>bold</option>", html)
+        self.assertNotIn("<option>plain</option>", html)
+        self.assertIn("Ändringar sparas direkt", html)
 
 
 if __name__ == "__main__":
