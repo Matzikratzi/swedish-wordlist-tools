@@ -283,15 +283,17 @@ def rows_from_blocks(
 def _apply_middle_column_content_start(
     column_entries: list[dict[str, Any]],
 ) -> tuple[int | None, int]:
-    """Drop page-header rows using the first real row in the middle column.
+    """Drop running heads on ordinary pages using the middle column as anchor.
 
-    Running heads live only at the outer page edge: on even pages the word is
-    left and page number right, on odd pages vice versa.  The middle column has
-    no running head.  SAOL's three text columns start on the same baseline, so
-    the first middle-column row gives a page-local content-start anchor without
-    OCR or page-parity assumptions.
+    The first page of an alphabet chapter is deliberately excluded: its large
+    inverse chapter plaque changes the top-of-column layout, so the ordinary
+    three-columns-start-together invariant does not apply there.
     """
     if not column_entries:
+        return None, 0
+    if any(int(entry.get("chapter_marker_count") or 0) for entry in column_entries):
+        for entry in column_entries:
+            entry["header_row_count"] = 0
         return None, 0
     middle = column_entries[len(column_entries) // 2]
     middle_rows = middle.get("rows") or []
