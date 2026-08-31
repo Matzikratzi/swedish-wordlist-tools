@@ -5,6 +5,7 @@ import unittest
 from PIL import Image
 
 from swedish_wordlist_tools.ocr_column_row_segmentation import (
+    _split_positions,
     column_blocks,
     estimate_row_pitch,
     rows_from_blocks,
@@ -77,6 +78,37 @@ class ColumnRowSegmentationTests(unittest.TestCase):
         rows = rows_from_blocks(image, blocks, left=0, right=90, row_pitch=20.0)
         self.assertGreaterEqual(len(rows), 3)
         self.assertTrue(any(row["source"] == "white-gap-projection-split" for row in rows))
+
+    def test_split_positions_anchor_to_ink_after_tall_upper_gap(self) -> None:
+        image = Image.new("L", (90, 120), 255)
+        # The first 50 pixels are white. Three rows of ink start only at y=60,
+        # with a one-pixel bridge preventing hard white separators between them.
+        for top in (60, 80, 100):
+            for y in range(top, top + 6):
+                for x in range(10, 45):
+                    image.putpixel((x, y), 0)
+        for y in range(66, 100):
+            image.putpixel((20, y), 0)
+        block = {
+            "upper_gap_bottom": 50,
+            "lower_gap_top": 110,
+            "upper_gap_center_y": 25.0,
+            "ink_bbox": [10, 60, 45, 106],
+        }
+        splits = _split_positions(
+            image,
+            block,
+            row_count=3,
+            row_pitch=20.0,
+            left=0,
+            right=90,
+            threshold=210,
+        )
+        self.assertEqual(len(splits), 2)
+        self.assertGreaterEqual(splits[0], 74)
+        self.assertLessEqual(splits[0], 86)
+        self.assertGreaterEqual(splits[1], 94)
+        self.assertLessEqual(splits[1], 106)
 
     def test_page_is_split_into_three_columns_before_rows(self) -> None:
         image = Image.new("L", (90, 60), 255)
