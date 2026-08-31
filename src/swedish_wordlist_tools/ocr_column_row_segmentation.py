@@ -75,12 +75,7 @@ def estimate_single_row_ink_height(
     blocks: list[dict[str, Any]],
     row_pitch: float,
 ) -> float | None:
-    """Estimate the vertical ink extent of one ordinary printed row.
-
-    Gap-to-gap distance alone can be large because a heading or margin leaves
-    extra white space. Ink height is an independent check: a block should only
-    be split into multiple rows when its actual ink also spans multiple pitches.
-    """
+    """Estimate the vertical ink extent of one ordinary printed row."""
     heights = [
         float(block["ink_height"])
         for block in blocks
@@ -108,6 +103,56 @@ def _estimated_rows_for_block(
     else:
         by_ink = 1 + _round_half_up((ink_height - single_row_ink_height) / row_pitch)
     return max(1, min(by_gap, by_ink))
+
+
+def _chapter_marker_for_block(
+    block: dict[str, Any],
+    *,
+    column: int,
+    left: int,
+    right: int,
+    row_pitch: float | None,
+) -> dict[str, Any] | None:
+    """Recognise the large inverse chapter letter plaque.
+
+    SAOL's chapter plaque (A, B, ...) occurs only in the left column.  It is a
+    broad, tall and unusually dense black rectangle with a light letter cut out
+    of it, so treating it as several ordinary text rows badly over-segments the
+    page.  Keep it as page structure instead of feeding it to row splitting.
+    """
+    if column != 0 or not row_pitch:
+        return None
+    bbox = block.get("ink_bbox")
+    if not bbox:
+        return None
+    ink_left, ink_top, ink_right, ink_bottom = map(int, bbox)
+    width = max(0, ink_right - ink_left)
+    height = max(0, ink_bottom - ink_top)
+    area = width * height
+    if area <= 0:
+        return None
+    density = float(block.get("ink_pixels") or 0) / area
+    column_width = max(1, right - left)
+
+    if width < 0.55 * column_width:
+        return None
+    if height < 2.0 * row_pitch:
+        return None
+    if density < 0.65:
+        return None
+
+    return {
+        "source": "chapter-marker",
+        "page_left": ink_left,
+        "page_top": ink_top,
+        "page_right": ink_right,
+        "page_bottom": ink_bottom,
+        "center_y": (ink_top + ink_bottom - 1.0) / 2.0,
+        "ink_pixels": int(block.get("ink_pixels") or 0),
+        "ink_density": density,
+        "upper_hard_gap": [int(block["upper_gap_top"]), int(block["upper_gap_bottom"])],
+        "lower_hard_gap": [int(block["lower_gap_top"]), int(block["lower_gap_bottom"])],
+    }
 
 
 def _horizontal_ink_counts(
@@ -156,10 +201,6 @@ def _split_positions(
     )
     positions: list[int] = []
 
-    # A hard white band may itself be very tall (page heading/margin). Its
-    # centre is therefore not a row-lattice anchor. Anchor the expected split
-    # positions to the first actual ink in the block instead. This matters in
-    # particular for the first dictionary rows on a page.
     ink_bbox = block.get("ink_bbox")
     ink_top = int(ink_bbox[1]) if ink_bbox else top
     radius = max(1, _round_half_up(row_pitch * 0.30))
@@ -282,23 +323,49 @@ def segment_page_rows(
     columns: int = 3,
     threshold: int = 210,
 ) -> dict[str, Any]:
-    """Segment a SAOL page from pixels alone: columns -> hard-gap blocks -> rows."""
+    """Segment a SAOL page from pixels alone: columns -> structures -> rows."""
     column_entries: list[dict[str, Any]] = []
     total_blocks = 0
     total_rows = 0
     total_multi_blocks = 0
+    total_chapter_markers = 0
     for column in range(columns):
         left = column * page.width // columns
         right = (column + 1) * page.width // columns if column + 1 < columns else page.width
         blocks = column_blocks(page, left=left, right=right, threshold=threshold)
         pitch = estimate_row_pitch(blocks)
-        single_row_ink_height = estimate_single_row_ink_height(blocks, pitch) if pitch else None
+
+        chapter_markers = [
+            marker
+            for block in blocks
+            if (
+                marker := _chapter_marker_for_block(
+                    block,
+                    column=column,
+                    left=left,
+                    right=right,
+                    row_pitch=pitch,
+                )
+            )
+            is not None
+        ]
+        marker_boxes = {
+            (marker["page_left"], marker["page_top"], marker["page_right"], marker["page_bottom"])
+            for marker in chapter_markers
+        }
+        row_blocks = [
+            block
+            for block in blocks
+            if tuple(map(int, block.get("ink_bbox") or [])) not in marker_boxes
+        ]
+
+        single_row_ink_height = estimate_single_row_ink_height(row_blocks, pitch) if pitch else None
         if pitch is None:
             rows: list[dict[str, Any]] = []
         else:
             rows = rows_from_blocks(
                 page,
-                blocks,
+                row_blocks,
                 left=left,
                 right=right,
                 row_pitch=pitch,
@@ -308,7 +375,7 @@ def segment_page_rows(
             row["index"] = index
         column_multi_blocks = sum(
             1
-            for block in blocks
+            for block in row_blocks
             if pitch
             and _estimated_rows_for_block(
                 block,
@@ -319,6 +386,7 @@ def segment_page_rows(
         total_blocks += len(blocks)
         total_rows += len(rows)
         total_multi_blocks += column_multi_blocks
+        total_chapter_markers += len(chapter_markers)
         column_entries.append(
             {
                 "column": column,
@@ -328,15 +396,18 @@ def segment_page_rows(
                 "single_row_ink_height": single_row_ink_height,
                 "block_count": len(blocks),
                 "multi_row_block_count": column_multi_blocks,
+                "chapter_marker_count": len(chapter_markers),
+                "chapter_markers": chapter_markers,
                 "rows": rows,
             }
         )
     return {
-        "format": "saol-white-gap-row-map-v2",
+        "format": "saol-white-gap-row-map-v3",
         "page_size": [page.width, page.height],
         "column_count": columns,
         "block_count": total_blocks,
         "multi_row_block_count": total_multi_blocks,
+        "chapter_marker_count": total_chapter_markers,
         "row_count": total_rows,
         "columns": column_entries,
     }
