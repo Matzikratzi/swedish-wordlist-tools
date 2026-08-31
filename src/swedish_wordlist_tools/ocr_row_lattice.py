@@ -70,16 +70,20 @@ def white_horizontal_bands(
 
 
 def typical_row_pitch(rows: Iterable[dict[str, Any]]) -> float | None:
-    """Return a robust center-to-center row pitch from cached physical rows."""
+    """Return a robust center-to-center row pitch from cached physical rows.
+
+    Missing Tesseract rows turn one normal adjacent distance into roughly two
+    row pitches. With only a few known rows that doubled gap can otherwise move
+    the ordinary median upward (for example 20, 40 -> 30). Prefer the lower
+    half of observed positive gaps, which still represents real adjacent rows
+    while deliberately excluding the large gaps we are trying to repair.
+    """
     centers = sorted(float(row["center_y"]) for row in rows if "center_y" in row)
-    diffs = [b - a for a, b in zip(centers, centers[1:]) if b > a]
+    diffs = sorted(b - a for a, b in zip(centers, centers[1:]) if b > a)
     if not diffs:
         return None
-    med = median(diffs)
-    # Large gaps often mean Tesseract missed one or more rows. Do not let those
-    # gaps inflate the pitch we use to detect exactly that situation.
-    close = [d for d in diffs if d <= med * 1.5]
-    return float(median(close or diffs))
+    lower_count = max(1, (len(diffs) + 1) // 2)
+    return float(median(diffs[:lower_count]))
 
 
 def blocks_between_white_bands(
