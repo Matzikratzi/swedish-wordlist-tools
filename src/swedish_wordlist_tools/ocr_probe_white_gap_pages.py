@@ -14,10 +14,10 @@ def parse_pages(spec: str) -> list[int]:
         part = part.strip()
         if not part:
             continue
-        if "-" in part:
-            start_text, end_text = part.split("-", 1)
-            start = int(start_text)
-            end = int(end_text)
+        range_pos = part.find("-", 1)
+        if range_pos >= 0:
+            start = int(part[:range_pos])
+            end = int(part[range_pos + 1 :])
             if end < start:
                 start, end = end, start
             pages.update(range(start, end + 1))
