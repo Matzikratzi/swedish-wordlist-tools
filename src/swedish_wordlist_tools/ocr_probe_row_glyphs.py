@@ -35,7 +35,8 @@ def analyse_row_exact(crop, models, *, threshold: int = 210) -> dict:
 
 
 def _render_label(label: str) -> str:
-    return "{u}" if label == "¤" else label
+    # The glyph identity remains ¤. {u} is the SAOL facsimile formatting marker.
+    return "{u}¤" if label == "¤" else label
 
 
 def exact_text_runs(matches, *, space_gap: int = 3) -> list[dict]:
@@ -43,7 +44,7 @@ def exact_text_runs(matches, *, space_gap: int = 3) -> list[dict]:
 
     Formatting changes only when glyph style changes. Spaces between glyph groups
     of the same style stay inside that style run. Printed ~ and · are emitted
-    literally; the raised explanatory marker ¤ is rendered as {u}.
+    literally; the raised explanatory marker keeps its glyph as {u}¤.
     """
     rows = sorted(matches, key=lambda m: (m.x, m.baseline, m.label, m.style))
     runs: list[dict] = []
@@ -79,6 +80,61 @@ def render_exact_markup(matches, *, space_gap: int = 3) -> str:
         else:
             parts.append(text)
     return "".join(parts)
+
+
+def text_boundary(matches) -> tuple[int, str | None]:
+    """Return the first glyph that ends SAOL's inflection/text field.
+
+    Known boundaries are the raised explanatory marker, a numbered explanation,
+    or a new bold headword after the initial headword has ended.
+    """
+    rows = sorted(matches, key=lambda m: (m.x, m.baseline, m.label, m.style))
+    left_initial_bold = False
+    for index, match in enumerate(rows):
+        if index == 0 and match.style != "bold":
+            left_initial_bold = True
+        elif match.style != "bold":
+            left_initial_bold = True
+
+        if match.label == "¤":
+            return index, "explanation-marker"
+        if left_initial_bold and match.label.isdigit():
+            return index, "numbered-explanation"
+        if left_initial_bold and match.style == "bold":
+            return index, "next-headword"
+    return len(rows), None
+
+
+def jsonl_like_fields(matches, *, space_gap: int = 3) -> dict:
+    """Project one exact physical row into the facsimile JSONL field convention.
+
+    This is intentionally row-local. It reconstructs the initial bold stycke,
+    ordkl through the first text boundary, and text beginning at the first italic
+    glyph. Multi-row article continuation is handled later.
+    """
+    rows = sorted(matches, key=lambda m: (m.x, m.baseline, m.label, m.style))
+    boundary_index, boundary_reason = text_boundary(rows)
+    field_rows = rows[:boundary_index]
+
+    headword_end = 0
+    while headword_end < len(field_rows) and field_rows[headword_end].style == "bold":
+        headword_end += 1
+    headword_rows = field_rows[:headword_end]
+    ordkl_rows = field_rows[headword_end:]
+
+    text_start = next(
+        (index for index, match in enumerate(ordkl_rows) if match.style == "italic"),
+        len(ordkl_rows),
+    )
+    text_rows = ordkl_rows[text_start:]
+
+    return {
+        "stycke": render_exact_text(headword_rows, space_gap=space_gap).strip(),
+        "ordkl": render_exact_markup(ordkl_rows, space_gap=space_gap).strip(),
+        "text": render_exact_text(text_rows, space_gap=space_gap).strip(),
+        "boundary": boundary_reason,
+        "remainder": render_exact_markup(rows[boundary_index:], space_gap=space_gap).strip(),
+    }
 
 
 def main() -> int:
@@ -129,6 +185,12 @@ def main() -> int:
     if result["selected"]:
         print(f"text={render_exact_text(result['selected'])}")
         print(f"markup={render_exact_markup(result['selected'])}")
+        fields = jsonl_like_fields(result["selected"])
+        print(f"stycke={fields['stycke']}")
+        print(f"ordkl={fields['ordkl']}")
+        print(f"jsonl_text={fields['text']}")
+        print(f"boundary={fields['boundary']}")
+        print(f"remainder={fields['remainder']}")
     for index, match in enumerate(result["selected"]):
         page_x = box[0] + match.x
         print(
