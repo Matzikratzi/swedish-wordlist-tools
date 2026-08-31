@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import html
 import re
+import sys
 from collections import defaultdict, deque
 from pathlib import Path
 
@@ -46,7 +47,15 @@ def _reference_headword(row: dict) -> str:
     return str(row.get("stycke") or row.get("ord") or row.get("normaliserat_ord") or "").strip()
 
 
-def _analyse_column_rows(page, column_entry: dict, column: int, models, *, threshold: int) -> list[dict]:
+def _analyse_column_rows(
+    page,
+    column_entry: dict,
+    column: int,
+    models,
+    *,
+    threshold: int,
+    progress=None,
+) -> list[dict]:
     physical_rows = column_entry.get("rows") or []
     rule_x = _persistent_left_rule_x(page, column_entry, threshold=threshold)
     content_left = rule_x + 2 if rule_x is not None else None
@@ -72,13 +81,22 @@ def _analyse_column_rows(page, column_entry: dict, column: int, models, *, thres
                 "source_pixels": result["source_pixels"],
             }
         )
+        if progress is not None:
+            progress(column, row_index + 1, len(physical_rows))
     return output
 
 
-def recovered_page_articles(page, row_map: dict, models, *, threshold: int = 210) -> list[dict]:
+def recovered_page_articles(page, row_map: dict, models, *, threshold: int = 210, progress=None) -> list[dict]:
     articles: list[dict] = []
     for column, column_entry in enumerate(row_map["columns"]):
-        rows = _analyse_column_rows(page, column_entry, column, models, threshold=threshold)
+        rows = _analyse_column_rows(
+            page,
+            column_entry,
+            column,
+            models,
+            threshold=threshold,
+            progress=progress,
+        )
         starts = [index for index, row in enumerate(rows) if row_starts_headword(row["matches"])]
         for pos, start in enumerate(starts):
             end = starts[pos + 1] if pos + 1 < len(starts) else len(rows)
@@ -153,8 +171,41 @@ def main() -> int:
     if page is None:
         raise SystemExit(f"could not load page image: {source}")
 
+    print(f"page={args.page}: segmenterar fysiska rader ...", file=sys.stderr, flush=True)
     row_map = segment_page_rows(page, threshold=args.threshold)
-    articles = recovered_page_articles(page, row_map, load_facit(args.facit), threshold=args.threshold)
+    column_sizes = [len(column.get("rows") or []) for column in row_map["columns"]]
+    total_rows = sum(column_sizes)
+    completed_before = [sum(column_sizes[:column]) for column in range(len(column_sizes))]
+    last_reported = {-1}
+
+    def show_progress(column: int, row_done: int, column_total: int) -> None:
+        done = completed_before[column] + row_done
+        percent = int(100 * done / total_rows) if total_rows else 100
+        # Report every 5 percentage points, plus first/last row of each column.
+        bucket = percent // 5
+        marker = (column, bucket)
+        if marker not in last_reported or row_done in {1, column_total}:
+            last_reported.add(marker)
+            print(
+                f"page={args.page}: {done}/{total_rows} rader ({percent:3d}%) "
+                f"kolumn={column} rad={row_done}/{column_total}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+    print(
+        f"page={args.page}: analyserar {total_rows} rader i {len(column_sizes)} kolumner ...",
+        file=sys.stderr,
+        flush=True,
+    )
+    articles = recovered_page_articles(
+        page,
+        row_map,
+        load_facit(args.facit),
+        threshold=args.threshold,
+        progress=show_progress,
+    )
+    print(f"page={args.page}: jämför {len(articles)} återfunna artiklar med JSONL ...", file=sys.stderr, flush=True)
     report = compare_page(rows, articles, args.page)
 
     print(
