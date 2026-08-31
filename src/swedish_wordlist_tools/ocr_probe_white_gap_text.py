@@ -32,6 +32,16 @@ def grouped_row_text(records: list[dict]) -> list[dict]:
     return rows
 
 
+def filter_rows(rows: list[dict], *, column: int | None = None, contains: str | None = None) -> list[dict]:
+    selected = rows
+    if column is not None:
+        selected = [row for row in selected if row["column"] == column]
+    if contains:
+        needle = contains.casefold()
+        selected = [row for row in selected if needle in str(row.get("text") or "").casefold()]
+    return selected
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="OCR rows whose geometry is owned by the white-gap pixel segmenter."
@@ -39,6 +49,7 @@ def main() -> int:
     ap.add_argument("jsonl", type=Path)
     ap.add_argument("--page", type=int, required=True)
     ap.add_argument("--column", type=int, choices=(0, 1, 2))
+    ap.add_argument("--contains", help="Show only OCR rows containing this text, case-insensitively.")
     ap.add_argument("--limit", type=int, default=30)
     ap.add_argument("--threshold", type=int, default=210)
     ap.add_argument("--lang", default="swe")
@@ -54,9 +65,7 @@ def main() -> int:
 
     row_map = segment_page_rows(page, threshold=args.threshold)
     records = ocr_page_row_map(page, row_map, lang=args.lang, psm=7, pad_y=1)
-    rows = grouped_row_text(records)
-    if args.column is not None:
-        rows = [row for row in rows if row["column"] == args.column]
+    rows = filter_rows(grouped_row_text(records), column=args.column, contains=args.contains)
     if args.limit >= 0:
         rows = rows[: args.limit]
 
