@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import math
+from collections import deque
 from pathlib import Path
 from statistics import median
 
@@ -22,14 +23,51 @@ def row_ink(crop, *, threshold: int = 210) -> set[tuple[int, int]]:
     }
 
 
+def ink_components(ink: set[tuple[int, int]]) -> list[dict]:
+    """Return 8-connected components for an arbitrary set of row-ink pixels."""
+    remaining = set(ink)
+    components: list[dict] = []
+    while remaining:
+        start = min(remaining, key=lambda point: (point[0], point[1]))
+        remaining.remove(start)
+        queue = deque([start])
+        points = [start]
+        while queue:
+            x, y = queue.popleft()
+            for ny in range(y - 1, y + 2):
+                for nx in range(x - 1, x + 2):
+                    if (nx, ny) in remaining:
+                        remaining.remove((nx, ny))
+                        queue.append((nx, ny))
+                        points.append((nx, ny))
+        xs = [x for x, _y in points]
+        ys = [y for _x, y in points]
+        components.append(
+            {
+                "left": min(xs),
+                "top": min(ys),
+                "right": max(xs) + 1,
+                "bottom": max(ys) + 1,
+                "width": max(xs) - min(xs) + 1,
+                "height": max(ys) - min(ys) + 1,
+                "pixels": len(points),
+            }
+        )
+    components.sort(key=lambda item: (item["left"], item["top"], item["right"], item["bottom"]))
+    return components
+
+
 def analyse_row_exact(crop, models, *, threshold: int = 210) -> dict:
     ink = row_ink(crop, threshold=threshold)
     baseline, selected = select_best_baseline_partition(ink, crop.width, crop.height, models)
     covered = set().union(*(match.pixels for match in selected)) if selected else set()
+    unmatched = ink - covered
     return {
         "baseline": baseline,
         "source_pixels": len(ink),
         "covered_pixels": len(covered),
+        "unmatched_pixels": len(unmatched),
+        "unmatched_components": ink_components(unmatched),
         "fully_exact": bool(ink) and covered == ink,
         "candidate_count": len(exact_matches(ink, crop.width, crop.height, models)),
         "selected": selected,
@@ -278,7 +316,7 @@ def main() -> int:
         f"y={row['page_top']}..{row['page_bottom']} rule_x={rule_x} crop_left={box[0]} "
         f"models={len(models)} candidates={result['candidate_count']} "
         f"baseline={result['baseline']} covered={result['covered_pixels']}/{result['source_pixels']} "
-        f"fully_exact={result['fully_exact']} space_gap={inferred_gap}"
+        f"unmatched={result['unmatched_pixels']} fully_exact={result['fully_exact']} space_gap={inferred_gap}"
     )
     if selected:
         print(f"text={render_exact_text(selected, source_ink=result['ink'])}")
@@ -295,6 +333,17 @@ def main() -> int:
             f"{index:02d}\tx={page_x}\tlabel={match.label!r}\tstyle={match.style}\t"
             f"baseline={box[1] + match.baseline}\tpx={match.model_pixels}\tsources={match.sources}"
         )
+    if result["unmatched_components"]:
+        print(f"unmatched_components={len(result['unmatched_components'])}")
+        for index, item in enumerate(result["unmatched_components"]):
+            page_left = box[0] + item["left"]
+            page_right = box[0] + item["right"] - 1
+            page_top = box[1] + item["top"]
+            page_bottom = box[1] + item["bottom"] - 1
+            print(
+                f"U{index:02d}\tx={page_left}..{page_right}\ty={page_top}..{page_bottom}\t"
+                f"w={item['width']} h={item['height']} px={item['pixels']}"
+            )
     return 0
 
 
