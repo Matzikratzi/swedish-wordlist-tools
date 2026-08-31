@@ -8,9 +8,11 @@ from swedish_wordlist_tools.ocr_glyph_matcher import GlyphModel, Match
 from swedish_wordlist_tools.ocr_probe_row_glyphs import (
     analyse_row_exact,
     exact_text_runs,
+    jsonl_like_fields,
     render_exact_markup,
     render_exact_text,
     row_ink,
+    text_boundary,
 )
 
 
@@ -52,33 +54,34 @@ class RowGlyphProbeTests(unittest.TestCase):
         self.assertFalse(result["fully_exact"])
         self.assertLess(result["covered_pixels"], result["source_pixels"])
 
-    def test_mixed_style_renderer_changes_format_only_when_style_changes(self) -> None:
-        def match(label: str, style: str, x: int) -> Match:
-            return Match(
-                label=label,
-                style=style,
-                x=x,
-                baseline=7,
-                pixels=frozenset({(x, 7)}),
-                model_pixels=1,
-                sources=1,
-            )
+    @staticmethod
+    def match(label: str, style: str, x: int) -> Match:
+        return Match(
+            label=label,
+            style=style,
+            x=x,
+            baseline=7,
+            pixels=frozenset({(x, 7)}),
+            model_pixels=1,
+            sources=1,
+        )
 
+    def test_mixed_style_renderer_changes_format_only_when_style_changes(self) -> None:
         matches = [
-            match("a", "bold", 0),
-            match("b", "bold", 1),
-            match("s", "roman", 5),
-            match(".", "roman", 6),
-            match("~", "italic", 10),
-            match("n", "italic", 11),
-            match("¤", "italic", 15),
-            match("e", "roman", 19),
-            match("n", "roman", 20),
+            self.match("a", "bold", 0),
+            self.match("b", "bold", 1),
+            self.match("s", "roman", 5),
+            self.match(".", "roman", 6),
+            self.match("~", "italic", 10),
+            self.match("n", "italic", 11),
+            self.match("¤", "italic", 15),
+            self.match("e", "roman", 19),
+            self.match("n", "roman", 20),
         ]
-        self.assertEqual(render_exact_text(matches), "ab s. ~n {u} en")
+        self.assertEqual(render_exact_text(matches), "ab s. ~n {u}¤ en")
         self.assertEqual(
             render_exact_markup(matches),
-            "<b>ab</b> s. <i>~n {u}</i> en",
+            "<b>ab</b> s. <i>~n {u}¤</i> en",
         )
         self.assertEqual(
             exact_text_runs(matches),
@@ -87,11 +90,65 @@ class RowGlyphProbeTests(unittest.TestCase):
                 {"style": "space", "text": " "},
                 {"style": "roman", "text": "s."},
                 {"style": "space", "text": " "},
-                {"style": "italic", "text": "~n {u}"},
+                {"style": "italic", "text": "~n {u}¤"},
                 {"style": "space", "text": " "},
                 {"style": "roman", "text": "en"},
             ],
         )
+
+    def test_explanation_marker_ends_jsonl_text(self) -> None:
+        matches = [
+            self.match("a", "bold", 0),
+            self.match("b", "bold", 1),
+            self.match("s", "roman", 5),
+            self.match(".", "roman", 6),
+            self.match("~", "italic", 10),
+            self.match("n", "italic", 11),
+            self.match("¤", "italic", 15),
+            self.match("e", "roman", 19),
+            self.match("n", "roman", 20),
+        ]
+        fields = jsonl_like_fields(matches)
+        self.assertEqual(fields["stycke"], "ab")
+        self.assertEqual(fields["ordkl"], "s. <i>~n</i>")
+        self.assertEqual(fields["text"], "~n")
+        self.assertEqual(fields["boundary"], "explanation-marker")
+        self.assertEqual(fields["remainder"], "<i>{u}¤</i> en")
+
+    def test_number_ends_jsonl_text_as_numbered_explanation(self) -> None:
+        matches = [
+            self.match("a", "bold", 0),
+            self.match("s", "roman", 4),
+            self.match(".", "roman", 5),
+            self.match("~", "italic", 9),
+            self.match("n", "italic", 10),
+            self.match("1", "roman", 14),
+            self.match("x", "roman", 18),
+        ]
+        boundary_index, reason = text_boundary(matches)
+        self.assertEqual(boundary_index, 5)
+        self.assertEqual(reason, "numbered-explanation")
+        fields = jsonl_like_fields(matches)
+        self.assertEqual(fields["text"], "~n")
+        self.assertEqual(fields["remainder"], "1 x")
+
+    def test_new_bold_headword_ends_current_article(self) -> None:
+        matches = [
+            self.match("a", "bold", 0),
+            self.match("s", "roman", 4),
+            self.match(".", "roman", 5),
+            self.match("~", "italic", 9),
+            self.match("n", "italic", 10),
+            self.match("b", "bold", 15),
+            self.match("s", "roman", 19),
+            self.match(".", "roman", 20),
+        ]
+        fields = jsonl_like_fields(matches)
+        self.assertEqual(fields["boundary"], "next-headword")
+        self.assertEqual(fields["stycke"], "a")
+        self.assertEqual(fields["ordkl"], "s. <i>~n</i>")
+        self.assertEqual(fields["text"], "~n")
+        self.assertEqual(fields["remainder"], "<b>b</b> s.")
 
 
 if __name__ == "__main__":
