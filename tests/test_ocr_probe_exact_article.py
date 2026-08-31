@@ -42,7 +42,7 @@ class ExactArticleProbeTests(unittest.TestCase):
                 ("e", "roman", 33, 2), ("t", "roman", 35, 2), ("i", "roman", 37, 1),
                 ("o", "roman", 38, 2), ("p", "roman", 40, 2), ("i", "roman", 42, 1),
                 ("e", "roman", 43, 2), ("r", "roman", 45, 2),
-                ("2", "roman", 50, 1), ("e", "roman", 55, 2), ("n", "roman", 57, 2),
+                ("2", "roman", 51, 1), ("e", "roman", 56, 2), ("n", "roman", 58, 2),
             ]),
             self.row([("k", "roman", 0, 2), ("a", "roman", 2, 2), ("t", "roman", 4, 2), ("t", "roman", 6, 2)]),
             self.row([("c", "bold", 0, 2), ("d", "bold", 2, 2), ("s", "roman", 8, 2), (".", "roman", 10, 1)]),
