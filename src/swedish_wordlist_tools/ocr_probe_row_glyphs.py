@@ -35,17 +35,18 @@ def analyse_row_exact(crop, models, *, threshold: int = 210) -> dict:
 
 
 def _render_style(match) -> str:
-    # ¤ is a raised explanatory marker, not italic. Some old facit samples happen
-    # to carry style=italic because the marker sits next to italic inflection text.
-    return "unformatted" if match.label == "¤" else match.style
+    # ¤ is its own raised explanatory glyph. Some old facit samples happen to
+    # carry style=italic because it sits next to italic inflection text, but the
+    # serialized facsimile representation should not attach formatting to it.
+    return "plain" if match.label == "¤" else match.style
 
 
 def exact_text_runs(matches, *, space_gap: int = 3) -> list[dict]:
     """Render exact glyphs as compact visual-style runs.
 
-    Formatting changes only when the rendered style changes. Printed ~ and · are
-    literal glyphs. The raised explanatory marker remains glyph ¤ but is given
-    the special unformatted style, represented as {u}¤ when serialized.
+    Formatting changes only when the rendered style changes. Printed ~, · and ¤
+    are emitted literally. The raised explanatory glyph ¤ gets a neutral run so
+    that surrounding italic/bold markup cannot leak onto it.
     """
     rows = sorted(matches, key=lambda m: (m.x, m.baseline, m.label, m.style))
     runs: list[dict] = []
@@ -68,8 +69,6 @@ def exact_text_runs(matches, *, space_gap: int = 3) -> list[dict]:
 def _render_run(run: dict, *, markup: bool) -> str:
     text = run["text"]
     style = run["style"]
-    if style == "unformatted":
-        return f"{{u}}{text}"
     if markup and style == "bold":
         return f"<b>{text}</b>"
     if markup and style == "italic":
