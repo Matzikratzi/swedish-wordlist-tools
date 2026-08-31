@@ -77,9 +77,11 @@ def _safe(s: str) -> str:
 
 
 def _load_page_image(meta: dict[str, object]) -> Image.Image | None:
-    p = Path(str(meta.get("page_image") or ""))
-    if p.exists():
-        return Image.open(p).convert("L")
+    page_image = str(meta.get("page_image") or "").strip()
+    if page_image:
+        p = Path(page_image)
+        if p.is_file():
+            return Image.open(p).convert("L")
     src = str(meta.get("source") or "")
     if not src:
         return None
@@ -133,7 +135,6 @@ def _match_models(crop: Image.Image, models: list[dict[str, object]]) -> tuple[d
     H = len(ink); W = len(ink[0]) if H else 0
     by_key: dict[tuple[str, str], list[dict[str, object]]] = defaultdict(list)
 
-    # Every learned shape, regardless of style, competes against the source ink.
     for model in models:
         mw = int(model["width"]); mh = int(model["height"])
         if mw > W or mh > H:
@@ -169,8 +170,6 @@ def _match_models(crop: Image.Image, models: list[dict[str, object]]) -> tuple[d
                     "baseline_hint": y0 + int(model["baseline_offset"]),
                 })
 
-    # Combine duplicate models and greedily keep strong non-overlapping placements
-    # per label/style so repeated letters can still appear more than once.
     matches: dict[str, list[dict[str, object]]] = defaultdict(list)
     baseline_votes: Counter[int] = Counter()
     for (label, style), hits in by_key.items():
