@@ -152,7 +152,8 @@ def render_html(state: dict, message: str = "") -> str:
 body{{font:16px system-ui,sans-serif;margin:20px;background:#f7f7f7;color:#171717}} h1{{font-size:22px}}
 .rowbox{{overflow:auto;background:white;border:1px solid #bbb;padding:36px 8px 8px;margin:12px 0}}
 canvas{{image-rendering:pixelated;cursor:pointer}} .controls{{display:flex;gap:10px;align-items:end;flex-wrap:wrap}}
-label{{display:flex;flex-direction:column;gap:4px}} input,select,button{{font:inherit;padding:6px}} button{{cursor:pointer}}
+label{{display:flex;flex-direction:column;gap:4px}} label.inline{{flex-direction:row;align-items:center;gap:6px}}
+input,select,button{{font:inherit;padding:6px}} input[type=checkbox]{{padding:0}} button{{cursor:pointer}}
 .items{{display:flex;flex-wrap:wrap;gap:5px;margin:10px 0}} .chip{{border:2px solid #888;background:white;padding:5px 7px}}
 .chip.match{{border-color:#b22}} .chip.residual{{border-color:#c77b00}} .chip.selected{{background:#dcecff}}
 code{{background:#eee;padding:2px 4px}} .msg{{font-weight:600;margin:8px 0}} .hint{{max-width:1000px}}
@@ -160,24 +161,43 @@ code{{background:#eee;padding:2px 4px}} .msg{{font-weight:600;margin:8px 0}} .hi
 <h1>SAOL glyphgranskning – sida {state['page']}, kolumn {state['column']}, rad {state['row']}</h1>
 <div>Exakt: <b>{state['covered_pixels']}/{state['source_pixels']}</b> pixlar. Text: <code>{state['text']}</code></div>
 <div class="msg">{message_html}</div>
+<div class="controls">
+<label class="inline"><input type="checkbox" id="showGrid" checked> Rutnät</label>
+<label class="inline"><input type="checkbox" id="showBaseline" checked> Stödlinje</label>
+</div>
 <div class="rowbox"><canvas id="row"></canvas></div>
 <div class="items" id="items"></div>
 <form method="post" id="form">
 <input type="hidden" name="selected" id="selected">
 <div class="controls">
 <label>Glyph<input name="label" id="label" size="5" required></label>
-<label>Stil<select name="style"><option>roman</option><option>italic</option><option>bold</option><option>plain</option></select></label>
+<label>Stil<select name="style"><option>roman</option><option>italic</option><option>bold</option></select></label>
 <button name="action" value="add">Lägg till/slå ihop valda pixlar som glyph</button>
 <button name="action" value="relabel" type="submit">Rätta vald M-glyphs facitmodell</button>
 </div></form>
-<p class="hint">Klicka på boxar i bilden eller knapparna nedanför. Röda <b>Mxx</b> är nuvarande exakta facitmatchningar; orange <b>Uxx</b> är omatchat bläck. För exempelvis <b>å</b>: välj både M-boxen för a-kroppen och U-boxen för ringen, skriv å och lägg till som en glyph. För en felmärkt befintlig modell: välj exakt en M-box, skriv rätt tecken och använd “Rätta”.</p>
+<p class="hint">Ändringar sparas direkt i facitfilen när du trycker på en åtgärdsknapp. Klicka på boxar i bilden eller knapparna nedanför. Röda <b>Mxx</b> är nuvarande exakta facitmatchningar; orange <b>Uxx</b> är omatchat bläck. För exempelvis <b>å</b>: välj både M-boxen för a-kroppen och U-boxen för ringen, skriv å och lägg till som en glyph.</p>
 <script>
 const S={data}; const scale=7, topPad=34; const canvas=document.getElementById('row'), ctx=canvas.getContext('2d');
 const chosen=new Set(); const img=new Image(); img.src=S.image;
+const showGrid=document.getElementById('showGrid'), showBaseline=document.getElementById('showBaseline');
+function drawGrid(){{
+ if(!showGrid.checked) return;
+ ctx.save(); ctx.strokeStyle='rgba(70,70,70,.22)'; ctx.lineWidth=1;
+ for(let x=0;x<=S.crop_width;x++){{const xx=x*scale+.5;ctx.beginPath();ctx.moveTo(xx,topPad);ctx.lineTo(xx,topPad+S.crop_height*scale);ctx.stroke();}}
+ for(let y=0;y<=S.crop_height;y++){{const yy=topPad+y*scale+.5;ctx.beginPath();ctx.moveTo(0,yy);ctx.lineTo(S.crop_width*scale,yy);ctx.stroke();}}
+ ctx.restore();
+}}
+function drawBaseline(){{
+ if(!showBaseline.checked || S.baseline===null) return;
+ const y=topPad+(S.baseline+.5)*scale;
+ ctx.save();ctx.strokeStyle='rgba(0,90,210,.95)';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(S.crop_width*scale,y);ctx.stroke();
+ ctx.fillStyle='rgba(0,90,210,.95)';ctx.font='12px monospace';ctx.textBaseline='bottom';ctx.fillText('baseline '+S.baseline,4,y-3);ctx.restore();
+}}
 function draw(){{
  canvas.width=S.crop_width*scale; canvas.height=S.crop_height*scale+topPad;
  ctx.imageSmoothingEnabled=false; ctx.fillStyle='white'; ctx.fillRect(0,0,canvas.width,canvas.height);
  ctx.drawImage(img,0,topPad,S.crop_width*scale,S.crop_height*scale);
+ drawGrid(); drawBaseline();
  ctx.font='12px monospace'; ctx.textBaseline='bottom';
  for(const it of S.items){{const b=it.bbox,x=b.left*scale,y=topPad+b.top*scale,w=(b.right-b.left)*scale,h=(b.bottom-b.top)*scale;
    const on=chosen.has(it.id); ctx.strokeStyle=on?'#1769d2':(it.kind==='match'?'#b22':'#c77b00');ctx.lineWidth=on?3:2;ctx.strokeRect(x,y,w,h);
@@ -188,7 +208,7 @@ function sync(){{document.getElementById('selected').value=[...chosen].join(',')
 function toggle(id){{chosen.has(id)?chosen.delete(id):chosen.add(id);sync();}}
 for(const it of S.items){{const b=document.createElement('button');b.type='button';b.dataset.id=it.id;b.className='chip '+it.kind;b.textContent=it.id+' '+(it.kind==='match'?JSON.stringify(it.label):'omatchad')+' · '+it.style+' · '+it.pixels+' px';b.onclick=()=>toggle(it.id);document.getElementById('items').appendChild(b);}}
 canvas.addEventListener('click',e=>{{const r=canvas.getBoundingClientRect(),px=(e.clientX-r.left)*(canvas.width/r.width)/scale,py=((e.clientY-r.top)*(canvas.height/r.height)-topPad)/scale;const hits=S.items.filter(it=>px>=it.bbox.left&&px<it.bbox.right&&py>=it.bbox.top&&py<it.bbox.bottom);if(hits.length)toggle(hits[hits.length-1].id);}});
-img.onload=draw;
+showGrid.addEventListener('change',draw); showBaseline.addEventListener('change',draw); img.onload=draw;
 </script></body></html>'''
 
 
