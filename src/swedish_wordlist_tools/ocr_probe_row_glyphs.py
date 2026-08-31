@@ -34,52 +34,55 @@ def analyse_row_exact(crop, models, *, threshold: int = 210) -> dict:
     }
 
 
-def _render_label(label: str) -> str:
-    # The glyph identity remains ¤. {u} is the SAOL facsimile formatting marker.
-    return "{u}¤" if label == "¤" else label
+def _render_style(match) -> str:
+    # ¤ is a raised explanatory marker, not italic. Some old facit samples happen
+    # to carry style=italic because the marker sits next to italic inflection text.
+    return "unformatted" if match.label == "¤" else match.style
 
 
 def exact_text_runs(matches, *, space_gap: int = 3) -> list[dict]:
-    """Render selected exact glyphs as style runs, preserving visible word gaps.
+    """Render exact glyphs as compact visual-style runs.
 
-    Formatting changes only when glyph style changes. Spaces between glyph groups
-    of the same style stay inside that style run. Printed ~ and · are emitted
-    literally; the raised explanatory marker keeps its glyph as {u}¤.
+    Formatting changes only when the rendered style changes. Printed ~ and · are
+    literal glyphs. The raised explanatory marker remains glyph ¤ but is given
+    the special unformatted style, represented as {u}¤ when serialized.
     """
     rows = sorted(matches, key=lambda m: (m.x, m.baseline, m.label, m.style))
     runs: list[dict] = []
     previous_right: int | None = None
     for match in rows:
         gap = previous_right is not None and match.x - previous_right - 1 >= space_gap
-        label = _render_label(match.label)
-        if runs and runs[-1]["style"] == match.style:
+        style = _render_style(match)
+        if runs and runs[-1]["style"] == style:
             if gap:
                 runs[-1]["text"] += " "
-            runs[-1]["text"] += label
+            runs[-1]["text"] += match.label
         else:
             if gap:
                 runs.append({"style": "space", "text": " "})
-            runs.append({"style": match.style, "text": label})
+            runs.append({"style": style, "text": match.label})
         previous_right = max(previous_right or match.x1, match.x1)
     return runs
 
 
+def _render_run(run: dict, *, markup: bool) -> str:
+    text = run["text"]
+    style = run["style"]
+    if style == "unformatted":
+        return f"{{u}}{text}"
+    if markup and style == "bold":
+        return f"<b>{text}</b>"
+    if markup and style == "italic":
+        return f"<i>{text}</i>"
+    return text
+
+
 def render_exact_text(matches, *, space_gap: int = 3) -> str:
-    return "".join(run["text"] for run in exact_text_runs(matches, space_gap=space_gap))
+    return "".join(_render_run(run, markup=False) for run in exact_text_runs(matches, space_gap=space_gap))
 
 
 def render_exact_markup(matches, *, space_gap: int = 3) -> str:
-    parts: list[str] = []
-    for run in exact_text_runs(matches, space_gap=space_gap):
-        text = run["text"]
-        style = run["style"]
-        if style == "bold":
-            parts.append(f"<b>{text}</b>")
-        elif style == "italic":
-            parts.append(f"<i>{text}</i>")
-        else:
-            parts.append(text)
-    return "".join(parts)
+    return "".join(_render_run(run, markup=True) for run in exact_text_runs(matches, space_gap=space_gap))
 
 
 def text_boundary(matches) -> tuple[int, str | None]:
