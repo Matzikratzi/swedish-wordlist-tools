@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from PIL import Image
 
-from swedish_wordlist_tools.ocr_row_map_words import ocr_page_row_map
+from swedish_wordlist_tools.ocr_row_map_words import _persistent_left_rule_x, ocr_page_row_map
 from swedish_wordlist_tools.ocr_tsv_articles import OcrWord
 
 
@@ -53,6 +53,36 @@ class RowMapWordTests(unittest.TestCase):
         self.assertEqual(records[0]["row_crop_box"], [30, 47, 60, 64])
         self.assertEqual(records[0]["bbox"], [38, 49, 31, 12])
         run.assert_called_once()
+
+    def test_persistent_vertical_rule_is_trimmed_before_ocr(self) -> None:
+        image = Image.new("L", (90, 180), 255)
+        rows = []
+        for index, top in enumerate(range(10, 170, 20)):
+            rows.append({
+                "index": index,
+                "source": "white-gap-single",
+                "page_top": top,
+                "page_bottom": top + 10,
+                "center_y": top + 4.5,
+            })
+            for y in range(top, top + 10):
+                image.putpixel((5, y), 0)
+            for y in range(top + 2, top + 8):
+                for x in range(12, 25):
+                    image.putpixel((x, y), 0)
+        entry = {"column": 0, "left": 0, "right": 30, "rows": rows}
+        self.assertEqual(_persistent_left_rule_x(image, entry), 5)
+
+        row_map = {"columns": [entry]}
+        with patch(
+            "swedish_wordlist_tools.ocr_row_map_words._run_row_tesseract",
+            return_value=[],
+        ) as run:
+            ocr_page_row_map(image, row_map, pad_y=0)
+
+        self.assertEqual(entry["ocr_content_left"], 7)
+        first_crop = run.call_args_list[0].args[0]
+        self.assertEqual(first_crop.width, 23)
 
 
 if __name__ == "__main__":
