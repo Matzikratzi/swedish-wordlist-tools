@@ -78,7 +78,7 @@ def estimate_single_row_ink_height(
     """Estimate the vertical ink extent of one ordinary printed row.
 
     Gap-to-gap distance alone can be large because a heading or margin leaves
-    extra white space.  Ink height is an independent check: a block should only
+    extra white space. Ink height is an independent check: a block should only
     be split into multiple rows when its actual ink also spans multiple pitches.
     """
     heights = [
@@ -155,10 +155,16 @@ def _split_positions(
         threshold=threshold,
     )
     positions: list[int] = []
-    upper_center = float(block["upper_gap_center_y"])
+
+    # A hard white band may itself be very tall (page heading/margin). Its
+    # centre is therefore not a row-lattice anchor. Anchor the expected split
+    # positions to the first actual ink in the block instead. This matters in
+    # particular for the first dictionary rows on a page.
+    ink_bbox = block.get("ink_bbox")
+    ink_top = int(ink_bbox[1]) if ink_bbox else top
     radius = max(1, _round_half_up(row_pitch * 0.30))
     for split_index in range(1, row_count):
-        expected = _round_half_up(upper_center + split_index * row_pitch)
+        expected = _round_half_up(ink_top + split_index * row_pitch)
         lo = max(top + 1, expected - radius)
         hi = min(bottom - 1, expected + radius)
         if hi < lo:
