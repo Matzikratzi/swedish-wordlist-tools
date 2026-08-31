@@ -9,6 +9,7 @@ from swedish_wordlist_tools.ocr_probe_row_glyphs import (
     analyse_row_exact,
     exact_text_runs,
     infer_space_gap,
+    ink_components,
     jsonl_like_fields,
     render_exact_markup,
     render_exact_text,
@@ -23,6 +24,16 @@ class RowGlyphProbeTests(unittest.TestCase):
         image.putpixel((1, 1), 0)
         image.putpixel((2, 1), 220)
         self.assertEqual(row_ink(image, threshold=210), {(1, 1)})
+
+    def test_ink_components_reports_residual_geometry(self) -> None:
+        components = ink_components({(1, 1), (2, 2), (7, 3), (7, 4)})
+        self.assertEqual(
+            components,
+            [
+                {"left": 1, "top": 1, "right": 3, "bottom": 3, "width": 2, "height": 2, "pixels": 2},
+                {"left": 7, "top": 3, "right": 8, "bottom": 5, "width": 1, "height": 2, "pixels": 2},
+            ],
+        )
 
     def test_exact_facit_model_is_selected_with_role(self) -> None:
         image = Image.new("L", (8, 8), 255)
@@ -40,6 +51,8 @@ class RowGlyphProbeTests(unittest.TestCase):
         self.assertEqual(len(result["selected"]), 1)
         self.assertEqual(result["selected"][0].label, "a")
         self.assertEqual(result["selected"][0].style, "headword-bold")
+        self.assertEqual(result["unmatched_pixels"], 0)
+        self.assertEqual(result["unmatched_components"], [])
 
     def test_uncovered_pixel_keeps_row_incomplete(self) -> None:
         image = Image.new("L", (8, 8), 255)
@@ -54,6 +67,10 @@ class RowGlyphProbeTests(unittest.TestCase):
         result = analyse_row_exact(image, [model])
         self.assertFalse(result["fully_exact"])
         self.assertLess(result["covered_pixels"], result["source_pixels"])
+        self.assertEqual(result["unmatched_pixels"], 1)
+        self.assertEqual(len(result["unmatched_components"]), 1)
+        self.assertEqual(result["unmatched_components"][0]["left"], 6)
+        self.assertEqual(result["unmatched_components"][0]["top"], 6)
 
     @staticmethod
     def match(label: str, style: str, x: int, width: int = 1) -> Match:
