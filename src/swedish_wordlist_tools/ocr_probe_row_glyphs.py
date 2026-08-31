@@ -34,25 +34,31 @@ def analyse_row_exact(crop, models, *, threshold: int = 210) -> dict:
     }
 
 
+def _render_label(label: str) -> str:
+    return "{u}" if label == "¤" else label
+
+
 def exact_text_runs(matches, *, space_gap: int = 3) -> list[dict]:
     """Render selected exact glyphs as style runs, preserving visible word gaps.
 
-    The matcher owns glyph identity and typography; geometry only decides where
-    whitespace belongs. SAOL punctuation such as ~, · and ¤ is emitted literally.
+    Formatting changes only when glyph style changes. Spaces between glyph groups
+    of the same style stay inside that style run. Printed ~ and · are emitted
+    literally; the raised explanatory marker ¤ is rendered as {u}.
     """
     rows = sorted(matches, key=lambda m: (m.x, m.baseline, m.label, m.style))
     runs: list[dict] = []
     previous_right: int | None = None
     for match in rows:
-        if previous_right is not None and match.x - previous_right - 1 >= space_gap:
-            if runs and runs[-1]["style"] == "space":
-                runs[-1]["text"] += " "
-            else:
-                runs.append({"style": "space", "text": " "})
+        gap = previous_right is not None and match.x - previous_right - 1 >= space_gap
+        label = _render_label(match.label)
         if runs and runs[-1]["style"] == match.style:
-            runs[-1]["text"] += match.label
+            if gap:
+                runs[-1]["text"] += " "
+            runs[-1]["text"] += label
         else:
-            runs.append({"style": match.style, "text": match.label})
+            if gap:
+                runs.append({"style": "space", "text": " "})
+            runs.append({"style": match.style, "text": label})
         previous_right = max(previous_right or match.x1, match.x1)
     return runs
 
