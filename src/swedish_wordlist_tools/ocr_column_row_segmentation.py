@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter
+from statistics import median
 from typing import Any
 
 from PIL import Image
@@ -56,13 +57,7 @@ def column_blocks(
 
 
 def estimate_row_pitch(blocks: list[dict[str, Any]]) -> float | None:
-    """Estimate printed row pitch from the modal hard-gap-to-hard-gap distance.
-
-    A normal one-row block occurs many times on a dictionary page, while merged
-    two/three-row blocks appear at approximately integer multiples. Quantising to
-    half an image pixel makes the dominant one-row distance a stable estimator
-    without needing Tesseract page segmentation first.
-    """
+    """Estimate printed row pitch from the modal hard-gap-to-hard-gap distance."""
     distances = [
         float(block["distance"])
         for block in blocks
@@ -73,9 +68,46 @@ def estimate_row_pitch(blocks: list[dict[str, Any]]) -> float | None:
         return None
     quantised = [round(distance * 2.0) / 2.0 for distance in distances]
     counts = Counter(quantised)
-    # In a tie prefer the smaller plausible pitch; merged-row distances are
-    # integer multiples and should not win merely because the sample is small.
     return min(counts, key=lambda value: (-counts[value], value))
+
+
+def estimate_single_row_ink_height(
+    blocks: list[dict[str, Any]],
+    row_pitch: float,
+) -> float | None:
+    """Estimate the vertical ink extent of one ordinary printed row.
+
+    Gap-to-gap distance alone can be large because a heading or margin leaves
+    extra white space.  Ink height is an independent check: a block should only
+    be split into multiple rows when its actual ink also spans multiple pitches.
+    """
+    heights = [
+        float(block["ink_height"])
+        for block in blocks
+        if 0.70 * row_pitch <= float(block.get("distance") or 0.0) <= 1.30 * row_pitch
+        and int(block.get("ink_height") or 0) >= 3
+    ]
+    if not heights:
+        return None
+    return float(median(heights))
+
+
+def _estimated_rows_for_block(
+    block: dict[str, Any],
+    *,
+    row_pitch: float,
+    single_row_ink_height: float | None,
+) -> int:
+    by_gap = max(1, _round_half_up(float(block["distance"]) / row_pitch))
+    if by_gap <= 1 or not single_row_ink_height:
+        return by_gap
+
+    ink_height = float(block.get("ink_height") or 0.0)
+    if ink_height <= single_row_ink_height:
+        by_ink = 1
+    else:
+        by_ink = 1 + _round_half_up((ink_height - single_row_ink_height) / row_pitch)
+    return max(1, min(by_gap, by_ink))
 
 
 def _horizontal_ink_counts(
@@ -131,7 +163,6 @@ def _split_positions(
         hi = min(bottom - 1, expected + radius)
         if hi < lo:
             continue
-        # Lowest ink is the best separator. Ties prefer the expected position.
         position = min(
             range(lo, hi + 1),
             key=lambda y: (counts.get(y, 0), abs(y - expected), y),
@@ -177,8 +208,13 @@ def rows_from_blocks(
 ) -> list[dict[str, Any]]:
     """Turn hard-gap blocks into physical rows, splitting merged blocks cheaply."""
     rows: list[dict[str, Any]] = []
+    single_row_ink_height = estimate_single_row_ink_height(blocks, row_pitch)
     for block in blocks:
-        estimated = max(1, _round_half_up(float(block["distance"]) / row_pitch))
+        estimated = _estimated_rows_for_block(
+            block,
+            row_pitch=row_pitch,
+            single_row_ink_height=single_row_ink_height,
+        )
         if estimated == 1:
             bbox = block.get("ink_bbox")
             if not bbox:
@@ -250,6 +286,7 @@ def segment_page_rows(
         right = (column + 1) * page.width // columns if column + 1 < columns else page.width
         blocks = column_blocks(page, left=left, right=right, threshold=threshold)
         pitch = estimate_row_pitch(blocks)
+        single_row_ink_height = estimate_single_row_ink_height(blocks, pitch) if pitch else None
         if pitch is None:
             rows: list[dict[str, Any]] = []
         else:
@@ -264,7 +301,14 @@ def segment_page_rows(
         for index, row in enumerate(rows):
             row["index"] = index
         column_multi_blocks = sum(
-            1 for block in blocks if pitch and _round_half_up(float(block["distance"]) / pitch) > 1
+            1
+            for block in blocks
+            if pitch
+            and _estimated_rows_for_block(
+                block,
+                row_pitch=pitch,
+                single_row_ink_height=single_row_ink_height,
+            ) > 1
         )
         total_blocks += len(blocks)
         total_rows += len(rows)
@@ -275,13 +319,14 @@ def segment_page_rows(
                 "left": left,
                 "right": right,
                 "row_pitch": pitch,
+                "single_row_ink_height": single_row_ink_height,
                 "block_count": len(blocks),
                 "multi_row_block_count": column_multi_blocks,
                 "rows": rows,
             }
         )
     return {
-        "format": "saol-white-gap-row-map-v1",
+        "format": "saol-white-gap-row-map-v2",
         "page_size": [page.width, page.height],
         "column_count": columns,
         "block_count": total_blocks,
