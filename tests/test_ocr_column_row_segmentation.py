@@ -39,13 +39,10 @@ class ColumnRowSegmentationTests(unittest.TestCase):
 
     def test_large_gap_with_only_one_row_of_ink_is_not_split(self) -> None:
         image = Image.new("L", (90, 100), 255)
-        # Two ordinary rows establish a 20 px pitch.
         for center in (15, 35):
             for y in range(center - 4, center + 5):
                 for x in range(8, 40):
                     image.putpixel((x, y), 0)
-        # A final ordinary-height row sits after extra vertical white space.
-        # Gap-centre distance alone would suggest multiple rows here.
         for y in range(71, 80):
             for x in range(8, 40):
                 image.putpixel((x, y), 0)
@@ -57,12 +54,9 @@ class ColumnRowSegmentationTests(unittest.TestCase):
 
     def test_merged_two_row_block_is_split_by_low_ink_projection(self) -> None:
         image = Image.new("L", (90, 70), 255)
-        # First ordinary row establishes the 20 px pitch.
         for y in range(8, 14):
             for x in range(10, 45):
                 image.putpixel((x, y), 0)
-        # Two following rows. A thin vertical stroke bridges their otherwise
-        # white separator, so there is no hard full-width white band between them.
         for y in range(28, 34):
             for x in range(10, 45):
                 image.putpixel((x, y), 0)
@@ -73,16 +67,12 @@ class ColumnRowSegmentationTests(unittest.TestCase):
             image.putpixel((20, y), 0)
 
         blocks = column_blocks(image, left=0, right=90)
-        # Feed the known printed pitch explicitly: the test is about splitting,
-        # not estimating pitch from this deliberately tiny sample.
         rows = rows_from_blocks(image, blocks, left=0, right=90, row_pitch=20.0)
         self.assertGreaterEqual(len(rows), 3)
         self.assertTrue(any(row["source"] == "white-gap-projection-split" for row in rows))
 
     def test_split_positions_anchor_to_ink_after_tall_upper_gap(self) -> None:
         image = Image.new("L", (90, 120), 255)
-        # The first 50 pixels are white. Three rows of ink start only at y=60,
-        # with a one-pixel bridge preventing hard white separators between them.
         for top in (60, 80, 100):
             for y in range(top, top + 6):
                 for x in range(10, 45):
@@ -109,6 +99,35 @@ class ColumnRowSegmentationTests(unittest.TestCase):
         self.assertLessEqual(splits[0], 86)
         self.assertGreaterEqual(splits[1], 94)
         self.assertLessEqual(splits[1], 106)
+
+    def test_dense_chapter_plaque_is_structure_only_in_left_column(self) -> None:
+        image = Image.new("L", (180, 140), 255)
+        # Ordinary rows in every column establish a 20 px pitch.
+        for column in range(3):
+            x0 = column * 60 + 8
+            for center in (15, 35, 115):
+                for y in range(center - 4, center + 5):
+                    for x in range(x0, x0 + 35):
+                        image.putpixel((x, y), 0)
+
+        # Broad, tall inverse chapter plaque in the left column only.
+        for y in range(55, 100):
+            for x in range(5, 55):
+                image.putpixel((x, y), 0)
+        # A simple white letter-shaped cutout keeps it from being a solid box.
+        for y in range(65, 90):
+            image.putpixel((25, y), 255)
+        for x in range(20, 31):
+            image.putpixel((x, 78), 255)
+
+        result = segment_page_rows(image)
+        self.assertEqual(result["chapter_marker_count"], 1)
+        self.assertEqual(result["columns"][0]["chapter_marker_count"], 1)
+        self.assertEqual(result["columns"][1]["chapter_marker_count"], 0)
+        self.assertEqual(result["columns"][2]["chapter_marker_count"], 0)
+        self.assertTrue(
+            all(not (55 <= row["center_y"] <= 100) for row in result["columns"][0]["rows"])
+        )
 
     def test_page_is_split_into_three_columns_before_rows(self) -> None:
         image = Image.new("L", (90, 60), 255)
