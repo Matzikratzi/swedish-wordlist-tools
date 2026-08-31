@@ -81,7 +81,7 @@ class RowGlyphProbeTests(unittest.TestCase):
         self.assertEqual(render_exact_text(matches), "ab s. ~n {u}¤ en")
         self.assertEqual(
             render_exact_markup(matches),
-            "<b>ab</b> s. <i>~n {u}¤</i> en",
+            "<b>ab</b> s. <i>~n</i> {u}¤ en",
         )
         self.assertEqual(
             exact_text_runs(matches),
@@ -90,7 +90,9 @@ class RowGlyphProbeTests(unittest.TestCase):
                 {"style": "space", "text": " "},
                 {"style": "roman", "text": "s."},
                 {"style": "space", "text": " "},
-                {"style": "italic", "text": "~n {u}¤"},
+                {"style": "italic", "text": "~n"},
+                {"style": "space", "text": " "},
+                {"style": "unformatted", "text": "¤"},
                 {"style": "space", "text": " "},
                 {"style": "roman", "text": "en"},
             ],
@@ -113,7 +115,7 @@ class RowGlyphProbeTests(unittest.TestCase):
         self.assertEqual(fields["ordkl"], "s. <i>~n</i>")
         self.assertEqual(fields["text"], "~n")
         self.assertEqual(fields["boundary"], "explanation-marker")
-        self.assertEqual(fields["remainder"], "<i>{u}¤</i> en")
+        self.assertEqual(fields["remainder"], "{u}¤ en")
 
     def test_number_ends_jsonl_text_as_numbered_explanation(self) -> None:
         matches = [
