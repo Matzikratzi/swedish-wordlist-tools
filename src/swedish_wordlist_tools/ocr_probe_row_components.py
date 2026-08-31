@@ -8,7 +8,7 @@ from PIL import Image
 
 from .ocr_column_row_segmentation import segment_page_rows
 from .ocr_prepare_sequential_page import _load_source_image, read_jsonl, source_for_page
-from .ocr_row_map_words import _row_crop_box, _trim_persistent_left_rule
+from .ocr_row_map_words import _persistent_left_rule_x, _row_crop_box
 
 
 def connected_ink_components(image: Image.Image, *, threshold: int = 210) -> list[dict]:
@@ -69,23 +69,37 @@ def main() -> int:
         raise SystemExit(f"could not load page image: {source}")
 
     row_map = segment_page_rows(page, threshold=args.threshold)
-    column = row_map["columns"][args.column]
-    rows = column.get("rows") or []
+    column_entry = row_map["columns"][args.column]
+    rows = column_entry.get("rows") or []
     if not 0 <= args.row < len(rows):
         raise SystemExit(f"row {args.row} out of range; column {args.column} has {len(rows)} rows")
     row = rows[args.row]
-    box = _row_crop_box(row, column=args.column, page_width=page.width, page_height=page.height, pad_y=1)
+
+    rule_x = _persistent_left_rule_x(page, column_entry, threshold=args.threshold)
+    content_left = rule_x + 2 if rule_x is not None else None
+    box = _row_crop_box(
+        row,
+        column=args.column,
+        page_width=page.width,
+        page_height=page.height,
+        pad_y=1,
+        left_override=content_left,
+    )
     crop = page.crop(box).convert("L")
-    crop, trim_x = _trim_persistent_left_rule(crop, threshold=args.threshold)
-    components = [item for item in connected_ink_components(crop, threshold=args.threshold) if item["pixels"] >= args.min_pixels]
+    components = [
+        item
+        for item in connected_ink_components(crop, threshold=args.threshold)
+        if item["pixels"] >= args.min_pixels
+    ]
 
     print(
         f"page={args.page} column={args.column} row={args.row} "
-        f"y={row['page_top']}..{row['page_bottom']} trim_x={trim_x} components={len(components)}"
+        f"y={row['page_top']}..{row['page_bottom']} "
+        f"rule_x={rule_x} crop_left={box[0]} components={len(components)}"
     )
     for index, item in enumerate(components):
-        page_left = box[0] + trim_x + item["left"]
-        page_right = box[0] + trim_x + item["right"]
+        page_left = box[0] + item["left"]
+        page_right = box[0] + item["right"]
         page_top = box[1] + item["top"]
         page_bottom = box[1] + item["bottom"]
         print(
