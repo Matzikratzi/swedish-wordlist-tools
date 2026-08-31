@@ -102,19 +102,15 @@ class ColumnRowSegmentationTests(unittest.TestCase):
 
     def test_dense_chapter_plaque_is_structure_only_in_left_column(self) -> None:
         image = Image.new("L", (180, 140), 255)
-        # Ordinary rows in every column establish a 20 px pitch.
         for column in range(3):
             x0 = column * 60 + 8
             for center in (15, 35, 115):
                 for y in range(center - 4, center + 5):
                     for x in range(x0, x0 + 35):
                         image.putpixel((x, y), 0)
-
-        # Broad, tall inverse chapter plaque in the left column only.
         for y in range(55, 100):
             for x in range(5, 55):
                 image.putpixel((x, y), 0)
-        # A simple white letter-shaped cutout keeps it from being a solid box.
         for y in range(65, 90):
             image.putpixel((25, y), 255)
         for x in range(20, 31):
@@ -128,6 +124,27 @@ class ColumnRowSegmentationTests(unittest.TestCase):
         self.assertTrue(
             all(not (55 <= row["center_y"] <= 100) for row in result["columns"][0]["rows"])
         )
+
+    def test_middle_column_first_row_excludes_outer_running_heads(self) -> None:
+        image = Image.new("L", (180, 130), 255)
+        # Running heads exist only in the outer columns, well above body text.
+        for x0 in (8, 128):
+            for y in range(10, 17):
+                for x in range(x0, x0 + 35):
+                    image.putpixel((x, y), 0)
+        # All three body columns start on the same row and continue at 20 px pitch.
+        for column in range(3):
+            x0 = column * 60 + 8
+            for center in (55, 75, 95):
+                for y in range(center - 4, center + 5):
+                    for x in range(x0, x0 + 35):
+                        image.putpixel((x, y), 0)
+
+        result = segment_page_rows(image)
+        self.assertEqual(result["header_row_count"], 2)
+        self.assertGreaterEqual(result["content_top"], 50)
+        self.assertEqual([len(entry["rows"]) for entry in result["columns"]], [3, 3, 3])
+        self.assertEqual([entry["header_row_count"] for entry in result["columns"]], [1, 0, 1])
 
     def test_page_is_split_into_three_columns_before_rows(self) -> None:
         image = Image.new("L", (90, 60), 255)
