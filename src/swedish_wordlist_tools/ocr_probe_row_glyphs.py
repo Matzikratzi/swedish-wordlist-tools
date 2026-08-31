@@ -34,6 +34,47 @@ def analyse_row_exact(crop, models, *, threshold: int = 210) -> dict:
     }
 
 
+def exact_text_runs(matches, *, space_gap: int = 3) -> list[dict]:
+    """Render selected exact glyphs as style runs, preserving visible word gaps.
+
+    The matcher owns glyph identity and typography; geometry only decides where
+    whitespace belongs. SAOL punctuation such as ~, · and ¤ is emitted literally.
+    """
+    rows = sorted(matches, key=lambda m: (m.x, m.baseline, m.label, m.style))
+    runs: list[dict] = []
+    previous_right: int | None = None
+    for match in rows:
+        if previous_right is not None and match.x - previous_right - 1 >= space_gap:
+            if runs and runs[-1]["style"] == "space":
+                runs[-1]["text"] += " "
+            else:
+                runs.append({"style": "space", "text": " "})
+        if runs and runs[-1]["style"] == match.style:
+            runs[-1]["text"] += match.label
+        else:
+            runs.append({"style": match.style, "text": match.label})
+        previous_right = max(previous_right or match.x1, match.x1)
+    return runs
+
+
+def render_exact_text(matches, *, space_gap: int = 3) -> str:
+    return "".join(run["text"] for run in exact_text_runs(matches, space_gap=space_gap))
+
+
+def render_exact_markup(matches, *, space_gap: int = 3) -> str:
+    parts: list[str] = []
+    for run in exact_text_runs(matches, space_gap=space_gap):
+        text = run["text"]
+        style = run["style"]
+        if style == "bold":
+            parts.append(f"<b>{text}</b>")
+        elif style == "italic":
+            parts.append(f"<i>{text}</i>")
+        else:
+            parts.append(text)
+    return "".join(parts)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Match one pixel-owned SAOL row against the exact manual glyph facit.")
     ap.add_argument("jsonl", type=Path)
@@ -79,6 +120,9 @@ def main() -> int:
         f"baseline={result['baseline']} covered={result['covered_pixels']}/{result['source_pixels']} "
         f"fully_exact={result['fully_exact']}"
     )
+    if result["selected"]:
+        print(f"text={render_exact_text(result['selected'])}")
+        print(f"markup={render_exact_markup(result['selected'])}")
     for index, match in enumerate(result["selected"]):
         page_x = box[0] + match.x
         print(
