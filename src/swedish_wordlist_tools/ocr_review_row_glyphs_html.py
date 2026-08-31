@@ -189,7 +189,9 @@ function drawGrid(){{
 }}
 function drawBaseline(){{
  if(!showBaseline.checked || S.baseline===null) return;
- const y=topPad+(S.baseline+.5)*scale;
+ // The matcher baseline is a source-pixel row. Draw the typographic support
+ // line on the lower edge of that row, coincident with the pixel grid.
+ const y=topPad+(S.baseline+1)*scale+.5;
  ctx.save();ctx.strokeStyle='rgba(0,90,210,.95)';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(S.crop_width*scale,y);ctx.stroke();
  ctx.fillStyle='rgba(0,90,210,.95)';ctx.font='12px monospace';ctx.textBaseline='bottom';ctx.fillText('baseline '+S.baseline,4,y-3);ctx.restore();
 }}
