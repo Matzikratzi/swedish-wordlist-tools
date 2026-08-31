@@ -52,7 +52,7 @@ class RowGlyphProbeTests(unittest.TestCase):
         self.assertFalse(result["fully_exact"])
         self.assertLess(result["covered_pixels"], result["source_pixels"])
 
-    def test_mixed_style_renderer_preserves_spaces_and_literal_markers(self) -> None:
+    def test_mixed_style_renderer_changes_format_only_when_style_changes(self) -> None:
         def match(label: str, style: str, x: int) -> Match:
             return Match(
                 label=label,
@@ -75,10 +75,10 @@ class RowGlyphProbeTests(unittest.TestCase):
             match("e", "roman", 19),
             match("n", "roman", 20),
         ]
-        self.assertEqual(render_exact_text(matches), "ab s. ~n ¤ en")
+        self.assertEqual(render_exact_text(matches), "ab s. ~n {u} en")
         self.assertEqual(
             render_exact_markup(matches),
-            "<b>ab</b> s. <i>~n</i> <i>¤</i> en",
+            "<b>ab</b> s. <i>~n {u}</i> en",
         )
         self.assertEqual(
             exact_text_runs(matches),
@@ -87,9 +87,7 @@ class RowGlyphProbeTests(unittest.TestCase):
                 {"style": "space", "text": " "},
                 {"style": "roman", "text": "s."},
                 {"style": "space", "text": " "},
-                {"style": "italic", "text": "~n"},
-                {"style": "space", "text": " "},
-                {"style": "italic", "text": "¤"},
+                {"style": "italic", "text": "~n {u}"},
                 {"style": "space", "text": " "},
                 {"style": "roman", "text": "en"},
             ],
