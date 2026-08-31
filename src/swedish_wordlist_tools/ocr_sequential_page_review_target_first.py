@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 from typing import Any
@@ -95,16 +96,35 @@ def _relative_target_first_context(
     return relative
 
 
+def _cache_row_artifacts(out_dir: Path, cache_dir: Path) -> None:
+    prepared = cache_dir / "prepared"
+    prepared.mkdir(parents=True, exist_ok=True)
+    for name in ("page-row-map.json", "row-map-ocr.json"):
+        source = out_dir / name
+        if source.is_file():
+            shutil.copy2(source, prepared / name)
+    for source in out_dir.glob("saol14-word-debug-*-rowmap-*.json"):
+        shutil.copy2(source, prepared / source.name)
+    source_png = out_dir / "png"
+    cached_png = prepared / "png"
+    cached_png.mkdir(exist_ok=True)
+    if source_png.is_dir():
+        for source in source_png.glob("saol14-word-debug-*-rowmap-*.png"):
+            shutil.copy2(source, cached_png / source.name)
+
+
 def main() -> int:
     sequential_page._active_line_context = _target_first_line_context
     sequential_page._relative_five_row_context = _relative_target_first_context
 
     from . import ocr_page_row_guides as row_guides
+    from . import ocr_row_map_words as row_words
     from . import ocr_unique_unknown_glyph_review as unique
     from . import ocr_sequential_page_review_persistent as persistent
 
-    persistent.PREP_CACHE_VERSION = "saol-page-prep-target-first-v3"
-    persistent.ANALYSIS_CACHE_VERSION = "saol-row-analysis-target-first-v2"
+    # v4 adds row-map-owned OCR and supplemental debug rows to the prepared cache.
+    persistent.PREP_CACHE_VERSION = "saol-page-prep-target-first-v4"
+    persistent.ANALYSIS_CACHE_VERSION = "saol-row-analysis-target-first-v3"
 
     unique.unknown_groups = row_guides.target_unknown_groups
     unique._cropped_review_context = row_guides.wrap_review_context(unique._cropped_review_context)
@@ -121,26 +141,65 @@ def main() -> int:
         **kwargs: Any,
     ) -> dict:
         report = cached_prepare(jsonl, page_number, out_dir, **kwargs)
-        row_map_path = Path(out_dir) / "page-row-map.json"
+        out_dir = Path(out_dir)
+        row_map_path = out_dir / "page-row-map.json"
+        row_ocr_path = out_dir / "row-map-ocr.json"
         page_image = sequential_page._load_source_image(str(report.get("source") or ""))
+        if page_image is None:
+            raise RuntimeError("could not load page image for physical-row OCR")
+
         row_map = row_guides.write_page_row_map(
-            Path(out_dir),
+            out_dir,
             row_map_path,
             page_image=page_image,
             threshold=int(kwargs.get("threshold", 210)),
         )
-        cache_dir = persistent._ACTIVE_PAGE_CACHE
-        if cache_dir is not None:
-            cached_path = cache_dir / "prepared" / "page-row-map.json"
-            cached_path.parent.mkdir(parents=True, exist_ok=True)
-            if row_map_path.resolve() != cached_path.resolve():
-                shutil.copy2(row_map_path, cached_path)
         print(
             f"[row-map] {row_map.get('row_count', 0)} physical rows "
             f"({row_map.get('proposed_row_count', 0)} lattice); "
             f"cached={row_map_path}",
             flush=True,
         )
+
+        if row_ocr_path.is_file():
+            payload = json.loads(row_ocr_path.read_text(encoding="utf-8"))
+            records = list(payload.get("words") or [])
+        else:
+            print(
+                f"[row-ocr] recognizing {row_map.get('row_count', 0)} physical rows with psm=7...",
+                flush=True,
+            )
+            records = row_words.write_row_map_ocr(
+                page_image,
+                row_map,
+                jsonl,
+                page_number,
+                row_ocr_path,
+                lang=str(kwargs.get("lang", "swe")),
+                psm=7,
+                pad_y=1,
+            )
+
+        supplemental = row_words.write_lattice_debug_files(
+            page_image,
+            records,
+            out_dir,
+            page_number=page_number,
+            source=str(report.get("source") or ""),
+            threshold=int(kwargs.get("threshold", 210)),
+        )
+        lattice_words = sum(
+            1 for record in records if record.get("row_source") == "white-gap-ink-island"
+        )
+        print(
+            f"[row-ocr] words={len(records)} lattice_words={lattice_words} "
+            f"supplemental_anchored={supplemental}; cached={row_ocr_path}",
+            flush=True,
+        )
+
+        cache_dir = persistent._ACTIVE_PAGE_CACHE
+        if cache_dir is not None:
+            _cache_row_artifacts(out_dir, cache_dir)
         return report
 
     persistent._cached_prepare_page = cached_prepare_with_row_map
