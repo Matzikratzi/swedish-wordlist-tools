@@ -131,12 +131,12 @@ def exact_matches(
     """Return pixel-perfect placements of learned models.
 
     ``style`` is retained as the internal compatibility name for typography
-    classification. For facit v2 its value is the semantic ``role`` instead.
+    classification.  For facit v2 its value is the semantic ``role`` instead
+    (for example ``headword-bold`` or ``unknown``).
 
     By default a placement must own every 4-connected source component it
-    touches. Callers that prove correctness by requiring a complete raster
-    cover may disable that local component rule, which is necessary when two
-    otherwise exact printed glyphs touch in the scan.
+    touches. Multi-row review may set ``require_whole_components=False`` so
+    known exact glyphs can be peeled from one connected cross-row tangle.
     """
     out: list[Match] = []
     components: list[frozenset[tuple[int, int]]] = []
@@ -251,14 +251,7 @@ def exact_sequence_cover(
 ) -> list[Match] | None:
     if not expected:
         return None
-    candidates = exact_matches(
-        ink,
-        width,
-        height,
-        models,
-        styles=styles,
-        require_whole_components=False,
-    )
+    candidates = exact_matches(ink, width, height, models, styles=styles)
     by_pos: dict[int, list[Match]] = {i: [] for i in range(len(expected))}
     for m in candidates:
         for pos in range(len(expected)):
@@ -280,6 +273,8 @@ def exact_sequence_cover(
             if m.x < min_anchor_x:
                 continue
             if word_baseline is not None and m.baseline != word_baseline:
+                continue
+            if used.intersection(m.pixels):
                 continue
             new_used = frozenset(set(used) | set(m.pixels))
             baseline = m.baseline if word_baseline is None else word_baseline
@@ -318,16 +313,11 @@ def model_inventory(models: Iterable[GlyphModel]) -> dict[str, dict[str, int]]:
 
 def analyse(ink: set[tuple[int, int]], width: int, height: int, models: list[GlyphModel], expected: str | None = None) -> dict[str, Any]:
     baseline, selected = select_best_baseline_partition(ink, width, height, models)
-    cover = exact_sequence_cover(ink, width, height, models, expected) if expected else None
-    if cover is not None:
-        selected = cover
-        baseline = cover[0].baseline if cover else baseline
     covered = set().union(*(m.pixels for m in selected)) if selected else set()
     return {
         "baseline": baseline,
         "exact_candidates": len(exact_matches(ink, width, height, models)),
         "selected_exact": _rows(selected),
-        "exact_sequence_cover": _rows(cover) if cover is not None else [],
         "covered_pixels": len(covered),
         "source_pixels": len(ink),
         "fully_exact": covered == ink,
