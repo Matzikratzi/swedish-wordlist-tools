@@ -14,7 +14,7 @@ from .ocr_column_row_segmentation import segment_page_rows
 from .ocr_glyph_matcher import load_facit
 from .ocr_prepare_sequential_page import _load_source_image, read_jsonl, source_for_page
 from .ocr_probe_row_glyphs import analyse_row_exact, render_exact_markup, render_exact_text
-from .ocr_row_map_words import _persistent_left_rule_x, _row_crop_box
+from .ocr_row_map_words import _owned_row_crop, _persistent_left_rule_x, _row_crop_box
 
 
 def normalize_points(points: set[tuple[int, int]], baseline: int) -> list[list[int]]:
@@ -97,7 +97,7 @@ def load_review_state(jsonl: Path, page_number: int, column: int, row_index: int
     rule_x = _persistent_left_rule_x(page, column_entry, threshold=threshold)
     content_left = rule_x + 2 if rule_x is not None else None
     box = _row_crop_box(row, column=column, page_width=page.width, page_height=page.height, pad_y=1, left_override=content_left)
-    crop = page.crop(box).convert("L")
+    crop, removed_neighbor_pixels = _owned_row_crop(page, row, box, threshold=threshold)
     crop, trimmed_left = _trim_leading_white_columns(crop, threshold=threshold, keep=2)
     if trimmed_left:
         box = (box[0] + trimmed_left, box[1], box[2], box[3])
@@ -147,6 +147,7 @@ def load_review_state(jsonl: Path, page_number: int, column: int, row_index: int
         "baseline": result["baseline"],
         "covered_pixels": result["covered_pixels"],
         "source_pixels": result["source_pixels"],
+        "removed_neighbor_pixels": removed_neighbor_pixels,
         "fully_exact": result["fully_exact"],
         "text": render_exact_text(selected, source_ink=result["ink"]) if selected else "",
         "markup": render_exact_markup(selected, source_ink=result["ink"]) if selected else "",
@@ -182,7 +183,7 @@ input,select,button{{font:inherit;padding:6px}} input[type=checkbox]{{padding:0}
 code{{background:#eee;padding:2px 4px}} .msg{{font-weight:600;margin:8px 0}} .hint{{max-width:1000px}}
 </style></head><body>
 <h1>SAOL glyphgranskning – sida {state['page']}, kolumn {state['column']}, rad {state['row']}</h1>
-<div>Exakt: <b>{state['covered_pixels']}/{state['source_pixels']}</b> pixlar. Text: <code>{state['text']}</code></div>
+<div>Exakt: <b>{state['covered_pixels']}/{state['source_pixels']}</b> pixlar. Grannrad bortfiltrerad: <b>{state.get('removed_neighbor_pixels', 0)}</b> pixlar. Text: <code>{state['text']}</code></div>
 <div class="msg">{message_html}</div>
 <div class="controls">
 <label class="inline"><input type="checkbox" id="showGrid" checked> Rutnät</label>
