@@ -147,6 +147,7 @@ def load_review_state(jsonl: Path, page_number: int, column: int, row_index: int
         "baseline": result["baseline"],
         "covered_pixels": result["covered_pixels"],
         "source_pixels": result["source_pixels"],
+        "source_ink_points": [[x, y] for x, y in sorted(result["ink"])],
         "removed_neighbor_pixels": removed_neighbor_pixels,
         "fully_exact": result["fully_exact"],
         "text": render_exact_text(selected, source_ink=result["ink"]) if selected else "",
@@ -164,6 +165,23 @@ def selected_points(state: dict, ids: list[str]) -> set[tuple[int, int]]:
     if unknown:
         raise ValueError("unknown selections: " + ", ".join(unknown))
     return set().union(*(state["point_sets"][item_id] for item_id in ids))
+
+
+def parse_pixel_selection(value: str, source_ink: set[tuple[int, int]]) -> set[tuple[int, int]]:
+    points: set[tuple[int, int]] = set()
+    for token in value.split(";"):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            sx, sy = token.split(",", 1)
+            point = (int(sx), int(sy))
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"ogiltig pixel {token!r}") from exc
+        if point not in source_ink:
+            raise ValueError(f"vald pixel {point} är inte svart källpixel")
+        points.add(point)
+    return points
 
 
 def render_html(state: dict, message: str = "") -> str:
@@ -188,22 +206,27 @@ code{{background:#eee;padding:2px 4px}} .msg{{font-weight:600;margin:8px 0}} .hi
 <div class="controls">
 <label class="inline"><input type="checkbox" id="showGrid" checked> Rutnät</label>
 <label class="inline"><input type="checkbox" id="showBaseline" checked> Stödlinje</label>
+<label class="inline"><input type="checkbox" id="pixelMode"> Pixel-läge</label>
+<button type="button" id="clearPixels">Rensa pixelval</button>
+<span id="pixelCount">0 valda pixlar</span>
 </div>
 <div class="rowbox"><canvas id="row"></canvas></div>
 <div class="items" id="items"></div>
 <form method="post" id="form">
 <input type="hidden" name="selected" id="selected">
+<input type="hidden" name="selected_pixels" id="selectedPixels">
 <div class="controls">
 <label>Glyph<input name="label" id="label" size="5" required></label>
 <label>Stil<select name="style"><option>roman</option><option>italic</option><option>bold</option></select></label>
 <button name="action" value="add">Lägg till/slå ihop valda pixlar som glyph</button>
 <button name="action" value="relabel" type="submit">Rätta vald M-glyphs facitmodell</button>
 </div></form>
-<p class="hint">Ändringar sparas direkt i facitfilen när du trycker på en åtgärdsknapp. Klicka på boxar i bilden eller knapparna nedanför. Röda <b>Mxx</b> är nuvarande exakta facitmatchningar; orange <b>Uxx</b> är omatchat bläck. För exempelvis <b>å</b>: välj både M-boxen för a-kroppen och U-boxen för ringen, skriv å och lägg till som en glyph.</p>
+<p class="hint">Normalläge: klicka M/U-boxar. <b>Pixel-läge:</b> dra en rektangel över svarta pixlar för att välja bara en del av en sammanhängande komponent; klicka en enskild svart pixel för att växla just den. Håll <b>Alt</b> medan du drar för att ta bort pixlar ur valet. Därmed kan exempelvis ett ihoptryckt <b>t;</b> delas i två separata glyphar trots att trycksvärtan går ihop med pixels bredsida.</p>
 <script>
 const S={data}; const scale=7, topPad=34; const canvas=document.getElementById('row'), ctx=canvas.getContext('2d');
-const chosen=new Set(); const img=new Image(); img.src=S.image;
-const showGrid=document.getElementById('showGrid'), showBaseline=document.getElementById('showBaseline');
+const chosen=new Set(), chosenPixels=new Set(), sourceInk=new Set(S.source_ink_points.map(p=>p[0]+','+p[1])); const img=new Image(); img.src=S.image;
+const showGrid=document.getElementById('showGrid'), showBaseline=document.getElementById('showBaseline'), pixelMode=document.getElementById('pixelMode');
+let dragStart=null, dragNow=null, dragRemove=false;
 function drawGrid(){{
  if(!showGrid.checked) return;
  ctx.save(); ctx.strokeStyle='rgba(70,70,70,.22)'; ctx.lineWidth=1;
@@ -213,8 +236,6 @@ function drawGrid(){{
 }}
 function drawBaseline(){{
  if(!showBaseline.checked || S.baseline===null) return;
- // The matcher baseline is a source-pixel row. Draw the typographic support
- // line on the lower edge of that row, coincident with the pixel grid.
  const y=topPad+(S.baseline+1)*scale+.5;
  ctx.save();ctx.strokeStyle='rgba(0,90,210,.95)';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(S.crop_width*scale,y);ctx.stroke();
  ctx.fillStyle='rgba(0,90,210,.95)';ctx.font='12px monospace';ctx.textBaseline='bottom';ctx.fillText('baseline '+S.baseline,4,y-3);ctx.restore();
@@ -223,18 +244,30 @@ function draw(){{
  canvas.width=S.crop_width*scale; canvas.height=S.crop_height*scale+topPad;
  ctx.imageSmoothingEnabled=false; ctx.fillStyle='white'; ctx.fillRect(0,0,canvas.width,canvas.height);
  ctx.drawImage(img,0,topPad,S.crop_width*scale,S.crop_height*scale);
+ for(const key of chosenPixels){{const [x,y]=key.split(',').map(Number);ctx.fillStyle='rgba(0,150,210,.45)';ctx.fillRect(x*scale,topPad+y*scale,scale,scale);}}
  drawGrid(); drawBaseline();
  ctx.font='12px monospace'; ctx.textBaseline='bottom';
  for(const it of S.items){{const b=it.bbox,x=b.left*scale,y=topPad+b.top*scale,w=(b.right-b.left)*scale,h=(b.bottom-b.top)*scale;
    const on=chosen.has(it.id); ctx.strokeStyle=on?'#1769d2':(it.kind==='match'?'#b22':'#c77b00');ctx.lineWidth=on?3:2;ctx.strokeRect(x,y,w,h);
    ctx.fillStyle=ctx.strokeStyle;ctx.fillText(it.id+' '+it.label,x,topPad-3);
  }}
+ if(dragStart&&dragNow){{const x=Math.min(dragStart.x,dragNow.x)*scale,y=topPad+Math.min(dragStart.y,dragNow.y)*scale,w=(Math.abs(dragStart.x-dragNow.x)+1)*scale,h=(Math.abs(dragStart.y-dragNow.y)+1)*scale;ctx.strokeStyle=dragRemove?'#b22':'#1769d2';ctx.lineWidth=2;ctx.strokeRect(x,y,w,h);}}
 }}
-function sync(){{document.getElementById('selected').value=[...chosen].join(',');document.querySelectorAll('.chip').forEach(b=>b.classList.toggle('selected',chosen.has(b.dataset.id)));draw();}}
+function sync(){{
+ document.getElementById('selected').value=[...chosen].join(',');
+ document.getElementById('selectedPixels').value=[...chosenPixels].join(';');
+ document.getElementById('pixelCount').textContent=chosenPixels.size+' valda pixlar';
+ document.querySelectorAll('.chip').forEach(b=>b.classList.toggle('selected',chosen.has(b.dataset.id)));draw();
+}}
 function toggle(id){{chosen.has(id)?chosen.delete(id):chosen.add(id);sync();}}
+function canvasPixel(e){{const r=canvas.getBoundingClientRect();return {{x:Math.max(0,Math.min(S.crop_width-1,Math.floor((e.clientX-r.left)*(canvas.width/r.width)/scale))),y:Math.max(0,Math.min(S.crop_height-1,Math.floor(((e.clientY-r.top)*(canvas.height/r.height)-topPad)/scale)))}};}}
 for(const it of S.items){{const b=document.createElement('button');b.type='button';b.dataset.id=it.id;b.className='chip '+it.kind;b.textContent=it.id+' '+(it.kind==='match'?JSON.stringify(it.label):'omatchad')+' · '+it.style+' · '+it.pixels+' px';b.onclick=()=>toggle(it.id);document.getElementById('items').appendChild(b);}}
-canvas.addEventListener('click',e=>{{const r=canvas.getBoundingClientRect(),px=(e.clientX-r.left)*(canvas.width/r.width)/scale,py=((e.clientY-r.top)*(canvas.height/r.height)-topPad)/scale;const hits=S.items.filter(it=>px>=it.bbox.left&&px<it.bbox.right&&py>=it.bbox.top&&py<it.bbox.bottom);if(hits.length)toggle(hits[hits.length-1].id);}});
-showGrid.addEventListener('change',draw); showBaseline.addEventListener('change',draw); img.onload=draw;
+canvas.addEventListener('mousedown',e=>{{if(!pixelMode.checked)return;dragStart=canvasPixel(e);dragNow=dragStart;dragRemove=e.altKey;e.preventDefault();draw();}});
+canvas.addEventListener('mousemove',e=>{{if(!dragStart)return;dragNow=canvasPixel(e);draw();}});
+window.addEventListener('mouseup',e=>{{if(!dragStart)return;dragNow=canvasPixel(e);const x0=Math.min(dragStart.x,dragNow.x),x1=Math.max(dragStart.x,dragNow.x),y0=Math.min(dragStart.y,dragNow.y),y1=Math.max(dragStart.y,dragNow.y);for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){{const key=x+','+y;if(sourceInk.has(key)){{if(dragRemove)chosenPixels.delete(key);else if(x0===x1&&y0===y1&&chosenPixels.has(key))chosenPixels.delete(key);else chosenPixels.add(key);}}}}dragStart=null;dragNow=null;sync();}});
+canvas.addEventListener('click',e=>{{if(pixelMode.checked)return;const p=canvasPixel(e);const hits=S.items.filter(it=>p.x>=it.bbox.left&&p.x<it.bbox.right&&p.y>=it.bbox.top&&p.y<it.bbox.bottom);if(hits.length)toggle(hits[hits.length-1].id);}});
+document.getElementById('clearPixels').onclick=()=>{{chosenPixels.clear();sync();}};
+showGrid.addEventListener('change',draw); showBaseline.addEventListener('change',draw); pixelMode.addEventListener('change',draw); img.onload=draw;
 </script></body></html>'''
 
 
@@ -243,19 +276,32 @@ def apply_edit(state: dict, facit: Path, form: dict[str, list[str]]) -> str:
     label = (form.get("label") or [""])[0]
     style = (form.get("style") or ["roman"])[0]
     ids = [item for item in (form.get("selected") or [""])[0].split(",") if item]
+    pixel_value = (form.get("selected_pixels") or [""])[0]
     if not label:
         raise ValueError("glyph label may not be empty")
     if state["baseline"] is None:
         raise ValueError("row has no support baseline")
     payload = json.loads(facit.read_text(encoding="utf-8"))
-    source = {"page": state["page"], "column": state["column"], "row": state["row"], "review_selection": ids, "source": state["source"]}
+    source_ink = {tuple(point) for point in state.get("source_ink_points") or []}
+    pixel_points = parse_pixel_selection(pixel_value, source_ink) if pixel_value.strip() else set()
+    source = {
+        "page": state["page"],
+        "column": state["column"],
+        "row": state["row"],
+        "review_selection": ids,
+        "review_pixel_count": len(pixel_points),
+        "source": state["source"],
+    }
     if action == "add":
-        points = selected_points(state, ids)
+        points = pixel_points if pixel_points else selected_points(state, ids)
         glyph = glyph_from_points(label, style, points, int(state["baseline"]), source)
         outcome = add_or_merge_glyph(payload, glyph)
         facit.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        return f"{outcome}: {label!r}/{style} från {','.join(ids)}"
+        origin = f"{len(pixel_points)} handvalda pixlar" if pixel_points else ",".join(ids)
+        return f"{outcome}: {label!r}/{style} från {origin}"
     if action == "relabel":
+        if pixel_points:
+            raise ValueError("Rätta facitmodell använder M-glyph, inte handvalda pixlar")
         if len(ids) != 1 or not ids[0].startswith("M"):
             raise ValueError("Rätta kräver exakt en vald M-glyph")
         index = int(ids[0][1:])
