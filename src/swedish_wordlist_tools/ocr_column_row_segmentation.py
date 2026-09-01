@@ -202,6 +202,92 @@ def _apply_middle_column_content_start(column_entries: list[dict[str, Any]]) -> 
     return content_top, discarded
 
 
+def _vertical_ink_counts(page: Image.Image, *, left: int, right: int, top: int, bottom: int, threshold: int) -> dict[int, int]:
+    gray = page.convert("L")
+    pixels = gray.load()
+    left = max(0, int(left))
+    right = min(gray.width, int(right))
+    top = max(0, int(top))
+    bottom = min(gray.height, int(bottom))
+    return {x: sum(1 for y in range(top, bottom) if pixels[x, y] < threshold) for x in range(left, right)}
+
+
+def _longest_low_vertical_run(counts: dict[int, int]) -> tuple[int, int] | None:
+    """Find the widest essentially empty vertical corridor in a search window."""
+    if not counts:
+        return None
+    allowed = min(counts.values()) + 1
+    best: tuple[int, int] | None = None
+    start: int | None = None
+    previous: int | None = None
+    for x in sorted(counts):
+        if counts[x] <= allowed:
+            if start is None or previous is None or x != previous + 1:
+                start = x
+        else:
+            if start is not None and previous is not None:
+                candidate = (start, previous + 1)
+                if best is None or candidate[1] - candidate[0] > best[1] - best[0]:
+                    best = candidate
+            start = None
+        previous = x
+    if start is not None and previous is not None:
+        candidate = (start, previous + 1)
+        if best is None or candidate[1] - candidate[0] > best[1] - best[0]:
+            best = candidate
+    return best
+
+
+def _refined_column_boundaries(page: Image.Image, column_entries: list[dict[str, Any]], *, threshold: int) -> list[int]:
+    """Measure real printed gutters around the rough one-third page boundaries.
+
+    The one-third split is only bootstrap geometry. Printed SAOL columns can
+    cross it by many pixels. The final row crop boundary is placed halfway in
+    the widest near-empty vertical corridor around each nominal split.
+    """
+    if len(column_entries) < 2:
+        return []
+    body_rows = [row for entry in column_entries for row in entry.get("rows") or []]
+    if not body_rows:
+        return [int(entry["right"]) for entry in column_entries[:-1]]
+    body_top = min(int(row["page_top"]) for row in body_rows)
+    body_bottom = max(int(row["page_bottom"]) for row in body_rows)
+    boundaries: list[int] = []
+    for index, entry in enumerate(column_entries[:-1]):
+        nominal = int(entry["right"])
+        width = max(1, int(entry["right"]) - int(entry["left"]))
+        radius = max(8, width // 4)
+        search_left = max(int(entry["left"]) + width // 2, nominal - radius)
+        next_entry = column_entries[index + 1]
+        search_right = min(page.width, int(next_entry["right"]), nominal + radius)
+        counts = _vertical_ink_counts(
+            page,
+            left=search_left,
+            right=search_right,
+            top=body_top,
+            bottom=body_bottom,
+            threshold=threshold,
+        )
+        run = _longest_low_vertical_run(counts)
+        boundary = nominal if run is None else (run[0] + run[1]) // 2
+        boundaries.append(boundary)
+    return boundaries
+
+
+def _apply_column_crop_bounds(page: Image.Image, column_entries: list[dict[str, Any]], *, threshold: int) -> list[int]:
+    boundaries = _refined_column_boundaries(page, column_entries, threshold=threshold)
+    edges = [0, *boundaries, page.width]
+    for index, entry in enumerate(column_entries):
+        crop_left = edges[index]
+        crop_right = edges[index + 1]
+        entry["crop_left"] = crop_left
+        entry["crop_right"] = crop_right
+        for row in entry.get("rows") or []:
+            row["crop_left"] = crop_left
+            row["crop_right"] = crop_right
+    return boundaries
+
+
 def segment_page_rows(page: Image.Image, *, columns: int = 3, threshold: int = 210) -> dict[str, Any]:
     column_entries: list[dict[str, Any]] = []
     total_blocks = 0
@@ -226,5 +312,6 @@ def segment_page_rows(page: Image.Image, *, columns: int = 3, threshold: int = 2
         column_entries.append({"column": column, "left": left, "right": right, "row_pitch": pitch, "single_row_ink_height": single_row_ink_height, "block_count": len(blocks), "multi_row_block_count": column_multi_blocks, "chapter_marker_count": len(chapter_markers), "chapter_markers": chapter_markers, "rows": rows})
 
     content_top, header_row_count = _apply_middle_column_content_start(column_entries)
+    crop_boundaries = _apply_column_crop_bounds(page, column_entries, threshold=threshold)
     total_rows = sum(len(entry.get("rows") or []) for entry in column_entries)
-    return {"format": "saol-white-gap-row-map-v5", "page_size": [page.width, page.height], "column_count": columns, "content_top": content_top, "header_row_count": header_row_count, "block_count": total_blocks, "multi_row_block_count": total_multi_blocks, "chapter_marker_count": total_chapter_markers, "row_count": total_rows, "columns": column_entries}
+    return {"format": "saol-white-gap-row-map-v6", "page_size": [page.width, page.height], "column_count": columns, "content_top": content_top, "header_row_count": header_row_count, "block_count": total_blocks, "multi_row_block_count": total_multi_blocks, "chapter_marker_count": total_chapter_markers, "crop_boundaries": crop_boundaries, "row_count": total_rows, "columns": column_entries}
