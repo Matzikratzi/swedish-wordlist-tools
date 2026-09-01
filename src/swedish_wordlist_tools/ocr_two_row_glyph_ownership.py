@@ -40,19 +40,37 @@ def _owned_pixels(matches: Iterable[Match]) -> frozenset[tuple[int, int]]:
     return frozenset().union(*(match.pixels for match in rows))
 
 
+def _vertical_order_ok(
+    current_owned: frozenset[tuple[int, int]],
+    neighbor_owned: frozenset[tuple[int, int]],
+    *,
+    neighbor_is_below: bool,
+) -> bool:
+    """Require adjacent-row ownership to preserve vertical order.
+
+    Printed rows may touch, but one row should not weave through the other.
+    For the row below, the lowest current-row pixel may be level with the
+    highest neighbour pixel, but it may not be lower. The upper-neighbour case
+    is the exact mirror image.
+    """
+    if not current_owned or not neighbor_owned:
+        return False
+    current_ys = [y for _x, y in current_owned]
+    neighbor_ys = [y for _x, y in neighbor_owned]
+    if neighbor_is_below:
+        return max(current_ys) <= min(neighbor_ys)
+    return min(current_ys) >= max(neighbor_ys)
+
+
 def _exact_two_baseline_partitions(
     component: frozenset[tuple[int, int]],
     models: Iterable[GlyphModel],
     *,
     current_baselines: range,
     neighbor_baselines: range,
+    neighbor_is_below: bool,
 ) -> list[tuple[frozenset[tuple[int, int]], frozenset[tuple[int, int]], tuple[Match, ...], tuple[Match, ...]]]:
-    """Return exact partitions of one touching component across two row baselines.
-
-    Coordinates are local to the component bounding box. A valid partition must
-    explain every source pixel exactly once using known glyph rasters, with at
-    least one glyph on each physical row's baseline range.
-    """
+    """Return exact, vertically ordered partitions across two row baselines."""
     if not component:
         return []
     min_x = min(x for x, _ in component)
@@ -99,6 +117,12 @@ def _exact_two_baseline_partitions(
             continue
         if current_owned.union(neighbor_owned) != local:
             continue
+        if not _vertical_order_ok(
+            current_owned,
+            neighbor_owned,
+            neighbor_is_below=neighbor_is_below,
+        ):
+            continue
         valid.append(
             (
                 frozenset((x + min_x, y + min_y) for x, y in current_owned),
@@ -121,16 +145,7 @@ def split_touching_neighbor_glyphs(
     *,
     threshold: int = 210,
 ) -> tuple[Image.Image, int, list[dict[str, Any]]]:
-    """Remove neighbor-owned ink only when two exact row glyph explanations agree.
-
-    This handles the printing accident where a descender/ascender from one row
-    physically touches a glyph in the adjacent row. Connected components alone
-    then cannot express ownership. We instead ask whether the complete touching
-    component has an exact glyph partition on the two physical baselines.
-
-    Ambiguity is deliberately rejected: if several exact partitions disagree
-    about which source pixels belong to the neighbour, no pixels are removed.
-    """
+    """Remove neighbour-owned ink only when exact two-row evidence agrees."""
     models = list(models)
     if not models:
         return crop, 0, []
@@ -172,6 +187,7 @@ def split_touching_neighbor_glyphs(
         current_bottom = int(current["page_bottom"]) - region_top
         neighbor_top = int(neighbor["page_top"]) - region_top
         neighbor_bottom = int(neighbor["page_bottom"]) - region_top
+        neighbor_is_below = neighbor_index > row_index
 
         for component in _components8(ink):
             has_current = any(current_top <= y < current_bottom for _x, y in component)
@@ -184,6 +200,7 @@ def split_touching_neighbor_glyphs(
                 models,
                 current_baselines=range(current_top, current_bottom),
                 neighbor_baselines=range(neighbor_top, neighbor_bottom),
+                neighbor_is_below=neighbor_is_below,
             )
             if not partitions:
                 continue
@@ -228,6 +245,7 @@ def split_touching_neighbor_glyphs(
                         "partitions": len(partitions),
                         "current_labels": "".join(match.label for match in sample[2]),
                         "neighbor_labels": "".join(match.label for match in sample[3]),
+                        "vertical_order": "touch-or-gap",
                     }
                 )
 
