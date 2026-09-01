@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from dataclasses import replace
 from typing import Iterable
 
 from .ocr_glyph_matcher import (
     GlyphModel,
     Match,
+    _ink_components,
     exact_matches,
     select_best_disjoint_exact_for_ink,
 )
@@ -75,6 +75,36 @@ def _shift_match(match: Match, dx: int) -> Match:
     )
 
 
+def _drop_partial_component_matches(
+    selected: Iterable[Match],
+    ink: set[tuple[int, int]],
+) -> list[Match]:
+    """Keep only matches whose touched 4-components are collectively complete.
+
+    Temporary partial ownership is allowed while solving so two touching glyphs
+    can form one exact partition. But the final answer must never recognize a
+    glyph from only part of a source component (for example reading the dot of a
+    semicolon as a period while leaving the semicolon's tail unmatched).
+    """
+    kept = list(selected)
+    components, _by_pixel = _ink_components(ink)
+    while kept:
+        occupied = frozenset().union(*(match.pixels for match in kept))
+        incomplete = [
+            component
+            for component in components
+            if component.intersection(occupied) and not component.issubset(occupied)
+        ]
+        if not incomplete:
+            break
+        bad_pixels = frozenset().union(*incomplete)
+        new_kept = [match for match in kept if match.pixels.isdisjoint(bad_pixels)]
+        if len(new_kept) == len(kept):
+            break
+        kept = new_kept
+    return sorted(kept, key=lambda match: (match.x, match.baseline, match.label, match.style))
+
+
 def exact_matches_by_safe_gaps(
     ink: set[tuple[int, int]],
     width: int,
@@ -84,8 +114,8 @@ def exact_matches_by_safe_gaps(
     """Generate exact placements inside provably independent x-groups.
 
     Individual candidates may own only part of a 4-connected source component;
-    the partition solver later requires/strongly prefers collective ownership.
-    This is what lets two printed glyphs that touch by an edge remain separate.
+    the partition solver later requires collective ownership. This is what lets
+    two printed glyphs that touch by an edge remain separate.
     """
     model_rows = list(models)
     internal_gap = max_internal_blank_run(model_rows)
@@ -118,7 +148,8 @@ def select_best_baseline_partition_by_safe_gaps(
 
     White gaps wider than every learned glyph's internal blank run prove that no
     exact placement can cross a group boundary. Within each group several glyphs
-    may collectively own one touching source component.
+    may collectively own one touching source component, but the final selection
+    may not leave a touched component only partly covered.
     """
     model_rows = list(models)
     internal_gap = max_internal_blank_run(model_rows)
@@ -154,13 +185,12 @@ def select_best_baseline_partition_by_safe_gaps(
         for candidates, group_ink in zip(candidates_by_group, local_inks):
             same_baseline = [match for match in candidates if match.baseline == baseline]
             if same_baseline:
-                selected.extend(
-                    select_best_disjoint_exact_for_ink(
-                        same_baseline,
-                        group_ink,
-                        beam_width=beam_width,
-                    )
+                group_selected = select_best_disjoint_exact_for_ink(
+                    same_baseline,
+                    group_ink,
+                    beam_width=beam_width,
                 )
+                selected.extend(_drop_partial_component_matches(group_selected, group_ink))
         key = (
             sum(match.model_pixels for match in selected),
             sum(match.model_pixels * match.model_pixels for match in selected),
