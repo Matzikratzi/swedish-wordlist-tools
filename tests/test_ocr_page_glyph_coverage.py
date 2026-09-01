@@ -127,6 +127,8 @@ class PageGlyphCoverageTests(unittest.TestCase):
             [(item["column"], item["row"], item["unknown_pixels"]) for item in report["misses"]],
             [(0, 5, 10), (0, 7, 20), (1, 0, 5)],
         )
+        self.assertTrue(all(item["text"] == "" for item in report["misses"]))
+        self.assertTrue(all(item["starts_headword"] is False for item in report["misses"]))
 
 
 if __name__ == "__main__":
