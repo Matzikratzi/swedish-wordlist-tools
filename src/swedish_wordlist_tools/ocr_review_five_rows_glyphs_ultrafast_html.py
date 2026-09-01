@@ -8,6 +8,7 @@ from . import ocr_review_five_rows_glyphs_fast_html as fast
 from .ocr_glyph_review_delete import apply_edit_with_delete, render_html_with_delete
 from .ocr_neighbor_row_raster import add_neighbor_row_raster
 from .ocr_probe_row_glyphs_grouped import analyse_row_exact_grouped
+from .ocr_two_row_glyph_ownership import split_touching_neighbor_glyphs
 
 
 # The fast editor already reuses page geometry, keeps generation-aware row
@@ -18,13 +19,69 @@ from .ocr_probe_row_glyphs_grouped import analyse_row_exact_grouped
 # so no other editor behaviour changes.
 fast.analyse_row_exact = analyse_row_exact_grouped
 
-# Add an unfiltered narrow source raster around the target row. This is
-# diagnostic only: matching still uses the conservative owned-row crop.
+# Add two-row ownership evidence without changing the base editor API. The fast
+# loader calls its module-global _owned_row_crop; keep the context/models for
+# the current row in thread-local storage while that call runs. This is safe
+# with the five parallel row workers used by the editor.
+_original_owned_row_crop = fast._owned_row_crop
+_ownership_context = threading.local()
+
+
+def owned_row_crop_with_two_row_evidence(page_image, row, box, *, threshold=210, probe_y=6):
+    crop, removed = _original_owned_row_crop(
+        page_image,
+        row,
+        box,
+        threshold=threshold,
+        probe_y=probe_y,
+    )
+    active = getattr(_ownership_context, "active", None)
+    if active is None:
+        return crop, removed
+    context, position, models = active
+    if page_image is not context.get("page"):
+        return crop, removed
+
+    column, row_index = position
+    rows = (context.get("row_map", {}).get("columns") or [])[column].get("rows") or []
+    if not 0 <= row_index < len(rows) or rows[row_index] is not row:
+        return crop, removed
+
+    cleaned, split_removed, diagnostics = split_touching_neighbor_glyphs(
+        page_image,
+        context["row_map"],
+        column,
+        row_index,
+        box,
+        crop,
+        models,
+        threshold=threshold,
+    )
+    _ownership_context.two_row_removed = split_removed
+    _ownership_context.two_row_diagnostics = diagnostics
+    return cleaned, removed + split_removed
+
+
+fast._owned_row_crop = owned_row_crop_with_two_row_evidence
+
+# Add an unfiltered narrow source raster around the target row. The ordinary
+# matching crop now also gets the conservative two-row exact-glyph ownership
+# split above.
 _original_load_review_state_fast = fast.load_review_state_fast
 
 
 def load_review_state_with_neighbors(context, position, models):
-    state = _original_load_review_state_fast(context, position, models)
+    _ownership_context.active = (context, position, models)
+    _ownership_context.two_row_removed = 0
+    _ownership_context.two_row_diagnostics = []
+    try:
+        state = _original_load_review_state_fast(context, position, models)
+        state["two_row_removed_pixels"] = int(getattr(_ownership_context, "two_row_removed", 0))
+        state["two_row_ownership"] = list(getattr(_ownership_context, "two_row_diagnostics", []))
+    finally:
+        for name in ("active", "two_row_removed", "two_row_diagnostics"):
+            if hasattr(_ownership_context, name):
+                delattr(_ownership_context, name)
     return add_neighbor_row_raster(context, state, probe_y=8)
 
 
@@ -47,9 +104,15 @@ def diagnostic_text(state: dict) -> str:
         f"baseline={state.get('baseline')}",
         f"coverage={state.get('covered_pixels')}/{state.get('source_pixels')} fully_exact={state.get('fully_exact')}",
         f"removed_neighbor_pixels={state.get('removed_neighbor_pixels', 0)}",
+        f"two_row_removed_pixels={state.get('two_row_removed_pixels', 0)}",
         f"text={state.get('text', '')!r}",
         f"markup={state.get('markup', '')!r}",
     ]
+    ownership = state.get("two_row_ownership") or []
+    if ownership:
+        lines.append("two_row_ownership:")
+        for item in ownership:
+            lines.append("  " + json.dumps(item, ensure_ascii=False, sort_keys=True))
     if state.get("neighbor_raster_image"):
         lines.extend(
             [
@@ -252,6 +315,7 @@ fast.ui.render_five_row_html = render_five_row_html_to_active_row
 
 def main() -> int:
     print("review: ULTRAFAST använder grupperad exact-glyphmatchning vid säkra vita gap", flush=True)
+    print("review: två-rads-ägarskap delar bara komponenter som exakt förklaras av kända glypher på båda baselines", flush=True)
     print("review: vald matchad glyph kan raderas ur facit för att delas om", flush=True)
     print("review: glyphändringar POST:as alltid till den faktiskt aktiva raden", flush=True)
     print("review: sparfel stannar på aktiv rad och skrivs ut i terminalen", flush=True)
