@@ -4,7 +4,12 @@ from collections import defaultdict
 from dataclasses import replace
 from typing import Iterable
 
-from .ocr_glyph_matcher import GlyphModel, Match, exact_matches, select_best_disjoint_exact
+from .ocr_glyph_matcher import (
+    GlyphModel,
+    Match,
+    exact_matches,
+    select_best_disjoint_exact_for_ink,
+)
 
 
 def max_internal_blank_run(models: Iterable[GlyphModel]) -> int:
@@ -38,7 +43,7 @@ def safe_ink_groups(
 ) -> list[tuple[int, int, set[tuple[int, int]]]]:
     """Split source ink at blank-column runs no known glyph can cross.
 
-    Returns ``(left, right_exclusive, local_ink)``.  ``local_ink`` has x=0 at
+    Returns ``(left, right_exclusive, local_ink)``. ``local_ink`` has x=0 at
     ``left`` so exact matching can run in the smallest possible horizontal box.
     """
     if not ink:
@@ -76,7 +81,12 @@ def exact_matches_by_safe_gaps(
     height: int,
     models: Iterable[GlyphModel],
 ) -> tuple[list[Match], list[tuple[int, int]]]:
-    """Generate exactly the same possible placements, but only inside safe groups."""
+    """Generate exact placements inside provably independent x-groups.
+
+    Individual candidates may own only part of a 4-connected source component;
+    the partition solver later requires/strongly prefers collective ownership.
+    This is what lets two printed glyphs that touch by an edge remain separate.
+    """
     model_rows = list(models)
     internal_gap = max_internal_blank_run(model_rows)
     groups = safe_ink_groups(ink, max_internal_gap=internal_gap)
@@ -85,7 +95,13 @@ def exact_matches_by_safe_gaps(
     for left, right, local_ink in groups:
         group_width = right - left
         bounds.append((left, right))
-        local = exact_matches(local_ink, group_width, height, model_rows)
+        local = exact_matches(
+            local_ink,
+            group_width,
+            height,
+            model_rows,
+            require_whole_components=False,
+        )
         candidates.extend(_shift_match(match, left) for match in local)
     return candidates, bounds
 
@@ -100,10 +116,9 @@ def select_best_baseline_partition_by_safe_gaps(
 ) -> tuple[int | None, list[Match], list[Match], list[tuple[int, int]]]:
     """Choose one baseline while solving independent safe groups separately.
 
-    White gaps wider than every learned glyph's internal blank run prove that
-    no exact placement can cross a group boundary.  For a fixed baseline the
-    optimal disjoint cover is therefore the union of the optimal covers of the
-    individual groups.
+    White gaps wider than every learned glyph's internal blank run prove that no
+    exact placement can cross a group boundary. Within each group several glyphs
+    may collectively own one touching source component.
     """
     model_rows = list(models)
     internal_gap = max_internal_blank_run(model_rows)
@@ -112,13 +127,21 @@ def select_best_baseline_partition_by_safe_gaps(
         return None, [], [], []
 
     candidates_by_group: list[list[Match]] = []
+    local_inks: list[set[tuple[int, int]]] = []
     all_candidates: list[Match] = []
     bounds: list[tuple[int, int]] = []
     baselines: set[int] = set()
     for left, right, local_ink in groups:
-        local = exact_matches(local_ink, right - left, height, model_rows)
+        local = exact_matches(
+            local_ink,
+            right - left,
+            height,
+            model_rows,
+            require_whole_components=False,
+        )
         shifted = [_shift_match(match, left) for match in local]
         candidates_by_group.append(shifted)
+        local_inks.append({(x + left, y) for x, y in local_ink})
         all_candidates.extend(shifted)
         bounds.append((left, right))
         baselines.update(match.baseline for match in shifted)
@@ -128,10 +151,16 @@ def select_best_baseline_partition_by_safe_gaps(
     best_key: tuple[int, int, int, int] | None = None
     for baseline in sorted(baselines):
         selected: list[Match] = []
-        for candidates in candidates_by_group:
+        for candidates, group_ink in zip(candidates_by_group, local_inks):
             same_baseline = [match for match in candidates if match.baseline == baseline]
             if same_baseline:
-                selected.extend(select_best_disjoint_exact(same_baseline, beam_width=beam_width))
+                selected.extend(
+                    select_best_disjoint_exact_for_ink(
+                        same_baseline,
+                        group_ink,
+                        beam_width=beam_width,
+                    )
+                )
         key = (
             sum(match.model_pixels for match in selected),
             sum(match.model_pixels * match.model_pixels for match in selected),
