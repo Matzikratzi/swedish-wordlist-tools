@@ -79,7 +79,19 @@ class UltrafastFiveRowGlyphReviewTests(unittest.TestCase):
             "covered_pixels": 9,
             "source_pixels": 10,
             "fully_exact": False,
-            "removed_neighbor_pixels": 2,
+            "removed_neighbor_pixels": 3,
+            "two_row_removed_pixels": 1,
+            "two_row_ownership": [
+                {
+                    "neighbor_row": 45,
+                    "status": "split",
+                    "component_pixels": 19,
+                    "removed_pixels": 1,
+                    "partitions": 1,
+                    "current_labels": "]",
+                    "neighbor_labels": "l",
+                }
+            ],
             "text": "x",
             "markup": "<i>x</i>",
             "crop_width": 20,
@@ -115,7 +127,11 @@ class UltrafastFiveRowGlyphReviewTests(unittest.TestCase):
         diagnostics = ultrafast.diagnostic_text(state)
         self.assertIn("page=1 column=0 row=44", diagnostics)
         self.assertIn("coverage=9/10 fully_exact=False", diagnostics)
-        self.assertIn("removed_neighbor_pixels=2", diagnostics)
+        self.assertIn("removed_neighbor_pixels=3", diagnostics)
+        self.assertIn("two_row_removed_pixels=1", diagnostics)
+        self.assertIn('"status": "split"', diagnostics)
+        self.assertIn('"current_labels": "]"', diagnostics)
+        self.assertIn('"neighbor_labels": "l"', diagnostics)
         self.assertIn("core_y=8..18", diagnostics)
         self.assertIn("M00 kind=match label=']' style=roman pixels=7", diagnostics)
         self.assertNotIn("data:image", diagnostics)
