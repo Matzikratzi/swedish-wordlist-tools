@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import json
 import threading
 
 from . import ocr_review_five_rows_glyphs_fast_html as fast
@@ -36,34 +37,86 @@ _original_render_html = fast.ui.editor.render_html
 _original_apply_edit = fast.legacy.apply_edit
 
 
+def diagnostic_text(state: dict) -> str:
+    """Return a compact, paste-friendly description of the active review row."""
+    lines = [
+        "SAOL GLYPH REVIEW",
+        f"page={state.get('page')} column={state.get('column')} row={state.get('row')}",
+        f"crop_box={state.get('crop_box')}",
+        f"row_page={state.get('row_page_top')}..{state.get('row_page_bottom')}",
+        f"baseline={state.get('baseline')}",
+        f"coverage={state.get('covered_pixels')}/{state.get('source_pixels')} fully_exact={state.get('fully_exact')}",
+        f"removed_neighbor_pixels={state.get('removed_neighbor_pixels', 0)}",
+        f"text={state.get('text', '')!r}",
+        f"markup={state.get('markup', '')!r}",
+    ]
+    if state.get("neighbor_raster_image"):
+        lines.extend(
+            [
+                "neighbor_raster:",
+                f"  size={state.get('neighbor_raster_width')}x{state.get('neighbor_raster_height')}",
+                f"  probe_y={state.get('neighbor_probe_y')}",
+                f"  page_y={state.get('neighbor_page_top')}..{state.get('neighbor_page_bottom')}",
+                f"  core_y={state.get('neighbor_core_top')}..{state.get('neighbor_core_bottom')}",
+            ]
+        )
+    lines.append("items:")
+    for item in state.get("items") or []:
+        lines.append(
+            "  "
+            + f"{item.get('id')} kind={item.get('kind')} label={item.get('label')!r} "
+            + f"style={item.get('style')} pixels={item.get('pixels')} bbox={item.get('bbox')}"
+        )
+    source_points = state.get("source_ink_points") or []
+    lines.append(f"source_ink_pixels={len(source_points)}")
+    return "\n".join(lines) + "\n"
+
+
 def render_html_with_neighbor_raster(state, message=""):
     document = render_html_with_delete(_original_render_html, state, message)
-    if not state.get("neighbor_raster_image"):
-        return document
 
+    diagnostics = diagnostic_text(state)
+    diag_json = json.dumps(diagnostics, ensure_ascii=False).replace("</", "<\\/")
     controls_needle = '<span id="pixelCount">0 valda pixlar</span>\n</div>'
-    controls_replacement = (
-        '<span id="pixelCount">0 valda pixlar</span>\n'
-        '<label class="inline"><input type="checkbox" id="showNeighbors"> Visa grannrader</label>\n'
-        '</div>'
-    )
+    controls = '<span id="pixelCount">0 valda pixlar</span>\n'
+    if state.get("neighbor_raster_image"):
+        controls += '<label class="inline"><input type="checkbox" id="showNeighbors"> Visa grannrader</label>\n'
+    controls += '<button type="button" id="copyDiagnostics">Kopiera diagnostik</button>\n</div>'
     if controls_needle not in document:
-        raise ValueError("could not find editor controls for neighbor raster")
-    document = document.replace(controls_needle, controls_replacement, 1)
+        raise ValueError("could not find editor controls for diagnostics")
+    document = document.replace(controls_needle, controls, 1)
 
-    rowbox_needle = '<div class="rowbox"><canvas id="row"></canvas></div>'
-    neighbor_box = rowbox_needle + '''
+    if state.get("neighbor_raster_image"):
+        rowbox_needle = '<div class="rowbox"><canvas id="row"></canvas></div>'
+        neighbor_box = rowbox_needle + '''
 <div id="neighborWrap" style="display:none;margin:10px 0 18px">
   <div><b>Grannradsraster</b> – ofiltrerad källa. Röda linjer avgränsar målradens egentliga område; pixlar ovanför/under är endast observation.</div>
   <div class="rowbox" style="padding-top:36px"><canvas id="neighborRow"></canvas></div>
 </div>'''
-    if rowbox_needle not in document:
-        raise ValueError("could not find editor row canvas for neighbor raster")
-    document = document.replace(rowbox_needle, neighbor_box, 1)
+        if rowbox_needle not in document:
+            raise ValueError("could not find editor row canvas for neighbor raster")
+        document = document.replace(rowbox_needle, neighbor_box, 1)
 
     script = r'''
 <script>
 (() => {
+  const diagnostics=__DIAGNOSTICS__;
+  const copyButton=document.getElementById('copyDiagnostics');
+  if(copyButton){
+    copyButton.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(diagnostics);
+        copyButton.textContent='Kopierat!';
+      } catch(err) {
+        const ta=document.createElement('textarea');
+        ta.value=diagnostics;ta.style.position='fixed';ta.style.left='-9999px';
+        document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();
+        copyButton.textContent='Kopierat!';
+      }
+      setTimeout(()=>copyButton.textContent='Kopiera diagnostik',1200);
+    });
+  }
+
   const checkbox=document.getElementById('showNeighbors');
   const wrap=document.getElementById('neighborWrap');
   const canvas=document.getElementById('neighborRow');
@@ -76,6 +129,17 @@ def render_html_with_neighbor_raster(state, message=""):
     ctx.imageSmoothingEnabled=false;
     ctx.fillStyle='white';ctx.fillRect(0,0,canvas.width,canvas.height);
     ctx.drawImage(nimg,0,ntop,S.neighbor_raster_width*nscale,S.neighbor_raster_height*nscale);
+
+    // Same visible pixel grid as the main glyph editor.
+    ctx.save();ctx.strokeStyle='rgba(70,70,70,.22)';ctx.lineWidth=1;
+    for(let x=0;x<=S.neighbor_raster_width;x++){
+      const xx=x*nscale+.5;ctx.beginPath();ctx.moveTo(xx,ntop);ctx.lineTo(xx,ntop+S.neighbor_raster_height*nscale);ctx.stroke();
+    }
+    for(let y=0;y<=S.neighbor_raster_height;y++){
+      const yy=ntop+y*nscale+.5;ctx.beginPath();ctx.moveTo(0,yy);ctx.lineTo(S.neighbor_raster_width*nscale,yy);ctx.stroke();
+    }
+    ctx.restore();
+
     ctx.save();
     ctx.strokeStyle='rgba(190,25,25,.95)';ctx.lineWidth=2;
     for(const yy of [S.neighbor_core_top,S.neighbor_core_bottom]){
@@ -89,7 +153,7 @@ def render_html_with_neighbor_raster(state, message=""):
   nimg.onload=()=>{if(checkbox.checked)drawNeighbor();};
 })();
 </script>
-'''
+'''.replace("__DIAGNOSTICS__", diag_json)
     return document.replace('</body>', script + '</body>', 1)
 
 
@@ -192,6 +256,7 @@ def main() -> int:
     print("review: glyphändringar POST:as alltid till den faktiskt aktiva raden", flush=True)
     print("review: sparfel stannar på aktiv rad och skrivs ut i terminalen", flush=True)
     print("review: Visa grannrader visar ofiltrerat raster ±8 px runt målradens gränser", flush=True)
+    print("review: Kopiera diagnostik ger ett textblock som kan klistras direkt i ChatGPT", flush=True)
     return fast.main()
 
 
