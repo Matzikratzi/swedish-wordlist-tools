@@ -61,7 +61,7 @@ class PageTextPrefixComparisonTests(unittest.TestCase):
         rows = [{"page": 1, "stycke": "<sup>1</sup>a", "text": "a:et"}]
         articles = [
             {
-                "stycke": "¹a",
+                "stycke": "¹ a",
                 "text": "a:et",
                 "column": 0,
                 "start_row": 1,
