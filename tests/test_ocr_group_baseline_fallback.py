@@ -10,14 +10,22 @@ from swedish_wordlist_tools.ocr_group_baseline_fallback import (
 )
 
 
+def models_with_one_internal_blank_column():
+    return [
+        GlyphModel("A", "roman", frozenset({(0, -2), (0, -1), (0, 0), (1, 0)}), 2),
+        GlyphModel("b", "roman", frozenset({(0, -1), (0, 0), (1, 0)}), 2),
+        GlyphModel("c", "roman", frozenset({(0, -1), (1, -1), (0, 0)}), 2),
+        # Not present in the synthetic source.  Its internal blank x=1 makes a
+        # one-column inter-glyph gap non-splitting, while a real word space is
+        # still a provably safe group boundary.
+        GlyphModel("Z", "roman", frozenset({(0, -2), (2, 0)}), 1),
+    ]
+
+
 class GroupBaselineFallbackTests(unittest.TestCase):
     def test_later_whitespace_group_may_shift_down_one_pixel_when_fully_exact(self) -> None:
         image = Image.new("L", (30, 12), 255)
-        models = [
-            GlyphModel("A", "roman", frozenset({(0, -2), (0, -1), (0, 0), (1, 0)}), 2),
-            GlyphModel("b", "roman", frozenset({(0, -1), (0, 0), (1, 0)}), 2),
-            GlyphModel("c", "roman", frozenset({(0, -1), (1, -1), (0, 0)}), 2),
-        ]
+        models = models_with_one_internal_blank_column()
 
         # Main group on baseline 5.  It is deliberately larger so the ordinary
         # whole-row decision remains baseline 5.
@@ -39,10 +47,7 @@ class GroupBaselineFallbackTests(unittest.TestCase):
 
     def test_single_glyph_does_not_trigger_local_baseline_shift(self) -> None:
         image = Image.new("L", (24, 12), 255)
-        models = [
-            GlyphModel("A", "roman", frozenset({(0, -2), (0, -1), (0, 0), (1, 0)}), 2),
-            GlyphModel("b", "roman", frozenset({(0, -1), (0, 0), (1, 0)}), 2),
-        ]
+        models = models_with_one_internal_blank_column()
         main = {(2, 3), (2, 4), (2, 5), (3, 5), (5, 3), (5, 4), (5, 5), (6, 5)}
         shifted_one = {(15, 5), (15, 6), (16, 6)}
         for point in main | shifted_one:
