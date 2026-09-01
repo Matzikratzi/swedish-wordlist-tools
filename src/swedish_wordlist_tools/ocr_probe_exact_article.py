@@ -22,14 +22,21 @@ SUPERSCRIPT_DIGITS = {
     "⁹": "9",
 }
 
-# These are SAOL field labels, not word-specific exceptions.  They belong to
-# the inflection text when they immediately introduce the first italic form.
-# Extend this vocabulary as further printed notation is encountered and
-# verified; keeping it explicit prevents a part-of-speech abbreviation such as
-# ``s.`` from accidentally becoming part of JSONL ``text``.
-INFLECTION_FIELD_LABELS = frozenset({
-    "best.",
-    "pl.",
+# SAOL's text field begins immediately after the word-class abbreviation.  It
+# does not begin at the first italic glyph: roman labels such as ``pl.`` and
+# ``best.`` are already part of text.  Keep the vocabulary semantic rather than
+# using typography as a proxy for the field boundary.
+WORD_CLASS_MARKERS = frozenset({
+    "s.",
+    "adj.",
+    "adv.",
+    "v.",
+    "pron.",
+    "prep.",
+    "konj.",
+    "interj.",
+    "räkn.",
+    "art.",
 })
 
 
@@ -148,38 +155,30 @@ def _render_range(article_rows: list[dict], start: int, end: int, *, markup: boo
     return _render_range_with_diagnostics(article_rows, start, end, markup=markup)[0]
 
 
-def _text_start_with_leading_inflection_labels(
+def _text_start_after_word_class(
     article_rows: list[dict], flat: list[tuple[int, object]], headword_end: int
 ) -> int:
-    """Find the JSONL text start, including slot labels before first italic form.
+    """Return the first glyph of text: immediately after SAOL's word class.
 
-    Typography alone identifies the first inflection form, but labels such as
-    ``best.`` and ``pl.`` are printed in roman immediately before it and belong
-    to the same JSONL text field.  Work backwards from the first italic glyph
-    and include the longest suffix consisting only of known SAOL field labels.
+    Pronunciation and the word-class abbreviation precede text.  Everything
+    after the word class belongs to text until an explanation boundary, whether
+    it is roman or italic.  A semicolon printed immediately after the word class
+    is a field separator (``s.; pl. ~``), so skip that separator as well.
     """
-    italic_start = next(
-        (
-            index
-            for index, (_row_index, match) in enumerate(flat[headword_end:], start=headword_end)
-            if match.style == "italic"
-        ),
-        len(flat),
-    )
-    if italic_start == len(flat):
-        return italic_start
-
-    best = italic_start
-    for candidate in range(headword_end, italic_start):
-        candidate_matches = flat[candidate:italic_start]
-        if not candidate_matches or any(match.style != "roman" for _row_index, match in candidate_matches):
+    for end in range(headword_end + 1, len(flat) + 1):
+        _row_index, match = flat[end - 1]
+        if match.style != "roman":
             continue
-        rendered = _render_range(article_rows, candidate, italic_start, markup=False).strip()
+        rendered = _render_range(article_rows, headword_end, end, markup=False).strip()
         tokens = rendered.split()
-        if tokens and all(token in INFLECTION_FIELD_LABELS for token in tokens):
-            best = candidate
-            break
-    return best
+        if not tokens or tokens[-1] not in WORD_CLASS_MARKERS:
+            continue
+        if end < len(flat):
+            next_match = flat[end][1]
+            if next_match.style == "roman" and next_match.label == ";":
+                end += 1
+        return end
+    return len(flat)
 
 
 def build_exact_article(rows: list[dict]) -> dict:
@@ -191,9 +190,10 @@ def build_exact_article(rows: list[dict]) -> dict:
     the first numbered explanation begins, the remaining physical rows still
     belong to the article until the next headword.
 
-    The JSONL-like ``text`` field still ends when explanation text begins, at
-    either the raised ¤ marker or the first ordinary numbered explanation. This
-    keeps field boundaries separate from article boundaries.
+    The JSONL-like ``text`` field begins immediately after the word class and
+    ends when explanation text begins, at either the raised ¤ marker or the
+    first ordinary numbered explanation. This keeps field boundaries separate
+    from both typography and article boundaries.
     """
     if not rows:
         raise ValueError("article needs at least one physical row")
@@ -210,7 +210,7 @@ def build_exact_article(rows: list[dict]) -> dict:
     first_row_matches = _sorted_matches(article_rows[0]["matches"])
     headword_end = _initial_headword_end(first_row_matches)
 
-    text_start = _text_start_with_leading_inflection_labels(article_rows, flat, headword_end)
+    text_start = _text_start_after_word_class(article_rows, flat, headword_end)
 
     explanation_start = len(flat)
     explanation_reason = None
