@@ -47,6 +47,7 @@ def glyph_cache_key(
     matcher_module_file: str,
     row_probe_module_file: str,
     row_map_module_file: str,
+    extra_module_files: tuple[str, ...] = (),
 ) -> str:
     return _hash_bytes(
         CACHE_FORMAT.encode("ascii"),
@@ -56,6 +57,7 @@ def glyph_cache_key(
         _module_bytes(matcher_module_file),
         _module_bytes(row_probe_module_file),
         _module_bytes(row_map_module_file),
+        *(_module_bytes(module_file) for module_file in extra_module_files),
     )
 
 
