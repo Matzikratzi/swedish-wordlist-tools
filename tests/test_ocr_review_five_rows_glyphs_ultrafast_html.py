@@ -68,6 +68,37 @@ class UltrafastFiveRowGlyphReviewTests(unittest.TestCase):
         )
         self.assertFalse(hasattr(ultrafast._post_context, "active_position"))
 
+    def test_neighbor_raster_control_is_injected(self):
+        state = {
+            "page": 1,
+            "column": 0,
+            "row": 44,
+            "covered_pixels": 9,
+            "source_pixels": 10,
+            "removed_neighbor_pixels": 0,
+            "text": "x",
+            "markup": "x",
+            "crop_width": 20,
+            "crop_height": 10,
+            "baseline": 7,
+            "image": "data:image/png;base64,AA==",
+            "source_ink_points": [[1, 1]],
+            "items": [],
+            "point_sets": {},
+            "matches": [],
+            "neighbor_raster_image": "data:image/png;base64,AA==",
+            "neighbor_raster_width": 20,
+            "neighbor_raster_height": 26,
+            "neighbor_core_top": 8,
+            "neighbor_core_bottom": 18,
+            "neighbor_probe_y": 8,
+        }
+        document = ultrafast.render_html_with_neighbor_raster(state)
+        self.assertIn('id="showNeighbors"', document)
+        self.assertIn('id="neighborRow"', document)
+        self.assertIn("Grannradsraster", document)
+        self.assertIn("neighbor_core_top", document)
+
 
 if __name__ == "__main__":
     unittest.main()
