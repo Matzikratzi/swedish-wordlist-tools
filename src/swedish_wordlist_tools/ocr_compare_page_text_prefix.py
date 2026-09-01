@@ -7,8 +7,18 @@ import sys
 from collections import defaultdict, deque
 from pathlib import Path
 
+from . import ocr_column_row_segmentation as segmentation_module
+from . import ocr_glyph_matcher as matcher_module
+from . import ocr_probe_row_glyphs as row_probe_module
+from . import ocr_row_map_words as row_map_module
 from .ocr_column_row_segmentation import segment_page_rows
 from .ocr_glyph_matcher import load_facit
+from .ocr_page_analysis_cache import (
+    DEFAULT_CACHE_DIR,
+    geometry_cache_key,
+    glyph_cache_key,
+    load_or_compute,
+)
 from .ocr_prepare_sequential_page import _load_source_image, _page_from_row, read_jsonl, source_for_page
 from .ocr_probe_exact_article import build_exact_article, row_starts_headword
 from .ocr_probe_row_glyphs import analyse_row_exact
@@ -20,13 +30,7 @@ SUPERSCRIPT_TRANSLATION = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "01234567
 
 
 def canonical_printed_text(value: object) -> str:
-    """Canonicalise JSONL transcription for comparison with printed glyph OCR.
-
-    SAOL14 JSONL uses + where the facsimile prints ~. Formatting tags are
-    metadata rather than printed characters, so they are ignored here.
-    Superscript digit glyphs are separate rasters but compare lexically as the
-    corresponding digit used inside JSONL ``<sup>`` markup.
-    """
+    """Canonicalise JSONL transcription for comparison with printed glyph OCR."""
     text = html.unescape(str(value or ""))
     text = TAG_RE.sub("", text)
     text = text.translate(SUPERSCRIPT_TRANSLATION)
@@ -40,7 +44,6 @@ def _has_real_text(value: object) -> bool:
 
 
 def text_prefix_matches(recovered: str, reference: str) -> bool:
-    """True when OCR agrees for every character present in JSONL ``text``."""
     wanted = canonical_printed_text(reference)
     got = canonical_printed_text(recovered)
     return bool(wanted) and got.startswith(wanted)
@@ -93,17 +96,16 @@ def _analyse_column_rows(
     return output
 
 
-def recovered_page_articles(page, row_map: dict, models, *, threshold: int = 210, progress=None) -> list[dict]:
+def analyse_page_rows(page, row_map: dict, models, *, threshold: int = 210, progress=None) -> list[list[dict]]:
+    return [
+        _analyse_column_rows(page, column_entry, column, models, threshold=threshold, progress=progress)
+        for column, column_entry in enumerate(row_map["columns"])
+    ]
+
+
+def articles_from_analysed_rows(columns: list[list[dict]]) -> list[dict]:
     articles: list[dict] = []
-    for column, column_entry in enumerate(row_map["columns"]):
-        rows = _analyse_column_rows(
-            page,
-            column_entry,
-            column,
-            models,
-            threshold=threshold,
-            progress=progress,
-        )
+    for column, rows in enumerate(columns):
         starts = [index for index, row in enumerate(rows) if row_starts_headword(row["matches"])]
         for pos, start in enumerate(starts):
             end = starts[pos + 1] if pos + 1 < len(starts) else len(rows)
@@ -112,6 +114,12 @@ def recovered_page_articles(page, row_map: dict, models, *, threshold: int = 210
             article["start_row"] = start
             articles.append(article)
     return articles
+
+
+def recovered_page_articles(page, row_map: dict, models, *, threshold: int = 210, progress=None) -> list[dict]:
+    return articles_from_analysed_rows(
+        analyse_page_rows(page, row_map, models, threshold=threshold, progress=progress)
+    )
 
 
 def compare_page(rows: list[dict], articles: list[dict], page_number: int) -> dict:
@@ -173,6 +181,8 @@ def main() -> int:
     ap.add_argument("--threshold", type=int, default=210)
     ap.add_argument("--facit", type=Path, default=Path("glyphs/saol14-manual-glyph-facit.json"))
     ap.add_argument("--show-ok", action="store_true")
+    ap.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
+    ap.add_argument("--no-cache", action="store_true", help="ignore persistent page caches for this run")
     args = ap.parse_args()
 
     rows = list(read_jsonl(args.jsonl))
@@ -184,7 +194,26 @@ def main() -> int:
         raise SystemExit(f"could not load page image: {source}")
 
     print(f"page={args.page}: segmenterar fysiska rader ...", file=sys.stderr, flush=True)
-    row_map = segment_page_rows(page, threshold=args.threshold)
+    if args.no_cache:
+        row_map = segment_page_rows(page, threshold=args.threshold)
+        geometry_hit = False
+        geometry_path = None
+        geometry_key = geometry_cache_key(page, threshold=args.threshold, segmentation_module_file=segmentation_module.__file__)
+    else:
+        geometry_key = geometry_cache_key(page, threshold=args.threshold, segmentation_module_file=segmentation_module.__file__)
+        row_map, geometry_hit, geometry_path = load_or_compute(
+            args.cache_dir,
+            args.page,
+            "geometry",
+            geometry_key,
+            lambda: segment_page_rows(page, threshold=args.threshold),
+        )
+        print(
+            f"page={args.page}: geometri-cache {'HIT' if geometry_hit else 'MISS'} {geometry_path}",
+            file=sys.stderr,
+            flush=True,
+        )
+
     column_sizes = [len(column.get("rows") or []) for column in row_map["columns"]]
     total_rows = sum(column_sizes)
     completed_before = [sum(column_sizes[:column]) for column in range(len(column_sizes))]
@@ -204,18 +233,36 @@ def main() -> int:
                 flush=True,
             )
 
+    models = load_facit(args.facit)
     print(
         f"page={args.page}: analyserar {total_rows} rader i {len(column_sizes)} kolumner ...",
         file=sys.stderr,
         flush=True,
     )
-    articles = recovered_page_articles(
-        page,
-        row_map,
-        load_facit(args.facit),
-        threshold=args.threshold,
-        progress=show_progress,
-    )
+    if args.no_cache:
+        analysed_columns = analyse_page_rows(page, row_map, models, threshold=args.threshold, progress=show_progress)
+    else:
+        glyph_key = glyph_cache_key(
+            geometry_key,
+            args.facit,
+            matcher_module_file=matcher_module.__file__,
+            row_probe_module_file=row_probe_module.__file__,
+            row_map_module_file=row_map_module.__file__,
+        )
+        analysed_columns, glyph_hit, glyph_path = load_or_compute(
+            args.cache_dir,
+            args.page,
+            "glyphs",
+            glyph_key,
+            lambda: analyse_page_rows(page, row_map, models, threshold=args.threshold, progress=show_progress),
+        )
+        print(
+            f"page={args.page}: glyph-cache {'HIT' if glyph_hit else 'MISS'} {glyph_path}",
+            file=sys.stderr,
+            flush=True,
+        )
+
+    articles = articles_from_analysed_rows(analysed_columns)
     print(f"page={args.page}: jämför {len(articles)} återfunna artiklar med JSONL ...", file=sys.stderr, flush=True)
     report = compare_page(rows, articles, args.page)
 
