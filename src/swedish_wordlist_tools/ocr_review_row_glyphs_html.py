@@ -196,10 +196,10 @@ body{{font:16px system-ui,sans-serif;margin:20px;background:#f7f7f7;color:#17171
 canvas{{image-rendering:pixelated;cursor:pointer}} .controls{{display:flex;gap:10px;align-items:end;flex-wrap:wrap}}
 label{{display:flex;flex-direction:column;gap:4px}} label.inline{{flex-direction:row;align-items:center;gap:6px}}
 input,select,button{{font:inherit;padding:6px}} input[type=checkbox]{{padding:0}} button{{cursor:pointer}}
-.items{{display:flex;flex-wrap:wrap;gap:5px;margin:10px 0}} .chip{{border:2px solid #888;background:white;padding:5px 7px}}
+.items{{display:flex;flex-wrap:wrap;gap:4px;margin:10px 0;align-items:flex-start}} .chip{{border:2px solid #888;background:white;padding:4px 6px;min-width:38px;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.05;gap:2px}}
 .chip.roman{{border-color:#1f6f8b;color:#174f63}} .chip.italic{{border-color:#98620c;color:#744a08}} .chip.bold{{border-color:#9b1c31;color:#781526;font-weight:700}}
 .chip.residual{{border-color:#c77b00;color:#8a5500}} .chip.selected{{background:#dcecff;box-shadow:0 0 0 2px #1769d2 inset}}
-.style-marker{{display:inline-block;min-width:.7em;text-align:center}} .style-marker.roman{{font-style:normal;font-weight:400}} .style-marker.italic{{font-style:italic;font-weight:400}} .style-marker.bold{{font-style:normal;font-weight:700}}
+.glyph-label{{white-space:nowrap}} .style-marker{{display:block;text-align:center}} .style-marker.roman{{font-style:normal;font-weight:400}} .style-marker.italic{{font-style:italic;font-weight:400}} .style-marker.bold{{font-style:normal;font-weight:700}} .pixel-count{{font-size:12px;font-weight:400;white-space:nowrap}}
 code{{background:#eee;padding:2px 4px}} .msg{{font-weight:600;margin:8px 0}} .hint{{max-width:1000px}}
 </style></head><body>
 <h1>SAOL glyphgranskning – sida {state['page']}, kolumn {state['column']}, rad {state['row']}</h1>
@@ -273,10 +273,13 @@ function canvasPixel(e){{const r=canvas.getBoundingClientRect();return {{x:Math.
 for(const it of S.items){{
  const b=document.createElement('button'); b.type='button'; b.dataset.id=it.id; b.className='chip '+it.kind+' '+it.style;
  if(it.kind==='match'){{
-   b.appendChild(document.createTextNode(JSON.stringify(it.label)+' · '));
+   const glyph=document.createElement('span'); glyph.className='glyph-label'; glyph.textContent=JSON.stringify(it.label); b.appendChild(glyph);
    const marker=document.createElement('span'); marker.className='style-marker '+it.style; marker.textContent=styleLetter(it.style); b.appendChild(marker);
-   b.appendChild(document.createTextNode(' · '+it.pixels+' px'));
- }} else {{b.textContent='omatchad · '+it.pixels+' px';}}
+   const pixels=document.createElement('span'); pixels.className='pixel-count'; pixels.textContent=it.pixels+' px'; b.appendChild(pixels);
+ }} else {{
+   const glyph=document.createElement('span'); glyph.className='glyph-label'; glyph.textContent='omatchad'; b.appendChild(glyph);
+   const pixels=document.createElement('span'); pixels.className='pixel-count'; pixels.textContent=it.pixels+' px'; b.appendChild(pixels);
+ }}
  b.onclick=()=>toggle(it.id); document.getElementById('items').appendChild(b);
 }}
 canvas.addEventListener('mousedown',e=>{{if(!pixelMode.checked)return;dragStart=canvasPixel(e);dragNow=dragStart;dragRemove=e.altKey;e.preventDefault();draw();}});
