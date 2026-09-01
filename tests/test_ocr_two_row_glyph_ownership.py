@@ -5,14 +5,24 @@ import unittest
 from PIL import Image
 
 from swedish_wordlist_tools.ocr_glyph_matcher import GlyphModel
-from swedish_wordlist_tools.ocr_two_row_glyph_ownership import split_touching_neighbor_glyphs
+from swedish_wordlist_tools.ocr_two_row_glyph_ownership import (
+    _vertical_order_ok,
+    split_touching_neighbor_glyphs,
+)
 
 
 class TwoRowGlyphOwnershipTests(unittest.TestCase):
+    def test_touching_rows_preserve_vertical_order(self) -> None:
+        current = frozenset({(2, 3), (3, 4), (4, 5)})
+        below_touching = frozenset({(5, 5), (5, 6), (6, 7)})
+        below_crossing = frozenset({(5, 4), (5, 6), (6, 7)})
+        above_touching = frozenset({(1, 1), (1, 2), (2, 3)})
+        self.assertTrue(_vertical_order_ok(current, below_touching, neighbor_is_below=True))
+        self.assertFalse(_vertical_order_ok(current, below_crossing, neighbor_is_below=True))
+        self.assertTrue(_vertical_order_ok(current, above_touching, neighbor_is_below=False))
+
     def test_exact_known_glyphs_touching_across_rows_are_split(self) -> None:
         image = Image.new("L", (12, 12), 255)
-        # Upper glyph: baseline y=4. Lower glyph: baseline y=5. They touch
-        # vertically at x=3 between y=4 and y=5, making one 8-connected blob.
         upper_page = {(2, 2), (3, 2), (3, 3), (3, 4)}
         lower_page = {(3, 5), (3, 6), (3, 7), (4, 7)}
         for point in upper_page | lower_page:
@@ -42,31 +52,24 @@ class TwoRowGlyphOwnershipTests(unittest.TestCase):
                 }
             ]
         }
-        box = (0, 0, 10, 6)  # target row plus one pixel of the row below
+        box = (0, 0, 10, 6)
         crop = image.crop(box)
 
         cleaned, removed, diagnostics = split_touching_neighbor_glyphs(
-            image,
-            row_map,
-            0,
-            0,
-            box,
-            crop,
-            models,
+            image, row_map, 0, 0, box, crop, models
         )
 
         self.assertEqual(removed, 1)
         self.assertEqual(cleaned.getpixel((3, 5)), 255)
         self.assertEqual(cleaned.getpixel((3, 4)), 0)
-        self.assertTrue(any(row["status"] == "split" for row in diagnostics))
         split = next(row for row in diagnostics if row["status"] == "split")
         self.assertEqual(split["current_labels"], "]")
         self.assertEqual(split["neighbor_labels"], "l")
+        self.assertEqual(split["vertical_order"], "touch-or-gap")
 
     def test_unknown_neighbor_shape_is_not_cut(self) -> None:
         image = Image.new("L", (12, 12), 255)
         upper_page = {(2, 2), (3, 2), (3, 3), (3, 4)}
-        # This lower blob is not explained by any known model.
         lower_page = {(3, 5), (3, 6), (4, 6), (5, 6), (5, 7)}
         for point in upper_page | lower_page:
             image.putpixel(point, 0)
@@ -92,13 +95,7 @@ class TwoRowGlyphOwnershipTests(unittest.TestCase):
         crop = image.crop(box)
 
         cleaned, removed, diagnostics = split_touching_neighbor_glyphs(
-            image,
-            row_map,
-            0,
-            0,
-            box,
-            crop,
-            models,
+            image, row_map, 0, 0, box, crop, models
         )
 
         self.assertEqual(removed, 0)
