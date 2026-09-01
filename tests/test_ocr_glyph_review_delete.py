@@ -41,6 +41,19 @@ class GlyphReviewDeleteTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "exactly one"):
             delete_exact_model(payload, label="az", style="roman", pixels_relative_to_baseline=[[0, 0]])
 
+    def test_non_delete_delegates_to_captured_original_edit_handler(self) -> None:
+        calls = []
+
+        def original(state, facit, form):
+            calls.append((state, facit, form))
+            return "saved-add"
+
+        state = {"sentinel": True}
+        facit = Path("facit.json")
+        form = {"action": ["add"], "label": ["a"]}
+        self.assertEqual(apply_edit_with_delete(original, state, facit, form), "saved-add")
+        self.assertEqual(calls, [(state, facit, form)])
+
     def test_apply_delete_does_not_require_label_field(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             facit = Path(tmp) / "facit.json"
@@ -59,7 +72,9 @@ class GlyphReviewDeleteTests(unittest.TestCase):
                 pixels=frozenset({(10, 4), (11, 5)}),
             )
             state = {"matches": [match], "source_ink_points": [[10, 4], [11, 5]]}
+            original = lambda *_args: self.fail("delete must not call original edit handler")
             message = apply_edit_with_delete(
+                original,
                 state,
                 facit,
                 {"action": ["delete"], "selected": ["M00"], "selected_pixels": [""]},
