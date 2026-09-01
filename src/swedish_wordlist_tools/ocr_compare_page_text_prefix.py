@@ -16,20 +16,27 @@ from .ocr_row_map_words import _persistent_left_rule_x, _row_crop_box
 
 TAG_RE = re.compile(r"<[^>]+>")
 SPACE_RE = re.compile(r"\s+")
+SUPERSCRIPT_TRANSLATION = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
 
 
 def canonical_printed_text(value: object) -> str:
     """Canonicalise JSONL transcription for comparison with printed glyph OCR.
 
-    SAOL14 JSONL uses + where the facsimile prints ~.  Formatting tags are
-    metadata rather than printed characters, so they are ignored here.  Other
-    punctuation is deliberately preserved: this comparison is meant to be
-    strict apart from that known notation translation and whitespace folding.
+    SAOL14 JSONL uses + where the facsimile prints ~. Formatting tags are
+    metadata rather than printed characters, so they are ignored here.
+    Superscript digit glyphs are separate rasters but compare lexically as the
+    corresponding digit used inside JSONL ``<sup>`` markup.
     """
     text = html.unescape(str(value or ""))
     text = TAG_RE.sub("", text)
+    text = text.translate(SUPERSCRIPT_TRANSLATION)
     text = text.replace("+", "~")
     return SPACE_RE.sub(" ", text).strip()
+
+
+def _has_real_text(value: object) -> bool:
+    text = str(value or "").strip()
+    return bool(text) and text.casefold() != "(null)"
 
 
 def text_prefix_matches(recovered: str, reference: str) -> bool:
@@ -110,7 +117,7 @@ def recovered_page_articles(page, row_map: dict, models, *, threshold: int = 210
 def compare_page(rows: list[dict], articles: list[dict], page_number: int) -> dict:
     references = [
         row for row in rows
-        if _page_from_row(row) == page_number and str(row.get("text") or "").strip()
+        if _page_from_row(row) == page_number and _has_real_text(row.get("text"))
     ]
     by_headword: dict[str, deque[dict]] = defaultdict(deque)
     for row in references:
@@ -136,17 +143,22 @@ def compare_page(rows: list[dict], articles: list[dict], page_number: int) -> di
                 "expected": expected,
                 "recovered": recovered,
                 "prefix_exact": text_prefix_matches(recovered, expected),
+                "forced_space_before_tilde": int(article.get("forced_space_before_tilde") or 0),
             }
         )
 
     unmatched = [row for row in references if id(row) not in matched_reference_ids]
     exact = [item for item in results if item["prefix_exact"]]
+    forced_spaces = sum(item["forced_space_before_tilde"] for item in results)
+    forced_articles = sum(bool(item["forced_space_before_tilde"]) for item in results)
     return {
         "references_with_text": len(references),
         "recovered_articles": len(articles),
         "matched_headwords": len(results),
         "text_prefix_exact": len(exact),
         "unmatched_references": len(unmatched),
+        "forced_space_before_tilde": forced_spaces,
+        "articles_with_forced_tilde_space": forced_articles,
         "results": results,
         "unmatched": unmatched,
     }
@@ -181,7 +193,6 @@ def main() -> int:
     def show_progress(column: int, row_done: int, column_total: int) -> None:
         done = completed_before[column] + row_done
         percent = int(100 * done / total_rows) if total_rows else 100
-        # Report every 5 percentage points, plus first/last row of each column.
         bucket = percent // 5
         marker = (column, bucket)
         if marker not in last_reported or row_done in {1, column_total}:
@@ -213,17 +224,25 @@ def main() -> int:
         f"recovered_articles={report['recovered_articles']} matched_headwords={report['matched_headwords']} "
         f"text_prefix_exact={report['text_prefix_exact']} unmatched_references={report['unmatched_references']}"
     )
+    print(
+        f"forced_space_before_tilde={report['forced_space_before_tilde']} "
+        f"articles_with_forced_tilde_space={report['articles_with_forced_tilde_space']}"
+    )
     denominator = report["matched_headwords"]
     if denominator:
         print(f"matched_text_rate={100.0 * report['text_prefix_exact'] / denominator:.1f}%")
 
     for item in report["results"]:
-        if item["prefix_exact"] and not args.show_ok:
+        spacing_warning = item["forced_space_before_tilde"]
+        if item["prefix_exact"] and not args.show_ok and not spacing_warning:
             continue
-        status = "OK" if item["prefix_exact"] else "MISS"
+        if item["prefix_exact"] and spacing_warning:
+            status = "OK+SPACE"
+        else:
+            status = "OK" if item["prefix_exact"] else "MISS"
         print(
             f"{status}\tcol={item['column']} row={item['row']} exact_pixels={item['fully_exact']} "
-            f"head={item['headword']!r}\n"
+            f"forced_tilde_spaces={spacing_warning} head={item['headword']!r}\n"
             f"  jsonl={item['expected']!r}\n"
             f"  ocr  ={item['recovered']!r}"
         )
