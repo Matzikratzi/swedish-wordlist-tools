@@ -4,6 +4,7 @@ import io
 import json
 import subprocess
 import tempfile
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -84,6 +85,96 @@ def _row_crop_box(
     return left, top, right, bottom
 
 
+def _owned_row_crop(
+    page_image: Image.Image,
+    row: dict[str, Any],
+    box: tuple[int, int, int, int],
+    *,
+    threshold: int = 210,
+    probe_y: int = 6,
+) -> tuple[Image.Image, int]:
+    """Return a row crop with provably neighbor-owned edge ink removed.
+
+    The ordinary crop deliberately includes a small vertical pad so glyphs that
+    cross a segmentation edge can still be reconstructed. That pad can also
+    contain a descender/ascender from the row above or below. We resolve only
+    the cheap, unambiguous case: an ink component visible in the crop has no
+    pixels inside the target row's own vertical span and is 8-connected to ink
+    beyond the crop on the same side. Such pixels demonstrably belong to a
+    neighbour, so they are whitened before glyph matching.
+
+    Components that touch the target row proper are left untouched. This makes
+    the filter deliberately conservative and symmetric for contamination from
+    above and below.
+    """
+    x0, y0, x1, y1 = map(int, box)
+    crop = page_image.crop(box).convert("L")
+    if probe_y <= 0 or crop.width <= 0 or crop.height <= 0:
+        return crop, 0
+
+    core_top = max(y0, min(y1, int(row["page_top"])))
+    core_bottom = max(core_top, min(y1, int(row["page_bottom"])))
+    probe_top = max(0, y0 - int(probe_y))
+    probe_bottom = min(page_image.height, y1 + int(probe_y))
+    if probe_top == y0 and probe_bottom == y1:
+        return crop, 0
+
+    region = page_image.crop((x0, probe_top, x1, probe_bottom)).convert("L")
+    pixels = region.load()
+    remaining = {
+        (x, y)
+        for y in range(region.height)
+        for x in range(region.width)
+        if pixels[x, y] < threshold
+    }
+    if not remaining:
+        return crop, 0
+
+    crop_top = y0 - probe_top
+    crop_bottom = y1 - probe_top
+    local_core_top = core_top - probe_top
+    local_core_bottom = core_bottom - probe_top
+    foreign: set[tuple[int, int]] = set()
+
+    while remaining:
+        start = remaining.pop()
+        queue = deque([start])
+        component = {start}
+        while queue:
+            x, y = queue.popleft()
+            for ny in range(y - 1, y + 2):
+                for nx in range(x - 1, x + 2):
+                    point = (nx, ny)
+                    if point in remaining:
+                        remaining.remove(point)
+                        component.add(point)
+                        queue.append(point)
+
+        in_crop = {point for point in component if crop_top <= point[1] < crop_bottom}
+        if not in_crop:
+            continue
+        in_core = {
+            point for point in component
+            if local_core_top <= point[1] < local_core_bottom
+        }
+        if in_core:
+            continue
+        continues_outside = any(point[1] < crop_top or point[1] >= crop_bottom for point in component)
+        if continues_outside:
+            foreign.update(in_crop)
+
+    if not foreign:
+        return crop, 0
+
+    cleaned = crop.copy()
+    cleaned_pixels = cleaned.load()
+    for x, region_y in foreign:
+        crop_y = region_y - crop_top
+        if 0 <= x < cleaned.width and 0 <= crop_y < cleaned.height:
+            cleaned_pixels[x, crop_y] = 255
+    return cleaned, len(foreign)
+
+
 def ocr_page_row_map(
     page_image: Image.Image,
     row_map: dict[str, Any],
@@ -102,7 +193,7 @@ def ocr_page_row_map(
         for row in sorted(column_entry.get("rows") or [], key=lambda item: (float(item["center_y"]), int(item["page_top"]))):
             box = _row_crop_box(row, column=column, page_width=page_image.width, page_height=page_image.height, pad_y=pad_y, left_override=content_left)
             x0, y0, x1, y1 = box
-            crop = page_image.crop(box).convert("L")
+            crop, _removed = _owned_row_crop(page_image, row, box)
             words = _run_row_tesseract(crop, lang=lang, psm=psm)
             for word in sorted(words, key=lambda item: (item.left, item.word)):
                 records.append({
