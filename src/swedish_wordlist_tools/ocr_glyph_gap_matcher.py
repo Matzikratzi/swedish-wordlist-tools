@@ -79,13 +79,7 @@ def _drop_partial_component_matches(
     selected: Iterable[Match],
     ink: set[tuple[int, int]],
 ) -> list[Match]:
-    """Keep only matches whose touched 4-components are collectively complete.
-
-    Temporary partial ownership is allowed while solving so two touching glyphs
-    can form one exact partition. But the final answer must never recognize a
-    glyph from only part of a source component (for example reading the dot of a
-    semicolon as a period while leaving the semicolon's tail unmatched).
-    """
+    """Keep only matches whose touched 4-components are collectively complete."""
     kept = list(selected)
     components, _by_pixel = _ink_components(ink)
     while kept:
@@ -105,18 +99,69 @@ def _drop_partial_component_matches(
     return sorted(kept, key=lambda match: (match.x, match.baseline, match.label, match.style))
 
 
+def _component_aware_candidates(
+    ink: set[tuple[int, int]],
+    width: int,
+    height: int,
+    models: list[GlyphModel],
+) -> list[Match]:
+    """Use cheap strict candidates except where touching glyphs require a split.
+
+    A strict exact match owns every 4-connected source component it touches.
+    Therefore partial-component candidates are useful only for source components
+    which no strict glyph can own at all, such as an edge-touching ``t;`` pair.
+    Restricting the expensive permissive search to those unresolved components
+    preserves touching-glyph support without multiplying candidates everywhere.
+    """
+    strict = exact_matches(
+        ink,
+        width,
+        height,
+        models,
+        require_whole_components=True,
+    )
+    components, by_pixel = _ink_components(ink)
+    resolved_components: set[int] = set()
+    for match in strict:
+        resolved_components.update(by_pixel[pixel] for pixel in match.pixels)
+    unresolved_components = set(range(len(components))) - resolved_components
+    if not unresolved_components:
+        return strict
+
+    permissive = exact_matches(
+        ink,
+        width,
+        height,
+        models,
+        require_whole_components=False,
+    )
+    partial = [
+        match
+        for match in permissive
+        if any(by_pixel[pixel] in unresolved_components for pixel in match.pixels)
+    ]
+
+    # Preserve deterministic order while avoiding duplicate strict/permissive placements.
+    seen = {
+        (match.label, match.style, match.x, match.baseline, match.pixels)
+        for match in strict
+    }
+    out = list(strict)
+    for match in partial:
+        key = (match.label, match.style, match.x, match.baseline, match.pixels)
+        if key not in seen:
+            seen.add(key)
+            out.append(match)
+    return out
+
+
 def exact_matches_by_safe_gaps(
     ink: set[tuple[int, int]],
     width: int,
     height: int,
     models: Iterable[GlyphModel],
 ) -> tuple[list[Match], list[tuple[int, int]]]:
-    """Generate exact placements inside provably independent x-groups.
-
-    Individual candidates may own only part of a 4-connected source component;
-    the partition solver later requires collective ownership. This is what lets
-    two printed glyphs that touch by an edge remain separate.
-    """
+    """Generate exact placements inside provably independent x-groups."""
     model_rows = list(models)
     internal_gap = max_internal_blank_run(model_rows)
     groups = safe_ink_groups(ink, max_internal_gap=internal_gap)
@@ -125,13 +170,7 @@ def exact_matches_by_safe_gaps(
     for left, right, local_ink in groups:
         group_width = right - left
         bounds.append((left, right))
-        local = exact_matches(
-            local_ink,
-            group_width,
-            height,
-            model_rows,
-            require_whole_components=False,
-        )
+        local = _component_aware_candidates(local_ink, group_width, height, model_rows)
         candidates.extend(_shift_match(match, left) for match in local)
     return candidates, bounds
 
@@ -147,9 +186,9 @@ def select_best_baseline_partition_by_safe_gaps(
     """Choose one baseline while solving independent safe groups separately.
 
     White gaps wider than every learned glyph's internal blank run prove that no
-    exact placement can cross a group boundary. Within each group several glyphs
-    may collectively own one touching source component, but the final selection
-    may not leave a touched component only partly covered.
+    exact placement can cross a group boundary. Strict whole-component matching
+    is used by default; permissive partitioning is generated only for components
+    that have no strict glyph candidate and may therefore contain touching glyphs.
     """
     model_rows = list(models)
     internal_gap = max_internal_blank_run(model_rows)
@@ -163,13 +202,7 @@ def select_best_baseline_partition_by_safe_gaps(
     bounds: list[tuple[int, int]] = []
     baselines: set[int] = set()
     for left, right, local_ink in groups:
-        local = exact_matches(
-            local_ink,
-            right - left,
-            height,
-            model_rows,
-            require_whole_components=False,
-        )
+        local = _component_aware_candidates(local_ink, right - left, height, model_rows)
         shifted = [_shift_match(match, left) for match in local]
         candidates_by_group.append(shifted)
         local_inks.append({(x + left, y) for x, y in local_ink})
