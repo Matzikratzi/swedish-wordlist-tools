@@ -6,22 +6,44 @@ from pathlib import Path
 from .ocr_column_row_segmentation import segment_page_rows
 from .ocr_glyph_matcher import load_facit
 from .ocr_prepare_sequential_page import _load_source_image, read_jsonl, source_for_page
-from .ocr_probe_row_glyphs import analyse_row_exact, render_exact_markup, render_exact_text
+from .ocr_probe_row_glyphs import analyse_row_exact, exact_text_runs, render_exact_text
 from .ocr_row_map_words import _persistent_left_rule_x, _row_crop_box
+
+SUPERSCRIPT_DIGITS = {
+    "⁰": "0",
+    "¹": "1",
+    "²": "2",
+    "³": "3",
+    "⁴": "4",
+    "⁵": "5",
+    "⁶": "6",
+    "⁷": "7",
+    "⁸": "8",
+    "⁹": "9",
+}
 
 
 def _sorted_matches(matches):
     return sorted(matches, key=lambda match: (match.x, match.baseline, match.label, match.style))
 
 
+def _is_superscript_digit(match) -> bool:
+    return match.label in SUPERSCRIPT_DIGITS
+
+
 def row_starts_headword(matches) -> bool:
     rows = _sorted_matches(matches)
-    return bool(rows) and rows[0].style == "bold"
+    index = 0
+    while index < len(rows) and _is_superscript_digit(rows[index]):
+        index += 1
+    return index < len(rows) and rows[index].style == "bold"
 
 
 def _initial_headword_end(matches) -> int:
     rows = _sorted_matches(matches)
     index = 0
+    while index < len(rows) and _is_superscript_digit(rows[index]):
+        index += 1
     while index < len(rows) and rows[index].style == "bold":
         index += 1
     return index
@@ -35,11 +57,64 @@ def _flatten(article_rows: list[dict]) -> list[tuple[int, object]]:
     return flattened
 
 
-def _render_range(article_rows: list[dict], start: int, end: int, *, markup: bool) -> str:
+def _wrap_run(text: str, style: str, *, markup: bool) -> str:
+    if not markup:
+        return text
+    if style == "bold":
+        return f"<b>{text}</b>"
+    if style == "italic":
+        return f"<i>{text}</i>"
+    return text
+
+
+def _render_saol_matches(matches, source_ink, *, markup: bool) -> tuple[str, int]:
+    """Render exact glyphs while preserving SAOL-specific spacing evidence.
+
+    The normal renderer trusts measured blank columns.  SAOL inflection notation
+    additionally guarantees that a new ``~`` token is preceded by whitespace.
+    If the measured geometry misses that whitespace, insert it in the semantic
+    rendering but count the insertion as a diagnostic rather than hiding it.
+
+    Superscript digits are separate exact glyph models (for example ``¹``), so
+    their smaller/raised raster remains distinct from an ordinary digit.  In
+    markup output they are serialized as ``<sup>1</sup>`` etc.
+    """
+    runs = exact_text_runs(matches, source_ink=source_ink)
+    pieces: list[str] = []
+    previous_logical = ""
+    forced_spaces = 0
+    for run in runs:
+        text = run["text"]
+        style = run["style"]
+        if style == "space":
+            pieces.append(text)
+            if text:
+                previous_logical = text[-1]
+            continue
+
+        transformed: list[str] = []
+        for ch in text:
+            if ch == "~" and previous_logical and not previous_logical.isspace() and previous_logical != "~":
+                transformed.append(" ")
+                previous_logical = " "
+                forced_spaces += 1
+            if markup and ch in SUPERSCRIPT_DIGITS:
+                transformed.append(f"<sup>{SUPERSCRIPT_DIGITS[ch]}</sup>")
+            else:
+                transformed.append(ch)
+            previous_logical = ch
+        pieces.append(_wrap_run("".join(transformed), style, markup=markup))
+    return "".join(pieces), forced_spaces
+
+
+def _render_range_with_diagnostics(
+    article_rows: list[dict], start: int, end: int, *, markup: bool
+) -> tuple[str, int]:
     if start >= end:
-        return ""
+        return "", 0
     cursor = 0
     pieces: list[str] = []
+    forced_spaces = 0
     for row in article_rows:
         matches = _sorted_matches(row["matches"])
         row_start = cursor
@@ -48,27 +123,33 @@ def _render_range(article_rows: list[dict], start: int, end: int, *, markup: boo
         take_end = min(end, row_end)
         if take_start < take_end:
             selected = matches[take_start - row_start : take_end - row_start]
-            renderer = render_exact_markup if markup else render_exact_text
-            piece = renderer(selected, source_ink=row.get("ink")).strip()
+            piece, forced = _render_saol_matches(selected, row.get("ink"), markup=markup)
+            piece = piece.strip()
             if piece:
                 pieces.append(piece)
+            forced_spaces += forced
         cursor = row_end
         if cursor >= end:
             break
-    return " ".join(pieces)
+    return " ".join(pieces), forced_spaces
+
+
+def _render_range(article_rows: list[dict], start: int, end: int, *, markup: bool) -> str:
+    return _render_range_with_diagnostics(article_rows, start, end, markup=markup)[0]
 
 
 def build_exact_article(rows: list[dict]) -> dict:
     """Build one SAOL article from consecutive exact physical rows.
 
-    The first row must start with a bold headword. A later physical row that
-    starts in bold belongs to the next article and is not consumed. Digits do
-    not end an article: once the first numbered explanation begins, the rest of
-    the physical rows remain part of the same article until the next headword.
+    The first row must start with a bold headword, optionally preceded by a
+    superscript homonym digit. A later physical row with the same shape begins
+    the next article and is not consumed. Digits do not end an article: once
+    the first numbered explanation begins, the remaining physical rows still
+    belong to the article until the next headword.
 
     The JSONL-like ``text`` field still ends when explanation text begins, at
-    either the raised ¤ marker or the first numbered explanation. This keeps
-    field boundaries separate from article boundaries.
+    either the raised ¤ marker or the first ordinary numbered explanation. This
+    keeps field boundaries separate from article boundaries.
     """
     if not rows:
         raise ValueError("article needs at least one physical row")
@@ -102,6 +183,7 @@ def build_exact_article(rows: list[dict]) -> dict:
             explanation_reason = "numbered-explanation"
             break
 
+    markup, forced_spaces = _render_range_with_diagnostics(article_rows, 0, len(flat), markup=True)
     return {
         "rows_consumed": len(article_rows),
         "fully_exact": all(bool(row.get("fully_exact", True)) for row in article_rows),
@@ -110,7 +192,8 @@ def build_exact_article(rows: list[dict]) -> dict:
         "text": _render_range(article_rows, text_start, explanation_start, markup=False),
         "boundary": explanation_reason,
         "remainder": _render_range(article_rows, explanation_start, len(flat), markup=True),
-        "markup": _render_range(article_rows, 0, len(flat), markup=True),
+        "markup": markup,
+        "forced_space_before_tilde": forced_spaces,
     }
 
 
@@ -175,7 +258,8 @@ def main() -> int:
 
     print(
         f"page={args.page} column={args.column} start_row={args.row} "
-        f"rows_consumed={article['rows_consumed']} fully_exact={article['fully_exact']}"
+        f"rows_consumed={article['rows_consumed']} fully_exact={article['fully_exact']} "
+        f"forced_space_before_tilde={article['forced_space_before_tilde']}"
     )
     for row in rows[: article["rows_consumed"]]:
         print(
