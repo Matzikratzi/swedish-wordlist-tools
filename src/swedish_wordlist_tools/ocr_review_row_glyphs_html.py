@@ -60,6 +60,26 @@ def _png_data_uri(crop) -> str:
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
 
 
+def _trim_leading_white_columns(crop, *, threshold: int = 210, keep: int = 2):
+    """Trim purely empty left margin while retaining a small visual cushion."""
+    gray = crop.convert("L")
+    pixels = gray.load()
+    first_ink = next(
+        (
+            x
+            for x in range(gray.width)
+            if any(pixels[x, y] < threshold for y in range(gray.height))
+        ),
+        None,
+    )
+    if first_ink is None:
+        return gray, 0
+    trim = max(0, first_ink - max(0, int(keep)))
+    if trim == 0:
+        return gray, 0
+    return gray.crop((trim, 0, gray.width, gray.height)), trim
+
+
 def load_review_state(jsonl: Path, page_number: int, column: int, row_index: int, facit: Path, threshold: int = 210) -> dict:
     rows = list(read_jsonl(jsonl))
     source = source_for_page(rows, page_number)
@@ -78,6 +98,9 @@ def load_review_state(jsonl: Path, page_number: int, column: int, row_index: int
     content_left = rule_x + 2 if rule_x is not None else None
     box = _row_crop_box(row, column=column, page_width=page.width, page_height=page.height, pad_y=1, left_override=content_left)
     crop = page.crop(box).convert("L")
+    crop, trimmed_left = _trim_leading_white_columns(crop, threshold=threshold, keep=2)
+    if trimmed_left:
+        box = (box[0] + trimmed_left, box[1], box[2], box[3])
     result = analyse_row_exact(crop, load_facit(facit), threshold=threshold)
     selected = result["selected"]
     covered = set().union(*(match.pixels for match in selected)) if selected else set()
