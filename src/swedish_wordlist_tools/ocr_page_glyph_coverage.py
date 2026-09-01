@@ -41,16 +41,18 @@ def _has_real_text(value: object) -> bool:
 
 
 def reference_headword_key(row: dict) -> str:
-    """Return the printed headword key, using JSONL homonr when available.
+    """Return the printed headword key, respecting real homonym markup only.
 
-    ``homonr`` is authoritative for homonym numbering.  ``stycke`` still gives
-    us the printed base headword, including SAOL boundary marks such as ``·``.
-    This avoids relying on the serialized ``<sup>N</sup>`` markup for the number.
+    SAOL JSONL commonly carries ``homonr='1'`` even for an ordinary, unnumbered
+    headword.  A homonym number is printed only when ``stycke`` itself has a
+    leading ``<sup>N</sup>`` marker.  In that case ``homonr`` is authoritative
+    for the number; otherwise ``homonr`` must not invent a printed superscript.
     """
     headword = html.unescape(_reference_headword(row))
-    homonr = str(row.get("homonr") or "").strip()
-    if homonr:
+    match = LEADING_SUP_RE.match(headword)
+    if match:
         base = LEADING_SUP_RE.sub("", headword, count=1)
+        homonr = str(row.get("homonr") or "").strip() or match.group(1)
         return _headword_key(f"{homonr}{base}")
     return _headword_key(headword)
 
@@ -91,7 +93,10 @@ def glyph_coverage_report(columns: list[list[dict]]) -> dict:
                     }
                 )
 
-    misses.sort(key=lambda item: (-item["unknown_pixels"], item["column"], item["row"]))
+    # Keep the normal report in physical reading order.  A worst-first list is
+    # easy to derive, but page order is much more useful while stepping through
+    # the glyph editor row by row.
+    misses.sort(key=lambda item: (item["column"], item["row"]))
     return {
         "rows_total": rows_total,
         "rows_exact": rows_exact,
@@ -295,7 +300,7 @@ def main() -> int:
     )
     print(
         "scope: glyph_coverage=all segmented body-row ink; "
-        "jsonl_verification=headword (homonr authoritative) + available text prefix only"
+        "jsonl_verification=headword (printed homonym markers only) + available text prefix only"
     )
     print(
         "scope: pronunciation, explanations after ¤/number, and print after JSONL truncation "
