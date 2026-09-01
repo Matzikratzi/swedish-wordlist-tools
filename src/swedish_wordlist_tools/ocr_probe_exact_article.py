@@ -85,17 +85,7 @@ def _wrap_run(text: str, style: str, *, markup: bool) -> str:
 
 
 def _render_saol_matches(matches, source_ink, *, markup: bool) -> tuple[str, int]:
-    """Render exact glyphs while preserving SAOL-specific spacing evidence.
-
-    The normal renderer trusts measured blank columns.  SAOL inflection notation
-    additionally guarantees that a new ``~`` token is preceded by whitespace.
-    If the measured geometry misses that whitespace, insert it in the semantic
-    rendering but count the insertion as a diagnostic rather than hiding it.
-
-    Superscript digits are separate exact glyph models (for example ``¹``), so
-    their smaller/raised raster remains distinct from an ordinary digit.  In
-    markup output they are serialized as ``<sup>1</sup>`` etc.
-    """
+    """Render exact glyphs while preserving SAOL-specific spacing evidence."""
     runs = exact_text_runs(matches, source_ink=source_ink)
     pieces: list[str] = []
     previous_logical = ""
@@ -160,10 +150,15 @@ def _text_start_after_word_class(
 ) -> int:
     """Return the first glyph of text: immediately after SAOL's word class.
 
-    Pronunciation and the word-class abbreviation precede text.  Everything
+    Pronunciation and the word-class abbreviation precede text. Everything
     after the word class belongs to text until an explanation boundary, whether
-    it is roman or italic.  A semicolon printed immediately after the word class
+    it is roman or italic. A semicolon printed immediately after the word class
     is a field separator (``s.; pl. ~``), so skip that separator as well.
+
+    Some synthetic probes and partially recognised rows do not contain a
+    readable word-class marker. In that incomplete case only, fall back to the
+    first italic glyph. That fallback must never override a recognised word
+    class, because real SAOL text can begin in roman type.
     """
     for end in range(headword_end + 1, len(flat) + 1):
         _row_index, match = flat[end - 1]
@@ -178,23 +173,19 @@ def _text_start_after_word_class(
             if next_match.style == "roman" and next_match.label == ";":
                 end += 1
         return end
-    return len(flat)
+
+    return next(
+        (
+            index
+            for index, (_row_index, match) in enumerate(flat[headword_end:], start=headword_end)
+            if match.style == "italic"
+        ),
+        len(flat),
+    )
 
 
 def build_exact_article(rows: list[dict]) -> dict:
-    """Build one SAOL article from consecutive exact physical rows.
-
-    The first row must start with a bold headword, optionally preceded by a
-    superscript homonym digit. A later physical row with the same shape begins
-    the next article and is not consumed. Digits do not end an article: once
-    the first numbered explanation begins, the remaining physical rows still
-    belong to the article until the next headword.
-
-    The JSONL-like ``text`` field begins immediately after the word class and
-    ends when explanation text begins, at either the raised ¤ marker or the
-    first ordinary numbered explanation. This keeps field boundaries separate
-    from both typography and article boundaries.
-    """
+    """Build one SAOL article from consecutive exact physical rows."""
     if not rows:
         raise ValueError("article needs at least one physical row")
     if not row_starts_headword(rows[0].get("matches") or []):
@@ -209,7 +200,6 @@ def build_exact_article(rows: list[dict]) -> dict:
     flat = _flatten(article_rows)
     first_row_matches = _sorted_matches(article_rows[0]["matches"])
     headword_end = _initial_headword_end(first_row_matches)
-
     text_start = _text_start_after_word_class(article_rows, flat, headword_end)
 
     explanation_start = len(flat)
