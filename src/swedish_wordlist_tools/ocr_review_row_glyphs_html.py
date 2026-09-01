@@ -160,7 +160,7 @@ def load_review_state(jsonl: Path, page_number: int, column: int, row_index: int
 
 def selected_points(state: dict, ids: list[str]) -> set[tuple[int, int]]:
     if not ids:
-        raise ValueError("select at least one M/U box")
+        raise ValueError("select at least one glyph box")
     unknown = [item_id for item_id in ids if item_id not in state["point_sets"]]
     if unknown:
         raise ValueError("unknown selections: " + ", ".join(unknown))
@@ -197,7 +197,8 @@ canvas{{image-rendering:pixelated;cursor:pointer}} .controls{{display:flex;gap:1
 label{{display:flex;flex-direction:column;gap:4px}} label.inline{{flex-direction:row;align-items:center;gap:6px}}
 input,select,button{{font:inherit;padding:6px}} input[type=checkbox]{{padding:0}} button{{cursor:pointer}}
 .items{{display:flex;flex-wrap:wrap;gap:5px;margin:10px 0}} .chip{{border:2px solid #888;background:white;padding:5px 7px}}
-.chip.match{{border-color:#b22}} .chip.residual{{border-color:#c77b00}} .chip.selected{{background:#dcecff}}
+.chip.roman{{border-color:#1f6f8b;color:#174f63}} .chip.italic{{border-color:#98620c;color:#744a08}} .chip.bold{{border-color:#9b1c31;color:#781526;font-weight:700}}
+.chip.residual{{border-color:#c77b00;color:#8a5500}} .chip.selected{{background:#dcecff;box-shadow:0 0 0 2px #1769d2 inset}}
 code{{background:#eee;padding:2px 4px}} .msg{{font-weight:600;margin:8px 0}} .hint{{max-width:1000px}}
 </style></head><body>
 <h1>SAOL glyphgranskning – sida {state['page']}, kolumn {state['column']}, rad {state['row']}</h1>
@@ -219,14 +220,20 @@ code{{background:#eee;padding:2px 4px}} .msg{{font-weight:600;margin:8px 0}} .hi
 <label>Glyph<input name="label" id="label" size="5" required></label>
 <label>Stil<select name="style"><option>roman</option><option>italic</option><option>bold</option></select></label>
 <button name="action" value="add">Lägg till/slå ihop valda pixlar som glyph</button>
-<button name="action" value="relabel" type="submit">Rätta vald M-glyphs facitmodell</button>
+<button name="action" value="relabel" type="submit">Rätta vald glyphs facitmodell</button>
 </div></form>
-<p class="hint">Normalläge: klicka M/U-boxar. <b>Pixel-läge:</b> dra en rektangel över svarta pixlar för att välja bara en del av en sammanhängande komponent; klicka en enskild svart pixel för att växla just den. Håll <b>Alt</b> medan du drar för att ta bort pixlar ur valet. Därmed kan exempelvis ett ihoptryckt <b>t;</b> delas i två separata glyphar trots att trycksvärtan går ihop med pixels bredsida.</p>
+<p class="hint">Normalläge: klicka glyphboxar eller omatchade boxar. <b>Pixel-läge:</b> dra en rektangel över svarta pixlar för att välja bara en del av en sammanhängande komponent; klicka en enskild svart pixel för att växla just den. Håll <b>Alt</b> medan du drar för att ta bort pixlar ur valet. Därmed kan exempelvis ett ihoptryckt <b>t;</b> delas i två separata glyphar trots att trycksvärtan går ihop med pixels bredsida.</p>
 <script>
 const S={data}; const scale=7, topPad=34; const canvas=document.getElementById('row'), ctx=canvas.getContext('2d');
 const chosen=new Set(), chosenPixels=new Set(), sourceInk=new Set(S.source_ink_points.map(p=>p[0]+','+p[1])); const img=new Image(); img.src=S.image;
 const showGrid=document.getElementById('showGrid'), showBaseline=document.getElementById('showBaseline'), pixelMode=document.getElementById('pixelMode');
 let dragStart=null, dragNow=null, dragRemove=false;
+function styleColor(it){{
+ if(it.kind!=='match') return '#c77b00';
+ if(it.style==='bold') return '#9b1c31';
+ if(it.style==='italic') return '#98620c';
+ return '#1f6f8b';
+}}
 function drawGrid(){{
  if(!showGrid.checked) return;
  ctx.save(); ctx.strokeStyle='rgba(70,70,70,.22)'; ctx.lineWidth=1;
@@ -248,8 +255,8 @@ function draw(){{
  drawGrid(); drawBaseline();
  ctx.font='12px monospace'; ctx.textBaseline='bottom';
  for(const it of S.items){{const b=it.bbox,x=b.left*scale,y=topPad+b.top*scale,w=(b.right-b.left)*scale,h=(b.bottom-b.top)*scale;
-   const on=chosen.has(it.id); ctx.strokeStyle=on?'#1769d2':(it.kind==='match'?'#b22':'#c77b00');ctx.lineWidth=on?3:2;ctx.strokeRect(x,y,w,h);
-   ctx.fillStyle=ctx.strokeStyle;ctx.fillText(it.id+' '+it.label,x,topPad-3);
+   const on=chosen.has(it.id), color=styleColor(it); ctx.strokeStyle=on?'#1769d2':color;ctx.lineWidth=on?3:2;ctx.strokeRect(x,y,w,h);
+   ctx.fillStyle=on?'#1769d2':color;ctx.fillText(it.kind==='match'?it.label:'?',x,topPad-3);
  }}
  if(dragStart&&dragNow){{const x=Math.min(dragStart.x,dragNow.x)*scale,y=topPad+Math.min(dragStart.y,dragNow.y)*scale,w=(Math.abs(dragStart.x-dragNow.x)+1)*scale,h=(Math.abs(dragStart.y-dragNow.y)+1)*scale;ctx.strokeStyle=dragRemove?'#b22':'#1769d2';ctx.lineWidth=2;ctx.strokeRect(x,y,w,h);}}
 }}
@@ -261,7 +268,7 @@ function sync(){{
 }}
 function toggle(id){{chosen.has(id)?chosen.delete(id):chosen.add(id);sync();}}
 function canvasPixel(e){{const r=canvas.getBoundingClientRect();return {{x:Math.max(0,Math.min(S.crop_width-1,Math.floor((e.clientX-r.left)*(canvas.width/r.width)/scale))),y:Math.max(0,Math.min(S.crop_height-1,Math.floor(((e.clientY-r.top)*(canvas.height/r.height)-topPad)/scale)))}};}}
-for(const it of S.items){{const b=document.createElement('button');b.type='button';b.dataset.id=it.id;b.className='chip '+it.kind;b.textContent=it.id+' '+(it.kind==='match'?JSON.stringify(it.label):'omatchad')+' · '+it.style+' · '+it.pixels+' px';b.onclick=()=>toggle(it.id);document.getElementById('items').appendChild(b);}}
+for(const it of S.items){{const b=document.createElement('button');b.type='button';b.dataset.id=it.id;b.className='chip '+it.kind+' '+it.style;b.textContent=(it.kind==='match'?JSON.stringify(it.label):'omatchad')+' · '+it.style+' · '+it.pixels+' px';b.onclick=()=>toggle(it.id);document.getElementById('items').appendChild(b);}}
 canvas.addEventListener('mousedown',e=>{{if(!pixelMode.checked)return;dragStart=canvasPixel(e);dragNow=dragStart;dragRemove=e.altKey;e.preventDefault();draw();}});
 canvas.addEventListener('mousemove',e=>{{if(!dragStart)return;dragNow=canvasPixel(e);draw();}});
 window.addEventListener('mouseup',e=>{{if(!dragStart)return;dragNow=canvasPixel(e);const x0=Math.min(dragStart.x,dragNow.x),x1=Math.max(dragStart.x,dragNow.x),y0=Math.min(dragStart.y,dragNow.y),y1=Math.max(dragStart.y,dragNow.y);for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){{const key=x+','+y;if(sourceInk.has(key)){{if(dragRemove)chosenPixels.delete(key);else if(x0===x1&&y0===y1&&chosenPixels.has(key))chosenPixels.delete(key);else chosenPixels.add(key);}}}}dragStart=null;dragNow=null;sync();}});
@@ -301,15 +308,15 @@ def apply_edit(state: dict, facit: Path, form: dict[str, list[str]]) -> str:
         return f"{outcome}: {label!r}/{style} från {origin}"
     if action == "relabel":
         if pixel_points:
-            raise ValueError("Rätta facitmodell använder M-glyph, inte handvalda pixlar")
+            raise ValueError("Rätta facitmodell använder vald glyph, inte handvalda pixlar")
         if len(ids) != 1 or not ids[0].startswith("M"):
-            raise ValueError("Rätta kräver exakt en vald M-glyph")
+            raise ValueError("Rätta kräver exakt en vald matchad glyph")
         index = int(ids[0][1:])
         match = state["matches"][index]
         pixels = normalize_points(set(match.pixels), int(match.baseline))
         relabel_exact_model(payload, old_label=match.label, old_style=match.style, pixels_relative_to_baseline=pixels, new_label=label, new_style=style)
         facit.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        return f"rättad: {ids[0]} {match.label!r}/{match.style} → {label!r}/{style}"
+        return f"rättad: {match.label!r}/{match.style} → {label!r}/{style}"
     raise ValueError(f"unknown action: {action!r}")
 
 
