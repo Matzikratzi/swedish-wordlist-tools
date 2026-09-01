@@ -6,7 +6,10 @@ from swedish_wordlist_tools.ocr_glyph_matcher import (
     exact_sequence_cover,
     select_best_baseline_partition,
 )
-from swedish_wordlist_tools.ocr_glyph_gap_matcher import select_best_baseline_partition_by_safe_gaps
+from swedish_wordlist_tools.ocr_glyph_gap_matcher import (
+    _component_aware_candidates,
+    select_best_baseline_partition_by_safe_gaps,
+)
 
 
 class TouchingGlyphPartitionTests(unittest.TestCase):
@@ -62,6 +65,15 @@ class TouchingGlyphPartitionTests(unittest.TestCase):
 
         self.assertIsNotNone(baseline)
         self.assertEqual(selected, [])
+
+    def test_resolved_component_does_not_generate_partial_subset_candidates(self):
+        semicolon = GlyphModel(";", "roman", frozenset({(0, -1), (0, 0)}), 1)
+        period = GlyphModel(".", "roman", frozenset({(0, -1)}), 1)
+        ink = {(2, 1), (2, 2)}
+
+        candidates = _component_aware_candidates(ink, 4, 4, [semicolon, period])
+
+        self.assertEqual([match.label for match in candidates], [";"])
 
 
 if __name__ == "__main__":
