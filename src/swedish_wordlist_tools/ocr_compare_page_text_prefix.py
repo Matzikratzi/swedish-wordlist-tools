@@ -28,6 +28,7 @@ from .ocr_row_map_words import _owned_row_crop, _persistent_left_rule_x, _row_cr
 
 TAG_RE = re.compile(r"<[^>]+>")
 SPACE_RE = re.compile(r"\s+")
+LEADING_HOMONYM_SPACE_RE = re.compile(r"^([0-9])\s+(?=\S)")
 SUPERSCRIPT_TRANSLATION = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
 
 
@@ -52,7 +53,13 @@ def text_prefix_matches(recovered: str, reference: str) -> bool:
 
 
 def _headword_key(value: object) -> str:
-    return canonical_printed_text(value).casefold()
+    text = canonical_printed_text(value)
+    # A raised homonym digit is typographically separated from the bold lemma in
+    # the scan, so pixel spacing may render ``¹ a``. JSONL encodes the same
+    # lexical headword as ``<sup>1</sup>a`` without a space. Normalize that one
+    # semantic boundary only; ordinary spaces elsewhere in headwords remain real.
+    text = LEADING_HOMONYM_SPACE_RE.sub(r"\1", text)
+    return text.casefold()
 
 
 def _reference_headword(row: dict) -> str:
