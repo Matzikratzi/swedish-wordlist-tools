@@ -7,7 +7,7 @@ from .ocr_column_row_segmentation import segment_page_rows
 from .ocr_glyph_matcher import load_facit
 from .ocr_prepare_sequential_page import _load_source_image, read_jsonl, source_for_page
 from .ocr_probe_row_glyphs import analyse_row_exact
-from .ocr_row_map_words import _persistent_left_rule_x, _row_crop_box
+from .ocr_row_map_words import _owned_row_crop, _persistent_left_rule_x, _row_crop_box
 
 
 def component_pixels(unmatched: set[tuple[int, int]], component: dict) -> set[tuple[int, int]]:
@@ -76,7 +76,7 @@ def main() -> int:
         pad_y=1,
         left_override=content_left,
     )
-    crop = page.crop(box).convert("L")
+    crop, removed_neighbor_pixels = _owned_row_crop(page, row, box, threshold=args.threshold)
     models = load_facit(args.facit)
     result = analyse_row_exact(crop, models, threshold=args.threshold)
     selected = result["selected"]
@@ -85,7 +85,8 @@ def main() -> int:
 
     print(
         f"page={args.page} column={args.column} row={args.row} "
-        f"unmatched={len(unmatched)} components={len(result['unmatched_components'])}"
+        f"unmatched={len(unmatched)} components={len(result['unmatched_components'])} "
+        f"removed_neighbor_pixels={removed_neighbor_pixels}"
     )
     for index, item in enumerate(result["unmatched_components"]):
         page_left = box[0] + item["left"]
