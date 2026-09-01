@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from swedish_wordlist_tools.ocr_glyph_matcher import Match
-from swedish_wordlist_tools.ocr_probe_exact_article import build_exact_article
+from swedish_wordlist_tools.ocr_probe_exact_article import build_exact_article, row_starts_headword
 
 
 class ExactArticleProbeTests(unittest.TestCase):
@@ -56,6 +56,7 @@ class ExactArticleProbeTests(unittest.TestCase):
         self.assertEqual(article["text"], "~n; pl. ~")
         self.assertEqual(article["boundary"], "numbered-explanation")
         self.assertEqual(article["remainder"], "1 (åld.) etiopier 2 en katt")
+        self.assertEqual(article["forced_space_before_tilde"], 0)
         self.assertEqual(
             article["markup"],
             "<b>ab</b> [x] s. <i>~n;</i> pl. <i>~</i> 1 (åld.) etiopier 2 en katt",
@@ -76,6 +77,49 @@ class ExactArticleProbeTests(unittest.TestCase):
         self.assertEqual(article["text"], "~n")
         self.assertEqual(article["boundary"], "explanation-marker")
         self.assertEqual(article["remainder"], "¤ en fisk")
+
+    def test_missing_geometric_space_before_tilde_is_forced_and_flagged(self) -> None:
+        rows = [
+            self.row([
+                ("a", "bold", 0, 2),
+                ("~", "italic", 6, 2), ("e", "italic", 8, 2), ("n", "italic", 10, 2),
+                # Only one blank source column before the second tilde: too small
+                # for the normal four-column whitespace detector.
+                ("~", "italic", 14, 2), ("e", "italic", 16, 2), ("r", "italic", 18, 2),
+            ]),
+        ]
+        article = build_exact_article(rows)
+        self.assertEqual(article["text"], "~en ~er")
+        self.assertEqual(article["forced_space_before_tilde"], 1)
+        self.assertEqual(article["markup"], "<b>a</b> <i>~en ~er</i>")
+
+    def test_double_tilde_is_not_split(self) -> None:
+        rows = [
+            self.row([
+                ("a", "bold", 0, 2),
+                ("~", "italic", 6, 1), ("~", "italic", 7, 1), ("n", "italic", 8, 1),
+            ]),
+        ]
+        article = build_exact_article(rows)
+        self.assertEqual(article["text"], "~~n")
+        self.assertEqual(article["forced_space_before_tilde"], 0)
+
+    def test_superscript_digit_can_precede_bold_headword(self) -> None:
+        row = self.row([
+            ("¹", "roman", 0, 1),
+            ("a", "bold", 3, 2),
+            ("s", "roman", 9, 2), (".", "roman", 11, 1),
+            ("~", "italic", 16, 2), ("n", "italic", 18, 2),
+        ])
+        self.assertTrue(row_starts_headword(row["matches"]))
+        article = build_exact_article([row])
+        self.assertEqual(article["stycke"], "¹a")
+        self.assertEqual(article["text"], "~n")
+        self.assertEqual(article["markup"], "<sup>1</sup><b>a</b> s. <i>~n</i>")
+
+    def test_ordinary_digit_before_bold_is_not_superscript_headword(self) -> None:
+        row = self.row([("1", "roman", 0, 1), ("a", "bold", 3, 2)])
+        self.assertFalse(row_starts_headword(row["matches"]))
 
     def test_requires_bold_headword_on_first_row(self) -> None:
         with self.assertRaisesRegex(ValueError, "bold headword"):
