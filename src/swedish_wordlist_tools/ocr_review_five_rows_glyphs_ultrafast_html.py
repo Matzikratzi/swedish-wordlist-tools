@@ -13,13 +13,17 @@ from .ocr_probe_row_glyphs_grouped import analyse_row_exact_grouped
 # so no other editor behaviour changes.
 fast.analyse_row_exact = analyse_row_exact_grouped
 
-# Add a narrowly scoped destructive action to the same editor. Keep references
-# to the original renderer before monkeypatching so the wrapper cannot recurse.
+# Add a narrowly scoped destructive action to the same editor. Capture both
+# original callables before monkeypatching; otherwise the non-delete path would
+# call the patched function recursively instead of saving add/relabel edits.
 _original_render_html = fast.ui.editor.render_html
+_original_apply_edit = fast.legacy.apply_edit
 fast.ui.editor.render_html = lambda state, message="": render_html_with_delete(
     _original_render_html, state, message
 )
-fast.legacy.apply_edit = apply_edit_with_delete
+fast.legacy.apply_edit = lambda state, facit, form: apply_edit_with_delete(
+    _original_apply_edit, state, facit, form
+)
 
 
 def main() -> int:
