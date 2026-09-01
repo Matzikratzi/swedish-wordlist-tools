@@ -73,17 +73,24 @@ class UltrafastFiveRowGlyphReviewTests(unittest.TestCase):
             "page": 1,
             "column": 0,
             "row": 44,
+            "crop_box": (10, 20, 30, 32),
+            "row_page_top": 21,
+            "row_page_bottom": 31,
             "covered_pixels": 9,
             "source_pixels": 10,
-            "removed_neighbor_pixels": 0,
+            "fully_exact": False,
+            "removed_neighbor_pixels": 2,
             "text": "x",
-            "markup": "x",
+            "markup": "<i>x</i>",
             "crop_width": 20,
             "crop_height": 10,
             "baseline": 7,
             "image": "data:image/png;base64,AA==",
             "source_ink_points": [[1, 1]],
-            "items": [],
+            "items": [
+                {"id": "M00", "kind": "match", "label": "]", "style": "roman", "pixels": 7, "bbox": {"left": 1, "top": 1, "right": 3, "bottom": 8}},
+                {"id": "U00", "kind": "residual", "label": "?", "style": "unknown", "pixels": 1, "bbox": {"left": 4, "top": 8, "right": 5, "bottom": 9}},
+            ],
             "point_sets": {},
             "matches": [],
             "neighbor_raster_image": "data:image/png;base64,AA==",
@@ -92,12 +99,26 @@ class UltrafastFiveRowGlyphReviewTests(unittest.TestCase):
             "neighbor_core_top": 8,
             "neighbor_core_bottom": 18,
             "neighbor_probe_y": 8,
+            "neighbor_page_top": 13,
+            "neighbor_page_bottom": 39,
         }
         document = ultrafast.render_html_with_neighbor_raster(state)
         self.assertIn('id="showNeighbors"', document)
         self.assertIn('id="neighborRow"', document)
         self.assertIn("Grannradsraster", document)
         self.assertIn("neighbor_core_top", document)
+        self.assertIn('id="copyDiagnostics"', document)
+        self.assertIn("Kopiera diagnostik", document)
+        self.assertIn("navigator.clipboard.writeText", document)
+        self.assertIn("Same visible pixel grid as the main glyph editor", document)
+
+        diagnostics = ultrafast.diagnostic_text(state)
+        self.assertIn("page=1 column=0 row=44", diagnostics)
+        self.assertIn("coverage=9/10 fully_exact=False", diagnostics)
+        self.assertIn("removed_neighbor_pixels=2", diagnostics)
+        self.assertIn("core_y=8..18", diagnostics)
+        self.assertIn("M00 kind=match label=']' style=roman pixels=7", diagnostics)
+        self.assertNotIn("data:image", diagnostics)
 
 
 if __name__ == "__main__":
