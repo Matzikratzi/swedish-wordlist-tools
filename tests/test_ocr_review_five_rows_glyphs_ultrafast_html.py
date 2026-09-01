@@ -6,6 +6,10 @@ from swedish_wordlist_tools.ocr_probe_row_glyphs_grouped import analyse_row_exac
 
 
 class UltrafastFiveRowGlyphReviewTests(unittest.TestCase):
+    def tearDown(self):
+        if hasattr(ultrafast._post_context, "active_position"):
+            del ultrafast._post_context.active_position
+
     def test_fast_editor_is_patched_to_grouped_matcher(self):
         self.assertIs(ultrafast.fast, fast)
         self.assertIs(fast.analyse_row_exact, analyse_row_exact_grouped)
@@ -46,6 +50,23 @@ class UltrafastFiveRowGlyphReviewTests(unittest.TestCase):
             'action="/?column=0&amp;row=15&amp;mode=defects',
             document,
         )
+
+    def test_failed_post_fallback_stays_on_active_row(self):
+        ultrafast._post_context.active_position = (1, 14)
+        location = ultrafast.row_url_preserving_failed_post((0, 10))
+        self.assertEqual(location, ultrafast._original_row_url((1, 14)))
+        self.assertFalse(hasattr(ultrafast._post_context, "active_position"))
+
+    def test_success_redirect_preserves_active_row_mode_and_anchor(self):
+        ultrafast._post_context.active_position = (1, 14)
+        location = ultrafast.row_url_preserving_failed_post(
+            (1, 14), mode="defects", anchor=(1, 14)
+        )
+        self.assertEqual(
+            location,
+            ultrafast._original_row_url((1, 14), mode="defects", anchor=(1, 14)),
+        )
+        self.assertFalse(hasattr(ultrafast._post_context, "active_position"))
 
 
 if __name__ == "__main__":
