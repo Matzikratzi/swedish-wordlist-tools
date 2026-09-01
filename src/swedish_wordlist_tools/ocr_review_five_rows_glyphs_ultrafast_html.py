@@ -5,6 +5,7 @@ import threading
 
 from . import ocr_review_five_rows_glyphs_fast_html as fast
 from .ocr_glyph_review_delete import apply_edit_with_delete, render_html_with_delete
+from .ocr_neighbor_row_raster import add_neighbor_row_raster
 from .ocr_probe_row_glyphs_grouped import analyse_row_exact_grouped
 
 
@@ -16,14 +17,83 @@ from .ocr_probe_row_glyphs_grouped import analyse_row_exact_grouped
 # so no other editor behaviour changes.
 fast.analyse_row_exact = analyse_row_exact_grouped
 
+# Add an unfiltered narrow source raster around the target row. This is
+# diagnostic only: matching still uses the conservative owned-row crop.
+_original_load_review_state_fast = fast.load_review_state_fast
+
+
+def load_review_state_with_neighbors(context, position, models):
+    state = _original_load_review_state_fast(context, position, models)
+    return add_neighbor_row_raster(context, state, probe_y=8)
+
+
+fast.load_review_state_fast = load_review_state_with_neighbors
+
 # Add a narrowly scoped destructive action to the same editor. Keep references
 # to the original renderer and edit handler before monkeypatching so wrappers
 # cannot recurse.
 _original_render_html = fast.ui.editor.render_html
 _original_apply_edit = fast.legacy.apply_edit
-fast.ui.editor.render_html = lambda state, message="": render_html_with_delete(
-    _original_render_html, state, message
-)
+
+
+def render_html_with_neighbor_raster(state, message=""):
+    document = render_html_with_delete(_original_render_html, state, message)
+    if not state.get("neighbor_raster_image"):
+        return document
+
+    controls_needle = '<span id="pixelCount">0 valda pixlar</span>\n</div>'
+    controls_replacement = (
+        '<span id="pixelCount">0 valda pixlar</span>\n'
+        '<label class="inline"><input type="checkbox" id="showNeighbors"> Visa grannrader</label>\n'
+        '</div>'
+    )
+    if controls_needle not in document:
+        raise ValueError("could not find editor controls for neighbor raster")
+    document = document.replace(controls_needle, controls_replacement, 1)
+
+    rowbox_needle = '<div class="rowbox"><canvas id="row"></canvas></div>'
+    neighbor_box = rowbox_needle + '''
+<div id="neighborWrap" style="display:none;margin:10px 0 18px">
+  <div><b>Grannradsraster</b> – ofiltrerad källa. Röda linjer avgränsar målradens egentliga område; pixlar ovanför/under är endast observation.</div>
+  <div class="rowbox" style="padding-top:36px"><canvas id="neighborRow"></canvas></div>
+</div>'''
+    if rowbox_needle not in document:
+        raise ValueError("could not find editor row canvas for neighbor raster")
+    document = document.replace(rowbox_needle, neighbor_box, 1)
+
+    script = r'''
+<script>
+(() => {
+  const checkbox=document.getElementById('showNeighbors');
+  const wrap=document.getElementById('neighborWrap');
+  const canvas=document.getElementById('neighborRow');
+  if(!checkbox || !wrap || !canvas || !S.neighbor_raster_image) return;
+  const ctx=canvas.getContext('2d'), nscale=7, ntop=34;
+  const nimg=new Image(); nimg.src=S.neighbor_raster_image;
+  function drawNeighbor(){
+    canvas.width=S.neighbor_raster_width*nscale;
+    canvas.height=S.neighbor_raster_height*nscale+ntop;
+    ctx.imageSmoothingEnabled=false;
+    ctx.fillStyle='white';ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.drawImage(nimg,0,ntop,S.neighbor_raster_width*nscale,S.neighbor_raster_height*nscale);
+    ctx.save();
+    ctx.strokeStyle='rgba(190,25,25,.95)';ctx.lineWidth=2;
+    for(const yy of [S.neighbor_core_top,S.neighbor_core_bottom]){
+      const y=ntop+yy*nscale+.5;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(canvas.width,y);ctx.stroke();
+    }
+    ctx.fillStyle='rgba(190,25,25,.95)';ctx.font='12px monospace';ctx.textBaseline='bottom';
+    ctx.fillText('målrad '+S.neighbor_core_top+'..'+S.neighbor_core_bottom+' px',4,ntop-3);
+    ctx.restore();
+  }
+  checkbox.addEventListener('change',()=>{wrap.style.display=checkbox.checked?'block':'none';if(checkbox.checked)drawNeighbor();});
+  nimg.onload=()=>{if(checkbox.checked)drawNeighbor();};
+})();
+</script>
+'''
+    return document.replace('</body>', script + '</body>', 1)
+
+
+fast.ui.editor.render_html = render_html_with_neighbor_raster
 
 # Remember the actual row being edited for the lifetime of one POST request.
 # ThreadingHTTPServer uses a request thread, so thread-local state avoids one
@@ -121,6 +191,7 @@ def main() -> int:
     print("review: vald matchad glyph kan raderas ur facit för att delas om", flush=True)
     print("review: glyphändringar POST:as alltid till den faktiskt aktiva raden", flush=True)
     print("review: sparfel stannar på aktiv rad och skrivs ut i terminalen", flush=True)
+    print("review: Visa grannrader visar ofiltrerat raster ±8 px runt målradens gränser", flush=True)
     return fast.main()
 
 
