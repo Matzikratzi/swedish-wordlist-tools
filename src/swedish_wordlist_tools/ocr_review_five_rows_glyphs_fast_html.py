@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import threading
 import webbrowser
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -45,7 +46,7 @@ def build_page_context(jsonl: Path, page_number: int, threshold: int = 210) -> d
 
 
 def load_review_state_fast(context: dict, position: tuple[int, int], models) -> dict:
-    """Analyse only one row; page loading and segmentation are already done."""
+    """Analyse one row while reusing page loading and segmentation."""
     column, row_index = position
     page = context["page"]
     row_map = context["row_map"]
@@ -81,25 +82,29 @@ def load_review_state_fast(context: dict, position: tuple[int, int], models) -> 
         item_id = f"M{index:02d}"
         points = frozenset(match.pixels)
         point_sets[item_id] = points
-        items.append({
-            "id": item_id,
-            "kind": "match",
-            "label": match.label,
-            "style": match.style,
-            "pixels": len(points),
-            "bbox": legacy._bbox(set(points)),
-        })
+        items.append(
+            {
+                "id": item_id,
+                "kind": "match",
+                "label": match.label,
+                "style": match.style,
+                "pixels": len(points),
+                "bbox": legacy._bbox(set(points)),
+            }
+        )
     for index, points in enumerate(residuals):
         item_id = f"U{index:02d}"
         point_sets[item_id] = points
-        items.append({
-            "id": item_id,
-            "kind": "residual",
-            "label": "?",
-            "style": "unknown",
-            "pixels": len(points),
-            "bbox": legacy._bbox(set(points)),
-        })
+        items.append(
+            {
+                "id": item_id,
+                "kind": "residual",
+                "label": "?",
+                "style": "unknown",
+                "pixels": len(points),
+                "bbox": legacy._bbox(set(points)),
+            }
+        )
 
     return {
         "source": context["source"],
@@ -127,37 +132,101 @@ def load_review_state_fast(context: dict, position: tuple[int, int], models) -> 
 
 
 class SynchronizedStateCache:
-    """Cache row states and prevent duplicate concurrent computation."""
+    """Generation cache with one lock per physical row.
+
+    After adding glyphs, old exact rows remain useful for defect scanning: adding
+    models cannot make their already complete pixel cover incomplete.  Old
+    defective rows are reanalysed lazily.  A normal ``get`` always refreshes a
+    stale row before displaying it, so labels/text still reflect the newest
+    facit.  Per-row locks prevent duplicate work without serialising unrelated
+    rows.
+    """
 
     def __init__(self, loader):
         self.loader = loader
-        self._lock = threading.RLock()
-        self._states: dict[tuple[int, int], dict] = {}
+        self._meta_lock = threading.RLock()
+        self._states: dict[tuple[int, int], tuple[int, dict]] = {}
+        self._row_locks: dict[tuple[int, int], threading.Lock] = {}
         self._generation = 0
 
+    def _row_lock(self, position: tuple[int, int]) -> threading.Lock:
+        with self._meta_lock:
+            return self._row_locks.setdefault(position, threading.Lock())
+
+    def facit_changed(self, reason: str) -> None:
+        with self._meta_lock:
+            self._generation += 1
+            exact = sum(1 for _generation, state in self._states.values() if not ui.is_defective(state))
+            defective = len(self._states) - exact
+            print(
+                f"review: facit generation {self._generation} ({reason}); "
+                f"behåller {exact} kända exakta rader, {defective} defekta blir stale",
+                flush=True,
+            )
+
     def clear(self, reason: str) -> None:
-        with self._lock:
+        """Hard reset, used for the explicit manual recompute button and tests."""
+        with self._meta_lock:
             count = len(self._states)
             self._states.clear()
             self._generation += 1
             if count:
                 print(f"review: tömmer {count} analyserade rader ({reason})", flush=True)
 
-    def get(self, position: tuple[int, int]) -> dict:
-        # Deliberately hold the lock during the row calculation. There are only
-        # five visible rows, and this guarantees that browser request fan-out can
-        # never calculate the same missing row several times in parallel.
-        with self._lock:
-            cached = self._states.get(position)
+    def invalidate(self, position: tuple[int, int]) -> None:
+        with self._meta_lock:
+            self._states.pop(position, None)
+
+    def _cached(self, position: tuple[int, int], *, allow_stale_exact: bool) -> dict | None:
+        entry = self._states.get(position)
+        if entry is None:
+            return None
+        generation, state = entry
+        if generation == self._generation:
+            return state
+        if allow_stale_exact and not ui.is_defective(state):
+            return state
+        return None
+
+    def _get(self, position: tuple[int, int], *, allow_stale_exact: bool) -> dict:
+        with self._meta_lock:
+            cached = self._cached(position, allow_stale_exact=allow_stale_exact)
+        if cached is not None:
+            return cached
+
+        lock = self._row_lock(position)
+        with lock:
+            with self._meta_lock:
+                cached = self._cached(position, allow_stale_exact=allow_stale_exact)
+                generation = self._generation
             if cached is not None:
                 return cached
+
             column, row_index = position
-            print(f"review: analyserar kolumn {column}, rad {row_index} ...", flush=True)
+            print(f"review: analyserar kolumn {column}, rad {row_index} (gen {generation}) ...", flush=True)
             state = self.loader(position)
-            self._states[position] = state
+            with self._meta_lock:
+                # A facit edit cannot normally race this calculation because the
+                # browser POST is short, but never publish an old-generation row
+                # as current if it does.
+                publish_generation = generation
+                self._states[position] = (publish_generation, state)
             status = "exakt" if not ui.is_defective(state) else f"defekt {state['covered_pixels']}/{state['source_pixels']}"
             print(f"review: kolumn {column}, rad {row_index}: {status}", flush=True)
             return state
+
+    def get(self, position: tuple[int, int]) -> dict:
+        return self._get(position, allow_stale_exact=False)
+
+    def get_for_defect_scan(self, position: tuple[int, int]) -> dict:
+        return self._get(position, allow_stale_exact=True)
+
+    def get_many(self, positions: list[tuple[int, int]]) -> list[dict]:
+        if len(positions) <= 1:
+            return [self.get(position) for position in positions]
+        with ThreadPoolExecutor(max_workers=min(5, len(positions)), thread_name_prefix="glyph-row") as pool:
+            futures = [pool.submit(self.get, position) for position in positions]
+            return [future.result() for future in futures]
 
 
 def main() -> int:
@@ -181,12 +250,22 @@ def main() -> int:
 
     models_holder = {"models": load_facit(args.facit)}
     message = {"text": ""}
-    cache = SynchronizedStateCache(lambda pos: load_review_state_fast(context, pos, models_holder["models"]))
+    models_lock = threading.RLock()
 
-    def refresh_models(reason: str) -> None:
-        # Facit is mutable, geometry is not. Reload only the glyph bank.
-        models_holder["models"] = load_facit(args.facit)
-        cache.clear(reason)
+    def row_loader(position: tuple[int, int]) -> dict:
+        with models_lock:
+            models = models_holder["models"]
+        return load_review_state_fast(context, position, models)
+
+    cache = SynchronizedStateCache(row_loader)
+
+    def refresh_models(reason: str, *, hard: bool = False) -> None:
+        with models_lock:
+            models_holder["models"] = load_facit(args.facit)
+        if hard:
+            cache.clear(reason)
+        else:
+            cache.facit_changed(reason)
 
     class Handler(BaseHTTPRequestHandler):
         def _query(self) -> dict[str, list[str]]:
@@ -220,7 +299,12 @@ def main() -> int:
             anchor = self._anchor(query, position)
             if mode == "defects":
                 direction = -1 if (query.get("scan") or ["forward"])[0] == "backward" else 1
-                visible = ui.defect_packet(positions, anchor, cache.get, direction=direction)
+                visible = ui.defect_packet(
+                    positions,
+                    anchor,
+                    cache.get_for_defect_scan,
+                    direction=direction,
+                )
                 if visible:
                     anchor = visible[0]
             else:
@@ -235,7 +319,7 @@ def main() -> int:
             try:
                 query = self._query()
                 if (query.get("refresh") or ["0"])[0] == "1":
-                    refresh_models("manuell omräkning")
+                    refresh_models("manuell omräkning", hard=True)
                 position = self._position(query)
                 visible, mode, anchor = self._visible(query, position)
                 if not visible:
@@ -243,7 +327,7 @@ def main() -> int:
                 else:
                     if position not in visible:
                         position = visible[0]
-                    states = [cache.get(item) for item in visible]
+                    states = cache.get_many(visible)
                     body = ui.render_five_row_html(
                         states, position, positions, message["text"], mode=mode, anchor=anchor
                     ).encode("utf-8")
@@ -267,6 +351,9 @@ def main() -> int:
                 active_state = cache.get(position)
                 message["text"] = legacy.apply_edit(active_state, args.facit, form)
                 refresh_models("facit ändrat")
+                # The edited row must always be redisplayed from newest facit,
+                # even if it happened to be exact before a relabel operation.
+                cache.invalidate(position)
                 location = ui.row_url(position, mode=mode, anchor=anchor)
             except Exception as exc:
                 message["text"] = "FEL: " + str(exc)
@@ -282,7 +369,8 @@ def main() -> int:
     url = f"http://{args.host}:{args.port}{ui.row_url(initial)}"
     print(url)
     print(
-        f"facit={args.facit} (FAST: sidbild/geometri återanvänds; varje rad analyseras högst en gång åt gången; Ctrl-C avslutar)"
+        f"facit={args.facit} (FAST: exakta rader behålls vid facittillägg; "
+        "defekta räknas om vid behov; olika rader kan analyseras parallellt; Ctrl-C avslutar)"
     )
     if not args.no_browser:
         webbrowser.open(url)
