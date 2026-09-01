@@ -24,7 +24,7 @@ from .ocr_page_analysis_cache import (
 from .ocr_prepare_sequential_page import _load_source_image, _page_from_row, read_jsonl, source_for_page
 from .ocr_probe_exact_article import build_exact_article, row_starts_headword
 from .ocr_probe_row_glyphs_grouped import analyse_row_exact_grouped
-from .ocr_row_map_words import _persistent_left_rule_x, _row_crop_box
+from .ocr_row_map_words import _owned_row_crop, _persistent_left_rule_x, _row_crop_box
 
 TAG_RE = re.compile(r"<[^>]+>")
 SPACE_RE = re.compile(r"\s+")
@@ -81,7 +81,12 @@ def _analyse_column_rows(
             pad_y=1,
             left_override=content_left,
         )
-        crop = page.crop(box).convert("L")
+        crop, removed_neighbor_pixels = _owned_row_crop(
+            page,
+            row,
+            box,
+            threshold=threshold,
+        )
         result = analyse_row_exact_grouped(crop, models, threshold=threshold)
         output.append(
             {
@@ -91,6 +96,7 @@ def _analyse_column_rows(
                 "fully_exact": result["fully_exact"],
                 "covered_pixels": result["covered_pixels"],
                 "source_pixels": result["source_pixels"],
+                "removed_neighbor_pixels": removed_neighbor_pixels,
             }
         )
         if progress is not None:
