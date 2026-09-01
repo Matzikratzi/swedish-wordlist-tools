@@ -258,7 +258,7 @@ def main() -> int:
         print(
             f"page={page_number}: starts={_format_vector(record['column_starts'])} "
             f"boundaries={_format_vector(record['boundaries'])} "
-            f"gutters={_format_vector([g['width'] if g else None for g in record['gutters'])}",
+            f"gutters={_format_vector([g['width'] if g else None for g in record['gutters']])}",
             flush=True,
         )
 
