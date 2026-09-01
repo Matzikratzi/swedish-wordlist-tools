@@ -31,6 +31,8 @@ from .ocr_page_analysis_cache import (
     load_or_compute,
 )
 from .ocr_prepare_sequential_page import _load_source_image, _page_from_row, read_jsonl, source_for_page
+from .ocr_probe_exact_article import row_starts_headword
+from .ocr_probe_row_glyphs import render_exact_text
 
 LEADING_SUP_RE = re.compile(r"^\s*<sup>\s*([0-9]+)\s*</sup>\s*", re.IGNORECASE)
 
@@ -83,6 +85,8 @@ def glyph_coverage_report(columns: list[list[dict]]) -> dict:
             if unknown == 0:
                 rows_exact += 1
             else:
+                matches = row.get("matches") or []
+                ink = row.get("ink")
                 misses.append(
                     {
                         "column": column,
@@ -90,6 +94,8 @@ def glyph_coverage_report(columns: list[list[dict]]) -> dict:
                         "source_pixels": source,
                         "covered_pixels": covered,
                         "unknown_pixels": unknown,
+                        "text": render_exact_text(matches, source_ink=ink),
+                        "starts_headword": row_starts_headword(matches),
                     }
                 )
 
@@ -314,7 +320,9 @@ def main() -> int:
             print(
                 f"PIXEL-MISS\tcol={item['column']} row={item['row']} "
                 f"unknown={item['unknown_pixels']} "
-                f"covered={item['covered_pixels']}/{item['source_pixels']}"
+                f"covered={item['covered_pixels']}/{item['source_pixels']} "
+                f"headstart={'yes' if item['starts_headword'] else 'no'} "
+                f"text={item['text']!r}"
             )
         if not args.show_pixel_misses and len(coverage["misses"]) > len(misses):
             print(
