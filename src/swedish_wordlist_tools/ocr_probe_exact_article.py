@@ -22,6 +22,16 @@ SUPERSCRIPT_DIGITS = {
     "⁹": "9",
 }
 
+# These are SAOL field labels, not word-specific exceptions.  They belong to
+# the inflection text when they immediately introduce the first italic form.
+# Extend this vocabulary as further printed notation is encountered and
+# verified; keeping it explicit prevents a part-of-speech abbreviation such as
+# ``s.`` from accidentally becoming part of JSONL ``text``.
+INFLECTION_FIELD_LABELS = frozenset({
+    "best.",
+    "pl.",
+})
+
 
 def _sorted_matches(matches):
     return sorted(matches, key=lambda match: (match.x, match.baseline, match.label, match.style))
@@ -138,6 +148,40 @@ def _render_range(article_rows: list[dict], start: int, end: int, *, markup: boo
     return _render_range_with_diagnostics(article_rows, start, end, markup=markup)[0]
 
 
+def _text_start_with_leading_inflection_labels(
+    article_rows: list[dict], flat: list[tuple[int, object]], headword_end: int
+) -> int:
+    """Find the JSONL text start, including slot labels before first italic form.
+
+    Typography alone identifies the first inflection form, but labels such as
+    ``best.`` and ``pl.`` are printed in roman immediately before it and belong
+    to the same JSONL text field.  Work backwards from the first italic glyph
+    and include the longest suffix consisting only of known SAOL field labels.
+    """
+    italic_start = next(
+        (
+            index
+            for index, (_row_index, match) in enumerate(flat[headword_end:], start=headword_end)
+            if match.style == "italic"
+        ),
+        len(flat),
+    )
+    if italic_start == len(flat):
+        return italic_start
+
+    best = italic_start
+    for candidate in range(headword_end, italic_start):
+        candidate_matches = flat[candidate:italic_start]
+        if not candidate_matches or any(match.style != "roman" for _row_index, match in candidate_matches):
+            continue
+        rendered = _render_range(article_rows, candidate, italic_start, markup=False).strip()
+        tokens = rendered.split()
+        if tokens and all(token in INFLECTION_FIELD_LABELS for token in tokens):
+            best = candidate
+            break
+    return best
+
+
 def build_exact_article(rows: list[dict]) -> dict:
     """Build one SAOL article from consecutive exact physical rows.
 
@@ -166,10 +210,7 @@ def build_exact_article(rows: list[dict]) -> dict:
     first_row_matches = _sorted_matches(article_rows[0]["matches"])
     headword_end = _initial_headword_end(first_row_matches)
 
-    text_start = next(
-        (index for index, (_row_index, match) in enumerate(flat[headword_end:], start=headword_end) if match.style == "italic"),
-        len(flat),
-    )
+    text_start = _text_start_with_leading_inflection_labels(article_rows, flat, headword_end)
 
     explanation_start = len(flat)
     explanation_reason = None
