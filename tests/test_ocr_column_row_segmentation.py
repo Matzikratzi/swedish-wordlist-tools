@@ -161,6 +161,33 @@ class ColumnRowSegmentationTests(unittest.TestCase):
         self.assertEqual([entry["right"] for entry in result["columns"]], [30, 60, 90])
         self.assertEqual(result["row_count"], 6)
 
+    def test_final_crop_boundaries_follow_real_gutters_not_page_thirds(self) -> None:
+        image = Image.new("L", (210, 90), 255)
+        starts = (10, 82, 152)
+        for center in (15, 35, 55, 75):
+            for column, x0 in enumerate(starts):
+                # One long row in each of the first two columns reaches close to
+                # the next printed column, while the other rows are shorter.
+                right = (77 if column == 0 else 147) if center == 35 else x0 + 42
+                if column == 2:
+                    right = 198
+                for y in range(center - 3, center + 4):
+                    for x in range(x0, right):
+                        image.putpixel((x, y), 0)
+
+        result = segment_page_rows(image)
+        self.assertEqual(result["format"], "saol-white-gap-row-map-v6")
+        first, second = result["crop_boundaries"]
+        self.assertGreater(first, 70)
+        self.assertGreater(second, 140)
+        self.assertLess(first, 82)
+        self.assertLess(second, 152)
+        for row in result["columns"][0]["rows"]:
+            self.assertEqual(row["crop_right"], first)
+        for row in result["columns"][1]["rows"]:
+            self.assertEqual(row["crop_left"], first)
+            self.assertEqual(row["crop_right"], second)
+
 
 if __name__ == "__main__":
     unittest.main()
