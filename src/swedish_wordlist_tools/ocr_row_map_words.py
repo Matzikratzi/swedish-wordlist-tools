@@ -72,7 +72,11 @@ def _row_crop_box(
     pad_y: int = 1,
     left_override: int | None = None,
 ) -> tuple[int, int, int, int]:
-    left, right = _column_bounds(column, page_width)
+    fallback_left, fallback_right = _column_bounds(column, page_width)
+    left = int(row.get("crop_left", fallback_left))
+    right = int(row.get("crop_right", fallback_right))
+    left = max(0, min(page_width - 1, left))
+    right = max(left + 1, min(page_width, right))
     if left_override is not None:
         left = max(left, min(right - 1, int(left_override)))
     top = max(0, int(row["page_top"]) - max(0, int(pad_y)))
