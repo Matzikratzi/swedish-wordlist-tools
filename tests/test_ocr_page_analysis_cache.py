@@ -78,6 +78,37 @@ class PageAnalysisCacheTests(unittest.TestCase):
 
         self.assertNotEqual(key1, key2)
 
+    def test_glyph_key_changes_with_extra_grouped_matcher_code(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            facit = root / "facit.json"
+            matcher = root / "matcher.py"
+            probe = root / "probe.py"
+            row_map = root / "row_map.py"
+            grouped = root / "grouped.py"
+            for path in (facit, matcher, probe, row_map, grouped):
+                path.write_text("one", encoding="utf-8")
+
+            key1 = glyph_cache_key(
+                "geometry",
+                facit,
+                matcher_module_file=str(matcher),
+                row_probe_module_file=str(probe),
+                row_map_module_file=str(row_map),
+                extra_module_files=(str(grouped),),
+            )
+            grouped.write_text("two", encoding="utf-8")
+            key2 = glyph_cache_key(
+                "geometry",
+                facit,
+                matcher_module_file=str(matcher),
+                row_probe_module_file=str(probe),
+                row_map_module_file=str(row_map),
+                extra_module_files=(str(grouped),),
+            )
+
+        self.assertNotEqual(key1, key2)
+
 
 if __name__ == "__main__":
     unittest.main()
