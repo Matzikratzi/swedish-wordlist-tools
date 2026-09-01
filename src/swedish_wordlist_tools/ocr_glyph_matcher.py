@@ -131,12 +131,12 @@ def exact_matches(
     """Return pixel-perfect placements of learned models.
 
     ``style`` is retained as the internal compatibility name for typography
-    classification.  For facit v2 its value is the semantic ``role`` instead
-    (for example ``headword-bold`` or ``unknown``).
+    classification. For facit v2 its value is the semantic ``role`` instead.
 
-    By default a placement must own every 4-connected source component it
-    touches. Multi-row review may set ``require_whole_components=False`` so
-    known exact glyphs can be peeled from one connected cross-row tangle.
+    With ``require_whole_components=True`` a single placement must own every
+    4-connected source component it touches. Partition solvers deliberately use
+    ``False``: adjacent printed glyphs may touch edge-to-edge and therefore form
+    one source component which is owned exactly by several glyphs together.
     """
     out: list[Match] = []
     components: list[frozenset[tuple[int, int]]] = []
@@ -209,6 +209,55 @@ def select_best_disjoint_exact(matches: Iterable[Match], *, beam_width: int = 51
     return sorted(best, key=lambda m: (m.x, m.baseline, m.label, m.style))
 
 
+def _component_partition_key(
+    chosen: Iterable[Match],
+    occupied: frozenset[tuple[int, int]],
+    components: Iterable[frozenset[tuple[int, int]]],
+) -> tuple[int, int, int, int, int]:
+    """Prefer collectively complete source components, then ordinary coverage."""
+    rows = list(chosen)
+    complete_pixels = sum(len(component) for component in components if component.issubset(occupied))
+    normal = _partition_key(rows)
+    return (complete_pixels, *normal)
+
+
+def select_best_disjoint_exact_for_ink(
+    matches: Iterable[Match],
+    ink: set[tuple[int, int]],
+    *,
+    beam_width: int = 512,
+) -> list[Match]:
+    """Choose disjoint glyphs while allowing several glyphs to own one component.
+
+    A printed ``t`` and ``;`` may touch by a pixel edge. Candidate glyphs are
+    therefore allowed to cover only part of a 4-connected source component.
+    The partition is scored first by how much source ink belongs to components
+    covered *completely* by the chosen glyphs. This keeps whole-component
+    evidence as the strongest signal without forcing one glyph to own it alone.
+    """
+    rows = sorted(matches, key=lambda m: (-m.model_pixels, -m.score, -m.sources, m.x, m.label, m.style))
+    components, _by_pixel = _ink_components(ink)
+    states: list[tuple[tuple[Match, ...], frozenset[tuple[int, int]]]] = [((), frozenset())]
+    for match in rows:
+        expanded = list(states)
+        for chosen, occupied in states:
+            if occupied.intersection(match.pixels):
+                continue
+            expanded.append((chosen + (match,), frozenset(set(occupied) | set(match.pixels))))
+        best_by_occupied: dict[frozenset[tuple[int, int]], tuple[Match, ...]] = {}
+        for chosen, occupied in expanded:
+            previous = best_by_occupied.get(occupied)
+            if previous is None or _component_partition_key(chosen, occupied, components) > _component_partition_key(previous, occupied, components):
+                best_by_occupied[occupied] = chosen
+        states = sorted(
+            ((chosen, occupied) for occupied, chosen in best_by_occupied.items()),
+            key=lambda state: _component_partition_key(state[0], state[1], components),
+            reverse=True,
+        )[:beam_width]
+    best = max(states, key=lambda state: _component_partition_key(state[0], state[1], components))[0] if states else ()
+    return sorted(best, key=lambda m: (m.x, m.baseline, m.label, m.style))
+
+
 def select_best_baseline_partition(
     ink: set[tuple[int, int]],
     width: int,
@@ -217,7 +266,7 @@ def select_best_baseline_partition(
     *,
     beam_width: int = 512,
 ) -> tuple[int | None, list[Match]]:
-    all_matches = exact_matches(ink, width, height, models)
+    all_matches = exact_matches(ink, width, height, models, require_whole_components=False)
     if not all_matches:
         return None, []
     by_baseline: dict[int, list[Match]] = {}
@@ -225,10 +274,12 @@ def select_best_baseline_partition(
         by_baseline.setdefault(m.baseline, []).append(m)
     best_baseline: int | None = None
     best_rows: list[Match] = []
-    best_key: tuple[int, int, int, int] | None = None
+    best_key: tuple[int, int, int, int, int] | None = None
+    components, _by_pixel = _ink_components(ink)
     for baseline, candidates in sorted(by_baseline.items()):
-        selected = select_best_disjoint_exact(candidates, beam_width=beam_width)
-        key = _partition_key(selected)
+        selected = select_best_disjoint_exact_for_ink(candidates, ink, beam_width=beam_width)
+        occupied = frozenset().union(*(match.pixels for match in selected)) if selected else frozenset()
+        key = _component_partition_key(selected, occupied, components)
         if best_key is None or key > best_key:
             best_key = key
             best_baseline = baseline
@@ -251,7 +302,14 @@ def exact_sequence_cover(
 ) -> list[Match] | None:
     if not expected:
         return None
-    candidates = exact_matches(ink, width, height, models, styles=styles)
+    candidates = exact_matches(
+        ink,
+        width,
+        height,
+        models,
+        styles=styles,
+        require_whole_components=False,
+    )
     by_pos: dict[int, list[Match]] = {i: [] for i in range(len(expected))}
     for m in candidates:
         for pos in range(len(expected)):
@@ -314,21 +372,23 @@ def model_inventory(models: Iterable[GlyphModel]) -> dict[str, dict[str, int]]:
 def analyse(ink: set[tuple[int, int]], width: int, height: int, models: list[GlyphModel], expected: str | None = None) -> dict[str, Any]:
     baseline, selected = select_best_baseline_partition(ink, width, height, models)
     covered = set().union(*(m.pixels for m in selected)) if selected else set()
+    sequence = exact_sequence_cover(ink, width, height, models, expected) if expected else None
     return {
         "baseline": baseline,
-        "exact_candidates": len(exact_matches(ink, width, height, models)),
+        "exact_candidates": len(exact_matches(ink, width, height, models, require_whole_components=False)),
         "selected_exact": _rows(selected),
         "covered_pixels": len(covered),
         "source_pixels": len(ink),
         "fully_exact": covered == ink,
         "recognized": "".join(m.label for m in selected),
         "expected_word": expected,
+        "exact_sequence_cover": _rows(sequence) if sequence else [],
         "fuzzy_diagnostics": [],
     }
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Minimal SAOL glyph OCR: exact whole-component models, one support baseline, maximum raster coverage.")
+    ap = argparse.ArgumentParser(description="Minimal SAOL glyph OCR: exact collective component partition, one support baseline, maximum raster coverage.")
     ap.add_argument("word_debug", type=Path)
     ap.add_argument("--facit", type=Path, default=Path("glyphs/saol14-manual-glyph-facit-v2.json"))
     ap.add_argument("--out", type=Path)
@@ -339,7 +399,7 @@ def main() -> int:
     result = analyse(ink, width, height, models, expected=expected)
     inventory = model_inventory(models)
     expected_labels = sorted(set(expected))
-    result.update({"format": "saol14-minimal-glyph-match-v10", "headword": debug.get("headword"), "page": debug.get("page"), "subnr": debug.get("subnr"), "models": len(models), "expected_label_models": {label: inventory.get(label, {}) for label in expected_labels}})
+    result.update({"format": "saol14-minimal-glyph-match-v11", "headword": debug.get("headword"), "page": debug.get("page"), "subnr": debug.get("subnr"), "models": len(models), "expected_label_models": {label: inventory.get(label, {}) for label in expected_labels}})
     text = json.dumps(result, ensure_ascii=False, indent=2) + "\n"
     if args.out:
         args.out.write_text(text, encoding="utf-8")
