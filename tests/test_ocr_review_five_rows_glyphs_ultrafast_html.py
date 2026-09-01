@@ -46,10 +46,7 @@ class UltrafastFiveRowGlyphReviewTests(unittest.TestCase):
             'action="/?column=0&amp;row=44&amp;mode=defects&amp;anchor_column=0&amp;anchor_row=15"',
             document,
         )
-        self.assertNotIn(
-            'action="/?column=0&amp;row=15&amp;mode=defects',
-            document,
-        )
+        self.assertNotIn('action="/?column=0&amp;row=15&amp;mode=defects', document)
 
     def test_failed_post_fallback_stays_on_active_row(self):
         ultrafast._post_context.active_position = (1, 14)
@@ -68,7 +65,7 @@ class UltrafastFiveRowGlyphReviewTests(unittest.TestCase):
         )
         self.assertFalse(hasattr(ultrafast._post_context, "active_position"))
 
-    def test_neighbor_raster_control_is_injected(self):
+    def test_three_row_raster_control_and_copy_are_injected(self):
         state = {
             "page": 1,
             "column": 0,
@@ -90,6 +87,7 @@ class UltrafastFiveRowGlyphReviewTests(unittest.TestCase):
                     "partitions": 1,
                     "current_labels": "]",
                     "neighbor_labels": "l",
+                    "vertical_order": "touch-or-gap",
                 }
             ],
             "text": "x",
@@ -107,22 +105,22 @@ class UltrafastFiveRowGlyphReviewTests(unittest.TestCase):
             "matches": [],
             "neighbor_raster_image": "data:image/png;base64,AA==",
             "neighbor_raster_width": 20,
-            "neighbor_raster_height": 26,
-            "neighbor_core_top": 8,
-            "neighbor_core_bottom": 18,
-            "neighbor_probe_y": 8,
-            "neighbor_page_top": 13,
-            "neighbor_page_bottom": 39,
+            "neighbor_raster_height": 30,
+            "neighbor_core_top": 10,
+            "neighbor_core_bottom": 20,
+            "neighbor_page_top": 11,
+            "neighbor_page_bottom": 41,
+            "neighbor_row_boundaries": [[0, "row 43 top"], [10, "TARGET row 44 top"], [20, "TARGET row 44 bottom"], [30, "row 45 bottom"]],
+            "neighbor_raster_ascii": "--- row 43 top y=0 ---\n..#..\n--- TARGET row 44 top y=10 ---\n.###.\n--- TARGET row 44 bottom y=20 ---\n..#..\n--- row 45 bottom y=30 ---",
         }
         document = ultrafast.render_html_with_neighbor_raster(state)
         self.assertIn('id="showNeighbors"', document)
         self.assertIn('id="neighborRow"', document)
-        self.assertIn("Grannradsraster", document)
-        self.assertIn("neighbor_core_top", document)
+        self.assertIn("Tre-radersraster", document)
+        self.assertIn("neighbor_row_boundaries", document)
         self.assertIn('id="copyDiagnostics"', document)
-        self.assertIn("Kopiera diagnostik", document)
+        self.assertIn("Kopiera diagnostik + raster", document)
         self.assertIn("navigator.clipboard.writeText", document)
-        self.assertIn("Same visible pixel grid as the main glyph editor", document)
 
         diagnostics = ultrafast.diagnostic_text(state)
         self.assertIn("page=1 column=0 row=44", diagnostics)
@@ -132,7 +130,9 @@ class UltrafastFiveRowGlyphReviewTests(unittest.TestCase):
         self.assertIn('"status": "split"', diagnostics)
         self.assertIn('"current_labels": "]"', diagnostics)
         self.assertIn('"neighbor_labels": "l"', diagnostics)
-        self.assertIn("core_y=8..18", diagnostics)
+        self.assertIn("target_core_y=10..20", diagnostics)
+        self.assertIn("three_row_raster_ascii:", diagnostics)
+        self.assertIn(".###.", diagnostics)
         self.assertIn("M00 kind=match label=']' style=roman pixels=7", diagnostics)
         self.assertNotIn("data:image", diagnostics)
 
