@@ -6,10 +6,12 @@ import re
 import sys
 from collections import defaultdict, deque
 from pathlib import Path
+from time import perf_counter
 
 from . import ocr_column_row_segmentation as segmentation_module
+from . import ocr_glyph_gap_matcher as gap_matcher_module
 from . import ocr_glyph_matcher as matcher_module
-from . import ocr_probe_row_glyphs as row_probe_module
+from . import ocr_probe_row_glyphs_grouped as grouped_probe_module
 from . import ocr_row_map_words as row_map_module
 from .ocr_column_row_segmentation import segment_page_rows
 from .ocr_glyph_matcher import load_facit
@@ -21,7 +23,7 @@ from .ocr_page_analysis_cache import (
 )
 from .ocr_prepare_sequential_page import _load_source_image, _page_from_row, read_jsonl, source_for_page
 from .ocr_probe_exact_article import build_exact_article, row_starts_headword
-from .ocr_probe_row_glyphs import analyse_row_exact
+from .ocr_probe_row_glyphs_grouped import analyse_row_exact_grouped
 from .ocr_row_map_words import _persistent_left_rule_x, _row_crop_box
 
 TAG_RE = re.compile(r"<[^>]+>")
@@ -80,7 +82,7 @@ def _analyse_column_rows(
             left_override=content_left,
         )
         crop = page.crop(box).convert("L")
-        result = analyse_row_exact(crop, models, threshold=threshold)
+        result = analyse_row_exact_grouped(crop, models, threshold=threshold)
         output.append(
             {
                 "row": row_index,
@@ -172,6 +174,16 @@ def compare_page(rows: list[dict], articles: list[dict], page_number: int) -> di
     }
 
 
+def _format_duration(seconds: float) -> str:
+    if seconds < 60.0:
+        return f"{seconds:.1f}s"
+    minutes, rest = divmod(int(seconds + 0.5), 60)
+    if minutes < 60:
+        return f"{minutes}m{rest:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h{minutes:02d}m{rest:02d}s"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Compare pixel-recovered SAOL article text with the available JSONL text prefix on one page."
@@ -196,8 +208,6 @@ def main() -> int:
     print(f"page={args.page}: segmenterar fysiska rader ...", file=sys.stderr, flush=True)
     if args.no_cache:
         row_map = segment_page_rows(page, threshold=args.threshold)
-        geometry_hit = False
-        geometry_path = None
         geometry_key = geometry_cache_key(page, threshold=args.threshold, segmentation_module_file=segmentation_module.__file__)
     else:
         geometry_key = geometry_cache_key(page, threshold=args.threshold, segmentation_module_file=segmentation_module.__file__)
@@ -218,6 +228,7 @@ def main() -> int:
     total_rows = sum(column_sizes)
     completed_before = [sum(column_sizes[:column]) for column in range(len(column_sizes))]
     last_reported = {-1}
+    analysis_started = perf_counter()
 
     def show_progress(column: int, row_done: int, column_total: int) -> None:
         done = completed_before[column] + row_done
@@ -226,16 +237,21 @@ def main() -> int:
         marker = (column, bucket)
         if marker not in last_reported or row_done in {1, column_total}:
             last_reported.add(marker)
+            elapsed = perf_counter() - analysis_started
+            eta = elapsed * (total_rows - done) / done if done else 0.0
+            rate = done / elapsed if elapsed > 0 else 0.0
             print(
                 f"page={args.page}: {done}/{total_rows} rader ({percent:3d}%) "
-                f"kolumn={column} rad={row_done}/{column_total}",
+                f"kolumn={column} rad={row_done}/{column_total} "
+                f"elapsed={_format_duration(elapsed)} eta={_format_duration(eta)} rate={rate:.2f} rad/s",
                 file=sys.stderr,
                 flush=True,
             )
 
     models = load_facit(args.facit)
     print(
-        f"page={args.page}: analyserar {total_rows} rader i {len(column_sizes)} kolumner ...",
+        f"page={args.page}: analyserar {total_rows} rader i {len(column_sizes)} kolumner "
+        f"med grupperad glyphmatchning ...",
         file=sys.stderr,
         flush=True,
     )
@@ -246,8 +262,9 @@ def main() -> int:
             geometry_key,
             args.facit,
             matcher_module_file=matcher_module.__file__,
-            row_probe_module_file=row_probe_module.__file__,
+            row_probe_module_file=grouped_probe_module.__file__,
             row_map_module_file=row_map_module.__file__,
+            extra_module_files=(gap_matcher_module.__file__,),
         )
         analysed_columns, glyph_hit, glyph_path = load_or_compute(
             args.cache_dir,
@@ -262,6 +279,12 @@ def main() -> int:
             flush=True,
         )
 
+    analysis_seconds = perf_counter() - analysis_started
+    print(
+        f"page={args.page}: glyphanalys klar på {_format_duration(analysis_seconds)}",
+        file=sys.stderr,
+        flush=True,
+    )
     articles = articles_from_analysed_rows(analysed_columns)
     print(f"page={args.page}: jämför {len(articles)} återfunna artiklar med JSONL ...", file=sys.stderr, flush=True)
     report = compare_page(rows, articles, args.page)
