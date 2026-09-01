@@ -199,6 +199,7 @@ input,select,button{{font:inherit;padding:6px}} input[type=checkbox]{{padding:0}
 .items{{display:flex;flex-wrap:wrap;gap:5px;margin:10px 0}} .chip{{border:2px solid #888;background:white;padding:5px 7px}}
 .chip.roman{{border-color:#1f6f8b;color:#174f63}} .chip.italic{{border-color:#98620c;color:#744a08}} .chip.bold{{border-color:#9b1c31;color:#781526;font-weight:700}}
 .chip.residual{{border-color:#c77b00;color:#8a5500}} .chip.selected{{background:#dcecff;box-shadow:0 0 0 2px #1769d2 inset}}
+.style-marker{{display:inline-block;min-width:.7em;text-align:center}} .style-marker.roman{{font-style:normal;font-weight:400}} .style-marker.italic{{font-style:italic;font-weight:400}} .style-marker.bold{{font-style:normal;font-weight:700}}
 code{{background:#eee;padding:2px 4px}} .msg{{font-weight:600;margin:8px 0}} .hint{{max-width:1000px}}
 </style></head><body>
 <h1>SAOL glyphgranskning – sida {state['page']}, kolumn {state['column']}, rad {state['row']}</h1>
@@ -234,6 +235,7 @@ function styleColor(it){{
  if(it.style==='italic') return '#98620c';
  return '#1f6f8b';
 }}
+function styleLetter(style){{return style==='bold'?'b':style==='italic'?'i':'r';}}
 function drawGrid(){{
  if(!showGrid.checked) return;
  ctx.save(); ctx.strokeStyle='rgba(70,70,70,.22)'; ctx.lineWidth=1;
@@ -268,7 +270,15 @@ function sync(){{
 }}
 function toggle(id){{chosen.has(id)?chosen.delete(id):chosen.add(id);sync();}}
 function canvasPixel(e){{const r=canvas.getBoundingClientRect();return {{x:Math.max(0,Math.min(S.crop_width-1,Math.floor((e.clientX-r.left)*(canvas.width/r.width)/scale))),y:Math.max(0,Math.min(S.crop_height-1,Math.floor(((e.clientY-r.top)*(canvas.height/r.height)-topPad)/scale)))}};}}
-for(const it of S.items){{const b=document.createElement('button');b.type='button';b.dataset.id=it.id;b.className='chip '+it.kind+' '+it.style;b.textContent=(it.kind==='match'?JSON.stringify(it.label):'omatchad')+' · '+it.style+' · '+it.pixels+' px';b.onclick=()=>toggle(it.id);document.getElementById('items').appendChild(b);}}
+for(const it of S.items){{
+ const b=document.createElement('button'); b.type='button'; b.dataset.id=it.id; b.className='chip '+it.kind+' '+it.style;
+ if(it.kind==='match'){{
+   b.appendChild(document.createTextNode(JSON.stringify(it.label)+' · '));
+   const marker=document.createElement('span'); marker.className='style-marker '+it.style; marker.textContent=styleLetter(it.style); b.appendChild(marker);
+   b.appendChild(document.createTextNode(' · '+it.pixels+' px'));
+ }} else {{b.textContent='omatchad · '+it.pixels+' px';}}
+ b.onclick=()=>toggle(it.id); document.getElementById('items').appendChild(b);
+}}
 canvas.addEventListener('mousedown',e=>{{if(!pixelMode.checked)return;dragStart=canvasPixel(e);dragNow=dragStart;dragRemove=e.altKey;e.preventDefault();draw();}});
 canvas.addEventListener('mousemove',e=>{{if(!dragStart)return;dragNow=canvasPixel(e);draw();}});
 window.addEventListener('mouseup',e=>{{if(!dragStart)return;dragNow=canvasPixel(e);const x0=Math.min(dragStart.x,dragNow.x),x1=Math.max(dragStart.x,dragNow.x),y0=Math.min(dragStart.y,dragNow.y),y1=Math.max(dragStart.y,dragNow.y);for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){{const key=x+','+y;if(sourceInk.has(key)){{if(dragRemove)chosenPixels.delete(key);else if(x0===x1&&y0===y1&&chosenPixels.has(key))chosenPixels.delete(key);else chosenPixels.add(key);}}}}dragStart=null;dragNow=null;sync();}});
