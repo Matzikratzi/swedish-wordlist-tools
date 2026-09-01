@@ -2,7 +2,7 @@ import unittest
 
 from swedish_wordlist_tools import ocr_review_five_rows_glyphs_fast_html as fast
 from swedish_wordlist_tools import ocr_review_five_rows_glyphs_ultrafast_html as ultrafast
-from swedish_wordlist_tools.ocr_probe_row_glyphs_grouped import analyse_row_exact_grouped
+from swedish_wordlist_tools.ocr_glyph_matcher import Match
 
 
 class UltrafastFiveRowGlyphReviewTests(unittest.TestCase):
@@ -10,9 +10,45 @@ class UltrafastFiveRowGlyphReviewTests(unittest.TestCase):
         if hasattr(ultrafast._post_context, "active_position"):
             del ultrafast._post_context.active_position
 
-    def test_fast_editor_is_patched_to_grouped_matcher(self):
+    def test_fast_editor_is_patched_to_fallback_recording_matcher(self):
         self.assertIs(ultrafast.fast, fast)
-        self.assertIs(fast.analyse_row_exact, analyse_row_exact_grouped)
+        self.assertIs(fast.analyse_row_exact, ultrafast.analyse_row_with_fallback_recording)
+
+    def test_residual_touching_bottom_requests_edge_retry(self):
+        state = {
+            "crop_height": 17,
+            "items": [
+                {"kind": "residual", "bbox": {"left": 20, "top": 6, "right": 30, "bottom": 17}}
+            ],
+        }
+        self.assertEqual(ultrafast._residual_edge_side(state), "bottom")
+
+    def test_edge_retry_accepts_same_absolute_baseline_glyph_crossing_old_bottom(self):
+        initial = {
+            "crop_box": (10, 20, 40, 37),
+            "row_page_top": 21,
+            "row_page_bottom": 36,
+            "baseline": 13,
+            "covered_pixels": 4,
+        }
+        retry_match = Match(
+            label="g",
+            style="roman",
+            x=3,
+            baseline=16,  # retry crop begins 3 px higher: absolute baseline remains 33
+            pixels=frozenset({(3, 10), (3, 11), (3, 12), (3, 13), (3, 14), (3, 15), (3, 16), (3, 17), (3, 18), (3, 19), (4, 19), (5, 19), (6, 19), (6, 20)}),
+            model_pixels=14,
+            sources=2,
+        )
+        retry = {
+            "crop_box": (10, 17, 40, 40),
+            "matches": [retry_match],
+        }
+        evidence = ultrafast._edge_retry_evidence(initial, retry, "bottom")
+        self.assertIsNotNone(evidence)
+        self.assertEqual(evidence["status"], "accepted")
+        self.assertEqual(evidence["labels"], "g")
+        self.assertEqual(evidence["main_baseline_page"], 33)
 
     def test_form_posts_to_actual_active_defect_row_not_scan_anchor(self):
         states = []
@@ -78,6 +114,17 @@ class UltrafastFiveRowGlyphReviewTests(unittest.TestCase):
             "fully_exact": False,
             "removed_neighbor_pixels": 3,
             "two_row_removed_pixels": 1,
+            "edge_rescue": {"status": "accepted", "side": "bottom", "labels": "g"},
+            "baseline_fallbacks": [
+                {
+                    "group": 4,
+                    "from_baseline": 7,
+                    "to_baseline": 8,
+                    "delta": 1,
+                    "labels": "ex",
+                    "status": "full-exact-whitespace-fallback",
+                }
+            ],
             "two_row_ownership": [
                 {
                     "neighbor_row": 45,
@@ -127,6 +174,10 @@ class UltrafastFiveRowGlyphReviewTests(unittest.TestCase):
         self.assertIn("coverage=9/10 fully_exact=False", diagnostics)
         self.assertIn("removed_neighbor_pixels=3", diagnostics)
         self.assertIn("two_row_removed_pixels=1", diagnostics)
+        self.assertIn("edge_rescue:", diagnostics)
+        self.assertIn('"labels": "g"', diagnostics)
+        self.assertIn("baseline_fallbacks:", diagnostics)
+        self.assertIn('"to_baseline": 8', diagnostics)
         self.assertIn('"status": "split"', diagnostics)
         self.assertIn('"current_labels": "]"', diagnostics)
         self.assertIn('"neighbor_labels": "l"', diagnostics)
