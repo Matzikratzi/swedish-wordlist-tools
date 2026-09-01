@@ -11,18 +11,8 @@ from .ocr_probe_row_glyphs_grouped import analyse_row_exact_grouped
 from .ocr_two_row_glyph_ownership import split_touching_neighbor_glyphs
 
 
-# The fast editor already reuses page geometry, keeps generation-aware row
-# state, and prevents duplicate concurrent work. Its remaining hot path is the
-# whole-row exact matcher imported into that module as ``analyse_row_exact``.
-# Swap only that implementation for the previously verified safe-gap grouped
-# matcher. ``load_review_state_fast`` resolves the module global at call time,
-# so no other editor behaviour changes.
 fast.analyse_row_exact = analyse_row_exact_grouped
 
-# Add two-row ownership evidence without changing the base editor API. The fast
-# loader calls its module-global _owned_row_crop; keep the context/models for
-# the current row in thread-local storage while that call runs. This is safe
-# with the five parallel row workers used by the editor.
 _original_owned_row_crop = fast._owned_row_crop
 _ownership_context = threading.local()
 
@@ -64,9 +54,6 @@ def owned_row_crop_with_two_row_evidence(page_image, row, box, *, threshold=210,
 
 fast._owned_row_crop = owned_row_crop_with_two_row_evidence
 
-# Add an unfiltered narrow source raster around the target row. The ordinary
-# matching crop now also gets the conservative two-row exact-glyph ownership
-# split above.
 _original_load_review_state_fast = fast.load_review_state_fast
 
 
@@ -87,15 +74,12 @@ def load_review_state_with_neighbors(context, position, models):
 
 fast.load_review_state_fast = load_review_state_with_neighbors
 
-# Add a narrowly scoped destructive action to the same editor. Keep references
-# to the original renderer and edit handler before monkeypatching so wrappers
-# cannot recurse.
 _original_render_html = fast.ui.editor.render_html
 _original_apply_edit = fast.legacy.apply_edit
 
 
 def diagnostic_text(state: dict) -> str:
-    """Return a compact, paste-friendly description of the active review row."""
+    """Return paste-friendly metadata plus the complete three-row pixel raster."""
     lines = [
         "SAOL GLYPH REVIEW",
         f"page={state.get('page')} column={state.get('column')} row={state.get('row')}",
@@ -116,11 +100,11 @@ def diagnostic_text(state: dict) -> str:
     if state.get("neighbor_raster_image"):
         lines.extend(
             [
-                "neighbor_raster:",
+                "three_row_raster:",
                 f"  size={state.get('neighbor_raster_width')}x{state.get('neighbor_raster_height')}",
-                f"  probe_y={state.get('neighbor_probe_y')}",
                 f"  page_y={state.get('neighbor_page_top')}..{state.get('neighbor_page_bottom')}",
-                f"  core_y={state.get('neighbor_core_top')}..{state.get('neighbor_core_bottom')}",
+                f"  target_core_y={state.get('neighbor_core_top')}..{state.get('neighbor_core_bottom')}",
+                f"  boundaries={state.get('neighbor_row_boundaries')}",
             ]
         )
     lines.append("items:")
@@ -132,6 +116,9 @@ def diagnostic_text(state: dict) -> str:
         )
     source_points = state.get("source_ink_points") or []
     lines.append(f"source_ink_pixels={len(source_points)}")
+    raster = state.get("neighbor_raster_ascii")
+    if raster:
+        lines.extend(["three_row_raster_ascii:", str(raster)])
     return "\n".join(lines) + "\n"
 
 
@@ -143,8 +130,8 @@ def render_html_with_neighbor_raster(state, message=""):
     controls_needle = '<span id="pixelCount">0 valda pixlar</span>\n</div>'
     controls = '<span id="pixelCount">0 valda pixlar</span>\n'
     if state.get("neighbor_raster_image"):
-        controls += '<label class="inline"><input type="checkbox" id="showNeighbors"> Visa grannrader</label>\n'
-    controls += '<button type="button" id="copyDiagnostics">Kopiera diagnostik</button>\n</div>'
+        controls += '<label class="inline"><input type="checkbox" id="showNeighbors"> Visa tre rader</label>\n'
+    controls += '<button type="button" id="copyDiagnostics">Kopiera diagnostik + raster</button>\n</div>'
     if controls_needle not in document:
         raise ValueError("could not find editor controls for diagnostics")
     document = document.replace(controls_needle, controls, 1)
@@ -153,7 +140,7 @@ def render_html_with_neighbor_raster(state, message=""):
         rowbox_needle = '<div class="rowbox"><canvas id="row"></canvas></div>'
         neighbor_box = rowbox_needle + '''
 <div id="neighborWrap" style="display:none;margin:10px 0 18px">
-  <div><b>Grannradsraster</b> – ofiltrerad källa. Röda linjer avgränsar målradens egentliga område; pixlar ovanför/under är endast observation.</div>
+  <div><b>Tre-radersraster</b> – ofiltrerad källa: föregående rad, målrad och nästa rad.</div>
   <div class="rowbox" style="padding-top:36px"><canvas id="neighborRow"></canvas></div>
 </div>'''
         if rowbox_needle not in document:
@@ -176,7 +163,7 @@ def render_html_with_neighbor_raster(state, message=""):
         document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();
         copyButton.textContent='Kopierat!';
       }
-      setTimeout(()=>copyButton.textContent='Kopiera diagnostik',1200);
+      setTimeout(()=>copyButton.textContent='Kopiera diagnostik + raster',1200);
     });
   }
 
@@ -193,7 +180,6 @@ def render_html_with_neighbor_raster(state, message=""):
     ctx.fillStyle='white';ctx.fillRect(0,0,canvas.width,canvas.height);
     ctx.drawImage(nimg,0,ntop,S.neighbor_raster_width*nscale,S.neighbor_raster_height*nscale);
 
-    // Same visible pixel grid as the main glyph editor.
     ctx.save();ctx.strokeStyle='rgba(70,70,70,.22)';ctx.lineWidth=1;
     for(let x=0;x<=S.neighbor_raster_width;x++){
       const xx=x*nscale+.5;ctx.beginPath();ctx.moveTo(xx,ntop);ctx.lineTo(xx,ntop+S.neighbor_raster_height*nscale);ctx.stroke();
@@ -203,13 +189,13 @@ def render_html_with_neighbor_raster(state, message=""):
     }
     ctx.restore();
 
-    ctx.save();
-    ctx.strokeStyle='rgba(190,25,25,.95)';ctx.lineWidth=2;
-    for(const yy of [S.neighbor_core_top,S.neighbor_core_bottom]){
+    ctx.save();ctx.strokeStyle='rgba(190,25,25,.95)';ctx.lineWidth=2;
+    const boundaries=S.neighbor_row_boundaries || [[S.neighbor_core_top,'target top'],[S.neighbor_core_bottom,'target bottom']];
+    for(const entry of boundaries){
+      const yy=entry[0], label=entry[1];
       const y=ntop+yy*nscale+.5;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(canvas.width,y);ctx.stroke();
+      ctx.fillStyle='rgba(190,25,25,.95)';ctx.font='11px monospace';ctx.fillText(label,4,Math.max(11,y-2));
     }
-    ctx.fillStyle='rgba(190,25,25,.95)';ctx.font='12px monospace';ctx.textBaseline='bottom';
-    ctx.fillText('målrad '+S.neighbor_core_top+'..'+S.neighbor_core_bottom+' px',4,ntop-3);
     ctx.restore();
   }
   checkbox.addEventListener('change',()=>{wrap.style.display=checkbox.checked?'block':'none';if(checkbox.checked)drawNeighbor();});
@@ -222,9 +208,6 @@ def render_html_with_neighbor_raster(state, message=""):
 
 fast.ui.editor.render_html = render_html_with_neighbor_raster
 
-# Remember the actual row being edited for the lifetime of one POST request.
-# ThreadingHTTPServer uses a request thread, so thread-local state avoids one
-# browser request affecting another concurrent request.
 _post_context = threading.local()
 
 
@@ -245,11 +228,6 @@ def apply_edit_on_active_row(state, facit, form):
 
 fast.legacy.apply_edit = apply_edit_on_active_row
 
-# In defect mode the URL can still point at the scan anchor while the editor is
-# actually displaying the first defective row found much later on the page.
-# The base editor's form has no explicit action, so the browser would POST back
-# to that stale anchor row. Make the form submit to the row that is actually
-# active in the editor, preserving defect mode and the packet anchor.
 _original_five_row_render = fast.ui.render_five_row_html
 _original_row_url = fast.ui.row_url
 
@@ -258,15 +236,8 @@ def row_url_preserving_failed_post(position, *, mode="all", anchor=None, scan="f
     active = getattr(_post_context, "active_position", None)
     if active is not None:
         if position == active:
-            # Normal success redirect: the base handler is already returning to
-            # the edited row, so consume the request-local marker and preserve
-            # its mode/anchor exactly.
             del _post_context.active_position
         else:
-            # The base handler only asks for another position after an exception
-            # (historically the command-line start row). Never throw the user
-            # away from the row whose edit failed. Use all-mode so the row stays
-            # visible even if the facit file was partly changed before failure.
             del _post_context.active_position
             print(
                 f"review: sparfel: behåller kolumn {active[0]}, rad {active[1]} "
@@ -315,12 +286,11 @@ fast.ui.render_five_row_html = render_five_row_html_to_active_row
 
 def main() -> int:
     print("review: ULTRAFAST använder grupperad exact-glyphmatchning vid säkra vita gap", flush=True)
-    print("review: två-rads-ägarskap delar bara komponenter som exakt förklaras av kända glypher på båda baselines", flush=True)
-    print("review: vald matchad glyph kan raderas ur facit för att delas om", flush=True)
+    print("review: två-radsdelning kräver exact glyphbevis och bevarad vertikal radordning", flush=True)
     print("review: glyphändringar POST:as alltid till den faktiskt aktiva raden", flush=True)
     print("review: sparfel stannar på aktiv rad och skrivs ut i terminalen", flush=True)
-    print("review: Visa grannrader visar ofiltrerat raster ±8 px runt målradens gränser", flush=True)
-    print("review: Kopiera diagnostik ger ett textblock som kan klistras direkt i ChatGPT", flush=True)
+    print("review: Visa tre rader visar hela föregående/mål/nästa fysiska rad", flush=True)
+    print("review: Kopiera diagnostik + raster ger #/. för hela tre-radersfältet", flush=True)
     return fast.main()
 
 
