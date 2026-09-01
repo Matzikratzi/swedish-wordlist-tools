@@ -49,6 +49,20 @@ class TouchingGlyphPartitionTests(unittest.TestCase):
         self.assertEqual([match.label for match in selected], ["x", "y"])
         self.assertEqual(set().union(*(match.pixels for match in selected)), ink)
 
+    def test_grouped_matcher_does_not_read_part_of_semicolon_as_period(self):
+        # The period model is an exact subset of the semicolon's connected ink.
+        # It must not be emitted unless the rest of that component is also
+        # explained by selected glyphs.
+        period = GlyphModel(".", "roman", frozenset({(0, 0)}), 1)
+        ink = {(2, 2), (2, 3)}
+
+        baseline, selected, _candidates, _groups = select_best_baseline_partition_by_safe_gaps(
+            ink, 4, 5, [period]
+        )
+
+        self.assertIsNotNone(baseline)
+        self.assertEqual(selected, [])
+
 
 if __name__ == "__main__":
     unittest.main()
