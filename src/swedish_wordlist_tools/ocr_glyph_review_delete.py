@@ -29,10 +29,16 @@ def delete_exact_model(
     return 1
 
 
-def apply_edit_with_delete(state: dict, facit: Path, form: dict[str, list[str]]) -> str:
+def apply_edit_with_delete(
+    original_apply_edit,
+    state: dict,
+    facit: Path,
+    form: dict[str, list[str]],
+) -> str:
+    """Handle delete locally and delegate every other edit to the captured original."""
     action = (form.get("action") or [""])[0]
     if action != "delete":
-        return legacy.apply_edit(state, facit, form)
+        return original_apply_edit(state, facit, form)
 
     ids = [item for item in (form.get("selected") or [""])[0].split(",") if item]
     pixel_value = (form.get("selected_pixels") or [""])[0]
