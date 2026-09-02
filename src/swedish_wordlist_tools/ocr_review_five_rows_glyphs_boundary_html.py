@@ -25,6 +25,10 @@ _boundary_generation_lock = threading.RLock()
 _boundary_generation = 0
 
 
+class _BoundaryGenerationChanged(RuntimeError):
+    """Internal retry signal: row geometry changed while a row was analysed."""
+
+
 def _current_boundary_generation() -> int:
     with _boundary_generation_lock:
         return _boundary_generation
@@ -81,7 +85,12 @@ def _mark_strict_boundaries(row_map: dict, records: list[dict]) -> None:
 
 
 def _row_crop_box_with_strict_boundaries(row: dict, **kwargs):
-    """Keep ordinary padding except across a proven horizontal cut."""
+    """Keep ordinary padding except across a proven horizontal cut.
+
+    A proven boundary is pixel ownership, not merely a drawing hint.  The upper
+    row owns y < page_bottom and the lower row owns y >= page_top, so crop
+    padding is never allowed to cross such a boundary.
+    """
     left, top, right, bottom = _original_row_crop_box(row, **kwargs)
     if row.get("_glyph_proven_strict_top"):
         top = max(top, int(row["page_top"]))
@@ -136,8 +145,14 @@ def _gap_boundaries_around_row(rows: list[dict], row_index: int) -> list[int]:
     return result
 
 
-def _stamp_generation(state: dict) -> dict:
-    state["row_boundary_generation"] = _current_boundary_generation()
+def _stamp_generation(state: dict, *, expected_generation: int | None = None) -> dict:
+    """Stamp only states analysed against the still-current row geometry."""
+    current = _current_boundary_generation()
+    if expected_generation is not None and int(expected_generation) != current:
+        raise _BoundaryGenerationChanged(
+            f"boundary generation changed during row analysis: {expected_generation} -> {current}"
+        )
+    state["row_boundary_generation"] = current
     return state
 
 
@@ -250,17 +265,14 @@ def _store_and_reanalyse(
     state = _original_load_review_state(effective, position, models)
     state["row_boundary_corrections"] = _records_for_row(records, column, row_index)
     state["row_boundary_correction_learned"] = correction
-    return _stamp_generation(state)
+    return _stamp_generation(state, expected_generation=generation)
 
 
-def load_review_state_with_cached_boundaries(context: dict, position: tuple[int, int], models) -> dict:
-    """Apply cached cuts and conservatively learn missing straight boundaries.
-
-    Physical gaps between preliminary rows are checked for a full-width white
-    separator *before* glyph review.  This is important: ink sitting in such a
-    gap otherwise belongs to neither crop and therefore cannot create an edge
-    residual that would trigger the old fallback.
-    """
+def _load_review_state_with_cached_boundaries_once(
+    context: dict, position: tuple[int, int], models
+) -> dict:
+    """One row-analysis attempt against one immutable boundary generation."""
+    analysis_generation = _current_boundary_generation()
     effective, records = _effective_context(context)
     column, row_index = position
     rows = (effective.get("row_map", {}).get("columns") or [])[column].get("rows") or []
@@ -308,9 +320,16 @@ def load_review_state_with_cached_boundaries(context: dict, position: tuple[int,
     state = _original_load_review_state(effective, position, models)
     state["row_boundary_corrections"] = _records_for_row(records, column, row_index)
 
+    # Do not use this result even transiently if another row learned a boundary
+    # while the crop/glyph analysis was running.  Re-run from the new effective
+    # row_map instead; otherwise an old +1 padded crop can survive beside a newly
+    # displayed, correct separator.
+    if analysis_generation != _current_boundary_generation():
+        raise _BoundaryGenerationChanged
+
     edge_side = ultrafast._residual_edge_side(state)
     if edge_side is None:
-        return _stamp_generation(state)
+        return _stamp_generation(state, expected_generation=analysis_generation)
 
     learned = None
     for upper_row in _candidate_boundaries_for_edge(edge_side, row_index, len(rows)):
@@ -380,7 +399,7 @@ def load_review_state_with_cached_boundaries(context: dict, position: tuple[int,
         break
 
     if learned is None:
-        return _stamp_generation(state)
+        return _stamp_generation(state, expected_generation=analysis_generation)
 
     return _store_and_reanalyse(
         context,
@@ -389,6 +408,24 @@ def load_review_state_with_cached_boundaries(context: dict, position: tuple[int,
         learned,
         store=store,
     )
+
+
+def load_review_state_with_cached_boundaries(context: dict, position: tuple[int, int], models) -> dict:
+    """Analyse from the current pixel-owned row geometry, retrying on changes.
+
+    Physical gaps between preliminary rows are checked for a full-width white
+    separator before glyph review.  Once a horizontal boundary is proven, that
+    corrected row_map is authoritative pixel ownership.  If another thread
+    changes the boundary generation while this row is being analysed, the
+    entire row is retried so displayed separators and analysed pixels can never
+    come from different row geometries.
+    """
+    for _attempt in range(16):
+        try:
+            return _load_review_state_with_cached_boundaries_once(context, position, models)
+        except _BoundaryGenerationChanged:
+            continue
+    raise RuntimeError("row boundaries kept changing during 16 consecutive analysis attempts")
 
 
 class BoundaryAwareStateCache(_original_state_cache):
@@ -437,7 +474,8 @@ def main() -> int:
     print("review: vid kantresidual provas också fullbredds vit rasterrad, helt utan facit", flush=True)
     print("review: bara om vitlinjeregeln inte avgör körs den dyrare glyphgränssökningen ±4 px", flush=True)
     print("review: en redan rätt gräns kan också verifieras med glyphbevis och shift 0", flush=True)
-    print("review: verifierad gräns är strikt: ±1 crop-padding får inte korsa den", flush=True)
+    print("review: verifierad gräns är pixelägande: analysens crop får aldrig korsa den", flush=True)
+    print("review: analys och separator måste komma från samma boundary generation; annars räknas raden om", flush=True)
     print("review: lyckad korrigering/verifiering sparas i data/generated/ocr-page-cache/row-boundary-corrections-v1.json", flush=True)
     print("review: ny gräns gör gamla radanalyser stale så båda grannraderna räknas om", flush=True)
     print("review: utan entydigt gränsbevis lämnas residualpixlarna till glyph-editorn", flush=True)
