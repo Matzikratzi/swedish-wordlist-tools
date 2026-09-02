@@ -4,7 +4,11 @@ import unittest
 from pathlib import Path
 
 from swedish_wordlist_tools.ocr_glyph_facit_audit import (
+    baseline_up_distribution,
+    baseline_up_height,
+    descender_depth,
     exact_mask_duplicate_groups,
+    format_baseline_metric_report,
     format_duplicate_review,
     format_per_label_height_report,
     height_distribution,
@@ -46,6 +50,38 @@ class GlyphFacitAuditTests(unittest.TestCase):
         self.assertEqual(dist["roman"][(-4, 0, 5)], 1)
         self.assertEqual(dist["roman"][(-4, 2, 7)], 1)
         self.assertEqual(dist["italic"][(-5, 0, 6)], 1)
+
+    def test_baseline_up_height_ignores_descender(self) -> None:
+        a = GlyphModel("a", "roman", frozenset({(0, -4), (0, 0)}), 1)
+        g = GlyphModel("g", "roman", frozenset({(0, -4), (0, 3)}), 1)
+        self.assertEqual(baseline_up_height(a), 5)
+        self.assertEqual(baseline_up_height(g), 5)
+        self.assertEqual(descender_depth(a), 0)
+        self.assertEqual(descender_depth(g), 3)
+
+    def test_baseline_up_distribution_keeps_descender_separate(self) -> None:
+        models = [
+            GlyphModel("a", "roman", frozenset({(0, -4), (0, 0)}), 1),
+            GlyphModel("g", "roman", frozenset({(0, -4), (0, 3)}), 1),
+        ]
+        dist = baseline_up_distribution(models)
+        self.assertEqual(dist[("a", "roman")][(5, 0)], 1)
+        self.assertEqual(dist[("g", "roman")][(5, 3)], 1)
+
+    def test_baseline_metric_report_groups_x_height_and_ascenders(self) -> None:
+        models = [
+            GlyphModel("a", "roman", frozenset({(0, -4), (0, 0)}), 1),
+            GlyphModel("g", "roman", frozenset({(0, -4), (0, 3)}), 1),
+            GlyphModel("d", "roman", frozenset({(0, -7), (0, 0)}), 1),
+            GlyphModel("ö", "roman", frozenset({(0, -6), (0, 0)}), 1),
+        ]
+        report = format_baseline_metric_report(models)
+        self.assertIn("X-HEIGHT-ANCHORS", report)
+        self.assertIn("roman: up=5:2", report)
+        self.assertIn("ASCENDER-TOPS", report)
+        self.assertIn("roman: up=8:1", report)
+        self.assertIn("roman 'g': up=5/down=3:1", report)
+        self.assertIn("roman 'ö': up=7/down=0:1", report)
 
     def test_per_label_height_distribution_keeps_style_and_label_separate(self) -> None:
         models = [
