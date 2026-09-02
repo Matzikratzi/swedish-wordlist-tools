@@ -51,15 +51,19 @@ def find_blank_row_boundary(
     so it is safe evidence even when the facit is missing the glyph immediately
     above or below the gap.
 
-    The *first* white raster row in a contiguous white band is the separator.
-    The cut is placed immediately after that row: the separator itself remains
-    with the upper row, and every raster row below it belongs to the lower row.
-    This intentionally avoids creating a neutral/buffer zone from the rest of a
-    wider white band.
+    The *first* white raster row in the chosen white band is the separator. The
+    cut is placed immediately after that row: the separator itself remains with
+    the upper row, and every raster row below it belongs to the lower row.
 
-    Only blank bands close to the existing row boundary are considered. The
-    band must have source ink nearby on both sides. If more than one equally
-    near band remains, the evidence is treated as ambiguous.
+    If the preliminary geometry has a real physical gap (upper.page_bottom <
+    lower.page_top), only white bands inside that gap are considered, and the
+    uppermost valid band wins. This is deliberate: an isolated dot/diacritic in
+    the gap below the first white separator must belong to the lower row rather
+    than being stranded in a neutral zone or attached to the upper row.
+
+    Otherwise blank bands close to the existing shared/overlapping boundary are
+    considered and the unique nearest band wins, preserving the old conservative
+    behaviour for already-adjacent rows.
     """
     columns = row_map.get("columns") or []
     if not 0 <= column < len(columns):
@@ -81,8 +85,13 @@ def find_blank_row_boundary(
 
     gray = page_image.convert("L")
     left, right = _column_x_bounds(gray, column_entry, upper, lower)
-    search_top = max(outer_top + 1, original - int(max_shift))
-    search_bottom = min(outer_bottom - 2, original + int(max_shift))
+    physical_gap = old_upper_bottom < old_lower_top
+    if physical_gap:
+        search_top = max(outer_top + 1, old_upper_bottom)
+        search_bottom = min(outer_bottom - 2, old_lower_top - 1)
+    else:
+        search_top = max(outer_top + 1, original - int(max_shift))
+        search_bottom = min(outer_bottom - 2, original + int(max_shift))
     if search_bottom < search_top:
         return None
 
@@ -107,9 +116,6 @@ def find_blank_row_boundary(
     evidence_radius = int(max_shift) + 1
     candidates = []
     for blank_top, blank_bottom in bands:
-        # The first completely white row is enough to prove separation. Keep
-        # that one row with the upper line and give *everything* below it to
-        # the lower line, including any additional white rows in the band.
         boundary = blank_top + 1
         if not outer_top < boundary < outer_bottom:
             continue
@@ -136,11 +142,17 @@ def find_blank_row_boundary(
 
     if not candidates:
         return None
-    best_distance = min(item["distance"] for item in candidates)
-    best = [item for item in candidates if item["distance"] == best_distance]
-    if len(best) != 1:
-        return None
-    winner = best[0]
+    if physical_gap:
+        # The first full-width white separator below the upper row owns the cut.
+        # Any ink island after it (for example the dot of the lower row's i) is
+        # therefore guaranteed to be handed to the lower row.
+        winner = min(candidates, key=lambda item: item["blank_top"])
+    else:
+        best_distance = min(item["distance"] for item in candidates)
+        best = [item for item in candidates if item["distance"] == best_distance]
+        if len(best) != 1:
+            return None
+        winner = best[0]
 
     return {
         "status": "accepted-blank-row-horizontal-boundary",
