@@ -3,17 +3,13 @@ from __future__ import annotations
 import argparse
 import io
 import sys
+from collections import defaultdict
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from time import perf_counter
 
 from .ocr_compare_page_text_prefix import _format_duration
-from .ocr_glyph_facit_audit import (
-    SIZE_METRIC_FAMILIES,
-    baseline_up_height,
-    infer_size_metric_modes,
-    model_signature,
-)
+from .ocr_glyph_facit_audit import baseline_up_height, model_signature
 from .ocr_glyph_matcher import load_facit
 from .ocr_review_five_rows_glyphs_boundary_html import load_review_state_with_cached_boundaries
 from .ocr_review_five_rows_glyphs_fast_html import build_page_context
@@ -54,34 +50,34 @@ def cluster_records(state: dict) -> list[dict]:
     return sorted(out, key=lambda item: (item["x0"], item["y0"], item["label"]))
 
 
-def _family_for_label(label: str) -> str | None:
-    for family, labels in SIZE_METRIC_FAMILIES:
-        if label in labels:
-            return family
-    return None
-
-
 def glyph_size_class_map(models) -> dict[tuple[str, str, frozenset[tuple[int, int]]], str]:
-    """Map exact learned model identities to small/large/outlier size classes."""
+    """Map glyph models to a shared small/large font-size class within each style.
+
+    Absolute raster heights are letter-specific: a small roman ``h`` is much
+    taller than a small roman ``a``.  Therefore models are paired *within the
+    same label and style*.  When exactly two baseline-up populations exist, the
+    lower one is the small printing size and the higher one the large printing
+    size.  Ambiguous labels with one or more than two populations are left
+    unresolved; the neighbour audit must not manufacture a size distinction.
+    """
     rows = list(models)
-    modes = infer_size_metric_modes(rows)
-    out: dict[tuple[str, str, frozenset[tuple[int, int]]], str] = {}
+    by_label_style: dict[tuple[str, str], list] = defaultdict(list)
     for model in rows:
-        family = _family_for_label(model.label)
-        if family is None:
-            continue
-        pair = modes.get(model.style, {}).get(family)
-        if pair is None:
-            size = "unresolved"
+        if len(str(model.label)) == 1 and str(model.label).isalpha():
+            by_label_style[(str(model.label), str(model.style))].append(model)
+
+    out: dict[tuple[str, str, frozenset[tuple[int, int]]], str] = {}
+    for group in by_label_style.values():
+        heights = sorted({baseline_up_height(model) for model in group})
+        if len(heights) == 2:
+            small_height, large_height = heights
+            for model in group:
+                up = baseline_up_height(model)
+                size = "small" if up == small_height else "large"
+                out[model_signature(model)] = size
         else:
-            up = baseline_up_height(model)
-            if up == pair[0]:
-                size = "small"
-            elif up == pair[1]:
-                size = "large"
-            else:
-                size = "outlier"
-        out[model_signature(model)] = size
+            for model in group:
+                out[model_signature(model)] = "unresolved"
     return out
 
 
@@ -91,13 +87,12 @@ def _match_signature(match) -> tuple[str, str, frozenset[tuple[int, int]]]:
 
 
 def neighbor_class_warnings(state: dict, class_map: dict) -> list[dict]:
-    """Flag a lone style/size class embedded in a locally uniform letter run.
+    """Flag isolated typography changes inside a locally uniform letter run.
 
-    This is intentionally conservative.  A candidate must be flanked immediately
-    by the same class and have at least three supporting neighbours of that class
-    inside a five-letter window.  Punctuation/clusters and gaps wider than an
-    ordinary inter-letter gap split runs, so typography transitions are not
-    treated as evidence by themselves.
+    Style and printing size are checked independently.  A roman-small ``a`` and
+    a roman-small ``h`` agree even though their absolute raster heights differ.
+    Size warnings are emitted only for models whose own label has a proven
+    small/large pair; unresolved models are ignored for size purposes.
     """
     matches = sorted(state.get("matches") or [], key=lambda match: (match.x, match.baseline))
     runs: list[list[dict]] = []
@@ -116,10 +111,6 @@ def neighbor_class_warnings(state: dict, class_map: dict) -> list[dict]:
         if len(label) != 1 or not label.isalpha():
             flush()
             continue
-        size = class_map.get(_match_signature(match))
-        if size not in {"small", "large", "outlier"}:
-            flush()
-            continue
         xs = [x for x, _y in match.pixels]
         x0 = min(xs)
         x1 = max(xs)
@@ -129,8 +120,7 @@ def neighbor_class_warnings(state: dict, class_map: dict) -> list[dict]:
             {
                 "label": label,
                 "style": str(match.style),
-                "size": size,
-                "class": f"{match.style}-{size}",
+                "size": class_map.get(_match_signature(match), "unresolved"),
                 "x0": x0,
                 "x1": x1,
             }
@@ -144,25 +134,59 @@ def neighbor_class_warnings(state: dict, class_map: dict) -> list[dict]:
             continue
         for index in range(1, len(run) - 1):
             candidate = run[index]
-            expected = run[index - 1]["class"]
-            if run[index + 1]["class"] != expected or candidate["class"] == expected:
-                continue
             lo = max(0, index - 2)
             hi = min(len(run), index + 3)
+            context = "".join(item["label"] for item in run[lo:hi])
+
+            expected_style = run[index - 1]["style"]
+            if (
+                run[index + 1]["style"] == expected_style
+                and candidate["style"] != expected_style
+            ):
+                support = sum(
+                    1
+                    for other_index in range(lo, hi)
+                    if other_index != index and run[other_index]["style"] == expected_style
+                )
+                if support >= 3:
+                    warnings.append(
+                        {
+                            "kind": "style",
+                            "label": candidate["label"],
+                            "x": candidate["x0"],
+                            "observed": candidate["style"],
+                            "expected": expected_style,
+                            "support": support,
+                            "context": context,
+                        }
+                    )
+                    continue
+
+            if candidate["size"] not in {"small", "large"}:
+                continue
+            if run[index - 1]["style"] != candidate["style"] or run[index + 1]["style"] != candidate["style"]:
+                continue
+            expected_size = run[index - 1]["size"]
+            if expected_size not in {"small", "large"}:
+                continue
+            if run[index + 1]["size"] != expected_size or candidate["size"] == expected_size:
+                continue
             support = sum(
                 1
                 for other_index in range(lo, hi)
-                if other_index != index and run[other_index]["class"] == expected
+                if other_index != index
+                and run[other_index]["style"] == candidate["style"]
+                and run[other_index]["size"] == expected_size
             )
             if support < 3:
                 continue
-            context = "".join(item["label"] for item in run[lo:hi])
             warnings.append(
                 {
+                    "kind": "size",
                     "label": candidate["label"],
                     "x": candidate["x0"],
-                    "observed": candidate["class"],
-                    "expected": expected,
+                    "observed": f"{candidate['style']}-{candidate['size']}",
+                    "expected": f"{candidate['style']}-{expected_size}",
                     "support": support,
                     "context": context,
                 }
@@ -311,7 +335,7 @@ def main() -> int:
             for warning in row["class_warnings"]:
                 print(
                     f"CLASS-WARN\tcol={row['column']} row={row['row']} "
-                    f"x={warning['x']} glyph={warning['label']!r} "
+                    f"kind={warning['kind']} x={warning['x']} glyph={warning['label']!r} "
                     f"observed={warning['observed']} expected={warning['expected']} "
                     f"support={warning['support']} context={warning['context']!r} "
                     f"text={row['text']!r}"
