@@ -9,6 +9,12 @@ from typing import Any, Iterable
 from .ocr_glyph_matcher import GlyphModel, load_facit
 
 
+X_HEIGHT_LABELS = frozenset("acegmnopqrsuvwxyz")
+ASCENDER_LABELS = frozenset("bdfhijklt")
+DIACRITIC_LABELS = frozenset("åäö")
+DESCENDER_LABELS = frozenset("gjpqy")
+
+
 def model_signature(model: GlyphModel) -> tuple[str, str, frozenset[tuple[int, int]]]:
     return model.label, model.style, model.pixels
 
@@ -40,6 +46,89 @@ def height_distribution(models: Iterable[GlyphModel]) -> dict[str, Counter[tuple
     for model in models:
         result[model.style][(model.min_y, model.max_y, model.max_y - model.min_y + 1)] += 1
     return dict(result)
+
+
+def baseline_up_height(model: GlyphModel) -> int:
+    """Raster rows from the highest ink pixel down through baseline y=0.
+
+    Pixels below the baseline are deliberately ignored, so e.g. g/j/p/q can
+    be compared with ordinary x-height letters without their descenders
+    inflating the measurement.
+    """
+    return max(0, -model.min_y + 1)
+
+
+def descender_depth(model: GlyphModel) -> int:
+    """Raster rows below baseline y=0, reported separately from letter height."""
+    return max(0, model.max_y)
+
+
+def baseline_up_distribution(
+    models: Iterable[GlyphModel],
+) -> dict[tuple[str, str], Counter[tuple[int, int]]]:
+    """Count (baseline-up height, descender depth) separately per label/style."""
+    result: dict[tuple[str, str], Counter[tuple[int, int]]] = defaultdict(Counter)
+    for model in models:
+        result[(model.label, model.style)][
+            (baseline_up_height(model), descender_depth(model))
+        ] += 1
+    return dict(result)
+
+
+def _metric_group_distribution(
+    models: Iterable[GlyphModel], labels: frozenset[str]
+) -> dict[str, Counter[int]]:
+    result: dict[str, Counter[int]] = defaultdict(Counter)
+    for model in models:
+        if model.label in labels:
+            result[model.style][baseline_up_height(model)] += 1
+    return dict(result)
+
+
+def format_baseline_metric_report(models: Iterable[GlyphModel]) -> str:
+    """Render typography-oriented heights measured from the support baseline.
+
+    The x-height anchor group includes g/p/q but only their part above the
+    baseline is measured. Descender depth is printed separately. Ascenders and
+    diacritic letters are kept separate because their top ink is not x-height.
+    """
+    rows = list(models)
+    distributions = baseline_up_distribution(rows)
+    lines = [
+        "BASELINE-METRICS",
+        "up = raster rows from top ink through support baseline y=0; ink below baseline is ignored",
+        "down = raster rows below support baseline, reported separately",
+        "",
+        "X-HEIGHT-ANCHORS labels=acegmnopqrsuvwxyz",
+    ]
+    xdist = _metric_group_distribution(rows, X_HEIGHT_LABELS)
+    for style in sorted(xdist):
+        rendered = ", ".join(f"up={height}:{count}" for height, count in sorted(xdist[style].items()))
+        lines.append(f"{style}: {rendered}")
+
+    lines.extend(["", "ASCENDER-TOPS labels=bdfhijklt"])
+    adist = _metric_group_distribution(rows, ASCENDER_LABELS)
+    for style in sorted(adist):
+        rendered = ", ".join(f"up={height}:{count}" for height, count in sorted(adist[style].items()))
+        lines.append(f"{style}: {rendered}")
+
+    lines.extend(["", "DIACRITIC-TOPS labels=åäö"])
+    ddist = _metric_group_distribution(rows, DIACRITIC_LABELS)
+    for style in sorted(ddist):
+        rendered = ", ".join(f"up={height}:{count}" for height, count in sorted(ddist[style].items()))
+        lines.append(f"{style}: {rendered}")
+
+    lines.extend(["", "PER-LABEL-BASELINE-METRICS"])
+    interesting = X_HEIGHT_LABELS | ASCENDER_LABELS | DIACRITIC_LABELS
+    for (label, style), values in sorted(distributions.items(), key=lambda item: (item[0][1], item[0][0])):
+        if label not in interesting:
+            continue
+        rendered = ", ".join(
+            f"up={up}/down={down}:{count}"
+            for (up, down), count in sorted(values.items())
+        )
+        lines.append(f"{style} {label!r}: {rendered}")
+    return "\n".join(lines)
 
 
 def per_label_height_distribution(
@@ -234,6 +323,11 @@ def main() -> int:
         help="show baseline-relative height populations separately for each label/style",
     )
     ap.add_argument(
+        "--baseline-metrics",
+        action="store_true",
+        help="show baseline-up letter heights with descenders measured separately",
+    )
+    ap.add_argument(
         "--jsonl",
         type=Path,
         help="JSONL path inserted into five-row-editor commands printed by --review-duplicates",
@@ -245,6 +339,8 @@ def main() -> int:
     if args.review_duplicates:
         provenance = load_source_provenance(args.facit)
         print(format_duplicate_review(models, provenance, jsonl=args.jsonl, port=args.port))
+    elif args.baseline_metrics:
+        print(format_baseline_metric_report(models))
     elif args.per_label_heights:
         print(format_per_label_height_report(models))
     else:
