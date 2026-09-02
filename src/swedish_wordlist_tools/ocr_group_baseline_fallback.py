@@ -15,20 +15,40 @@ def _covered(matches: Iterable[Match]) -> set[tuple[int, int]]:
     return set().union(*(match.pixels for match in rows)) if rows else set()
 
 
+def _exact_group_at_baseline(
+    candidates: Iterable[Match],
+    group_ink: set[tuple[int, int]],
+    *,
+    left: int,
+    right: int,
+    baseline: int,
+) -> list[Match]:
+    same = [m for m in candidates if left <= m.x < right and m.baseline == baseline]
+    if not same:
+        return []
+    chosen = select_best_disjoint_exact_for_ink(same, group_ink)
+    chosen = _drop_partial_component_matches(chosen, group_ink)
+    return chosen if _covered(chosen) == group_ink else []
+
+
 def analyse_row_exact_grouped_with_baseline_fallback(
     crop,
     models: Iterable[GlyphModel],
     *,
     threshold: int = 210,
 ) -> dict:
-    """Keep one row baseline, but rescue wholly failing later whitespace groups at ±1.
+    """Keep one row baseline, with a conservative whitespace-triggered ±1 fallback.
 
-    The ordinary grouped matcher remains authoritative.  Only after it has chosen
+    The ordinary grouped matcher remains authoritative. Only after it has chosen
     one baseline for the complete physical row do we inspect later safe-whitespace
-    groups which remain incomplete.  Such a group may move by one pixel only if
-    the alternate baseline explains the *entire* group's source ink exactly and
-    does so with at least two glyphs.  This is deliberately a fallback for local
-    typesetting shifts, not a general per-word baseline optimiser.
+    groups which remain incomplete. A group may move by one pixel only if the
+    alternate baseline explains the *entire* group's source ink exactly with at
+    least two glyphs.
+
+    Once such a later group has proved a local baseline shift, the immediately
+    preceding incomplete group may be retried at that already-proved baseline.
+    This lets a single first glyph of a shifted phrase follow the proven shift,
+    without allowing one isolated glyph to establish a new baseline by itself.
     """
     model_rows = list(models)
     result = analyse_row_exact_grouped(crop, model_rows, threshold=threshold)
@@ -60,13 +80,14 @@ def analyse_row_exact_grouped_with_baseline_fallback(
         best = None
         for delta in (-1, 1):
             baseline = int(main_baseline) + delta
-            same = [m for m in candidates if left <= m.x < right and m.baseline == baseline]
-            if not same:
-                continue
-            chosen = select_best_disjoint_exact_for_ink(same, group_ink)
-            chosen = _drop_partial_component_matches(chosen, group_ink)
-            covered = _covered(chosen)
-            if covered != group_ink or len(chosen) < 2:
+            chosen = _exact_group_at_baseline(
+                candidates,
+                group_ink,
+                left=left,
+                right=right,
+                baseline=baseline,
+            )
+            if len(chosen) < 2:
                 continue
             key = (
                 sum(m.model_pixels for m in chosen),
@@ -82,6 +103,7 @@ def analyse_row_exact_grouped_with_baseline_fallback(
             continue
 
         _key, delta, chosen = best
+        proven_baseline = int(main_baseline) + int(delta)
         selected = [m for m in selected if not (left <= m.x < right)] + list(chosen)
         fallbacks.append(
             {
@@ -89,11 +111,58 @@ def analyse_row_exact_grouped_with_baseline_fallback(
                 "left": left,
                 "right": right,
                 "from_baseline": int(main_baseline),
-                "to_baseline": int(main_baseline) + int(delta),
+                "to_baseline": proven_baseline,
                 "delta": int(delta),
                 "labels": "".join(m.label for m in sorted(chosen, key=lambda m: m.x)),
                 "pixels": len(group_ink),
                 "status": "full-exact-whitespace-fallback",
+            }
+        )
+
+        # A single glyph immediately before the proving group was deliberately
+        # not allowed to establish a shift. Now that the following group has
+        # proved it, retry exactly that one preceding incomplete group at the
+        # same baseline. Never walk farther backwards.
+        previous_index = group_index - 1
+        if previous_index <= 0:
+            continue
+        previous_left, previous_right = groups[previous_index]
+        previous_ink = {
+            (x, y)
+            for x, y in result["ink"]
+            if previous_left <= x < previous_right
+        }
+        previous_existing = [
+            m for m in selected if previous_left <= m.x < previous_right
+        ]
+        if not previous_ink or _covered(previous_existing) == previous_ink:
+            continue
+        previous_chosen = _exact_group_at_baseline(
+            candidates,
+            previous_ink,
+            left=previous_left,
+            right=previous_right,
+            baseline=proven_baseline,
+        )
+        if not previous_chosen:
+            continue
+        selected = [
+            m for m in selected if not (previous_left <= m.x < previous_right)
+        ] + list(previous_chosen)
+        fallbacks.append(
+            {
+                "group": previous_index,
+                "left": previous_left,
+                "right": previous_right,
+                "from_baseline": int(main_baseline),
+                "to_baseline": proven_baseline,
+                "delta": int(delta),
+                "labels": "".join(
+                    m.label for m in sorted(previous_chosen, key=lambda m: m.x)
+                ),
+                "pixels": len(previous_ink),
+                "status": "retroactive-preceding-group-fallback",
+                "proved_by_group": group_index,
             }
         )
 
@@ -104,5 +173,8 @@ def analyse_row_exact_grouped_with_baseline_fallback(
     result["covered_pixels"] = len(covered)
     result["unmatched_pixels"] = len(unmatched)
     result["fully_exact"] = bool(result["ink"]) and covered == result["ink"]
-    result["baseline_fallbacks"] = fallbacks
+    result["baseline_fallbacks"] = sorted(
+        fallbacks,
+        key=lambda item: (int(item["group"]), str(item["status"])),
+    )
     return result
