@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import threading
 import unittest
+from unittest.mock import Mock
 
 from swedish_wordlist_tools.ocr_review_batch_live_html import (
     _FinishAwareServer,
@@ -24,15 +24,21 @@ class PausedLiveBatchTests(unittest.TestCase):
         self.assertNotIn('mode=defects', url)
         self.assertNotIn('anchor_', url)
 
-    def test_finish_aware_server_stops_only_after_finish_event(self) -> None:
-        event = threading.Event()
-        _FinishAwareServer.finish_event = event
-        server = object.__new__(_FinishAwareServer)
-        server.service_actions()
-        event.set()
-        with self.assertRaises(KeyboardInterrupt):
-            server.service_actions()
-        _FinishAwareServer.finish_event = None
+    def test_stop_active_calls_shutdown_on_current_editor_server(self) -> None:
+        server = Mock()
+        with _FinishAwareServer.active_lock:
+            _FinishAwareServer.active_server = server
+        try:
+            self.assertTrue(_FinishAwareServer.stop_active())
+            server.shutdown.assert_called_once_with()
+        finally:
+            with _FinishAwareServer.active_lock:
+                _FinishAwareServer.active_server = None
+
+    def test_stop_active_is_safe_when_no_editor_is_running(self) -> None:
+        with _FinishAwareServer.active_lock:
+            _FinishAwareServer.active_server = None
+        self.assertFalse(_FinishAwareServer.stop_active())
 
 
 if __name__ == '__main__':
