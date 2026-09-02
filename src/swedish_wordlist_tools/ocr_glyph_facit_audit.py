@@ -14,6 +14,18 @@ ASCENDER_LABELS = frozenset("bdfhijklt")
 DIACRITIC_LABELS = frozenset("åäö")
 DESCENDER_LABELS = frozenset("gjpqy")
 
+# Size inference is deliberately read-only and typography-oriented.  These
+# families keep letters with systematically different top metrics apart; in
+# particular i/j and t must not be treated as ordinary ascenders.
+SIZE_METRIC_FAMILIES: tuple[tuple[str, frozenset[str]], ...] = (
+    ("x-height", X_HEIGHT_LABELS),
+    ("ascender", frozenset("bdfhkl")),
+    ("i/j", frozenset("ij")),
+    ("t", frozenset("t")),
+    ("diaeresis", frozenset("äö")),
+    ("ring", frozenset("å")),
+)
+
 
 def model_signature(model: GlyphModel) -> tuple[str, str, frozenset[tuple[int, int]]]:
     return model.label, model.style, model.pixels
@@ -86,12 +98,7 @@ def _metric_group_distribution(
 
 
 def format_baseline_metric_report(models: Iterable[GlyphModel]) -> str:
-    """Render typography-oriented heights measured from the support baseline.
-
-    The x-height anchor group includes g/p/q but only their part above the
-    baseline is measured. Descender depth is printed separately. Ascenders and
-    diacritic letters are kept separate because their top ink is not x-height.
-    """
+    """Render typography-oriented heights measured from the support baseline."""
     rows = list(models)
     distributions = baseline_up_distribution(rows)
     lines = [
@@ -128,6 +135,130 @@ def format_baseline_metric_report(models: Iterable[GlyphModel]) -> str:
             for (up, down), count in sorted(values.items())
         )
         lines.append(f"{style} {label!r}: {rendered}")
+    return "\n".join(lines)
+
+
+def _dominant_two_modes(values: Counter[int]) -> tuple[int, int] | None:
+    """Return the two best-supported distinct heights, ordered small -> large.
+
+    Support count wins; equal support prefers the lower metric.  A family with
+    fewer than two observed heights is left unresolved rather than guessed.
+    """
+    if len(values) < 2:
+        return None
+    best = sorted(values, key=lambda height: (-values[height], height))[:2]
+    return tuple(sorted(best))  # type: ignore[return-value]
+
+
+def infer_size_metric_modes(
+    models: Iterable[GlyphModel],
+) -> dict[str, dict[str, tuple[int, int] | None]]:
+    """Infer small/large baseline-up modes independently for each style/family."""
+    rows = list(models)
+    styles = sorted({model.style for model in rows})
+    result: dict[str, dict[str, tuple[int, int] | None]] = {}
+    for style in styles:
+        by_family: dict[str, tuple[int, int] | None] = {}
+        style_rows = [model for model in rows if model.style == style]
+        for family, labels in SIZE_METRIC_FAMILIES:
+            counts = Counter(
+                baseline_up_height(model)
+                for model in style_rows
+                if model.label in labels
+            )
+            by_family[family] = _dominant_two_modes(counts)
+        result[style] = by_family
+    return result
+
+
+def _family_for_label(label: str) -> str | None:
+    for family, labels in SIZE_METRIC_FAMILIES:
+        if label in labels:
+            return family
+    return None
+
+
+def classify_size_models(models: Iterable[GlyphModel]) -> list[dict[str, Any]]:
+    """Classify measurable models as small/large/outlier using inferred modes."""
+    rows = list(models)
+    modes = infer_size_metric_modes(rows)
+    out: list[dict[str, Any]] = []
+    for model in rows:
+        family = _family_for_label(model.label)
+        if family is None:
+            continue
+        pair = modes.get(model.style, {}).get(family)
+        up = baseline_up_height(model)
+        if pair is None:
+            size = "unresolved"
+        elif up == pair[0]:
+            size = "small"
+        elif up == pair[1]:
+            size = "large"
+        else:
+            size = "outlier"
+        out.append(
+            {
+                "label": model.label,
+                "style": model.style,
+                "family": family,
+                "up": up,
+                "down": descender_depth(model),
+                "size": size,
+                "sources": model.sources,
+                "mode_pair": pair,
+            }
+        )
+    return sorted(out, key=lambda row: (row["style"], row["family"], row["label"], row["up"], row["down"]))
+
+
+def format_size_class_report(models: Iterable[GlyphModel]) -> str:
+    """Render a read-only audit of the possible two sizes inside each style."""
+    rows = list(models)
+    modes = infer_size_metric_modes(rows)
+    classified = classify_size_models(rows)
+    lines = [
+        "SIZE-CLASS-INFERENCE (read-only; facit unchanged)",
+        "small/large are inferred independently inside each typography metric family",
+        "",
+        "STYLE-SUMMARY",
+    ]
+    for style in sorted(modes):
+        xpair = modes[style].get("x-height")
+        candidate = "yes" if xpair is not None else "not proven"
+        rendered_x = "?" if xpair is None else f"{xpair[0]}/{xpair[1]}"
+        lines.append(f"{style}: two-size-candidate={candidate} x-height-small/large={rendered_x}")
+        for family, _labels in SIZE_METRIC_FAMILIES:
+            pair = modes[style].get(family)
+            rendered = "unresolved" if pair is None else f"small={pair[0]} large={pair[1]}"
+            lines.append(f"  {family}: {rendered}")
+
+    lines.extend(["", "OUTLIERS"])
+    outliers = [row for row in classified if row["size"] == "outlier"]
+    if not outliers:
+        lines.append("none")
+    else:
+        for row in outliers:
+            pair = row["mode_pair"]
+            lines.append(
+                f"{row['style']} {row['label']!r} family={row['family']} "
+                f"up={row['up']} down={row['down']} expected={pair[0]}/{pair[1]} "
+                f"sources={row['sources']}"
+            )
+
+    lines.extend(["", "UNRESOLVED-FAMILIES"])
+    unresolved = [
+        (style, family)
+        for style, families in modes.items()
+        for family, pair in families.items()
+        if pair is None
+    ]
+    if not unresolved:
+        lines.append("none")
+    else:
+        for style, family in unresolved:
+            lines.append(f"{style} {family}")
+
     return "\n".join(lines)
 
 
@@ -328,6 +459,11 @@ def main() -> int:
         help="show baseline-up letter heights with descenders measured separately",
     )
     ap.add_argument(
+        "--size-classes",
+        action="store_true",
+        help="infer read-only small/large typography classes per style and list outliers",
+    )
+    ap.add_argument(
         "--jsonl",
         type=Path,
         help="JSONL path inserted into five-row-editor commands printed by --review-duplicates",
@@ -339,6 +475,8 @@ def main() -> int:
     if args.review_duplicates:
         provenance = load_source_provenance(args.facit)
         print(format_duplicate_review(models, provenance, jsonl=args.jsonl, port=args.port))
+    elif args.size_classes:
+        print(format_size_class_report(models))
     elif args.baseline_metrics:
         print(format_baseline_metric_report(models))
     elif args.per_label_heights:
