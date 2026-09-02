@@ -15,14 +15,31 @@ from .ocr_glyph_matcher import load_facit
 
 
 class _FinishAwareServer(ThreadingHTTPServer):
-    """Editor server that can be stopped by the live batch control button."""
+    """Editor server that can be shut down explicitly by the live control."""
 
-    finish_event: threading.Event | None = None
+    active_server: "_FinishAwareServer | None" = None
+    active_lock = threading.RLock()
 
-    def service_actions(self) -> None:
-        event = type(self).finish_event
-        if event is not None and event.is_set():
-            raise KeyboardInterrupt
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        with type(self).active_lock:
+            type(self).active_server = self
+
+    @classmethod
+    def stop_active(cls) -> bool:
+        """Stop the current editor server from another thread."""
+        with cls.active_lock:
+            server = cls.active_server
+        if server is None:
+            return False
+        server.shutdown()
+        return True
+
+    def server_close(self) -> None:
+        with type(self).active_lock:
+            if type(self).active_server is self:
+                type(self).active_server = None
+        super().server_close()
 
 
 def _add_finish_button(document: str, control_url: str) -> str:
@@ -59,24 +76,22 @@ def _launch_paused_editor(
 ) -> int:
     """Run the normal editor while the batch is completely idle.
 
-    The batch has already found the exact defective row.  Therefore the editor
-    must *not* start in defects mode: that mode walks forward through the page
-    to build a defect packet, which looked like the batch was still running.
-    We instead open the ordinary five-row packet centred on the known row and
-    do no further scanning until the explicit finish button is clicked.
+    The batch has already found the exact defective row.  The editor opens a
+    plain five-row packet and then owns the foreground completely.  The control
+    button explicitly calls ``shutdown()`` on that editor HTTP server from a
+    separate thread.  Only after ``serve_forever()`` has really returned does
+    this function return and allow the batch scanner to resume.
     """
-    finish_event = threading.Event()
     control_port = port + 1
 
     class ControlHandler(BaseHTTPRequestHandler):
         def do_GET(self):
-            finish_event.set()
             body = (
                 '<!doctype html><meta charset="utf-8">'
                 '<title>Fortsätter</title>'
                 '<body style="font-family:sans-serif;padding:2rem">'
                 '<h2>Fortsätter batchen …</h2>'
-                '<p>Nästa trasiga rad öppnas automatiskt när den hittas.</p>'
+                '<p>Editorn stängs nu. Nästa trasiga rad öppnas automatiskt när den hittas.</p>'
                 '</body>'
             ).encode('utf-8')
             self.send_response(200)
@@ -84,6 +99,13 @@ def _launch_paused_editor(
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+            self.wfile.flush()
+            print('batch: "Klar med editeringen" mottagen; stänger editorn', flush=True)
+            threading.Thread(
+                target=_FinishAwareServer.stop_active,
+                name='ocr-batch-stop-editor',
+                daemon=True,
+            ).start()
 
         def log_message(self, _fmt, *_values):
             return
@@ -104,7 +126,6 @@ def _launch_paused_editor(
     def plain_url(_host: str, _port: int, _position: tuple[int, int]) -> str:
         return _plain_editor_url(_host, _port, _position)
 
-    _FinishAwareServer.finish_event = finish_event
     fast.ThreadingHTTPServer = _FinishAwareServer
     fast.ui.render_five_row_html = render_with_finish
     batch.defect_url = plain_url
@@ -128,7 +149,6 @@ def _launch_paused_editor(
         batch.defect_url = original_defect_url
         fast.ui.render_five_row_html = original_render
         fast.ThreadingHTTPServer = original_server
-        _FinishAwareServer.finish_event = None
         control.shutdown()
         control.server_close()
         control_thread.join(timeout=2.0)
@@ -207,7 +227,7 @@ def main() -> int:
                 port=args.port,
                 no_browser=args.no_browser,
             )
-            print('batch: fortsätter med aktuellt facit', flush=True)
+            print('batch: editorn stängd; fortsätter med aktuellt facit', flush=True)
 
     print(
         f'batch: alla valda sidor klara; elapsed={perf_counter() - started:.1f}s',
