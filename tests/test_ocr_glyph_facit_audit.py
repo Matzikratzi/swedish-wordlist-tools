@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from swedish_wordlist_tools.ocr_glyph_facit_audit import (
     exact_mask_duplicate_groups,
+    format_duplicate_review,
     height_distribution,
+    model_signature,
+    source_row_location,
 )
 from swedish_wordlist_tools.ocr_glyph_matcher import GlyphModel
 
@@ -39,6 +43,29 @@ class GlyphFacitAuditTests(unittest.TestCase):
         self.assertEqual(dist["roman"][(-4, 0, 5)], 1)
         self.assertEqual(dist["roman"][(-4, 2, 7)], 1)
         self.assertEqual(dist["italic"][(-5, 0, 6)], 1)
+
+    def test_source_row_location_requires_physical_row_coordinates(self) -> None:
+        self.assertEqual(source_row_location({"page": 4, "column": 1, "row": 24}), (4, 1, 24))
+        self.assertIsNone(source_row_location({"page": 1553, "word_file": "word.png"}))
+
+    def test_duplicate_review_prints_editor_command_and_target_style(self) -> None:
+        pixels = frozenset({(0, -1), (0, 0)})
+        roman = GlyphModel("R", "roman", pixels, 1)
+        italic = GlyphModel("R", "italic", pixels, 1)
+        provenance = {
+            model_signature(roman): [{"page": 2, "column": 1, "row": 17}],
+            model_signature(italic): [{"page": 4, "column": 0, "row": 31}],
+        }
+        report = format_duplicate_review(
+            [roman, italic],
+            provenance,
+            jsonl=Path("/tmp/saol.jsonl"),
+            port=8766,
+        )
+        self.assertIn("SÄRGRANSKA 'R' som nu är roman", report)
+        self.assertIn("--page 2 --column 1 --row 17 --port 8766", report)
+        self.assertIn("SÄRGRANSKA 'R' som nu är italic", report)
+        self.assertIn("--page 4 --column 0 --row 31 --port 8766", report)
 
 
 if __name__ == "__main__":
