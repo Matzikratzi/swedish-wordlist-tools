@@ -58,13 +58,37 @@ class BlankRowBoundaryTests(unittest.TestCase):
 
         self.assertIsNotNone(correction)
         self.assertEqual((correction["blank_row_top"], correction["blank_row_bottom"]), (9, 11))
-        # y=9 is the separator row. Everything y>=10 belongs to lower row,
-        # including the remaining white rows y=10..11 before its first ink.
         self.assertEqual(correction["corrected_boundary"], 10)
+
+    def test_physical_gap_uses_upper_separator_before_isolated_lower_dot(self) -> None:
+        image = Image.new("L", (20, 20), 255)
+        # Upper line ends at y=7. The preliminary geometry leaves y=8..13
+        # unowned. y=8..9 are white, y=10..11 are an isolated lower-row dot,
+        # and y=12..13 are white again before the lower glyph body at y=14.
+        for x, y in {(2, 6), (2, 7), (10, 10), (10, 11), (10, 14), (10, 15)}:
+            image.putpixel((x, y), 0)
+        row_map = {
+            "columns": [{
+                "column": 0,
+                "left": 0,
+                "right": 20,
+                "rows": [
+                    {"index": 0, "page_top": 0, "page_bottom": 8},
+                    {"index": 1, "page_top": 14, "page_bottom": 20},
+                ],
+            }]
+        }
+
+        correction = find_blank_row_boundary(image, row_map, 0, 0, max_shift=4)
+
+        self.assertIsNotNone(correction)
+        self.assertEqual((correction["blank_row_top"], correction["blank_row_bottom"]), (8, 9))
+        self.assertEqual(correction["corrected_boundary"], 9)
+        # Thus the isolated ink at y=10..11 is on the lower side of the cut.
+        self.assertLess(correction["corrected_boundary"], 10 + 1)
 
     def test_no_blank_row_means_no_conclusion(self) -> None:
         image = Image.new("L", (20, 16), 255)
-        # At least one ink pixel exists on every raster row in the search zone.
         for y in range(4, 13):
             image.putpixel((2, y), 0)
 
