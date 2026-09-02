@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import io
 import sys
+from contextlib import redirect_stderr
 from pathlib import Path
 from time import perf_counter
 
@@ -43,11 +45,21 @@ def cluster_records(state: dict) -> list[dict]:
     return sorted(out, key=lambda item: (item["x0"], item["y0"], item["label"]))
 
 
+def _load_review_state_for_audit(context: dict, position, models) -> dict:
+    """Run boundary-aware row analysis without flooding the page audit output.
+
+    Boundary learning/caching remains fully active.  Only its per-row diagnostic
+    chatter is suppressed here; the interactive reviewer still prints it.
+    """
+    with redirect_stderr(io.StringIO()):
+        return load_review_state_with_cached_boundaries(context, position, models)
+
+
 def audit_page(context: dict, models, *, progress=None) -> dict:
     rows: list[dict] = []
     positions = list(context.get("positions") or [])
     for done, position in enumerate(positions, start=1):
-        state = load_review_state_with_cached_boundaries(context, position, models)
+        state = _load_review_state_for_audit(context, position, models)
         clusters = cluster_records(state)
         singleton_count = sum(
             1 for match in state.get("matches") or [] if not is_cluster_label(match.label)
