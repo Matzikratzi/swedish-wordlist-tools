@@ -6,12 +6,15 @@ from pathlib import Path
 from swedish_wordlist_tools.ocr_glyph_facit_audit import (
     baseline_up_distribution,
     baseline_up_height,
+    classify_size_models,
     descender_depth,
     exact_mask_duplicate_groups,
     format_baseline_metric_report,
     format_duplicate_review,
     format_per_label_height_report,
+    format_size_class_report,
     height_distribution,
+    infer_size_metric_modes,
     model_signature,
     multiple_height_populations,
     per_label_height_distribution,
@@ -82,6 +85,46 @@ class GlyphFacitAuditTests(unittest.TestCase):
         self.assertIn("roman: up=8:1", report)
         self.assertIn("roman 'g': up=5/down=3:1", report)
         self.assertIn("roman 'ö': up=7/down=0:1", report)
+
+    def test_size_modes_pick_two_best_supported_heights(self) -> None:
+        models = [
+            GlyphModel("a", "roman", frozenset({(0, -5), (0, 0)}), 1),  # up 6
+            GlyphModel("e", "roman", frozenset({(0, -5), (0, 0)}), 1),  # up 6
+            GlyphModel("o", "roman", frozenset({(0, -7), (0, 0)}), 1),  # up 8
+            GlyphModel("x", "roman", frozenset({(0, -8), (0, 0)}), 1),  # up 9 noise
+            GlyphModel("u", "roman", frozenset({(0, -7), (0, 0)}), 1),  # up 8
+        ]
+        modes = infer_size_metric_modes(models)
+        self.assertEqual(modes["roman"]["x-height"], (6, 8))
+
+    def test_size_classification_marks_family_outlier(self) -> None:
+        models = [
+            GlyphModel("a", "roman", frozenset({(0, -5), (0, 0)}), 1),
+            GlyphModel("e", "roman", frozenset({(0, -7), (0, 0)}), 1),
+            GlyphModel("o", "roman", frozenset({(0, -6), (0, 0)}), 1),
+        ]
+        classified = classify_size_models(models)
+        by_label = {row["label"]: row for row in classified}
+        self.assertEqual(by_label["a"]["size"], "small")
+        self.assertEqual(by_label["e"]["size"], "large")
+        self.assertEqual(by_label["o"]["size"], "outlier")
+
+    def test_size_report_separates_i_j_and_t_from_ordinary_ascenders(self) -> None:
+        models = [
+            GlyphModel("a", "roman", frozenset({(0, -5), (0, 0)}), 1),
+            GlyphModel("e", "roman", frozenset({(0, -7), (0, 0)}), 1),
+            GlyphModel("d", "roman", frozenset({(0, -10), (0, 0)}), 1),
+            GlyphModel("h", "roman", frozenset({(0, -12), (0, 0)}), 1),
+            GlyphModel("i", "roman", frozenset({(0, -9), (0, 0)}), 1),
+            GlyphModel("j", "roman", frozenset({(0, -11), (0, 2)}), 1),
+            GlyphModel("t", "roman", frozenset({(0, -6), (0, 0)}), 1),
+            GlyphModel("t", "roman", frozenset({(0, -9), (0, 0)}), 1),
+        ]
+        report = format_size_class_report(models)
+        self.assertIn("roman: two-size-candidate=yes x-height-small/large=6/8", report)
+        self.assertIn("ascender: small=11 large=13", report)
+        self.assertIn("i/j: small=10 large=12", report)
+        self.assertIn("t: small=7 large=10", report)
 
     def test_per_label_height_distribution_keeps_style_and_label_separate(self) -> None:
         models = [
