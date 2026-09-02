@@ -10,6 +10,7 @@ from swedish_wordlist_tools.ocr_page_glyph_audit import (
     _load_review_state_for_audit,
     cluster_records,
     is_cluster_label,
+    neighbor_class_warnings,
 )
 
 
@@ -38,6 +39,65 @@ class PageGlyphAuditTest(unittest.TestCase):
         self.assertEqual(records[0]["x1"], 8)
         self.assertEqual(records[0]["pixels"], 4)
         self.assertEqual(records[0]["sources"], 1)
+
+    def test_neighbor_warning_flags_single_class_inside_uniform_run(self):
+        def match(label: str, style: str, x: int) -> Match:
+            return Match(label, style, x, 8, frozenset({(x, 7), (x, 8)}), 2, 1)
+
+        matches = [
+            match("a", "roman", 0),
+            match("e", "roman", 2),
+            match("o", "italic", 4),
+            match("u", "roman", 6),
+            match("x", "roman", 8),
+        ]
+        class_map = {}
+        for item in matches:
+            pixels = frozenset((x - item.x, y - item.baseline) for x, y in item.pixels)
+            size = "small"
+            class_map[(item.label, item.style, pixels)] = size
+
+        warnings = neighbor_class_warnings({"matches": matches}, class_map)
+        self.assertEqual(len(warnings), 1)
+        self.assertEqual(warnings[0]["label"], "o")
+        self.assertEqual(warnings[0]["observed"], "italic-small")
+        self.assertEqual(warnings[0]["expected"], "roman-small")
+        self.assertEqual(warnings[0]["support"], 4)
+        self.assertEqual(warnings[0]["context"], "aeoux")
+
+    def test_neighbor_warning_requires_more_than_aba(self):
+        def match(label: str, style: str, x: int) -> Match:
+            return Match(label, style, x, 8, frozenset({(x, 7), (x, 8)}), 2, 1)
+
+        matches = [
+            match("a", "roman", 0),
+            match("e", "italic", 2),
+            match("o", "roman", 4),
+        ]
+        class_map = {}
+        for item in matches:
+            pixels = frozenset((x - item.x, y - item.baseline) for x, y in item.pixels)
+            class_map[(item.label, item.style, pixels)] = "small"
+
+        self.assertEqual(neighbor_class_warnings({"matches": matches}, class_map), [])
+
+    def test_neighbor_warning_does_not_cross_large_gap(self):
+        def match(label: str, style: str, x: int) -> Match:
+            return Match(label, style, x, 8, frozenset({(x, 7), (x, 8)}), 2, 1)
+
+        matches = [
+            match("a", "roman", 0),
+            match("e", "roman", 2),
+            match("o", "italic", 20),
+            match("u", "roman", 22),
+            match("x", "roman", 24),
+        ]
+        class_map = {}
+        for item in matches:
+            pixels = frozenset((x - item.x, y - item.baseline) for x, y in item.pixels)
+            class_map[(item.label, item.style, pixels)] = "small"
+
+        self.assertEqual(neighbor_class_warnings({"matches": matches}, class_map), [])
 
     def test_row_loader_suppresses_boundary_diagnostics_on_both_streams(self):
         expected = {"column": 0, "row": 0}
