@@ -1,173 +1,207 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import sys
 import threading
-import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from time import perf_counter
 
 from . import ocr_review_batch_defects_html as batch
 from .ocr_batch_progress_cache import BatchProgressStore, DEFAULT_CACHE_PATH
-from .ocr_review_batch_prefetch import BatchPrefetcher
+from .ocr_glyph_matcher import load_facit
 
 
-class InteractivePriorityGate:
-    """Let interactive review pre-empt background row analysis.
+class _FinishAwareServer(ThreadingHTTPServer):
+    """Editor server that can be stopped by the live batch control button."""
 
-    Background analysis is allowed only while no interactive row load/edit is
-    active or waiting. Interactive work may run concurrently with other
-    interactive work, preserving the five-row editor's parallel row loading.
-    A short grace period after an edit keeps the background worker from jumping
-    in between the POST and the browser's redirected GET.
+    finish_event: threading.Event | None = None
+
+    def service_actions(self) -> None:
+        event = type(self).finish_event
+        if event is not None and event.is_set():
+            raise KeyboardInterrupt
+
+
+def _add_finish_button(document: str, control_url: str) -> str:
+    button = (
+        '<div style="position:sticky;top:0;z-index:9999;padding:8px 12px;'
+        'background:#fff;border-bottom:1px solid #bbb">'
+        f'<a href="{control_url}" style="display:inline-block;padding:9px 15px;'
+        'background:#1769aa;color:white;text-decoration:none;border-radius:5px;'
+        'font-weight:700">Klar med editeringen – fortsätt</a>'
+        '</div>'
+    )
+    needle = '<body>'
+    if needle in document:
+        return document.replace(needle, needle + button, 1)
+    return button + document
+
+
+def _launch_paused_editor(
+    jsonl: Path,
+    *,
+    page: int,
+    position: tuple[int, int],
+    threshold: int,
+    facit: Path,
+    host: str,
+    port: int,
+    no_browser: bool,
+) -> int:
+    """Run the normal editor while the batch is completely idle.
+
+    A tiny control server owns the explicit "done editing" button.  Clicking it
+    sets an event.  The editor HTTP server observes that event from
+    ``service_actions`` and exits its normal ``serve_forever`` loop.  Only then
+    does the batch resume scanning with the newly loaded facit.
     """
+    finish_event = threading.Event()
+    control_port = port + 1
 
-    def __init__(self) -> None:
-        self._condition = threading.Condition()
-        self._interactive_active = 0
-        self._interactive_waiting = 0
-        self._background_active = False
-        self._background_not_before = 0.0
+    class ControlHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            finish_event.set()
+            body = (
+                '<!doctype html><meta charset="utf-8">'
+                '<title>Fortsätter</title>'
+                '<body style="font-family:sans-serif;padding:2rem">'
+                '<h2>Fortsätter batchen …</h2>'
+                '<p>Nästa trasiga rad öppnas automatiskt när den hittas.</p>'
+                '</body>'
+            ).encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
-    def interactive_call(self, fn, *args, grace_seconds: float = 0.0, **kwargs):
-        with self._condition:
-            self._interactive_waiting += 1
-            try:
-                while self._background_active:
-                    self._condition.wait()
-                self._interactive_active += 1
-            finally:
-                self._interactive_waiting -= 1
-        try:
-            return fn(*args, **kwargs)
-        finally:
-            with self._condition:
-                self._interactive_active -= 1
-                if grace_seconds > 0:
-                    self._background_not_before = max(
-                        self._background_not_before,
-                        time.monotonic() + float(grace_seconds),
-                    )
-                self._condition.notify_all()
+        def log_message(self, _fmt, *_values):
+            return
 
-    def background_call(self, fn, *args, **kwargs):
-        with self._condition:
-            while True:
-                now = time.monotonic()
-                delay = self._background_not_before - now
-                blocked = (
-                    self._background_active
-                    or self._interactive_active > 0
-                    or self._interactive_waiting > 0
-                    or delay > 0
-                )
-                if not blocked:
-                    self._background_active = True
-                    break
-                self._condition.wait(timeout=max(0.001, delay) if delay > 0 else None)
-        try:
-            return fn(*args, **kwargs)
-        finally:
-            with self._condition:
-                self._background_active = False
-                self._condition.notify_all()
+    control = ThreadingHTTPServer((host, control_port), ControlHandler)
+    control_thread = threading.Thread(target=control.serve_forever, name='ocr-batch-control', daemon=True)
+    control_thread.start()
+
+    fast = batch.boundary.fast
+    original_server = fast.ThreadingHTTPServer
+    original_render = fast.ui.render_five_row_html
+    control_url = f'http://{host}:{control_port}/finish'
+
+    def render_with_finish(*args, **kwargs):
+        return _add_finish_button(original_render(*args, **kwargs), control_url)
+
+    _FinishAwareServer.finish_event = finish_event
+    fast.ThreadingHTTPServer = _FinishAwareServer
+    fast.ui.render_five_row_html = render_with_finish
+    try:
+        print(
+            f'batch: FEL page={page} col={position[0]} row={position[1]}; '
+            'batchen står nu helt still tills du klickar "Klar med editeringen – fortsätt"',
+            flush=True,
+        )
+        return batch.launch_editor(
+            jsonl,
+            page=page,
+            position=position,
+            threshold=threshold,
+            facit=facit,
+            host=host,
+            port=port,
+            no_browser=no_browser,
+        )
+    finally:
+        fast.ui.render_five_row_html = original_render
+        fast.ThreadingHTTPServer = original_server
+        _FinishAwareServer.finish_event = None
+        control.shutdown()
+        control.server_close()
+        control_thread.join(timeout=2.0)
 
 
-def _live_args(argv: list[str]) -> argparse.Namespace:
-    ap = argparse.ArgumentParser(add_help=False)
-    ap.add_argument("jsonl", type=Path)
-    ap.add_argument("--pages", required=True)
-    ap.add_argument("--threshold", type=int, default=210)
-    ap.add_argument("--facit", type=Path, default=Path("glyphs/saol14-manual-glyph-facit.json"))
-    ap.add_argument("--progress-cache", type=Path, default=DEFAULT_CACHE_PATH)
-    args, _unknown = ap.parse_known_args(argv[1:])
-    return args
+def _quiet_scan_page(*args, **kwargs) -> dict:
+    """Keep boundary/row diagnostics out of the normal live terminal."""
+    sink = io.StringIO()
+    with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
+        return batch.scan_page(*args, **kwargs)
 
 
 def main() -> int:
-    live = _live_args(sys.argv)
-    pages = batch.parse_pages(live.pages)
-    original_launch_editor = batch.launch_editor
+    ap = argparse.ArgumentParser(
+        description='Sequential OCR batch review: scan until a defect, then stop completely while editing.'
+    )
+    ap.add_argument('jsonl', type=Path)
+    ap.add_argument('--pages', required=True)
+    ap.add_argument('--threshold', type=int, default=210)
+    ap.add_argument('--facit', type=Path, default=Path('glyphs/saol14-manual-glyph-facit.json'))
+    ap.add_argument('--host', default='127.0.0.1')
+    ap.add_argument('--port', type=int, default=8766)
+    ap.add_argument('--no-browser', action='store_true')
+    ap.add_argument('--progress-cache', type=Path, default=DEFAULT_CACHE_PATH)
+    ap.add_argument('--reset-progress', action='store_true')
+    args = ap.parse_args()
 
-    def launch_with_prefetch(
-        jsonl: Path,
-        *,
-        page: int,
-        position: tuple[int, int],
-        threshold: int,
-        facit: Path,
-        host: str,
-        port: int,
-        no_browser: bool,
-    ) -> int:
-        later_pages = [candidate for candidate in pages if candidate > page]
-        prefetcher = BatchPrefetcher(
-            jsonl=jsonl,
-            pages=later_pages,
-            threshold=threshold,
-            facit=facit,
-            progress_store=BatchProgressStore(live.progress_cache),
-        )
-        gate = InteractivePriorityGate()
+    try:
+        pages = batch.parse_pages(args.pages)
+    except ValueError as exc:
+        ap.error(str(exc))
 
-        original_audit_loader = batch._load_review_state_for_audit
-        original_editor_loader = batch.boundary.fast.load_review_state_fast
-        original_apply_edit = batch.boundary.fast.legacy.apply_edit
+    progress_store = BatchProgressStore(args.progress_cache)
+    if args.reset_progress:
+        progress_store.clear()
+        print(f'batch: rensade progress-cache {args.progress_cache}', flush=True)
 
-        def priority_audit_loader(context, row_position, models):
-            if threading.current_thread().name == "ocr-batch-prefetch":
-                return gate.background_call(original_audit_loader, context, row_position, models)
-            return original_audit_loader(context, row_position, models)
+    started = perf_counter()
+    print(
+        f'batch: sekventiellt live-läge för sidor {pages}; '
+        'ingen bakgrundsprocessning medan editorn är öppen',
+        flush=True,
+    )
 
-        def priority_editor_loader(context, row_position, models):
-            if threading.current_thread().name == "ocr-batch-prefetch":
-                return original_editor_loader(context, row_position, models)
-            return gate.interactive_call(
-                original_editor_loader,
-                context,
-                row_position,
+    for page in pages:
+        while True:
+            models = load_facit(args.facit)
+            report = _quiet_scan_page(
+                args.jsonl,
+                page,
                 models,
-                grace_seconds=0.10,
+                threshold=args.threshold,
+                stop_after_first_defect=True,
+                progress_store=progress_store,
             )
 
-        def priority_apply_edit(state, edit_facit, form):
-            # Keep background work away long enough for the POST to finish and
-            # the browser to start the redirected GET that redraws the row.
-            return gate.interactive_call(
-                original_apply_edit,
-                state,
-                edit_facit,
-                form,
-                grace_seconds=1.5,
+            if not report['defects']:
+                suffix = ' (cachad)' if report.get('cached_complete') else ''
+                print(f'batch: sida {page} klar{suffix}', flush=True)
+                break
+
+            first = report['defects'][0]
+            position = (int(first['column']), int(first['row']))
+            print(
+                f"batch: FEL page={page} col={position[0]} row={position[1]} "
+                f"unknown={first['unknown_pixels']} text={first['text']!r}",
+                flush=True,
             )
-
-        batch._load_review_state_for_audit = priority_audit_loader
-        batch.boundary.fast.load_review_state_fast = priority_editor_loader
-        batch.boundary.fast.legacy.apply_edit = priority_apply_edit
-
-        prefetcher.start()
-        try:
-            return original_launch_editor(
-                jsonl,
+            _launch_paused_editor(
+                args.jsonl,
                 page=page,
                 position=position,
-                threshold=threshold,
-                facit=facit,
-                host=host,
-                port=port,
-                no_browser=no_browser,
+                threshold=args.threshold,
+                facit=args.facit,
+                host=args.host,
+                port=args.port,
+                no_browser=args.no_browser,
             )
-        finally:
-            prefetcher.stop()
-            batch._load_review_state_for_audit = original_audit_loader
-            batch.boundary.fast.load_review_state_fast = original_editor_loader
-            batch.boundary.fast.legacy.apply_edit = original_apply_edit
+            print('batch: fortsätter med aktuellt facit', flush=True)
 
-    batch.launch_editor = launch_with_prefetch
-    try:
-        return batch.main()
-    finally:
-        batch.launch_editor = original_launch_editor
+    print(
+        f'batch: alla valda sidor klara; elapsed={perf_counter() - started:.1f}s',
+        flush=True,
+    )
+    return 0
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     raise SystemExit(main())
