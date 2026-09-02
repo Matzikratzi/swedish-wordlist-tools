@@ -7,7 +7,9 @@ from . import ocr_review_five_rows_glyphs_ultrafast_html as ultrafast
 from .ocr_row_boundary_corrections import (
     BoundaryCorrectionStore,
     apply_boundary_corrections,
+    evaluate_boundary,
     find_boundary_correction,
+    model_digest,
     page_digest,
 )
 
@@ -16,6 +18,7 @@ fast = ultrafast.fast
 _original_load_review_state = fast.load_review_state_fast
 _original_diagnostic_text = ultrafast.diagnostic_text
 _original_state_cache = fast.SynchronizedStateCache
+_original_row_crop_box = fast._row_crop_box
 _context_lock = threading.RLock()
 _boundary_generation_lock = threading.RLock()
 _boundary_generation = 0
@@ -61,12 +64,38 @@ def _page_records(context: dict) -> list[dict]:
     )
 
 
+def _mark_strict_boundaries(row_map: dict, records: list[dict]) -> None:
+    """Mark glyph-proven cuts so the normal ±1 crop pad cannot cross them."""
+    columns = row_map.get("columns") or []
+    for record in records:
+        column = int(record.get("column", -1))
+        upper_row = int(record.get("upper_row", -1))
+        if not 0 <= column < len(columns):
+            continue
+        rows = columns[column].get("rows") or []
+        if not 0 <= upper_row < len(rows) - 1:
+            continue
+        rows[upper_row]["_glyph_proven_strict_bottom"] = True
+        rows[upper_row + 1]["_glyph_proven_strict_top"] = True
+
+
+def _row_crop_box_with_strict_boundaries(row: dict, **kwargs):
+    """Keep ordinary padding except across a glyph-proven horizontal cut."""
+    left, top, right, bottom = _original_row_crop_box(row, **kwargs)
+    if row.get("_glyph_proven_strict_top"):
+        top = max(top, int(row["page_top"]))
+    if row.get("_glyph_proven_strict_bottom"):
+        bottom = min(bottom, int(row["page_bottom"]))
+    return left, top, right, bottom
+
+
 def _effective_context(context: dict) -> tuple[dict, list[dict]]:
     records = _page_records(context)
     if not records:
         return context, []
     effective = dict(context)
     effective["row_map"] = apply_boundary_corrections(context["row_map"], records)
+    _mark_strict_boundaries(effective["row_map"], records)
     return effective, records
 
 
@@ -93,12 +122,96 @@ def _stamp_generation(state: dict) -> dict:
     return state
 
 
+def _prove_existing_boundary(
+    context: dict,
+    row_map: dict,
+    column: int,
+    upper_row: int,
+    models,
+    *,
+    digest: str,
+) -> dict | None:
+    """Prove that the nominal cut is right but the review padding crosses it.
+
+    This is the touching-descender/ascender case: each strict half is completely
+    explained by known glyphs, while one or both ordinary padded row crops still
+    contain unexplained edge ink from the other row.  The physical boundary need
+    not move; what we learn is that this existing horizontal line is authoritative
+    and padding must stop there.
+    """
+    columns = row_map.get("columns") or []
+    if not 0 <= column < len(columns):
+        return None
+    rows = columns[column].get("rows") or []
+    if not 0 <= upper_row < len(rows) - 1:
+        return None
+    upper = rows[upper_row]
+    lower = rows[upper_row + 1]
+    old_upper_bottom = int(upper["page_bottom"])
+    old_lower_top = int(lower["page_top"])
+    boundary = int(round((old_upper_bottom + old_lower_top) / 2.0))
+
+    strict = evaluate_boundary(
+        context["page"],
+        row_map,
+        column,
+        upper_row,
+        boundary,
+        models,
+        threshold=int(context["threshold"]),
+    )
+    if not (strict["upper"]["fully_exact"] and strict["lower"]["fully_exact"]):
+        return None
+
+    upper_padded = _original_load_review_state(
+        {**context, "row_map": row_map}, (column, upper_row), models
+    )
+    lower_padded = _original_load_review_state(
+        {**context, "row_map": row_map}, (column, upper_row + 1), models
+    )
+    upper_unmatched = int(upper_padded.get("source_pixels") or 0) - int(upper_padded.get("covered_pixels") or 0)
+    lower_unmatched = int(lower_padded.get("source_pixels") or 0) - int(lower_padded.get("covered_pixels") or 0)
+    before_unmatched = upper_unmatched + lower_unmatched
+    if before_unmatched <= 0:
+        return None
+
+    return {
+        "status": "accepted-glyph-proven-existing-horizontal-boundary",
+        "page": int(context["page_number"]),
+        "column": int(column),
+        "upper_row": int(upper_row),
+        "lower_row": int(upper_row) + 1,
+        "threshold": int(context["threshold"]),
+        "source_digest": digest,
+        "original_upper_bottom": old_upper_bottom,
+        "original_lower_top": old_lower_top,
+        "original_boundary": boundary,
+        "corrected_boundary": boundary,
+        "shift": 0,
+        "max_shift": 4,
+        "before": {
+            "unmatched": before_unmatched,
+            "covered": int(upper_padded.get("covered_pixels") or 0) + int(lower_padded.get("covered_pixels") or 0),
+            "upper_unmatched": upper_unmatched,
+            "lower_unmatched": lower_unmatched,
+        },
+        "after": {
+            "unmatched": 0,
+            "covered": strict["covered"],
+            "upper_unmatched": 0,
+            "lower_unmatched": 0,
+        },
+        "evidence_facit_digest": model_digest(models),
+    }
+
+
 def load_review_state_with_cached_boundaries(context: dict, position: tuple[int, int], models) -> dict:
     """Apply learned cuts, and learn a new one only for edge residuals.
 
     The ordinary segmentation remains untouched. A copied row map gets cached
     horizontal corrections, so concurrent row analyses never observe a temporary
-    mutation of the shared geometry.
+    mutation of the shared geometry. A cached boundary is also a strict ownership
+    cut: ordinary review padding may not borrow pixels across it.
     """
     effective, records = _effective_context(context)
     state = _original_load_review_state(effective, position, models)
@@ -114,7 +227,7 @@ def load_review_state_with_cached_boundaries(context: dict, position: tuple[int,
     learned = None
     for upper_row in _candidate_boundaries_for_edge(edge_side, row_index, len(rows)):
         # Never repeatedly optimize a boundary already proven and cached. If a
-        # residual remains after that cut, it belongs in the glyph editor.
+        # residual remains after that strict cut, it belongs in the glyph editor.
         existing = store.get(
             source_digest=digest,
             page_number=int(context["page_number"]),
@@ -142,6 +255,15 @@ def load_review_state_with_cached_boundaries(context: dict, position: tuple[int,
             page_number=int(context["page_number"]),
         )
         if correction is None:
+            correction = _prove_existing_boundary(
+                context,
+                effective["row_map"],
+                column,
+                upper_row,
+                models,
+                digest=digest,
+            )
+        if correction is None:
             print(
                 f"review: radgräns {column}:{upper_row}/{upper_row + 1}: inget entydigt glyphbevis",
                 flush=True,
@@ -151,10 +273,11 @@ def load_review_state_with_cached_boundaries(context: dict, position: tuple[int,
         store.put(correction)
         learned = correction
         generation = _advance_boundary_generation()
+        verb = "verifierad" if int(correction.get("shift", 0)) == 0 else "korrigerad"
         print(
             f"review: radgräns {column}:{upper_row}/{upper_row + 1}: "
-            f"{correction['original_boundary']} -> {correction['corrected_boundary']} "
-            f"(oförklarat {correction['before']['unmatched']} -> {correction['after']['unmatched']}); "
+            f"{correction['original_boundary']} -> {correction['corrected_boundary']} ({verb}; "
+            f"oförklarat {correction['before']['unmatched']} -> {correction['after']['unmatched']}); "
             f"cachad, boundary generation {generation}",
             flush=True,
         )
@@ -204,6 +327,7 @@ def diagnostic_text_with_boundaries(state: dict) -> str:
     return text + payload
 
 
+fast._row_crop_box = _row_crop_box_with_strict_boundaries
 fast.load_review_state_fast = load_review_state_with_cached_boundaries
 fast.SynchronizedStateCache = BoundaryAwareStateCache
 # ultrafast.render_html_with_neighbor_raster resolves this global at call time.
@@ -213,8 +337,9 @@ ultrafast.diagnostic_text = diagnostic_text_with_boundaries
 def main() -> int:
     print("review: BOUNDARY använder ULTRAFAST + cachade glyphbevisade raka radgränser", flush=True)
     print("review: vanliga radgränser lämnas orörda; fallback körs bara för kantresidualer", flush=True)
-    print("review: gränssökning är ±4 px och måste förbättra båda rader utan försämring", flush=True)
-    print("review: lyckad korrigering sparas i data/generated/ocr-page-cache/row-boundary-corrections-v1.json", flush=True)
+    print("review: gränssökning är ±4 px; en redan rätt gräns kan också verifieras med shift 0", flush=True)
+    print("review: verifierad gräns är strikt: ±1 crop-padding får inte korsa den", flush=True)
+    print("review: lyckad korrigering/verifiering sparas i data/generated/ocr-page-cache/row-boundary-corrections-v1.json", flush=True)
     print("review: ny gräns gör gamla radanalyser stale så båda grannraderna räknas om", flush=True)
     print("review: misslyckad/ambiguous korrigering lämnar residualpixlarna till glyph-editorn", flush=True)
     return ultrafast.main()
