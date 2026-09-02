@@ -37,18 +37,19 @@ def analyse_row_exact_grouped_with_baseline_fallback(
     *,
     threshold: int = 210,
 ) -> dict:
-    """Keep one row baseline, with a conservative whitespace-triggered ±1 fallback.
+    """Keep a piecewise-constant row baseline with conservative ±1 discovery.
 
-    The ordinary grouped matcher remains authoritative. Only after it has chosen
-    one baseline for the complete physical row do we inspect later safe-whitespace
-    groups which remain incomplete. A group may move by one pixel only if the
-    alternate baseline explains the *entire* group's source ink exactly with at
-    least two glyphs.
+    The ordinary grouped matcher first chooses one baseline for the complete
+    physical row. A later safe-whitespace group may establish a one-pixel shift
+    only if the alternate baseline explains the *entire* group's source ink
+    exactly with at least two glyphs.
 
-    Once such a later group has proved a local baseline shift, the immediately
-    preceding incomplete group may be retried at that already-proved baseline.
-    This lets a single first glyph of a shifted phrase follow the proven shift,
-    without allowing one isolated glyph to establish a new baseline by itself.
+    Once such a shift is proved, that baseline is treated as the support line
+    for the rest of the physical row. Subsequent incomplete whitespace groups
+    are therefore retried at the already-proved baseline even when they contain
+    only one glyph. This is still purely pixel/facit based; no JSONL text is
+    consulted. The immediately preceding incomplete group may also inherit the
+    newly proved shift, as before.
     """
     model_rows = list(models)
     result = analyse_row_exact_grouped(crop, model_rows, threshold=threshold)
@@ -56,6 +57,11 @@ def analyse_row_exact_grouped_with_baseline_fallback(
     groups = list(result.get("safe_groups") or [])
     if main_baseline is None or len(groups) < 2 or result.get("fully_exact"):
         result["baseline_fallbacks"] = []
+        result["baseline_segments"] = (
+            [{"left": 0, "right": crop.width, "baseline": int(main_baseline)}]
+            if main_baseline is not None
+            else []
+        )
         return result
 
     candidates, bounds = exact_matches_by_safe_gaps(
@@ -66,6 +72,8 @@ def analyse_row_exact_grouped_with_baseline_fallback(
 
     selected = list(result["selected"])
     fallbacks: list[dict] = []
+    active_baseline = int(main_baseline)
+    shift_start_left: int | None = None
 
     for group_index, (left, right) in enumerate(groups):
         if group_index == 0:
@@ -75,6 +83,39 @@ def analyse_row_exact_grouped_with_baseline_fallback(
             continue
         existing = [m for m in selected if left <= m.x < right]
         if _covered(existing) == group_ink:
+            continue
+
+        # A previously proved support-line shift persists to the end of the row.
+        # It no longer needs two glyphs in every later group: the earlier proof
+        # established the baseline, while this group still has to match *all* of
+        # its pixels exactly at that same baseline.
+        if active_baseline != int(main_baseline):
+            inherited = _exact_group_at_baseline(
+                candidates,
+                group_ink,
+                left=left,
+                right=right,
+                baseline=active_baseline,
+            )
+            if inherited:
+                selected = [m for m in selected if not (left <= m.x < right)] + list(inherited)
+                fallbacks.append(
+                    {
+                        "group": group_index,
+                        "left": left,
+                        "right": right,
+                        "from_baseline": int(main_baseline),
+                        "to_baseline": active_baseline,
+                        "delta": active_baseline - int(main_baseline),
+                        "labels": "".join(
+                            m.label for m in sorted(inherited, key=lambda m: m.x)
+                        ),
+                        "pixels": len(group_ink),
+                        "status": "persistent-proven-baseline-fallback",
+                    }
+                )
+            # Once a support line has been proved we do not hunt for another
+            # independent ±1 shift later on the same physical row.
             continue
 
         best = None
@@ -104,6 +145,8 @@ def analyse_row_exact_grouped_with_baseline_fallback(
 
         _key, delta, chosen = best
         proven_baseline = int(main_baseline) + int(delta)
+        active_baseline = proven_baseline
+        shift_start_left = left
         selected = [m for m in selected if not (left <= m.x < right)] + list(chosen)
         fallbacks.append(
             {
@@ -146,6 +189,7 @@ def analyse_row_exact_grouped_with_baseline_fallback(
         )
         if not previous_chosen:
             continue
+        shift_start_left = previous_left
         selected = [
             m for m in selected if not (previous_left <= m.x < previous_right)
         ] + list(previous_chosen)
@@ -177,4 +221,13 @@ def analyse_row_exact_grouped_with_baseline_fallback(
         fallbacks,
         key=lambda item: (int(item["group"]), str(item["status"])),
     )
+    if shift_start_left is None:
+        result["baseline_segments"] = [
+            {"left": 0, "right": crop.width, "baseline": int(main_baseline)}
+        ]
+    else:
+        result["baseline_segments"] = [
+            {"left": 0, "right": int(shift_start_left), "baseline": int(main_baseline)},
+            {"left": int(shift_start_left), "right": crop.width, "baseline": int(active_baseline)},
+        ]
     return result
