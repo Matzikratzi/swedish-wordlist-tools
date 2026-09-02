@@ -39,14 +39,28 @@ def parse_pages(spec: str) -> list[int]:
     return sorted(pages)
 
 
-def scan_context(context: dict, models, *, progress=None) -> dict:
-    """Return only settled pixel defects for one already-segmented page."""
+def scan_context(
+    context: dict,
+    models,
+    *,
+    progress=None,
+    stop_after_first_defect: bool = False,
+) -> dict:
+    """Scan settled rows and optionally stop as soon as one pixel defect exists.
+
+    Interactive batch review only needs enough information to find the first
+    defective page and row.  Stopping there avoids doing expensive exact glyph
+    matching for the rest of that page and for every later selected page.
+    Full scans remain available for ``--scan-only`` and tests.
+    """
     positions = list(context.get("positions") or [])
     defects: list[dict] = []
     source_pixels = 0
     covered_pixels = 0
+    rows_scanned = 0
     for done, position in enumerate(positions, start=1):
         state = _load_review_state_for_audit(context, position, models)
+        rows_scanned = done
         source = int(state.get("source_pixels") or 0)
         covered = int(state.get("covered_pixels") or 0)
         unknown = max(0, source - covered)
@@ -65,10 +79,16 @@ def scan_context(context: dict, models, *, progress=None) -> dict:
             )
         if progress is not None:
             progress(done, len(positions), position)
+        if unknown and stop_after_first_defect:
+            break
+
+    complete_scan = rows_scanned == len(positions)
     return {
         "page": int(context["page_number"]),
         "rows_total": len(positions),
-        "rows_exact": len(positions) - len(defects),
+        "rows_scanned": rows_scanned,
+        "complete_scan": complete_scan,
+        "rows_exact": rows_scanned - len(defects),
         "defects": defects,
         "source_pixels": source_pixels,
         "covered_pixels": covered_pixels,
@@ -76,7 +96,14 @@ def scan_context(context: dict, models, *, progress=None) -> dict:
     }
 
 
-def scan_page(jsonl: Path, page: int, models, *, threshold: int = 210) -> dict:
+def scan_page(
+    jsonl: Path,
+    page: int,
+    models,
+    *,
+    threshold: int = 210,
+    stop_after_first_defect: bool = False,
+) -> dict:
     started = perf_counter()
     context = build_page_context(jsonl, page, threshold)
     last_bucket = -1
@@ -94,7 +121,12 @@ def scan_page(jsonl: Path, page: int, models, *, threshold: int = 210) -> dict:
             flush=True,
         )
 
-    report = scan_context(context, models, progress=progress)
+    report = scan_context(
+        context,
+        models,
+        progress=progress,
+        stop_after_first_defect=stop_after_first_defect,
+    )
     report["elapsed"] = perf_counter() - started
     return report
 
@@ -181,7 +213,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
             "Scan several SAOL pages with the exact boundary-aware glyph pipeline, "
-            "then open only defective rows in the ordinary five-row editor."
+            "then open the first defective page immediately in the ordinary five-row editor."
         )
     )
     ap.add_argument("jsonl", type=Path)
@@ -191,7 +223,7 @@ def main() -> int:
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8766)
     ap.add_argument("--no-browser", action="store_true")
-    ap.add_argument("--scan-only", action="store_true", help="scan and summarize without starting the editor")
+    ap.add_argument("--scan-only", action="store_true", help="fully scan and summarize all selected pages without starting the editor")
     args = ap.parse_args()
 
     try:
@@ -200,9 +232,63 @@ def main() -> int:
         ap.error(str(exc))
 
     models = load_facit(args.facit)
-    reports: list[dict] = []
     batch_started = perf_counter()
-    print(f"batch: skannar sidor {pages}; bara pixeldefekter räknas", flush=True)
+    print(
+        f"batch: skannar sidor {pages}; bara pixeldefekter räknas; "
+        + ("full scan" if args.scan_only else "öppnar direkt vid första defekt"),
+        flush=True,
+    )
+
+    if not args.scan_only:
+        exact_pages = 0
+        for page in pages:
+            report = scan_page(
+                args.jsonl,
+                page,
+                models,
+                threshold=args.threshold,
+                stop_after_first_defect=True,
+            )
+            if report["defects"]:
+                first = report["defects"][0]
+                print(
+                    f"batch page={page}: TRASIG; hittade första defekten efter "
+                    f"{report['rows_scanned']}/{report['rows_total']} rader, "
+                    f"unknown={first['unknown_pixels']} col={first['column']} row={first['row']} "
+                    f"elapsed={_format_duration(report['elapsed'])} text={first['text']!r}",
+                    flush=True,
+                )
+                print(
+                    f"batch: {exact_pages} föregående sida/sidor var pixel-exakta; "
+                    f"slutar förskanna efter {_format_duration(perf_counter() - batch_started)}",
+                    flush=True,
+                )
+                return launch_editor(
+                    args.jsonl,
+                    page=page,
+                    position=(int(first["column"]), int(first["row"])),
+                    threshold=args.threshold,
+                    facit=args.facit,
+                    host=args.host,
+                    port=args.port,
+                    no_browser=args.no_browser,
+                )
+
+            exact_pages += 1
+            print(
+                f"batch page={page}: EXAKT; rows_exact={report['rows_exact']}/{report['rows_total']} "
+                f"elapsed={_format_duration(report['elapsed'])}",
+                flush=True,
+            )
+
+        print(
+            f"batch: inga trasiga rader på de valda sidorna; pages={len(pages)} "
+            f"elapsed={_format_duration(perf_counter() - batch_started)}",
+            flush=True,
+        )
+        return 0
+
+    reports: list[dict] = []
     for page in pages:
         report = scan_page(args.jsonl, page, models, threshold=args.threshold)
         reports.append(report)
@@ -216,7 +302,7 @@ def main() -> int:
     defective_reports = [report for report in reports if report["defects"]]
     total_defects = sum(len(report["defects"]) for report in defective_reports)
     print(
-        f"batch: klart på {_format_duration(perf_counter() - batch_started)}; "
+        f"batch: full scan klar på {_format_duration(perf_counter() - batch_started)}; "
         f"pages={len(reports)} exact_pages={len(reports) - len(defective_reports)} "
         f"defective_pages={len(defective_reports)} defective_rows={total_defects}",
         flush=True,
@@ -229,24 +315,7 @@ def main() -> int:
             f"text={first['text']!r}",
             flush=True,
         )
-
-    if not defective_reports or args.scan_only:
-        if not defective_reports:
-            print("batch: inga trasiga rader på de valda sidorna", flush=True)
-        return 0
-
-    first_report = defective_reports[0]
-    first_defect = first_report["defects"][0]
-    return launch_editor(
-        args.jsonl,
-        page=int(first_report["page"]),
-        position=(int(first_defect["column"]), int(first_defect["row"])),
-        threshold=args.threshold,
-        facit=args.facit,
-        host=args.host,
-        port=args.port,
-        no_browser=args.no_browser,
-    )
+    return 0
 
 
 if __name__ == "__main__":
