@@ -25,8 +25,8 @@ class BlankRowBoundaryTests(unittest.TestCase):
 
     def test_full_width_white_row_moves_cut_without_glyph_evidence(self) -> None:
         image = Image.new("L", (20, 16), 255)
-        # Upper ink reaches y=8.  y=9 is fully white.  Unknown lower-row ink
-        # starts at y=10.  No glyph models are involved in this proof.
+        # Upper ink reaches y=8. y=9 is fully white. Unknown lower-row ink
+        # starts at y=10. No glyph models are involved in this proof.
         for x, y in {(2, 6), (2, 7), (2, 8), (10, 10), (10, 11), (11, 11)}:
             image.putpixel((x, y), 0)
 
@@ -47,7 +47,7 @@ class BlankRowBoundaryTests(unittest.TestCase):
         self.assertEqual(correction["corrected_boundary"], 10)
         self.assertEqual(correction["shift"], 2)
 
-    def test_contiguous_white_band_uses_lower_edge_before_next_ink(self) -> None:
+    def test_contiguous_white_band_cuts_after_first_white_row(self) -> None:
         image = Image.new("L", (20, 18), 255)
         for x, y in {(2, 6), (2, 7), (2, 8), (10, 12), (10, 13)}:
             image.putpixel((x, y), 0)
@@ -58,7 +58,9 @@ class BlankRowBoundaryTests(unittest.TestCase):
 
         self.assertIsNotNone(correction)
         self.assertEqual((correction["blank_row_top"], correction["blank_row_bottom"]), (9, 11))
-        self.assertEqual(correction["corrected_boundary"], 12)
+        # y=9 is the separator row. Everything y>=10 belongs to lower row,
+        # including the remaining white rows y=10..11 before its first ink.
+        self.assertEqual(correction["corrected_boundary"], 10)
 
     def test_no_blank_row_means_no_conclusion(self) -> None:
         image = Image.new("L", (20, 16), 255)
