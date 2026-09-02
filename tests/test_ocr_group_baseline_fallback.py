@@ -60,17 +60,21 @@ class GroupBaselineFallbackTests(unittest.TestCase):
         self.assertEqual(result["baseline_fallbacks"], [])
 
     def test_proven_shift_rescues_immediately_preceding_single_glyph(self) -> None:
-        image = Image.new("L", (36, 12), 255)
+        image = Image.new("L", (40, 12), 255)
         models = models_with_one_internal_blank_column()
 
-        main = {(2, 3), (2, 4), (2, 5), (3, 5), (5, 3), (5, 4), (5, 5), (6, 5)}
+        # Four A glyphs on baseline 5 make the main row baseline unambiguous.
+        # One-column inter-glyph gaps keep them in the same safe group.
+        main = set()
+        for x in (2, 5, 8, 11):
+            main.update({(x, 3), (x, 4), (x, 5), (x + 1, 5)})
         # First shifted safe group contains only one glyph, so it may not prove
         # the shift by itself.
-        shifted_first = {(15, 5), (15, 6), (16, 6)}  # b at baseline 6
+        shifted_first = {(18, 5), (18, 6), (19, 6)}  # b at baseline 6
         # The following safe group contains two exact glyphs and proves +1.
         shifted_proof = {
-            (22, 5), (23, 5), (22, 6),
             (25, 5), (26, 5), (25, 6),
+            (28, 5), (29, 5), (28, 6),
         }  # cc at baseline 6
         for point in main | shifted_first | shifted_proof:
             image.putpixel(point, 0)
