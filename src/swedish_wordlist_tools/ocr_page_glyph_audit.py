@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import io
 import sys
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from time import perf_counter
 
@@ -46,13 +46,19 @@ def cluster_records(state: dict) -> list[dict]:
 
 
 def _load_review_state_for_audit(context: dict, position, models) -> dict:
-    """Run boundary-aware row analysis without flooding the page audit output.
+    """Run boundary-aware row analysis quietly until its cuts have settled.
 
-    Boundary learning/caching remains fully active.  Only its per-row diagnostic
-    chatter is suppressed here; the interactive reviewer still prints it.
+    The interactive loader deliberately returns immediately after learning one
+    boundary correction so the browser can refresh.  A batch audit has no such
+    refresh, so repeat the same row while it reports a newly learned correction.
     """
-    with redirect_stderr(io.StringIO()):
-        return load_review_state_with_cached_boundaries(context, position, models)
+    state: dict = {}
+    for _attempt in range(8):
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            state = load_review_state_with_cached_boundaries(context, position, models)
+        if not state.get("row_boundary_correction_learned"):
+            return state
+    return state
 
 
 def audit_page(context: dict, models, *, progress=None) -> dict:
