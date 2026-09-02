@@ -35,6 +35,35 @@ class BoundaryAwareStateCacheTests(unittest.TestCase):
         self.assertEqual(boundary_ui._candidate_boundaries_for_edge("top", 0, 50), [])
         self.assertEqual(boundary_ui._candidate_boundaries_for_edge("bottom", 49, 50), [])
 
+    def test_verified_boundary_blocks_padding_only_across_that_cut(self) -> None:
+        row_map = {
+            "columns": [
+                {
+                    "rows": [
+                        {"page_top": 10, "page_bottom": 20, "crop_left": 0, "crop_right": 100},
+                        {"page_top": 20, "page_bottom": 30, "crop_left": 0, "crop_right": 100},
+                    ]
+                }
+            ]
+        }
+        boundary_ui._mark_strict_boundaries(
+            row_map,
+            [{"column": 0, "upper_row": 0, "lower_row": 1, "corrected_boundary": 20}],
+        )
+        upper, lower = row_map["columns"][0]["rows"]
+
+        upper_box = boundary_ui._row_crop_box_with_strict_boundaries(
+            upper, column=0, page_width=100, page_height=100, pad_y=1, left_override=None
+        )
+        lower_box = boundary_ui._row_crop_box_with_strict_boundaries(
+            lower, column=0, page_width=100, page_height=100, pad_y=1, left_override=None
+        )
+
+        # Upper row keeps its top padding but may not borrow y=20 from below.
+        self.assertEqual(upper_box, (0, 9, 100, 20))
+        # Lower row may not borrow y=19 from above, but keeps bottom padding.
+        self.assertEqual(lower_box, (0, 20, 100, 31))
+
 
 if __name__ == "__main__":
     unittest.main()
