@@ -5,10 +5,11 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
 
-from swedish_wordlist_tools.ocr_glyph_matcher import Match
+from swedish_wordlist_tools.ocr_glyph_matcher import GlyphModel, Match
 from swedish_wordlist_tools.ocr_page_glyph_audit import (
     _load_review_state_for_audit,
     cluster_records,
+    glyph_size_class_map,
     is_cluster_label,
     neighbor_class_warnings,
 )
@@ -40,7 +41,29 @@ class PageGlyphAuditTest(unittest.TestCase):
         self.assertEqual(records[0]["pixels"], 4)
         self.assertEqual(records[0]["sources"], 1)
 
-    def test_neighbor_warning_flags_single_class_inside_uniform_run(self):
+    def test_size_map_pairs_each_letter_independently_into_shared_font_sizes(self):
+        models = [
+            GlyphModel("a", "roman", frozenset({(0, -5), (0, 0)}), 1),   # small a: up 6
+            GlyphModel("a", "roman", frozenset({(0, -7), (0, 0)}), 1),   # large a: up 8
+            GlyphModel("h", "roman", frozenset({(0, -10), (0, 0)}), 1),  # small h: up 11
+            GlyphModel("h", "roman", frozenset({(0, -12), (0, 0)}), 1),  # large h: up 13
+        ]
+        classes = glyph_size_class_map(models)
+        self.assertEqual(classes[("a", "roman", models[0].pixels)], "small")
+        self.assertEqual(classes[("h", "roman", models[2].pixels)], "small")
+        self.assertEqual(classes[("a", "roman", models[1].pixels)], "large")
+        self.assertEqual(classes[("h", "roman", models[3].pixels)], "large")
+
+    def test_size_map_leaves_ambiguous_letter_unresolved(self):
+        models = [
+            GlyphModel("u", "roman", frozenset({(0, -5), (0, 0)}), 1),
+            GlyphModel("u", "roman", frozenset({(0, -6), (0, 0)}), 1),
+            GlyphModel("u", "roman", frozenset({(0, -7), (0, 0)}), 1),
+        ]
+        classes = glyph_size_class_map(models)
+        self.assertEqual(set(classes.values()), {"unresolved"})
+
+    def test_neighbor_warning_flags_isolated_style_even_when_sizes_match(self):
         def match(label: str, style: str, x: int) -> Match:
             return Match(label, style, x, 8, frozenset({(x, 7), (x, 8)}), 2, 1)
 
@@ -54,16 +77,55 @@ class PageGlyphAuditTest(unittest.TestCase):
         class_map = {}
         for item in matches:
             pixels = frozenset((x - item.x, y - item.baseline) for x, y in item.pixels)
-            size = "small"
+            class_map[(item.label, item.style, pixels)] = "small"
+
+        warnings = neighbor_class_warnings({"matches": matches}, class_map)
+        self.assertEqual(len(warnings), 1)
+        self.assertEqual(warnings[0]["kind"], "style")
+        self.assertEqual(warnings[0]["label"], "o")
+        self.assertEqual(warnings[0]["observed"], "italic")
+        self.assertEqual(warnings[0]["expected"], "roman")
+        self.assertEqual(warnings[0]["support"], 4)
+        self.assertEqual(warnings[0]["context"], "aeoux")
+
+    def test_neighbor_warning_flags_shared_size_class_across_different_letters(self):
+        def match(label: str, x: int) -> Match:
+            return Match(label, "roman", x, 8, frozenset({(x, 7), (x, 8)}), 2, 1)
+
+        matches = [
+            match("a", 0),
+            match("h", 2),
+            match("e", 4),
+            match("b", 6),
+            match("o", 8),
+        ]
+        sizes = ["small", "small", "large", "small", "small"]
+        class_map = {}
+        for item, size in zip(matches, sizes):
+            pixels = frozenset((x - item.x, y - item.baseline) for x, y in item.pixels)
             class_map[(item.label, item.style, pixels)] = size
 
         warnings = neighbor_class_warnings({"matches": matches}, class_map)
         self.assertEqual(len(warnings), 1)
-        self.assertEqual(warnings[0]["label"], "o")
-        self.assertEqual(warnings[0]["observed"], "italic-small")
+        self.assertEqual(warnings[0]["kind"], "size")
+        self.assertEqual(warnings[0]["label"], "e")
+        self.assertEqual(warnings[0]["observed"], "roman-large")
         self.assertEqual(warnings[0]["expected"], "roman-small")
         self.assertEqual(warnings[0]["support"], 4)
-        self.assertEqual(warnings[0]["context"], "aeoux")
+        self.assertEqual(warnings[0]["context"], "ahebo")
+
+    def test_neighbor_warning_ignores_unresolved_size(self):
+        def match(label: str, x: int) -> Match:
+            return Match(label, "roman", x, 8, frozenset({(x, 7), (x, 8)}), 2, 1)
+
+        matches = [match("a", 0), match("h", 2), match("u", 4), match("b", 6), match("o", 8)]
+        sizes = ["small", "small", "unresolved", "small", "small"]
+        class_map = {}
+        for item, size in zip(matches, sizes):
+            pixels = frozenset((x - item.x, y - item.baseline) for x, y in item.pixels)
+            class_map[(item.label, item.style, pixels)] = size
+
+        self.assertEqual(neighbor_class_warnings({"matches": matches}, class_map), [])
 
     def test_neighbor_warning_requires_more_than_aba(self):
         def match(label: str, style: str, x: int) -> Match:
