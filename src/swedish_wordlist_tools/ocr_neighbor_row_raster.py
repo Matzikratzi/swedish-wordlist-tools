@@ -28,6 +28,53 @@ def _ascii_raster(image, *, threshold: int, boundaries: list[tuple[int, str]]) -
     return "\n".join(lines)
 
 
+def _support_lines(
+    state: dict[str, Any],
+    rows: list[dict[str, Any]],
+    row_index: int,
+    *,
+    source_top: int,
+    image_height: int,
+) -> list[tuple[int, str]]:
+    """Project the target baseline onto its immediate physical neighbours.
+
+    The target row baseline is measured by the exact-row analyser.  For a
+    touching-row failure we still want to inspect/create an unknown glyph before
+    the ownership cut has been proven.  Therefore the diagnostic raster carries
+    one support line per visible row.  Neighbor support lines are projected by
+    the difference between physical row centres; they are visual guides only and
+    are never consumed as ownership evidence.
+    """
+    baseline = state.get("baseline")
+    crop_box = state.get("crop_box")
+    if baseline is None or not crop_box:
+        return []
+
+    target_baseline_page = int(crop_box[1]) + int(baseline)
+    target = rows[row_index]
+    target_center = float(
+        target.get(
+            "center_y",
+            (int(target["page_top"]) + int(target["page_bottom"]) - 1) / 2.0,
+        )
+    )
+
+    result: list[tuple[int, str]] = []
+    for index in range(max(0, row_index - 1), min(len(rows), row_index + 2)):
+        row = rows[index]
+        center = float(
+            row.get(
+                "center_y",
+                (int(row["page_top"]) + int(row["page_bottom"]) - 1) / 2.0,
+            )
+        )
+        page_y = int(round(target_baseline_page + center - target_center))
+        local_y = max(0, min(int(image_height), page_y - int(source_top)))
+        suffix = "exact" if index == row_index else "projected"
+        result.append((local_y, f"SUPPORT row {index} ({suffix})"))
+    return result
+
+
 def add_neighbor_row_raster(
     context: dict[str, Any],
     state: dict[str, Any],
@@ -89,6 +136,15 @@ def add_neighbor_row_raster(
             ]
         )
 
+    support_lines = _support_lines(
+        state,
+        rows,
+        row_index,
+        source_top=source_top,
+        image_height=image.height,
+    )
+    display_lines = [*boundaries, *support_lines]
+
     state = dict(state)
     state.update(
         {
@@ -100,11 +156,12 @@ def add_neighbor_row_raster(
             "neighbor_probe_y": int(probe_y),
             "neighbor_page_top": source_top,
             "neighbor_page_bottom": source_bottom,
-            "neighbor_row_boundaries": [[y, label] for y, label in boundaries],
+            "neighbor_row_boundaries": [[y, label] for y, label in display_lines],
+            "neighbor_support_lines": [[y, label] for y, label in support_lines],
             "neighbor_raster_ascii": _ascii_raster(
                 image,
                 threshold=int(context.get("threshold", 210)),
-                boundaries=boundaries,
+                boundaries=display_lines,
             ),
         }
     )
