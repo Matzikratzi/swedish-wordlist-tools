@@ -53,25 +53,31 @@ class PagePixelArray:
     def assign_row_map(self, row_map: dict) -> int:
         """Assign currently-unassigned ink by the row map's exact geometry.
 
-        No padding is involved.  Pixels outside all physical row rectangles stay
+        No padding is involved. Pixels outside all physical row rectangles stay
         at 255, which makes segmentation gaps visible instead of silently giving
-        those pixels to a neighbouring crop.
+        those pixels to a neighbouring crop. Refined crop bounds are preferred
+        over the bootstrap one-third column bounds.
         """
         assigned = 0
-        for column_index, column in enumerate(row_map.get("columns") or []):
-            left = max(0, int(column.get("left", 0)))
-            right = min(self.width, int(column.get("right", self.width)))
+        for column in row_map.get("columns") or []:
+            left = max(0, int(column.get("crop_left", column.get("left", 0))))
+            right = min(
+                self.width,
+                int(column.get("crop_right", column.get("right", self.width))),
+            )
             if right <= left:
                 continue
             for row_index, row in enumerate(column.get("rows") or []):
                 code = self.row_code(row_index)
+                row_left = max(0, int(row.get("crop_left", left)))
+                row_right = min(self.width, int(row.get("crop_right", right)))
                 top = max(0, int(row["page_top"]))
                 bottom = min(self.height, int(row["page_bottom"]))
-                if bottom <= top:
+                if row_right <= row_left or bottom <= top:
                     continue
                 for y in range(top, bottom):
-                    start = y * self.width + left
-                    end = y * self.width + right
+                    start = y * self.width + row_left
+                    end = y * self.width + row_right
                     for offset in range(start, end):
                         if self.data[offset] == UNASSIGNED_INK:
                             self.data[offset] = code
