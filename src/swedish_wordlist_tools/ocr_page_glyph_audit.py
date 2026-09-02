@@ -8,9 +8,18 @@ from pathlib import Path
 from time import perf_counter
 
 from .ocr_compare_page_text_prefix import _format_duration
+from .ocr_glyph_facit_audit import (
+    SIZE_METRIC_FAMILIES,
+    baseline_up_height,
+    infer_size_metric_modes,
+    model_signature,
+)
 from .ocr_glyph_matcher import load_facit
 from .ocr_review_five_rows_glyphs_boundary_html import load_review_state_with_cached_boundaries
 from .ocr_review_five_rows_glyphs_fast_html import build_page_context
+
+
+MAX_INTRA_WORD_GAP = 4
 
 
 def is_cluster_label(label: str) -> bool:
@@ -45,6 +54,122 @@ def cluster_records(state: dict) -> list[dict]:
     return sorted(out, key=lambda item: (item["x0"], item["y0"], item["label"]))
 
 
+def _family_for_label(label: str) -> str | None:
+    for family, labels in SIZE_METRIC_FAMILIES:
+        if label in labels:
+            return family
+    return None
+
+
+def glyph_size_class_map(models) -> dict[tuple[str, str, frozenset[tuple[int, int]]], str]:
+    """Map exact learned model identities to small/large/outlier size classes."""
+    rows = list(models)
+    modes = infer_size_metric_modes(rows)
+    out: dict[tuple[str, str, frozenset[tuple[int, int]]], str] = {}
+    for model in rows:
+        family = _family_for_label(model.label)
+        if family is None:
+            continue
+        pair = modes.get(model.style, {}).get(family)
+        if pair is None:
+            size = "unresolved"
+        else:
+            up = baseline_up_height(model)
+            if up == pair[0]:
+                size = "small"
+            elif up == pair[1]:
+                size = "large"
+            else:
+                size = "outlier"
+        out[model_signature(model)] = size
+    return out
+
+
+def _match_signature(match) -> tuple[str, str, frozenset[tuple[int, int]]]:
+    pixels = frozenset((x - int(match.x), y - int(match.baseline)) for x, y in match.pixels)
+    return str(match.label), str(match.style), pixels
+
+
+def neighbor_class_warnings(state: dict, class_map: dict) -> list[dict]:
+    """Flag a lone style/size class embedded in a locally uniform letter run.
+
+    This is intentionally conservative.  A candidate must be flanked immediately
+    by the same class and have at least three supporting neighbours of that class
+    inside a five-letter window.  Punctuation/clusters and gaps wider than an
+    ordinary inter-letter gap split runs, so typography transitions are not
+    treated as evidence by themselves.
+    """
+    matches = sorted(state.get("matches") or [], key=lambda match: (match.x, match.baseline))
+    runs: list[list[dict]] = []
+    current: list[dict] = []
+    previous_x1: int | None = None
+
+    def flush() -> None:
+        nonlocal current, previous_x1
+        if current:
+            runs.append(current)
+        current = []
+        previous_x1 = None
+
+    for match in matches:
+        label = str(match.label)
+        if len(label) != 1 or not label.isalpha():
+            flush()
+            continue
+        size = class_map.get(_match_signature(match))
+        if size not in {"small", "large", "outlier"}:
+            flush()
+            continue
+        xs = [x for x, _y in match.pixels]
+        x0 = min(xs)
+        x1 = max(xs)
+        if previous_x1 is not None and x0 - previous_x1 - 1 > MAX_INTRA_WORD_GAP:
+            flush()
+        current.append(
+            {
+                "label": label,
+                "style": str(match.style),
+                "size": size,
+                "class": f"{match.style}-{size}",
+                "x0": x0,
+                "x1": x1,
+            }
+        )
+        previous_x1 = x1
+    flush()
+
+    warnings: list[dict] = []
+    for run in runs:
+        if len(run) < 4:
+            continue
+        for index in range(1, len(run) - 1):
+            candidate = run[index]
+            expected = run[index - 1]["class"]
+            if run[index + 1]["class"] != expected or candidate["class"] == expected:
+                continue
+            lo = max(0, index - 2)
+            hi = min(len(run), index + 3)
+            support = sum(
+                1
+                for other_index in range(lo, hi)
+                if other_index != index and run[other_index]["class"] == expected
+            )
+            if support < 3:
+                continue
+            context = "".join(item["label"] for item in run[lo:hi])
+            warnings.append(
+                {
+                    "label": candidate["label"],
+                    "x": candidate["x0"],
+                    "observed": candidate["class"],
+                    "expected": expected,
+                    "support": support,
+                    "context": context,
+                }
+            )
+    return warnings
+
+
 def _load_review_state_for_audit(context: dict, position, models) -> dict:
     """Run boundary-aware row analysis quietly until its cuts have settled.
 
@@ -64,9 +189,11 @@ def _load_review_state_for_audit(context: dict, position, models) -> dict:
 def audit_page(context: dict, models, *, progress=None) -> dict:
     rows: list[dict] = []
     positions = list(context.get("positions") or [])
+    class_map = glyph_size_class_map(models)
     for done, position in enumerate(positions, start=1):
         state = _load_review_state_for_audit(context, position, models)
         clusters = cluster_records(state)
+        class_warnings = neighbor_class_warnings(state, class_map)
         singleton_count = sum(
             1 for match in state.get("matches") or [] if not is_cluster_label(match.label)
         )
@@ -82,6 +209,7 @@ def audit_page(context: dict, models, *, progress=None) -> dict:
                 "text": str(state.get("text") or ""),
                 "singletons": singleton_count,
                 "clusters": clusters,
+                "class_warnings": class_warnings,
                 "boundary_corrections": list(state.get("row_boundary_corrections") or []),
             }
         )
@@ -92,6 +220,7 @@ def audit_page(context: dict, models, *, progress=None) -> dict:
     covered_pixels = sum(row["covered_pixels"] for row in rows)
     misses = [row for row in rows if row["unknown_pixels"]]
     cluster_rows = [row for row in rows if row["clusters"]]
+    warning_rows = [row for row in rows if row["class_warnings"]]
     return {
         "rows": rows,
         "rows_total": len(rows),
@@ -103,6 +232,8 @@ def audit_page(context: dict, models, *, progress=None) -> dict:
         "cluster_rows": cluster_rows,
         "cluster_matches": sum(len(row["clusters"]) for row in cluster_rows),
         "singleton_matches": sum(row["singletons"] for row in rows),
+        "warning_rows": warning_rows,
+        "class_warnings": sum(len(row["class_warnings"]) for row in warning_rows),
     }
 
 
@@ -173,6 +304,18 @@ def main() -> int:
             )
     else:
         print("PIXEL-MISSES 0")
+
+    if report["class_warnings"]:
+        print(f"NEIGHBOR-CLASS-WARNINGS {report['class_warnings']}")
+        for row in report["warning_rows"]:
+            for warning in row["class_warnings"]:
+                print(
+                    f"CLASS-WARN\tcol={row['column']} row={row['row']} "
+                    f"x={warning['x']} glyph={warning['label']!r} "
+                    f"observed={warning['observed']} expected={warning['expected']} "
+                    f"support={warning['support']} context={warning['context']!r} "
+                    f"text={row['text']!r}"
+                )
 
     if args.clusters != "none":
         print(
