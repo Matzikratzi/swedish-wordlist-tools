@@ -42,6 +42,51 @@ def height_distribution(models: Iterable[GlyphModel]) -> dict[str, Counter[tuple
     return dict(result)
 
 
+def per_label_height_distribution(
+    models: Iterable[GlyphModel],
+) -> dict[tuple[str, str], Counter[tuple[int, int, int]]]:
+    """Count baseline-relative height tuples separately for each label/style."""
+    result: dict[tuple[str, str], Counter[tuple[int, int, int]]] = defaultdict(Counter)
+    for model in models:
+        key = (model.label, model.style)
+        height = model.max_y - model.min_y + 1
+        result[key][(model.min_y, model.max_y, height)] += 1
+    return dict(result)
+
+
+def multiple_height_populations(
+    models: Iterable[GlyphModel],
+) -> dict[tuple[str, str], Counter[tuple[int, int, int]]]:
+    """Return label/style identities represented by more than one vertical extent."""
+    distributions = per_label_height_distribution(models)
+    return {key: values for key, values in distributions.items() if len(values) > 1}
+
+
+def _format_height_values(values: Counter[tuple[int, int, int]]) -> str:
+    return ", ".join(
+        f"y={min_y}..{max_y}/h={height}:{count}"
+        for (min_y, max_y, height), count in sorted(values.items())
+    )
+
+
+def format_per_label_height_report(models: Iterable[GlyphModel]) -> str:
+    """Render all label/style height distributions plus identities with multiple extents."""
+    rows = list(models)
+    distributions = per_label_height_distribution(rows)
+    multiple = multiple_height_populations(rows)
+    lines = ["PER-LABEL-HEIGHTS"]
+    for (label, style), values in sorted(distributions.items(), key=lambda item: (item[0][1], item[0][0])):
+        lines.append(f"{style} {label!r}: {_format_height_values(values)}")
+
+    lines.extend(["", "MULTI-HEIGHT-LABELS"])
+    if not multiple:
+        lines.append("none")
+    else:
+        for (label, style), values in sorted(multiple.items(), key=lambda item: (item[0][1], item[0][0])):
+            lines.append(f"{style} {label!r}: {_format_height_values(values)}")
+    return "\n".join(lines)
+
+
 def _raw_model_identity(row: dict[str, Any], fmt: str) -> tuple[str, str, frozenset[tuple[int, int]]]:
     style_key = "role" if fmt == "saol14-manual-glyph-facit-v2" else "style"
     style = str(row.get(style_key) or ("unknown" if style_key == "role" else "roman"))
@@ -162,12 +207,7 @@ def format_report(models: Iterable[GlyphModel]) -> str:
     lines.extend(["", "HEIGHT-DISTRIBUTIONS"])
     distributions = height_distribution(rows)
     for style in sorted(distributions):
-        values = distributions[style]
-        rendered = ", ".join(
-            f"y={min_y}..{max_y}/h={height}:{count}"
-            for (min_y, max_y, height), count in sorted(values.items())
-        )
-        lines.append(f"{style}: {rendered}")
+        lines.append(f"{style}: {_format_height_values(distributions[style])}")
     return "\n".join(lines)
 
 
@@ -189,6 +229,11 @@ def main() -> int:
         help="show source provenance and ordinary five-row-editor commands for exact-mask duplicates",
     )
     ap.add_argument(
+        "--per-label-heights",
+        action="store_true",
+        help="show baseline-relative height populations separately for each label/style",
+    )
+    ap.add_argument(
         "--jsonl",
         type=Path,
         help="JSONL path inserted into five-row-editor commands printed by --review-duplicates",
@@ -200,6 +245,8 @@ def main() -> int:
     if args.review_duplicates:
         provenance = load_source_provenance(args.facit)
         print(format_duplicate_review(models, provenance, jsonl=args.jsonl, port=args.port))
+    elif args.per_label_heights:
+        print(format_per_label_height_report(models))
     else:
         print(format_report(models))
     return 0
