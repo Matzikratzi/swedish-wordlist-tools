@@ -40,6 +40,12 @@ def _add_finish_button(document: str, control_url: str) -> str:
     return button + document
 
 
+def _plain_editor_url(host: str, port: int, position: tuple[int, int]) -> str:
+    """Open exactly around the known defect, never trigger a defect scan."""
+    column, row = position
+    return f"http://{host}:{port}/?column={column}&row={row}&mode=all"
+
+
 def _launch_paused_editor(
     jsonl: Path,
     *,
@@ -53,10 +59,11 @@ def _launch_paused_editor(
 ) -> int:
     """Run the normal editor while the batch is completely idle.
 
-    A tiny control server owns the explicit "done editing" button.  Clicking it
-    sets an event.  The editor HTTP server observes that event from
-    ``service_actions`` and exits its normal ``serve_forever`` loop.  Only then
-    does the batch resume scanning with the newly loaded facit.
+    The batch has already found the exact defective row.  Therefore the editor
+    must *not* start in defects mode: that mode walks forward through the page
+    to build a defect packet, which looked like the batch was still running.
+    We instead open the ordinary five-row packet centred on the known row and
+    do no further scanning until the explicit finish button is clicked.
     """
     finish_event = threading.Event()
     control_port = port + 1
@@ -88,14 +95,19 @@ def _launch_paused_editor(
     fast = batch.boundary.fast
     original_server = fast.ThreadingHTTPServer
     original_render = fast.ui.render_five_row_html
+    original_defect_url = batch.defect_url
     control_url = f'http://{host}:{control_port}/finish'
 
     def render_with_finish(*args, **kwargs):
         return _add_finish_button(original_render(*args, **kwargs), control_url)
 
+    def plain_url(_host: str, _port: int, _position: tuple[int, int]) -> str:
+        return _plain_editor_url(_host, _port, _position)
+
     _FinishAwareServer.finish_event = finish_event
     fast.ThreadingHTTPServer = _FinishAwareServer
     fast.ui.render_five_row_html = render_with_finish
+    batch.defect_url = plain_url
     try:
         print(
             f'batch: FEL page={page} col={position[0]} row={position[1]}; '
@@ -113,6 +125,7 @@ def _launch_paused_editor(
             no_browser=no_browser,
         )
     finally:
+        batch.defect_url = original_defect_url
         fast.ui.render_five_row_html = original_render
         fast.ThreadingHTTPServer = original_server
         _FinishAwareServer.finish_event = None
