@@ -118,6 +118,24 @@ def _candidate_boundaries_for_edge(side: str | None, row_index: int, row_count: 
     return result
 
 
+def _gap_boundaries_around_row(rows: list[dict], row_index: int) -> list[int]:
+    """Return adjacent row pairs whose preliminary geometry leaves a gap/overlap.
+
+    These pairs must be normalized before glyph review.  Otherwise ink that lies
+    in the physical gap is owned by neither row and can never appear as an edge
+    residual, which is exactly the failure mode this helper prevents.
+    """
+    result: list[int] = []
+    for upper_row in (row_index - 1, row_index):
+        if not 0 <= upper_row < len(rows) - 1:
+            continue
+        upper = rows[upper_row]
+        lower = rows[upper_row + 1]
+        if int(upper["page_bottom"]) != int(lower["page_top"]):
+            result.append(upper_row)
+    return result
+
+
 def _stamp_generation(state: dict) -> dict:
     state["row_boundary_generation"] = _current_boundary_generation()
     return state
@@ -132,14 +150,7 @@ def _prove_existing_boundary(
     *,
     digest: str,
 ) -> dict | None:
-    """Prove that the nominal cut is right but the review padding crosses it.
-
-    This is the touching-descender/ascender case: each strict half is completely
-    explained by known glyphs, while one or both ordinary padded row crops still
-    contain unexplained edge ink from the other row.  The physical boundary need
-    not move; what we learn is that this existing horizontal line is authoritative
-    and padding must stop there.
-    """
+    """Prove that the nominal cut is right but the review padding crosses it."""
     columns = row_map.get("columns") or []
     if not 0 <= column < len(columns):
         return None
@@ -206,28 +217,103 @@ def _prove_existing_boundary(
     }
 
 
-def load_review_state_with_cached_boundaries(context: dict, position: tuple[int, int], models) -> dict:
-    """Apply learned cuts, and learn a new one only for edge residuals.
+def _store_and_reanalyse(
+    context: dict,
+    position: tuple[int, int],
+    models,
+    correction: dict,
+    *,
+    store: BoundaryCorrectionStore,
+) -> dict:
+    store.put(correction)
+    generation = _advance_boundary_generation()
+    column, row_index = position
+    if correction.get("status") == "accepted-blank-row-horizontal-boundary":
+        detail = (
+            f"vit rasterrad {correction['blank_row_top']}..{correction['blank_row_bottom']}; "
+            "facit-oberoende"
+        )
+    else:
+        verb = "verifierad" if int(correction.get("shift", 0)) == 0 else "korrigerad"
+        detail = (
+            f"{verb}; oförklarat {correction['before']['unmatched']} -> "
+            f"{correction['after']['unmatched']}"
+        )
+    print(
+        f"review: radgräns {column}:{correction['upper_row']}/{correction['lower_row']}: "
+        f"{correction['original_boundary']} -> {correction['corrected_boundary']} ({detail}); "
+        f"cachad, boundary generation {generation}",
+        flush=True,
+    )
 
-    A full-width white raster row is tried first because it proves separation
-    without depending on the glyph facit.  Only if that cheap rule cannot decide
-    do we run the more expensive glyph-based ±4 search.
-    """
     effective, records = _effective_context(context)
     state = _original_load_review_state(effective, position, models)
+    state["row_boundary_corrections"] = _records_for_row(records, column, row_index)
+    state["row_boundary_correction_learned"] = correction
+    return _stamp_generation(state)
+
+
+def load_review_state_with_cached_boundaries(context: dict, position: tuple[int, int], models) -> dict:
+    """Apply cached cuts and conservatively learn missing straight boundaries.
+
+    Physical gaps between preliminary rows are checked for a full-width white
+    separator *before* glyph review.  This is important: ink sitting in such a
+    gap otherwise belongs to neither crop and therefore cannot create an edge
+    residual that would trigger the old fallback.
+    """
+    effective, records = _effective_context(context)
     column, row_index = position
+    rows = (effective.get("row_map", {}).get("columns") or [])[column].get("rows") or []
+    store, digest = _boundary_runtime(context)
+
+    # First normalize any preliminary physical gap/overlap adjacent to this row.
+    # This does not depend on facit and therefore must happen before we decide
+    # whether the row itself has a glyph residual.
+    for upper_row in _gap_boundaries_around_row(rows, row_index):
+        existing = store.get(
+            source_digest=digest,
+            page_number=int(context["page_number"]),
+            threshold=int(context["threshold"]),
+            column=column,
+            upper_row=upper_row,
+        )
+        if existing is not None:
+            continue
+        correction = find_blank_row_boundary(
+            context["page"],
+            effective["row_map"],
+            column,
+            upper_row,
+            threshold=int(context["threshold"]),
+            max_shift=4,
+            source_digest_value=digest,
+            page_number=int(context["page_number"]),
+        )
+        if correction is None:
+            continue
+        print(
+            f"review: fysisk lucka {column}:{upper_row}/{upper_row + 1}; "
+            f"säker fullbredds vit rasterrad y={correction['blank_row_top']}..{correction['blank_row_bottom']}, "
+            "flyttar hela ägargränsen innan glyphanalys",
+            flush=True,
+        )
+        return _store_and_reanalyse(
+            context,
+            position,
+            models,
+            correction,
+            store=store,
+        )
+
+    state = _original_load_review_state(effective, position, models)
     state["row_boundary_corrections"] = _records_for_row(records, column, row_index)
 
     edge_side = ultrafast._residual_edge_side(state)
     if edge_side is None:
         return _stamp_generation(state)
 
-    rows = (effective.get("row_map", {}).get("columns") or [])[column].get("rows") or []
-    store, digest = _boundary_runtime(context)
     learned = None
     for upper_row in _candidate_boundaries_for_edge(edge_side, row_index, len(rows)):
-        # Never repeatedly optimize a boundary already proven and cached. If a
-        # residual remains after that strict cut, it belongs in the glyph editor.
         existing = store.get(
             source_digest=digest,
             page_number=int(context["page_number"]),
@@ -279,7 +365,7 @@ def load_review_state_with_cached_boundaries(context: dict, position: tuple[int,
             print(
                 f"review: radgräns {column}:{upper_row}/{upper_row + 1}: "
                 f"säker fullbredds vit rasterrad y={correction['blank_row_top']}..{correction['blank_row_bottom']}; "
-                f"facit behövs inte",
+                "facit behövs inte",
                 flush=True,
             )
 
@@ -290,36 +376,19 @@ def load_review_state_with_cached_boundaries(context: dict, position: tuple[int,
             )
             continue
 
-        store.put(correction)
         learned = correction
-        generation = _advance_boundary_generation()
-        if correction.get("status") == "accepted-blank-row-horizontal-boundary":
-            detail = (
-                f"vit rasterrad {correction['blank_row_top']}..{correction['blank_row_bottom']}; "
-                "facit-oberoende"
-            )
-        else:
-            verb = "verifierad" if int(correction.get("shift", 0)) == 0 else "korrigerad"
-            detail = (
-                f"{verb}; oförklarat {correction['before']['unmatched']} -> "
-                f"{correction['after']['unmatched']}"
-            )
-        print(
-            f"review: radgräns {column}:{upper_row}/{upper_row + 1}: "
-            f"{correction['original_boundary']} -> {correction['corrected_boundary']} ({detail}); "
-            f"cachad, boundary generation {generation}",
-            flush=True,
-        )
         break
 
     if learned is None:
         return _stamp_generation(state)
 
-    effective, records = _effective_context(context)
-    state = _original_load_review_state(effective, position, models)
-    state["row_boundary_corrections"] = _records_for_row(records, column, row_index)
-    state["row_boundary_correction_learned"] = learned
-    return _stamp_generation(state)
+    return _store_and_reanalyse(
+        context,
+        position,
+        models,
+        learned,
+        store=store,
+    )
 
 
 class BoundaryAwareStateCache(_original_state_cache):
@@ -359,13 +428,13 @@ def diagnostic_text_with_boundaries(state: dict) -> str:
 fast._row_crop_box = _row_crop_box_with_strict_boundaries
 fast.load_review_state_fast = load_review_state_with_cached_boundaries
 fast.SynchronizedStateCache = BoundaryAwareStateCache
-# ultrafast.render_html_with_neighbor_raster resolves this global at call time.
 ultrafast.diagnostic_text = diagnostic_text_with_boundaries
 
 
 def main() -> int:
     print("review: BOUNDARY använder ULTRAFAST + cachade raka radgränser", flush=True)
-    print("review: vid kantresidual provas först fullbredds vit rasterrad, helt utan facit", flush=True)
+    print("review: fysisk lucka mellan rader provas med fullbredds vit rasterrad före glyphanalys", flush=True)
+    print("review: vid kantresidual provas också fullbredds vit rasterrad, helt utan facit", flush=True)
     print("review: bara om vitlinjeregeln inte avgör körs den dyrare glyphgränssökningen ±4 px", flush=True)
     print("review: en redan rätt gräns kan också verifieras med glyphbevis och shift 0", flush=True)
     print("review: verifierad gräns är strikt: ±1 crop-padding får inte korsa den", flush=True)
