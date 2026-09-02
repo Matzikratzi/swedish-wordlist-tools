@@ -51,6 +51,43 @@ class NeighborRowRasterTests(unittest.TestCase):
         self.assertIn(".", ascii_raster)
         self.assertTrue(result["neighbor_raster_image"].startswith("data:image/png;base64,"))
 
+    def test_three_row_raster_shows_target_and_projected_neighbor_support_lines(self):
+        page = Image.new("L", (20, 50), 255)
+        rows = [
+            {"page_top": 2, "page_bottom": 12, "center_y": 6.5},
+            {"page_top": 12, "page_bottom": 22, "center_y": 16.5},
+            {"page_top": 22, "page_bottom": 32, "center_y": 26.5},
+        ]
+        context = {
+            "page": page,
+            "threshold": 210,
+            "row_map": {"columns": [{"rows": rows}]},
+        }
+        # crop top 11 + baseline 8 => target baseline page y=19.
+        state = {
+            "column": 0,
+            "row": 1,
+            "crop_box": (2, 11, 10, 23),
+            "baseline": 8,
+        }
+        result = add_neighbor_row_raster(context, state, probe_y=8)
+
+        # Diagnostic raster starts at previous.page_top == 2.  Row centres are
+        # 10 px apart, therefore the visible support lines are y=7,17,27.
+        self.assertEqual(
+            result["neighbor_support_lines"],
+            [
+                [7, "SUPPORT row 0 (projected)"],
+                [17, "SUPPORT row 1 (exact)"],
+                [27, "SUPPORT row 2 (projected)"],
+            ],
+        )
+        ascii_raster = result["neighbor_raster_ascii"]
+        self.assertIn("--- SUPPORT row 0 (projected) y=7 ---", ascii_raster)
+        self.assertIn("--- SUPPORT row 1 (exact) y=17 ---", ascii_raster)
+        self.assertIn("--- SUPPORT row 2 (projected) y=27 ---", ascii_raster)
+        self.assertIn([7, "SUPPORT row 0 (projected)"], result["neighbor_row_boundaries"])
+
 
 if __name__ == "__main__":
     unittest.main()
