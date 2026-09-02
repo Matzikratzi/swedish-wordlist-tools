@@ -15,7 +15,22 @@ from .ocr_row_boundary_corrections import (
 fast = ultrafast.fast
 _original_load_review_state = fast.load_review_state_fast
 _original_diagnostic_text = ultrafast.diagnostic_text
+_original_state_cache = fast.SynchronizedStateCache
 _context_lock = threading.RLock()
+_boundary_generation_lock = threading.RLock()
+_boundary_generation = 0
+
+
+def _current_boundary_generation() -> int:
+    with _boundary_generation_lock:
+        return _boundary_generation
+
+
+def _advance_boundary_generation() -> int:
+    global _boundary_generation
+    with _boundary_generation_lock:
+        _boundary_generation += 1
+        return _boundary_generation
 
 
 def _boundary_runtime(context: dict):
@@ -73,6 +88,11 @@ def _candidate_boundaries_for_edge(side: str | None, row_index: int, row_count: 
     return result
 
 
+def _stamp_generation(state: dict) -> dict:
+    state["row_boundary_generation"] = _current_boundary_generation()
+    return state
+
+
 def load_review_state_with_cached_boundaries(context: dict, position: tuple[int, int], models) -> dict:
     """Apply learned cuts, and learn a new one only for edge residuals.
 
@@ -87,7 +107,7 @@ def load_review_state_with_cached_boundaries(context: dict, position: tuple[int,
 
     edge_side = ultrafast._residual_edge_side(state)
     if edge_side is None:
-        return state
+        return _stamp_generation(state)
 
     rows = (effective.get("row_map", {}).get("columns") or [])[column].get("rows") or []
     store, digest = _boundary_runtime(context)
@@ -130,22 +150,36 @@ def load_review_state_with_cached_boundaries(context: dict, position: tuple[int,
 
         store.put(correction)
         learned = correction
+        generation = _advance_boundary_generation()
         print(
             f"review: radgräns {column}:{upper_row}/{upper_row + 1}: "
             f"{correction['original_boundary']} -> {correction['corrected_boundary']} "
-            f"(oförklarat {correction['before']['unmatched']} -> {correction['after']['unmatched']}); cachad",
+            f"(oförklarat {correction['before']['unmatched']} -> {correction['after']['unmatched']}); "
+            f"cachad, boundary generation {generation}",
             flush=True,
         )
         break
 
     if learned is None:
-        return state
+        return _stamp_generation(state)
 
     effective, records = _effective_context(context)
     state = _original_load_review_state(effective, position, models)
     state["row_boundary_corrections"] = _records_for_row(records, column, row_index)
     state["row_boundary_correction_learned"] = learned
-    return state
+    return _stamp_generation(state)
+
+
+class BoundaryAwareStateCache(_original_state_cache):
+    """Reject any row state computed before the latest learned boundary."""
+
+    def _cached(self, position: tuple[int, int], *, allow_stale_exact: bool) -> dict | None:
+        state = super()._cached(position, allow_stale_exact=allow_stale_exact)
+        if state is None:
+            return None
+        if int(state.get("row_boundary_generation", -1)) != _current_boundary_generation():
+            return None
+        return state
 
 
 def diagnostic_text_with_boundaries(state: dict) -> str:
@@ -171,6 +205,7 @@ def diagnostic_text_with_boundaries(state: dict) -> str:
 
 
 fast.load_review_state_fast = load_review_state_with_cached_boundaries
+fast.SynchronizedStateCache = BoundaryAwareStateCache
 # ultrafast.render_html_with_neighbor_raster resolves this global at call time.
 ultrafast.diagnostic_text = diagnostic_text_with_boundaries
 
@@ -180,6 +215,7 @@ def main() -> int:
     print("review: vanliga radgränser lämnas orörda; fallback körs bara för kantresidualer", flush=True)
     print("review: gränssökning är ±4 px och måste förbättra båda rader utan försämring", flush=True)
     print("review: lyckad korrigering sparas i data/generated/ocr-page-cache/row-boundary-corrections-v1.json", flush=True)
+    print("review: ny gräns gör gamla radanalyser stale så båda grannraderna räknas om", flush=True)
     print("review: misslyckad/ambiguous korrigering lämnar residualpixlarna till glyph-editorn", flush=True)
     return ultrafast.main()
 
