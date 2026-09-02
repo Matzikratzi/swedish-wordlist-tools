@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 from .ocr_glyph_matcher import GlyphModel, load_facit
 
@@ -39,6 +40,99 @@ def height_distribution(models: Iterable[GlyphModel]) -> dict[str, Counter[tuple
     for model in models:
         result[model.style][(model.min_y, model.max_y, model.max_y - model.min_y + 1)] += 1
     return dict(result)
+
+
+def _raw_model_identity(row: dict[str, Any], fmt: str) -> tuple[str, str, frozenset[tuple[int, int]]]:
+    style_key = "role" if fmt == "saol14-manual-glyph-facit-v2" else "style"
+    style = str(row.get(style_key) or ("unknown" if style_key == "role" else "roman"))
+    pixels = frozenset(
+        (int(x), int(y)) for x, y in row.get("pixels_relative_to_baseline") or []
+    )
+    return str(row.get("label") or ""), style, pixels
+
+
+def load_source_provenance(path: Path) -> dict[tuple[str, str, frozenset[tuple[int, int]]], list[dict[str, Any]]]:
+    """Read complete source records without changing the matcher representation."""
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    fmt = str(payload.get("format") or "")
+    out: dict[tuple[str, str, frozenset[tuple[int, int]]], list[dict[str, Any]]] = defaultdict(list)
+    for row in payload.get("glyphs") or []:
+        identity = _raw_model_identity(row, fmt)
+        out[identity].extend(dict(source) for source in row.get("sources") or [])
+    return dict(out)
+
+
+def source_row_location(source: dict[str, Any]) -> tuple[int, int, int] | None:
+    """Return page/column/row when a facit source records a physical review row."""
+    try:
+        if all(key in source for key in ("page", "column", "row")):
+            return int(source["page"]), int(source["column"]), int(source["row"])
+    except (TypeError, ValueError):
+        pass
+    return None
+
+
+def _compact_source(source: dict[str, Any]) -> str:
+    preferred = ("page", "column", "row", "expected_word", "source_id", "word_file")
+    fields = []
+    for key in preferred:
+        if key in source:
+            fields.append(f"{key}={source[key]!r}")
+    for key in sorted(source):
+        if key not in preferred:
+            fields.append(f"{key}={source[key]!r}")
+    return " ".join(fields) if fields else "(tom source-post)"
+
+
+def format_duplicate_review(
+    models: Iterable[GlyphModel],
+    provenance: dict[tuple[str, str, frozenset[tuple[int, int]]], list[dict[str, Any]]],
+    *,
+    jsonl: Path | None = None,
+    port: int = 8766,
+) -> str:
+    """Render source rows for models whose exact mask has conflicting identities."""
+    duplicates = exact_mask_duplicate_groups(models)
+    lines = ["DUPLICATE-SOURCE-REVIEW"]
+    if not duplicates:
+        lines.append("none")
+        return "\n".join(lines)
+
+    for index, group in enumerate(duplicates, start=1):
+        labels = sorted({m.label for m in group})
+        styles = sorted({m.style for m in group})
+        lines.extend([
+            "",
+            f"GROUP {index}: SÄRGRANSKA glyph={labels!r} styles={styles!r}",
+            "  Samma exakta pixelmask har flera identiteter; avgör klass från tryckkontexten.",
+        ])
+        for model in group:
+            identity = model_signature(model)
+            sources = provenance.get(identity) or []
+            lines.append(
+                f"  MODEL label={model.label!r} style={model.style} sources={len(sources)}"
+            )
+            if not sources:
+                lines.append("    SOURCE saknas i facit")
+                continue
+            for source_index, source in enumerate(sources, start=1):
+                location = source_row_location(source)
+                if location is None:
+                    lines.append(f"    SOURCE {source_index}: {_compact_source(source)}")
+                    lines.append("      ingen page/column/row-position sparad; kan inte öppna femradseditorn direkt")
+                    continue
+                page, column, row = location
+                lines.append(
+                    f"    SOURCE {source_index}: page={page} column={column} row={row} "
+                    f"-- SÄRGRANSKA {model.label!r} som nu är {model.style}"
+                )
+                if jsonl is not None:
+                    lines.extend([
+                        "      PYTHONPATH=src python -m swedish_wordlist_tools.ocr_review_five_rows_glyphs_boundary_html \\",
+                        f"        {jsonl} \\",
+                        f"        --page {page} --column {column} --row {row} --port {port}",
+                    ])
+    return "\n".join(lines)
 
 
 def format_report(models: Iterable[GlyphModel]) -> str:
@@ -89,8 +183,25 @@ def main() -> int:
         type=Path,
         default=Path("glyphs/saol14-manual-glyph-facit.json"),
     )
+    ap.add_argument(
+        "--review-duplicates",
+        action="store_true",
+        help="show source provenance and ordinary five-row-editor commands for exact-mask duplicates",
+    )
+    ap.add_argument(
+        "--jsonl",
+        type=Path,
+        help="JSONL path inserted into five-row-editor commands printed by --review-duplicates",
+    )
+    ap.add_argument("--port", type=int, default=8766)
     args = ap.parse_args()
-    print(format_report(load_facit(args.facit)))
+
+    models = load_facit(args.facit)
+    if args.review_duplicates:
+        provenance = load_source_provenance(args.facit)
+        print(format_duplicate_review(models, provenance, jsonl=args.jsonl, port=args.port))
+    else:
+        print(format_report(models))
     return 0
 
 
