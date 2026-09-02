@@ -15,6 +15,7 @@ def models_with_one_internal_blank_column():
         GlyphModel("A", "roman", frozenset({(0, -2), (0, -1), (0, 0), (1, 0)}), 2),
         GlyphModel("b", "roman", frozenset({(0, -1), (0, 0), (1, 0)}), 2),
         GlyphModel("c", "roman", frozenset({(0, -1), (1, -1), (0, 0)}), 2),
+        GlyphModel(".", "roman", frozenset({(0, 0)}), 2),
         # Not present in the synthetic source. Its internal blank x=1 makes a
         # one-column inter-glyph gap non-splitting, while a real word space is
         # still a provably safe group boundary.
@@ -98,6 +99,45 @@ class GroupBaselineFallbackTests(unittest.TestCase):
         self.assertEqual(retro["to_baseline"], 6)
         self.assertEqual(retro["proved_by_group"], proof["group"])
         self.assertEqual(proof["labels"], "cc")
+        self.assertEqual(result["baseline_segments"][1]["baseline"], 6)
+        self.assertEqual(result["baseline_segments"][1]["left"], 18)
+
+    def test_proven_shift_persists_to_later_single_glyph_groups(self) -> None:
+        image = Image.new("L", (52, 12), 255)
+        models = models_with_one_internal_blank_column()
+
+        main = set()
+        for x in (2, 5, 8, 11):
+            main.update({(x, 3), (x, 4), (x, 5), (x + 1, 5)})
+        # This two-glyph group proves baseline 6.
+        shifted_proof = {
+            (20, 5), (20, 6), (21, 6),
+            (23, 5), (24, 5), (23, 6),
+        }  # bc
+        # Later groups contain only one glyph each. They cannot independently
+        # prove a shift, but should inherit the already-proved support line.
+        later_b = {(34, 5), (34, 6), (35, 6)}
+        later_dot = {(44, 6)}
+        for point in main | shifted_proof | later_b | later_dot:
+            image.putpixel(point, 0)
+
+        result = analyse_row_exact_grouped_with_baseline_fallback(image, models)
+
+        self.assertTrue(result["fully_exact"])
+        inherited = [
+            item
+            for item in result["baseline_fallbacks"]
+            if item["status"] == "persistent-proven-baseline-fallback"
+        ]
+        self.assertEqual([item["labels"] for item in inherited], ["b", "."])
+        self.assertTrue(all(item["to_baseline"] == 6 for item in inherited))
+        self.assertEqual(
+            result["baseline_segments"],
+            [
+                {"left": 0, "right": 20, "baseline": 5},
+                {"left": 20, "right": 52, "baseline": 6},
+            ],
+        )
 
 
 if __name__ == "__main__":
