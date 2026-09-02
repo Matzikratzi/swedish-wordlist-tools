@@ -4,6 +4,7 @@ import json
 import threading
 
 from . import ocr_review_five_rows_glyphs_ultrafast_html as ultrafast
+from .ocr_blank_row_boundary import find_blank_row_boundary
 from .ocr_row_boundary_corrections import (
     BoundaryCorrectionStore,
     apply_boundary_corrections,
@@ -65,7 +66,7 @@ def _page_records(context: dict) -> list[dict]:
 
 
 def _mark_strict_boundaries(row_map: dict, records: list[dict]) -> None:
-    """Mark glyph-proven cuts so the normal ±1 crop pad cannot cross them."""
+    """Mark proven cuts so the normal ±1 crop pad cannot cross them."""
     columns = row_map.get("columns") or []
     for record in records:
         column = int(record.get("column", -1))
@@ -80,7 +81,7 @@ def _mark_strict_boundaries(row_map: dict, records: list[dict]) -> None:
 
 
 def _row_crop_box_with_strict_boundaries(row: dict, **kwargs):
-    """Keep ordinary padding except across a glyph-proven horizontal cut."""
+    """Keep ordinary padding except across a proven horizontal cut."""
     left, top, right, bottom = _original_row_crop_box(row, **kwargs)
     if row.get("_glyph_proven_strict_top"):
         top = max(top, int(row["page_top"]))
@@ -208,10 +209,9 @@ def _prove_existing_boundary(
 def load_review_state_with_cached_boundaries(context: dict, position: tuple[int, int], models) -> dict:
     """Apply learned cuts, and learn a new one only for edge residuals.
 
-    The ordinary segmentation remains untouched. A copied row map gets cached
-    horizontal corrections, so concurrent row analyses never observe a temporary
-    mutation of the shared geometry. A cached boundary is also a strict ownership
-    cut: ordinary review padding may not borrow pixels across it.
+    A full-width white raster row is tried first because it proves separation
+    without depending on the glyph facit.  Only if that cheap rule cannot decide
+    do we run the more expensive glyph-based ±4 search.
     """
     effective, records = _effective_context(context)
     state = _original_load_review_state(effective, position, models)
@@ -238,34 +238,54 @@ def load_review_state_with_cached_boundaries(context: dict, position: tuple[int,
         if existing is not None:
             continue
 
-        print(
-            f"review: oförklarad kant vid kolumn {column}, rad {row_index}; "
-            f"provar rak gräns {upper_row}/{upper_row + 1} ±4 px ...",
-            flush=True,
-        )
-        correction = find_boundary_correction(
+        correction = find_blank_row_boundary(
             context["page"],
             effective["row_map"],
             column,
             upper_row,
-            models,
             threshold=int(context["threshold"]),
             max_shift=4,
             source_digest_value=digest,
             page_number=int(context["page_number"]),
         )
+
         if correction is None:
-            correction = _prove_existing_boundary(
-                context,
+            print(
+                f"review: oförklarad kant vid kolumn {column}, rad {row_index}; "
+                f"ingen säker vit rasterrad, provar glyphgräns {upper_row}/{upper_row + 1} ±4 px ...",
+                flush=True,
+            )
+            correction = find_boundary_correction(
+                context["page"],
                 effective["row_map"],
                 column,
                 upper_row,
                 models,
-                digest=digest,
+                threshold=int(context["threshold"]),
+                max_shift=4,
+                source_digest_value=digest,
+                page_number=int(context["page_number"]),
             )
+            if correction is None:
+                correction = _prove_existing_boundary(
+                    context,
+                    effective["row_map"],
+                    column,
+                    upper_row,
+                    models,
+                    digest=digest,
+                )
+        else:
+            print(
+                f"review: radgräns {column}:{upper_row}/{upper_row + 1}: "
+                f"säker fullbredds vit rasterrad y={correction['blank_row_top']}..{correction['blank_row_bottom']}; "
+                f"facit behövs inte",
+                flush=True,
+            )
+
         if correction is None:
             print(
-                f"review: radgräns {column}:{upper_row}/{upper_row + 1}: inget entydigt glyphbevis",
+                f"review: radgräns {column}:{upper_row}/{upper_row + 1}: inget entydigt gränsbevis",
                 flush=True,
             )
             continue
@@ -273,11 +293,20 @@ def load_review_state_with_cached_boundaries(context: dict, position: tuple[int,
         store.put(correction)
         learned = correction
         generation = _advance_boundary_generation()
-        verb = "verifierad" if int(correction.get("shift", 0)) == 0 else "korrigerad"
+        if correction.get("status") == "accepted-blank-row-horizontal-boundary":
+            detail = (
+                f"vit rasterrad {correction['blank_row_top']}..{correction['blank_row_bottom']}; "
+                "facit-oberoende"
+            )
+        else:
+            verb = "verifierad" if int(correction.get("shift", 0)) == 0 else "korrigerad"
+            detail = (
+                f"{verb}; oförklarat {correction['before']['unmatched']} -> "
+                f"{correction['after']['unmatched']}"
+            )
         print(
             f"review: radgräns {column}:{upper_row}/{upper_row + 1}: "
-            f"{correction['original_boundary']} -> {correction['corrected_boundary']} ({verb}; "
-            f"oförklarat {correction['before']['unmatched']} -> {correction['after']['unmatched']}); "
+            f"{correction['original_boundary']} -> {correction['corrected_boundary']} ({detail}); "
             f"cachad, boundary generation {generation}",
             flush=True,
         )
@@ -335,13 +364,14 @@ ultrafast.diagnostic_text = diagnostic_text_with_boundaries
 
 
 def main() -> int:
-    print("review: BOUNDARY använder ULTRAFAST + cachade glyphbevisade raka radgränser", flush=True)
-    print("review: vanliga radgränser lämnas orörda; fallback körs bara för kantresidualer", flush=True)
-    print("review: gränssökning är ±4 px; en redan rätt gräns kan också verifieras med shift 0", flush=True)
+    print("review: BOUNDARY använder ULTRAFAST + cachade raka radgränser", flush=True)
+    print("review: vid kantresidual provas först fullbredds vit rasterrad, helt utan facit", flush=True)
+    print("review: bara om vitlinjeregeln inte avgör körs den dyrare glyphgränssökningen ±4 px", flush=True)
+    print("review: en redan rätt gräns kan också verifieras med glyphbevis och shift 0", flush=True)
     print("review: verifierad gräns är strikt: ±1 crop-padding får inte korsa den", flush=True)
     print("review: lyckad korrigering/verifiering sparas i data/generated/ocr-page-cache/row-boundary-corrections-v1.json", flush=True)
     print("review: ny gräns gör gamla radanalyser stale så båda grannraderna räknas om", flush=True)
-    print("review: misslyckad/ambiguous korrigering lämnar residualpixlarna till glyph-editorn", flush=True)
+    print("review: utan entydigt gränsbevis lämnas residualpixlarna till glyph-editorn", flush=True)
     return ultrafast.main()
 
 
