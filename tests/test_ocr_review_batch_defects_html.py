@@ -34,10 +34,39 @@ class BatchDefectReviewTests(unittest.TestCase):
         ):
             report = scan_context(context, [])
 
+        self.assertTrue(report["complete_scan"])
+        self.assertEqual(report["rows_scanned"], 3)
         self.assertEqual(report["rows_exact"], 2)
         self.assertEqual(report["unknown_pixels"], 7)
         self.assertEqual(len(report["defects"]), 1)
         self.assertEqual(report["defects"][0]["column"], 0)
+        self.assertEqual(report["defects"][0]["row"], 1)
+
+    def test_scan_context_can_stop_at_first_pixel_defect(self) -> None:
+        context = {"page_number": 7, "positions": [(0, 0), (0, 1), (1, 0), (1, 1)]}
+        states = {
+            (0, 0): {"column": 0, "row": 0, "source_pixels": 100, "covered_pixels": 100, "text": "a"},
+            (0, 1): {"column": 0, "row": 1, "source_pixels": 90, "covered_pixels": 83, "text": "b"},
+            (1, 0): {"column": 1, "row": 0, "source_pixels": 80, "covered_pixels": 80, "text": "c"},
+            (1, 1): {"column": 1, "row": 1, "source_pixels": 70, "covered_pixels": 70, "text": "d"},
+        }
+        visited = []
+
+        def load(_context, position, _models):
+            visited.append(position)
+            return states[position]
+
+        with patch(
+            "swedish_wordlist_tools.ocr_review_batch_defects_html._load_review_state_for_audit",
+            side_effect=load,
+        ):
+            report = scan_context(context, [], stop_after_first_defect=True)
+
+        self.assertEqual(visited, [(0, 0), (0, 1)])
+        self.assertFalse(report["complete_scan"])
+        self.assertEqual(report["rows_scanned"], 2)
+        self.assertEqual(report["rows_exact"], 1)
+        self.assertEqual(len(report["defects"]), 1)
         self.assertEqual(report["defects"][0]["row"], 1)
 
     def test_defect_url_opens_existing_editor_in_defect_mode(self) -> None:
