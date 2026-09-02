@@ -46,13 +46,19 @@ def find_blank_row_boundary(
 ) -> dict | None:
     """Find a conservative row cut from a full-width white raster row.
 
-    This deliberately does not use glyph models.  A completely white horizontal
+    This deliberately does not use glyph models. A completely white horizontal
     raster row across the column proves that no connected printed ink crosses it,
     so it is safe evidence even when the facit is missing the glyph immediately
     above or below the gap.
 
-    Only blank bands close to the existing row boundary are considered.  The
-    band must have source ink nearby on both sides.  If more than one equally
+    The *first* white raster row in a contiguous white band is the separator.
+    The cut is placed immediately after that row: the separator itself remains
+    with the upper row, and every raster row below it belongs to the lower row.
+    This intentionally avoids creating a neutral/buffer zone from the rest of a
+    wider white band.
+
+    Only blank bands close to the existing row boundary are considered. The
+    band must have source ink nearby on both sides. If more than one equally
     near band remains, the evidence is treated as ambiguous.
     """
     columns = row_map.get("columns") or []
@@ -101,7 +107,10 @@ def find_blank_row_boundary(
     evidence_radius = int(max_shift) + 1
     candidates = []
     for blank_top, blank_bottom in bands:
-        boundary = blank_bottom + 1
+        # The first completely white row is enough to prove separation. Keep
+        # that one row with the upper line and give *everything* below it to
+        # the lower line, including any additional white rows in the band.
+        boundary = blank_top + 1
         if not outer_top < boundary < outer_bottom:
             continue
         upper_probe_top = max(outer_top, blank_top - evidence_radius)
