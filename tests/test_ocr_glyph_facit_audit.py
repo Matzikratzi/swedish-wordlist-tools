@@ -99,9 +99,11 @@ class GlyphFacitAuditTests(unittest.TestCase):
 
     def test_size_classification_marks_family_outlier(self) -> None:
         models = [
-            GlyphModel("a", "roman", frozenset({(0, -5), (0, 0)}), 1),
-            GlyphModel("e", "roman", frozenset({(0, -7), (0, 0)}), 1),
-            GlyphModel("o", "roman", frozenset({(0, -6), (0, 0)}), 1),
+            GlyphModel("a", "roman", frozenset({(0, -5), (0, 0)}), 1),  # up 6
+            GlyphModel("c", "roman", frozenset({(0, -5), (0, 0)}), 1),  # support up 6
+            GlyphModel("e", "roman", frozenset({(0, -7), (0, 0)}), 1),  # up 8
+            GlyphModel("u", "roman", frozenset({(0, -7), (0, 0)}), 1),  # support up 8
+            GlyphModel("o", "roman", frozenset({(0, -6), (0, 0)}), 1),  # up 7 outlier
         ]
         classified = classify_size_models(models)
         by_label = {row["label"]: row for row in classified}
