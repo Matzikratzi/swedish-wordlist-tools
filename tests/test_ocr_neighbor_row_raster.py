@@ -51,7 +51,7 @@ class NeighborRowRasterTests(unittest.TestCase):
         self.assertIn(".", ascii_raster)
         self.assertTrue(result["neighbor_raster_image"].startswith("data:image/png;base64,"))
 
-    def test_three_row_raster_shows_target_and_projected_neighbor_support_lines(self):
+    def test_support_lines_are_never_projected_from_target_row(self):
         page = Image.new("L", (20, 50), 255)
         rows = [
             {"page_top": 2, "page_bottom": 12, "center_y": 6.5},
@@ -63,7 +63,6 @@ class NeighborRowRasterTests(unittest.TestCase):
             "threshold": 210,
             "row_map": {"columns": [{"rows": rows}]},
         }
-        # crop top 11 + baseline 8 => target baseline page y=19.
         state = {
             "column": 0,
             "row": 1,
@@ -72,21 +71,45 @@ class NeighborRowRasterTests(unittest.TestCase):
         }
         result = add_neighbor_row_raster(context, state, probe_y=8)
 
-        # Diagnostic raster starts at previous.page_top == 2.  Row centres are
-        # 10 px apart, therefore the visible support lines are y=7,17,27.
+        self.assertEqual(result["neighbor_support_lines"], [])
+        self.assertNotIn("SUPPORT", result["neighbor_raster_ascii"])
+
+    def test_explicit_measured_support_lines_are_drawn_in_page_coordinates(self):
+        page = Image.new("L", (20, 50), 255)
+        rows = [
+            {"page_top": 2, "page_bottom": 12},
+            {"page_top": 12, "page_bottom": 22},
+            {"page_top": 22, "page_bottom": 32},
+        ]
+        context = {
+            "page": page,
+            "threshold": 210,
+            "row_map": {"columns": [{"rows": rows}]},
+        }
+        state = {"column": 0, "row": 1, "crop_box": (2, 11, 10, 23)}
+        result = add_neighbor_row_raster(
+            context,
+            state,
+            probe_y=8,
+            support_page_y={
+                0: (9, "measured exact"),
+                1: (19, "measured defective"),
+                2: (29, "measured exact"),
+            },
+        )
+
         self.assertEqual(
             result["neighbor_support_lines"],
             [
-                [7, "SUPPORT row 0 (projected)"],
-                [17, "SUPPORT row 1 (exact)"],
-                [27, "SUPPORT row 2 (projected)"],
+                [7, "SUPPORT row 0 (measured exact)"],
+                [17, "SUPPORT row 1 (measured defective)"],
+                [27, "SUPPORT row 2 (measured exact)"],
             ],
         )
         ascii_raster = result["neighbor_raster_ascii"]
-        self.assertIn("--- SUPPORT row 0 (projected) y=7 ---", ascii_raster)
-        self.assertIn("--- SUPPORT row 1 (exact) y=17 ---", ascii_raster)
-        self.assertIn("--- SUPPORT row 2 (projected) y=27 ---", ascii_raster)
-        self.assertIn([7, "SUPPORT row 0 (projected)"], result["neighbor_row_boundaries"])
+        self.assertIn("--- SUPPORT row 0 (measured exact) y=7 ---", ascii_raster)
+        self.assertIn("--- SUPPORT row 1 (measured defective) y=17 ---", ascii_raster)
+        self.assertIn("--- SUPPORT row 2 (measured exact) y=27 ---", ascii_raster)
 
 
 if __name__ == "__main__":
