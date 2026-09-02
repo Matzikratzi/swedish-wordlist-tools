@@ -28,64 +28,23 @@ def _ascii_raster(image, *, threshold: int, boundaries: list[tuple[int, str]]) -
     return "\n".join(lines)
 
 
-def _support_lines(
-    state: dict[str, Any],
-    rows: list[dict[str, Any]],
-    row_index: int,
-    *,
-    source_top: int,
-    image_height: int,
-) -> list[tuple[int, str]]:
-    """Project the target baseline onto its immediate physical neighbours.
-
-    The target row baseline is measured by the exact-row analyser.  For a
-    touching-row failure we still want to inspect/create an unknown glyph before
-    the ownership cut has been proven.  Therefore the diagnostic raster carries
-    one support line per visible row.  Neighbor support lines are projected by
-    the difference between physical row centres; they are visual guides only and
-    are never consumed as ownership evidence.
-    """
-    baseline = state.get("baseline")
-    crop_box = state.get("crop_box")
-    if baseline is None or not crop_box:
-        return []
-
-    target_baseline_page = int(crop_box[1]) + int(baseline)
-    target = rows[row_index]
-    target_center = float(
-        target.get(
-            "center_y",
-            (int(target["page_top"]) + int(target["page_bottom"]) - 1) / 2.0,
-        )
-    )
-
-    result: list[tuple[int, str]] = []
-    for index in range(max(0, row_index - 1), min(len(rows), row_index + 2)):
-        row = rows[index]
-        center = float(
-            row.get(
-                "center_y",
-                (int(row["page_top"]) + int(row["page_bottom"]) - 1) / 2.0,
-            )
-        )
-        page_y = int(round(target_baseline_page + center - target_center))
-        local_y = max(0, min(int(image_height), page_y - int(source_top)))
-        suffix = "exact" if index == row_index else "projected"
-        result.append((local_y, f"SUPPORT row {index} ({suffix})"))
-    return result
-
-
 def add_neighbor_row_raster(
     context: dict[str, Any],
     state: dict[str, Any],
     *,
     probe_y: int = 8,
+    support_page_y: dict[int, tuple[int, str]] | None = None,
 ) -> dict[str, Any]:
     """Attach an unfiltered three-physical-row source raster for diagnostics.
 
     When neighbours exist, include the complete previous/current/next physical
     rows. At a page/column edge fall back to a small probe beyond the target.
     Coordinates and the ASCII dump are relative to this diagnostic raster.
+
+    ``support_page_y`` contains *measured* baseline positions in page
+    coordinates.  We deliberately do not project a target baseline onto its
+    neighbours: that looked plausible but is not valid evidence when two rows
+    touch or have different descenders.
     """
     page = context["page"]
     column = int(state["column"])
@@ -136,13 +95,17 @@ def add_neighbor_row_raster(
             ]
         )
 
-    support_lines = _support_lines(
-        state,
-        rows,
-        row_index,
-        source_top=source_top,
-        image_height=image.height,
-    )
+    support_lines: list[tuple[int, str]] = []
+    if support_page_y:
+        for index in range(max(0, row_index - 1), min(len(rows), row_index + 2)):
+            measured = support_page_y.get(index)
+            if measured is None:
+                continue
+            page_y, quality = measured
+            if not source_top <= int(page_y) <= source_bottom:
+                continue
+            support_lines.append((local_y(int(page_y)), f"SUPPORT row {index} ({quality})"))
+
     display_lines = [*boundaries, *support_lines]
 
     state = dict(state)
