@@ -64,6 +64,41 @@ class BoundaryAwareStateCacheTests(unittest.TestCase):
         # Lower row may not borrow y=19 from above, but keeps bottom padding.
         self.assertEqual(lower_box, (0, 20, 100, 31))
 
+    def test_generation_stamp_rejects_analysis_from_old_row_geometry(self) -> None:
+        start_generation = boundary_ui._current_boundary_generation()
+        boundary_ui._advance_boundary_generation()
+        with self.assertRaises(boundary_ui._BoundaryGenerationChanged):
+            boundary_ui._stamp_generation(
+                {"covered_pixels": 10, "source_pixels": 10},
+                expected_generation=start_generation,
+            )
+
+    def test_public_loader_retries_when_boundary_changes_mid_analysis(self) -> None:
+        original = boundary_ui._load_review_state_with_cached_boundaries_once
+        calls = []
+
+        def flaky_loader(context, position, models):
+            calls.append(position)
+            if len(calls) == 1:
+                raise boundary_ui._BoundaryGenerationChanged
+            return {
+                "column": position[0],
+                "row": position[1],
+                "covered_pixels": 10,
+                "source_pixels": 10,
+                "fully_exact": True,
+                "row_boundary_generation": boundary_ui._current_boundary_generation(),
+            }
+
+        boundary_ui._load_review_state_with_cached_boundaries_once = flaky_loader
+        try:
+            state = boundary_ui.load_review_state_with_cached_boundaries({}, (1, 28), [])
+        finally:
+            boundary_ui._load_review_state_with_cached_boundaries_once = original
+
+        self.assertEqual(calls, [(1, 28), (1, 28)])
+        self.assertEqual(state["row"], 28)
+
 
 if __name__ == "__main__":
     unittest.main()
