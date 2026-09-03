@@ -22,15 +22,20 @@ class GlyphReviewDeleteTest(unittest.TestCase):
         }
 
         def original_render(_state, _message=""):
-            return '''<html><body>
-<div id="items"><button type="button" class="chip match unknown" data-id="M00">o</button></div>
+            return '''<html><head><style></style></head><body>
+<div id="items"></div>
 <form method="post" id="form">
 <input type="hidden" name="selected" id="selected">
 <input type="hidden" name="selected_pixels" id="selectedPixels">
+<input name="label" id="label"><select name="style"><option>roman</option></select>
 <button name="action" value="relabel" type="submit">Rätta vald glyphs facitmodell</button>
 </form>
-<script>const S={items:[{id:'M00',kind:'match',label:'o',pixels:55},{id:'U00',kind:'residual',label:'?',pixels:14}]};</script>
-</body></html>'''
+<script>
+for(const it of S.items){
+ const b=document.createElement('button'); b.type='button'; b.dataset.id=it.id; b.className='chip '+it.kind+' '+it.style;
+ b.onclick=()=>toggle(it.id); document.getElementById('items').appendChild(b);
+}
+</script></body></html>'''
 
         html = render_html_with_delete(original_render, state)
         self.assertIn('value="delete"', html)
