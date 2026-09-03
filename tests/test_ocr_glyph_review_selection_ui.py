@@ -1,3 +1,4 @@
+import sys
 import unittest
 from types import SimpleNamespace
 
@@ -62,9 +63,20 @@ class GlyphReviewSelectionUiTests(unittest.TestCase):
             "matches": [match],
         }
 
+        # Another test module may already have imported the page-byte-array
+        # editor, which monkey-patches paint.render_html with its production
+        # wrapper. Always exercise exactly one delete/review wrapper here.
+        page_module = sys.modules.get(
+            "swedish_wordlist_tools.ocr_review_page_pixel_array_glyphs_html"
+        )
+        base_render = getattr(
+            page_module,
+            "_original_editor_render_html",
+            paint.render_html,
+        )
         html = _decorate_review_html(
             lambda current_state, message="": render_html_with_delete(
-                paint.render_html, current_state, message
+                base_render, current_state, message
             ),
             state,
         )
