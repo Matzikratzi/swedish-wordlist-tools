@@ -79,9 +79,11 @@ class NeighborRowRasterTests(unittest.TestCase):
 
         result = add_neighbor_row_raster(context, state, probe_y=8)
 
-        # source_top=5, so effective page separator y=15 is local y=10.
-        self.assertIn([10, "RADGRÄNS row 0/1"], result["neighbor_row_boundaries"])
-        self.assertIn("--- RADGRÄNS row 0/1 y=10 ---", result["neighbor_raster_ascii"])
+        # Target row 0 has no previous physical row, so the three-row diagnostic
+        # uses its eight-pixel edge probe: source_top=max(0, 5-8)=0. Effective
+        # page separator y=15 is therefore also local y=15.
+        self.assertIn([15, "RADGRÄNS row 0/1"], result["neighbor_row_boundaries"])
+        self.assertIn("--- RADGRÄNS row 0/1 y=15 ---", result["neighbor_raster_ascii"])
 
     def test_support_line_is_displayed_one_pixel_below_matching_baseline(self):
         page = Image.new("L", (20, 40), 255)
