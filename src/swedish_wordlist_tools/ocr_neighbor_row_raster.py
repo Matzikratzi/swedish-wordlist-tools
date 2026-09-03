@@ -364,14 +364,19 @@ def _decorate_review_html(original_render, state: dict, message: str = "") -> st
         "ctx.fillStyle=on?'#1769d2':color;"
         "const label=it.kind==='match'?it.label:'?';"
         "const tw=ctx.measureText(label).width;"
-        "const wanted=x+w/2-tw/2;"
-        "const lx=Math.max(0,Math.min(canvas.width-tw,wanted));"
+        "const wanted=x;"
+        "const lx=Math.max(wanted,labelRight+2);"
         "const ly=Math.min(canvas.height-2,y+h+15);"
         "ctx.fillText(label,lx,ly);"
+        "labelRight=lx+tw;"
     )
     if old_label not in document:
         raise ValueError("could not find paint glyph canvas label renderer")
     document = document.replace(old_label, new_label, 1)
+    loop_needle = "for(const it of S.items){const b=it.bbox,x=b.left*scale"
+    if loop_needle not in document:
+        raise ValueError("could not find paint glyph draw loop")
+    document = document.replace(loop_needle, "let labelRight=-Infinity;" + loop_needle, 1)
     style_needle = "</style></head><body>"
     orange_css = (
         "\n.chip.residual,.chip.match.needs-review{"
