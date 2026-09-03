@@ -582,9 +582,9 @@ function toggle(id){
         click_replacement,
         "could not find glyph-chip click handler",
     )
-    loop_needle = "for(const it of S.items){"
+    loop_needle = "for(const it of S.items){\n const b=document.createElement('button');"
     if loop_needle not in html:
-        raise ValueError("could not find glyph item loop")
+        raise ValueError("could not find glyph item button loop")
     html = html.replace(loop_needle, prefill_script + loop_needle, 1)
 
     mouseup_needle = "window.addEventListener('mouseup',e=>{if(!dragStart)return;dragNow=canvasPixel(e);const x0=Math.min(dragStart.x,dragNow.x),x1=Math.max(dragStart.x,dragNow.x),y0=Math.min(dragStart.y,dragNow.y),y1=Math.max(dragStart.y,dragNow.y);for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const key=x+','+y;if(sourceInk.has(key)){if(dragRemove)chosenPixels.delete(key);else if(x0===x1&&y0===y1&&chosenPixels.has(key))chosenPixels.delete(key);else chosenPixels.add(key);}}dragStart=null;dragNow=null;sync();});"
