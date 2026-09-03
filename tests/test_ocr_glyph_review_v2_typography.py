@@ -88,7 +88,7 @@ for(const it of S.items){{
         self.assertIn("document.getElementById('label').value=it.label", html)
         self.assertIn("rightItem ? rightItem.style : it.style", html)
 
-    def test_prefill_style_comes_from_following_matched_glyph(self):
+    def test_prefill_style_comes_from_geometric_right_neighbor(self):
         first_role = Role("unknown")
         first_role.typographic_style = "bold"
         first_role.reviewed = False
@@ -98,8 +98,8 @@ for(const it of S.items){{
         state = {
             "matches": [SimpleNamespace(style=first_role), SimpleNamespace(style=second_role)],
             "items": [
-                {"id": "M00", "kind": "match", "label": "a", "style": "unknown", "pixels": 3},
-                {"id": "M01", "kind": "match", "label": "b", "style": "unknown", "pixels": 4},
+                {"id": "M00", "kind": "match", "label": "a", "style": "unknown", "pixels": 3, "bbox": [10, 0, 14, 8]},
+                {"id": "M01", "kind": "match", "label": "b", "style": "unknown", "pixels": 4, "bbox": [18, 0, 22, 8]},
             ],
         }
 
@@ -107,8 +107,9 @@ for(const it of S.items){{
 
         self.assertEqual("bold", state["items"][0]["style"])
         self.assertEqual("italic", state["items"][1]["style"])
-        self.assertIn("S.items.slice(itemIndex+1).find", html)
-        self.assertIn("candidate.kind==='match'", html)
+        self.assertIn("candidate.bbox[0]>it.bbox[0]", html)
+        self.assertIn(".sort((a,b)=>a.bbox[0]-b.bbox[0])", html)
+        self.assertIn("rightItem ? rightItem.style : it.style", html)
 
     def test_prefill_hook_accepts_paint_editor_click_spacing(self):
         state = self._unreviewed_state()
