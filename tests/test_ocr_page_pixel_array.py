@@ -23,6 +23,35 @@ class PagePixelArrayTests(unittest.TestCase):
         self.assertEqual(pixels.value(2, 1), UNASSIGNED_INK)
         self.assertEqual(pixels.value(3, 1), WHITE)
 
+    def test_dense_black_section_rectangle_is_masked_completely(self):
+        page = Image.new("L", (50, 50), 255)
+        # Dense black section marker with a white letter-shaped hole.
+        for y in range(8, 42):
+            for x in range(7, 43):
+                page.putpixel((x, y), 0)
+        for y in range(16, 34):
+            page.putpixel((24, y), 255)
+            page.putpixel((25, y), 255)
+        # Ordinary text-like pixels elsewhere must survive.
+        page.putpixel((2, 2), 0)
+        page.putpixel((3, 2), 0)
+
+        pixels = PagePixelArray.from_image(page)
+        regions = pixels.mask_dense_black_rectangles(
+            min_width=20,
+            min_height=20,
+            min_ink_pixels=500,
+            min_density=0.5,
+        )
+
+        self.assertEqual(len(regions), 1)
+        self.assertEqual(regions[0]["box"], (7, 8, 43, 42))
+        for y in range(8, 42):
+            for x in range(7, 43):
+                self.assertEqual(pixels.value(x, y), WHITE)
+        self.assertEqual(pixels.value(2, 2), UNASSIGNED_INK)
+        self.assertEqual(pixels.value(3, 2), UNASSIGNED_INK)
+
     def test_exact_row_geometry_assigns_touching_rows_without_padding_leak(self):
         page = Image.new("L", (8, 8), 255)
         # Upper row has ink on its final raster line; lower row starts directly
