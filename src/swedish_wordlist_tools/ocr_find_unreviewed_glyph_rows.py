@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .ocr_glyph_review_delete import _match_reviewed, load_facit_with_typography
@@ -10,6 +11,9 @@ from .ocr_review_page_pixel_array_glyphs_html import (
     build_page_context_pixel_array,
     load_review_state_pixel_array,
 )
+
+
+QUEUE_FORMAT = "saol14-glyph-review-row-queue-v1"
 
 
 @dataclass(frozen=True)
@@ -42,15 +46,20 @@ def classify_row_state(page: int, position: tuple[int, int], state: dict) -> Row
 
 
 def format_row_work(work: RowWork) -> str:
-    pixel_status = (
-        "exact"
-        if work.fully_exact
-        else f"{work.covered_pixels}/{work.source_pixels}"
-    )
+    pixel_status = "exact" if work.fully_exact else f"{work.covered_pixels}/{work.source_pixels}"
     return (
         f"page {work.page} column {work.column} row {work.row}: "
         f"unreviewed={work.unreviewed_matches} pixels={pixel_status}"
     )
+
+
+def write_review_queue(path: Path, rows: list[RowWork]) -> None:
+    payload = {
+        "format": QUEUE_FORMAT,
+        "rows": [asdict(row) for row in rows],
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _available_pages(jsonl: Path) -> list[int]:
@@ -102,6 +111,11 @@ def main() -> int:
     )
     ap.add_argument("--start-page", type=int)
     ap.add_argument("--end-page", type=int)
+    ap.add_argument(
+        "--output",
+        type=Path,
+        help="save all reported rows as a JSON review queue",
+    )
     args = ap.parse_args()
 
     available = _available_pages(args.jsonl)
@@ -115,7 +129,7 @@ def main() -> int:
         raise ValueError("no pages selected")
 
     models = load_facit_with_typography(args.facit)
-    found = 0
+    work_rows: list[RowWork] = []
     scanned_rows = 0
     for page in pages:
         context = build_page_context_pixel_array(args.jsonl, page, args.threshold)
@@ -127,15 +141,19 @@ def main() -> int:
             if not work.needs_work:
                 continue
             print(format_row_work(work), flush=True)
-            found += 1
+            work_rows.append(work)
             page_found += 1
         print(
             f"scan: page {page}: {page_found} rows need work / {len(context['positions'])} rows",
             flush=True,
         )
 
+    if args.output is not None:
+        write_review_queue(args.output, work_rows)
+        print(f"scan: saved {len(work_rows)} rows to {args.output}", flush=True)
+
     print(
-        f"scan: {found} rows need work / {scanned_rows} scanned rows on {len(pages)} pages",
+        f"scan: {len(work_rows)} rows need work / {scanned_rows} scanned rows on {len(pages)} pages",
         flush=True,
     )
     return 0
