@@ -54,6 +54,10 @@ def _timed(label: str, started: float) -> None:
     print(f"review: tid {label}: {time.perf_counter() - started:.3f} s", flush=True)
 
 
+def _row_owner_revision(context: dict, position: tuple[int, int]) -> int:
+    return int((context.get("pixel_owner_row_revisions") or {}).get(position, 0))
+
+
 def build_page_context_pixel_array(jsonl, page_number: int, threshold: int = 210) -> dict:
     """Load/segment/threshold one page, with startup timing for every major step."""
     global _current_pixel_context
@@ -108,6 +112,7 @@ def build_page_context_pixel_array(jsonl, page_number: int, threshold: int = 210
     context["known_glyph_ownership_done_pairs"] = set()
     context["known_glyph_ownership_lock"] = threading.Lock()
     context["pixel_owner_revision"] = 0
+    context["pixel_owner_row_revisions"] = {}
 
     started = time.perf_counter()
     content_lefts: dict[int, int | None] = {}
@@ -181,7 +186,7 @@ def _pair_has_ink_bridge(context: dict, pair: tuple[int, int]) -> bool:
 
 
 def _ensure_known_glyph_ownership(context: dict, pairs: set[tuple[int, int]], models) -> bool:
-    """Refine requested boundaries once; bump ownership revision on real moves."""
+    """Refine requested boundaries once; invalidate only rows whose pixels moved."""
     if not pairs:
         return False
     changed_any = False
@@ -216,6 +221,11 @@ def _ensure_known_glyph_ownership(context: dict, pairs: set[tuple[int, int]], mo
             if moved:
                 changed_any = True
                 context["pixel_owner_revision"] = int(context.get("pixel_owner_revision") or 0) + 1
+                row_revisions = context["pixel_owner_row_revisions"]
+                upper_position = (pair[0], pair[1])
+                lower_position = (pair[0], pair[1] + 1)
+                row_revisions[upper_position] = int(row_revisions.get(upper_position, 0)) + 1
+                row_revisions[lower_position] = int(row_revisions.get(lower_position, 0)) + 1
             context["known_glyph_ownership_refinements"].extend(changes)
             print(
                 f"review: glyphägande c{pair[0]} r{pair[1]}/r{pair[1] + 1} "
@@ -260,6 +270,7 @@ def _load_owned_row_state(context: dict, position: tuple[int, int], models) -> d
 
     with context["known_glyph_ownership_lock"]:
         owner_revision = int(context.get("pixel_owner_revision") or 0)
+        owner_row_revision = _row_owner_revision(context, position)
         crop = owners.render_owner_crop(row_index=row_index, box=box)
 
     crop, trimmed_left = fast.legacy._trim_leading_white_columns(crop, threshold=threshold, keep=2)
@@ -315,6 +326,7 @@ def _load_owned_row_state(context: dict, position: tuple[int, int], models) -> d
         "pixel_owner_mode": "page-byte-array+known-glyphs",
         "pixel_owner_code": PagePixelArray.row_code(row_index),
         "pixel_owner_revision": owner_revision,
+        "pixel_owner_row_revision": owner_row_revision,
         "pixel_array_counts": owners.counts(),
         "ignored_black_rectangles": context.get("ignored_black_rectangles") or [],
         "known_glyph_ownership_refinements": context.get("known_glyph_ownership_refinements") or [],
@@ -325,7 +337,8 @@ def load_review_state_pixel_array(context: dict, position: tuple[int, int], mode
     state = _load_owned_row_state(context, position, models)
     if not state["fully_exact"]:
         changed = _ensure_known_glyph_ownership(context, _neighbor_pairs(context, position), models)
-        if changed or state["pixel_owner_revision"] != int(context.get("pixel_owner_revision") or 0):
+        current_row_revision = _row_owner_revision(context, position)
+        if changed or int(state.get("pixel_owner_row_revision") or 0) != current_row_revision:
             state = _load_owned_row_state(context, position, models)
     return add_neighbor_row_raster(context, state, probe_y=8)
 
@@ -334,15 +347,16 @@ _original_cache_get_many = fast.SynchronizedStateCache.get_many
 
 
 def _get_many_owner_revision_safe(self, positions):
+    """Keep every analysed row in RAM; refresh only rows whose owned pixels changed."""
     states = _original_cache_get_many(self, positions)
     context = _current_pixel_context
     if context is None:
         return states
-    current = int(context.get("pixel_owner_revision") or 0)
     out = []
     for position, state in zip(positions, states):
-        revision = state.get("pixel_owner_revision")
-        if revision is not None and int(revision) != current:
+        current = _row_owner_revision(context, position)
+        revision = int(state.get("pixel_owner_row_revision") or 0)
+        if revision != current:
             self.invalidate(position)
             state = self.get(position)
         out.append(state)
@@ -458,11 +472,12 @@ def main() -> int:
     fast.load_review_state_fast = load_review_state_pixel_array
     print("review: BYTE-ARRAY använder en sidglobal raster; PNG/threshold görs en gång", flush=True)
     print("review: varje loggrad har relativ tidsstämpel från editorstart", flush=True)
+    print("review: analyserade rader ligger kvar i RAM; bara rader vars pixelägande ändras räknas om", flush=True)
     print("review: visar/analyserar aktuell rad plus högst två rader framåt", flush=True)
     print("review: glyphägande delas vid säkra vita x-gap och matchar bara grupper med gränsbrygga", flush=True)
     print("review: JSONL-sidkälla söks strömmande och starttider loggas per steg", flush=True)
     print("review: normal rad analyseras först; exakt rad triggar aldrig två-raders glyphägande", flush=True)
-    print("review: pixelägande revisionsmärks så parallella radresultat inte kan bli stale", flush=True)
+    print("review: pixelägande revisionsmärks per rad så andra cachade rader förblir giltiga", flush=True)
     print("review: Visa tre rader sparas i webbläsaren mellan radbyten", flush=True)
     print("review: stödlinjer visas en pixel under baseline och alltid i blått", flush=True)
     print("review: stora täta svarta bokstavsrektanglar maskas helt före radägande", flush=True)
