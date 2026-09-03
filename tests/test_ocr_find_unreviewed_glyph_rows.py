@@ -1,11 +1,18 @@
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
+import json
 import unittest
 
 from swedish_wordlist_tools.ocr_find_unreviewed_glyph_rows import (
+    QUEUE_FORMAT,
+    RowWork,
     _selected_pages,
     classify_row_state,
     format_row_work,
+    write_review_queue,
 )
+from swedish_wordlist_tools.ocr_review_glyph_row_queue import load_queue_positions
 
 
 class OcrFindUnreviewedGlyphRowsTests(unittest.TestCase):
@@ -60,6 +67,20 @@ class OcrFindUnreviewedGlyphRowsTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "pages are not present"):
             _selected_pages([1, 2], pages=[3], start_page=None, end_page=None)
+
+    def test_review_queue_round_trip_and_page_filter(self):
+        rows = [
+            RowWork(2, 0, 5, 1, 100, 100, True),
+            RowWork(2, 1, 18, 0, 292, 375, False),
+            RowWork(3, 0, 1, 1, 50, 50, True),
+        ]
+        with TemporaryDirectory() as td:
+            path = Path(td) / "queue.json"
+            write_review_queue(path, rows)
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(QUEUE_FORMAT, payload["format"])
+            self.assertEqual([(0, 5), (1, 18)], load_queue_positions(path, 2))
+            self.assertEqual([(0, 1)], load_queue_positions(path, 3))
 
 
 if __name__ == "__main__":
