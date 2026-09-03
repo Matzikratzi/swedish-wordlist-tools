@@ -6,6 +6,13 @@ from pathlib import Path
 from . import ocr_review_row_glyphs_html as legacy
 
 
+def _glyph_style(payload: dict, glyph: dict) -> str:
+    """Return the matcher-visible style/role for either facit format."""
+    if payload.get("format") == "saol14-manual-glyph-facit-v2":
+        return str(glyph.get("role") or "unknown")
+    return str(glyph.get("style") or "roman")
+
+
 def delete_exact_model(
     payload: dict,
     *,
@@ -13,13 +20,13 @@ def delete_exact_model(
     style: str,
     pixels_relative_to_baseline: list[list[int]],
 ) -> int:
-    """Delete exactly one facit glyph identified by label, style and raster."""
+    """Delete exactly one facit glyph identified by label, matcher style and raster."""
     target = tuple(tuple(point) for point in pixels_relative_to_baseline)
     glyphs = payload.get("glyphs") or []
     matches: list[int] = []
     for index, glyph in enumerate(glyphs):
         pixels = tuple(tuple(point) for point in glyph.get("pixels_relative_to_baseline") or [])
-        if glyph.get("label") == label and glyph.get("style") == style and pixels == target:
+        if glyph.get("label") == label and _glyph_style(payload, glyph) == style and pixels == target:
             matches.append(index)
     if len(matches) != 1:
         raise ValueError(
@@ -79,8 +86,8 @@ def render_html_with_delete(original_render, state: dict, message: str = "") -> 
     html = html.replace(needle, button, 1)
 
     # A bad model can have a huge bounding box overlapping many correct glyphs,
-    # which makes selecting it on the canvas awkward or impossible.  Give every
-    # matched chip its own visible delete button.  It POSTs the exact Mxx id
+    # which makes selecting it on the canvas awkward or impossible. Give every
+    # matched chip its own visible delete button. It POSTs the exact Mxx id
     # through the existing form and therefore deletes the exact facit raster.
     direct_delete = r'''
 <style>
