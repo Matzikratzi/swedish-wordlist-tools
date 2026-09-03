@@ -366,7 +366,7 @@ def apply_edit_with_delete(original_apply_edit, state: dict, facit: Path, form: 
         return message
     if action not in {"delete", "relabel"}:
         message = original_apply_edit(state, facit, form)
-        if action == "add":
+        if action == "add" and facit.exists():
             payload = json.loads(facit.read_text(encoding="utf-8"))
             _mark_added_reviewed(state, payload, form)
             facit.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -400,12 +400,7 @@ def apply_edit_with_delete(original_apply_edit, state: dict, facit: Path, form: 
 def _apply_display_typography(state: dict) -> None:
     matches = state.get("matches") or []
     by_id = {f"M{index:02d}": match for index, match in enumerate(matches)}
-    point_sets = state.get("point_sets") or {}
     for item in state.get("items") or []:
-        item["points"] = [
-            [int(x), int(y)]
-            for x, y in sorted(point_sets.get(item.get("id")) or [])
-        ]
         match = by_id.get(item.get("id"))
         if match is None:
             continue
@@ -462,6 +457,8 @@ def render_html_with_delete(original_render, state: dict, message: str = "") -> 
         raise ValueError("could not find relabel button in glyph editor HTML")
     html = html.replace(needle, button, 1)
     style_needle = '</style></head><body>'
+    if style_needle not in html:
+        return html
     review_style = '''
 .chip{min-width:0;padding:3px 4px}
 .glyph-label{font-size:20px;line-height:1;min-width:0}
@@ -482,8 +479,6 @@ def render_html_with_delete(original_render, state: dict, message: str = "") -> 
 .two-row-fallback h2{font-size:18px;margin:0 0 5px}.two-row-fallback p{margin:4px 0 8px}
 .two-row-candidate{padding:7px 0;border-top:1px solid #e0bf7c}.two-row-form{display:inline-block;margin-left:8px}.two-row-form button{padding:4px 7px}
 '''
-    if style_needle not in html:
-        raise ValueError("could not find editor style block")
     html = html.replace(style_needle, review_style + style_needle, 1)
     html = html.replace('<div>Exakt:', '<div class="row-summary">Exakt:', 1)
     class_replacement = "b.className='chip '+it.kind+' '+it.style+((it.kind==='match' && it.reviewed===false)?' needs-review':'');"
@@ -502,56 +497,12 @@ def render_html_with_delete(original_render, state: dict, message: str = "") -> 
  const ay=a.bbox?a.bbox.top:0,by=b.bbox?b.bbox.top:0;
  return ay-by || String(a.id).localeCompare(String(b.id));
 });
-function itemPointKeys(id){
- const it=S.items.find(candidate=>candidate.id===id);
- return new Set(((it&&it.points)||[]).map(p=>p[0]+','+p[1]));
-}
-function connected8(keys){
- if(keys.size<=1)return true;
- const pending=[[...keys][0]],seen=new Set(pending);
- while(pending.length){
-   const key=pending.pop(),parts=key.split(',').map(Number),x=parts[0],y=parts[1];
-   for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
-     if(dx===0&&dy===0)continue;
-     const next=(x+dx)+','+(y+dy);
-     if(keys.has(next)&&!seen.has(next)){seen.add(next);pending.push(next);}
-   }
- }
- return seen.size===keys.size;
-}
-function itemsContiguous(ids){
- if(ids.size<=1)return true;
- const positions=[...ids].map(id=>orderedItems.findIndex(it=>it.id===id)).filter(index=>index>=0).sort((a,b)=>a-b);
- return positions.length===ids.size && positions[positions.length-1]-positions[0]+1===positions.length;
-}
-function setsTouch8(a,b){
- if(!a.size||!b.size)return false;
- for(const key of a){
-   const parts=key.split(',').map(Number),x=parts[0],y=parts[1];
-   for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)if(b.has((x+dx)+','+(y+dy)))return true;
- }
- return false;
-}
-function selectionValid(itemIds,pixelKeys){
- if(!itemsContiguous(itemIds))return false;
- if(pixelKeys.size && !connected8(pixelKeys))return false;
- if(itemIds.size && pixelKeys.size){
-   const itemKeys=new Set();
-   for(const id of itemIds)for(const key of itemPointKeys(id))itemKeys.add(key);
-   if(!setsTouch8(itemKeys,pixelKeys))return false;
- }
- return true;
-}
 function replaceSet(target,next){target.clear();for(const value of next)target.add(value);}
-function toggle(id){
- const next=new Set(chosen);next.has(id)?next.delete(id):next.add(id);
- if(!selectionValid(next,chosenPixels))return false;
- replaceSet(chosen,next);sync();return true;
-}'''
+function toggle(id){chosen.has(id)?chosen.delete(id):chosen.add(id);sync();return true;}'''
     html = _replace_first_variant(html, (toggle_needle,), toggle_replacement, "could not find glyph selection toggle")
 
     click_replacement = r'''b.onclick=()=>{
-   if(!toggle(it.id))return;
+   toggle(it.id);
    prefillItem(it);
  };document.getElementById('items').appendChild(b);'''
     old_click_variants = (
@@ -586,10 +537,6 @@ function toggle(id){
     if loop_needle not in html:
         raise ValueError("could not find glyph item button loop")
     html = html.replace(loop_needle, prefill_script + loop_needle, 1)
-
-    mouseup_needle = "window.addEventListener('mouseup',e=>{if(!dragStart)return;dragNow=canvasPixel(e);const x0=Math.min(dragStart.x,dragNow.x),x1=Math.max(dragStart.x,dragNow.x),y0=Math.min(dragStart.y,dragNow.y),y1=Math.max(dragStart.y,dragNow.y);for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const key=x+','+y;if(sourceInk.has(key)){if(dragRemove)chosenPixels.delete(key);else if(x0===x1&&y0===y1&&chosenPixels.has(key))chosenPixels.delete(key);else chosenPixels.add(key);}}dragStart=null;dragNow=null;sync();});"
-    mouseup_replacement = r'''window.addEventListener('mouseup',e=>{if(!dragStart)return;dragNow=canvasPixel(e);const x0=Math.min(dragStart.x,dragNow.x),x1=Math.max(dragStart.x,dragNow.x),y0=Math.min(dragStart.y,dragNow.y),y1=Math.max(dragStart.y,dragNow.y);const next=new Set(chosenPixels);for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const key=x+','+y;if(sourceInk.has(key)){if(dragRemove)next.delete(key);else if(x0===x1&&y0===y1&&next.has(key))next.delete(key);else next.add(key);}}dragStart=null;dragNow=null;if(selectionValid(chosen,next))replaceSet(chosenPixels,next);sync();});'''
-    html = _replace_first_variant(html, (mouseup_needle,), mouseup_replacement, "could not find pixel selection mouseup handler")
 
     arrow_script = r'''
 window.addEventListener('keydown',e=>{
