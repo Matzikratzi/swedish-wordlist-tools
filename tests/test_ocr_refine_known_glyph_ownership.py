@@ -75,12 +75,73 @@ class RefineKnownGlyphOwnershipTests(unittest.TestCase):
         changes = refine_known_glyph_ownership(page, row_map, owners, models)
 
         self.assertEqual(len(changes), 1)
+        self.assertEqual(changes[0]["evidence_mode"], "two-sided-exact")
         self.assertIn("g", changes[0]["upper_labels"])
         self.assertIn("b", changes[0]["lower_labels"])
         self.assertEqual(changes[0]["conflict_pixels"], 0)
         self.assertEqual(owners.value(9, 12), upper)
         self.assertEqual(owners.value(10, 10), lower)
         self.assertEqual(owners.value(10, 11), lower)
+
+    def test_isolated_known_descender_needs_no_lower_boundary_match(self):
+        page = Image.new("L", (34, 28), 255)
+        upper_anchor = GlyphModel(
+            "A",
+            "roman",
+            frozenset({(0, -2), (1, -2), (0, -1), (1, -1), (0, 0), (1, 0)}),
+            1,
+        )
+        known_j = GlyphModel(
+            "j",
+            "roman",
+            frozenset({(0, -3), (0, -2), (0, -1), (0, 0), (0, 1), (1, 2)}),
+            1,
+        )
+        lower_anchor = GlyphModel(
+            "C",
+            "roman",
+            frozenset({(0, -2), (1, -2), (2, -2), (0, -1), (0, 0), (1, 0), (2, 0)}),
+            1,
+        )
+        models = [upper_anchor, known_j, lower_anchor]
+
+        def draw(model, x0, baseline):
+            for x, y in model.pixels:
+                page.putpixel((x0 + x, baseline + y), 0)
+
+        draw(upper_anchor, 2, 10)
+        draw(known_j, 8, 10)       # lowest j pixel is at (9, 12), below the cut
+        draw(lower_anchor, 24, 24) # real lower-row text is far away
+
+        row_map = {
+            "columns": [
+                {
+                    "left": 0,
+                    "right": 34,
+                    "crop_left": 0,
+                    "crop_right": 34,
+                    "rows": [
+                        {"page_top": 6, "page_bottom": 12},
+                        {"page_top": 12, "page_bottom": 27},
+                    ],
+                }
+            ]
+        }
+        owners = PagePixelArray.from_image(page)
+        owners.assign_row_map(row_map)
+        upper = PagePixelArray.row_code(0)
+        lower = PagePixelArray.row_code(1)
+        self.assertEqual(owners.value(9, 12), lower)
+
+        changes = refine_known_glyph_ownership(page, row_map, owners, models)
+
+        self.assertEqual(len(changes), 1)
+        self.assertEqual(changes[0]["evidence_mode"], "upper-only-exact-isolated")
+        self.assertEqual(changes[0]["upper_labels"], "j")
+        self.assertEqual(changes[0]["lower_labels"], "")
+        self.assertGreaterEqual(changes[0]["one_sided_manhattan"], 6)
+        self.assertEqual(changes[0]["moved_to_upper"], 1)
+        self.assertEqual(owners.value(9, 12), upper)
 
 
 if __name__ == "__main__":
