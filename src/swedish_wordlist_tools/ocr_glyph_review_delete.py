@@ -400,7 +400,12 @@ def apply_edit_with_delete(original_apply_edit, state: dict, facit: Path, form: 
 def _apply_display_typography(state: dict) -> None:
     matches = state.get("matches") or []
     by_id = {f"M{index:02d}": match for index, match in enumerate(matches)}
+    point_sets = state.get("point_sets") or {}
     for item in state.get("items") or []:
+        item["points"] = [
+            [int(x), int(y)]
+            for x, y in sorted(point_sets.get(item.get("id")) or [])
+        ]
         match = by_id.get(item.get("id"))
         if match is None:
             continue
@@ -458,9 +463,13 @@ def render_html_with_delete(original_render, state: dict, message: str = "") -> 
     html = html.replace(needle, button, 1)
     style_needle = '</style></head><body>'
     review_style = '''
-.chip{min-width:0;padding:3px 5px}
+.chip{min-width:0;padding:3px 4px}
 .glyph-label{font-size:20px;line-height:1;min-width:0}
-.pixel-count{font-size:11px}
+.chip.italic .glyph-label{font-style:italic;font-weight:400}
+.chip.roman .glyph-label{font-style:normal;font-weight:400}
+.chip.bold .glyph-label{font-style:normal;font-weight:700}
+.pixel-count{font-size:11px;line-height:1;font-weight:400;text-align:center}
+.pixel-unit{display:block;font-size:9px;line-height:1;margin-top:1px}
 .rowbox + .items{margin-top:6px}
 .row-summary code{font-size:2em;line-height:1.15}
 .chip.match.needs-review .glyph-label{
@@ -480,30 +489,124 @@ def render_html_with_delete(original_render, state: dict, message: str = "") -> 
     class_replacement = "b.className='chip '+it.kind+' '+it.style+((it.kind==='match' && it.reviewed===false)?' needs-review':'');"
     html = _replace_first_variant(html, ("b.className='chip '+it.kind+' '+it.style;",), class_replacement, "could not find glyph-chip class assignment")
     html = _replace_first_variant(html, ("glyph.textContent=JSON.stringify(it.label);",), "glyph.textContent=it.label;", "could not find glyph label renderer")
-    click_replacement = """b.onclick=()=>{
-   toggle(it.id);
-   const styleSelect=document.querySelector('select[name="style"]');
-   if(styleSelect){
-     const matchedItems=S.items.filter(candidate=>candidate.kind==='match');
-     let leftItem=null;
-     if(it.bbox){
-       leftItem=matchedItems.filter(candidate=>candidate.id!==it.id && candidate.bbox && candidate.bbox[0]<it.bbox[0]).sort((a,b)=>b.bbox[0]-a.bbox[0])[0] || null;
-     }
-     if(!leftItem){
-       const itemIndex=S.items.findIndex(candidate=>candidate.id===it.id);
-       leftItem=itemIndex>0 ? S.items.slice(0,itemIndex).reverse().find(candidate=>candidate.kind==='match') : null;
-     }
-     if(leftItem){
-       styleSelect.value=leftItem.style;
-     }else if(it.kind==='match'){
-       styleSelect.value=it.style;
-     }
+    pixel_needle = "pixels.textContent=it.pixels+' px';"
+    pixel_replacement = "pixels.textContent=it.pixels;const unit=document.createElement('span');unit.className='pixel-unit';unit.textContent='px';pixels.appendChild(unit);"
+    if html.count(pixel_needle) != 2:
+        raise ValueError("could not find both glyph pixel-count renderers")
+    html = html.replace(pixel_needle, pixel_replacement)
+
+    toggle_needle = "function toggle(id){chosen.has(id)?chosen.delete(id):chosen.add(id);sync();}"
+    toggle_replacement = r'''const orderedItems=[...S.items].sort((a,b)=>{
+ const ax=a.bbox?a.bbox.left:0,bx=b.bbox?b.bbox.left:0;
+ if(ax!==bx)return ax-bx;
+ const ay=a.bbox?a.bbox.top:0,by=b.bbox?b.bbox.top:0;
+ return ay-by || String(a.id).localeCompare(String(b.id));
+});
+function itemPointKeys(id){
+ const it=S.items.find(candidate=>candidate.id===id);
+ return new Set(((it&&it.points)||[]).map(p=>p[0]+','+p[1]));
+}
+function connected8(keys){
+ if(keys.size<=1)return true;
+ const pending=[[...keys][0]],seen=new Set(pending);
+ while(pending.length){
+   const key=pending.pop(),parts=key.split(',').map(Number),x=parts[0],y=parts[1];
+   for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
+     if(dx===0&&dy===0)continue;
+     const next=(x+dx)+','+(y+dy);
+     if(keys.has(next)&&!seen.has(next)){seen.add(next);pending.push(next);}
    }
-   if(it.kind==='match'){
-     document.getElementById('label').value=it.label;
+ }
+ return seen.size===keys.size;
+}
+function itemsContiguous(ids){
+ if(ids.size<=1)return true;
+ const positions=[...ids].map(id=>orderedItems.findIndex(it=>it.id===id)).filter(index=>index>=0).sort((a,b)=>a-b);
+ return positions.length===ids.size && positions[positions.length-1]-positions[0]+1===positions.length;
+}
+function setsTouch8(a,b){
+ if(!a.size||!b.size)return false;
+ for(const key of a){
+   const parts=key.split(',').map(Number),x=parts[0],y=parts[1];
+   for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)if(b.has((x+dx)+','+(y+dy)))return true;
+ }
+ return false;
+}
+function selectionValid(itemIds,pixelKeys){
+ if(!itemsContiguous(itemIds))return false;
+ if(pixelKeys.size && !connected8(pixelKeys))return false;
+ if(itemIds.size && pixelKeys.size){
+   const itemKeys=new Set();
+   for(const id of itemIds)for(const key of itemPointKeys(id))itemKeys.add(key);
+   if(!setsTouch8(itemKeys,pixelKeys))return false;
+ }
+ return true;
+}
+function replaceSet(target,next){target.clear();for(const value of next)target.add(value);}
+function toggle(id){
+ const next=new Set(chosen);next.has(id)?next.delete(id):next.add(id);
+ if(!selectionValid(next,chosenPixels))return false;
+ replaceSet(chosen,next);sync();return true;
+}'''
+    html = _replace_first_variant(html, (toggle_needle,), toggle_replacement, "could not find glyph selection toggle")
+
+    click_replacement = r'''b.onclick=()=>{
+   if(!toggle(it.id))return;
+   prefillItem(it);
+ };document.getElementById('items').appendChild(b);'''
+    old_click_variants = (
+        "b.onclick=()=>toggle(it.id);document.getElementById('items').appendChild(b);",
+        "b.onclick=()=>toggle(it.id); document.getElementById('items').appendChild(b);",
+    )
+    prefill_script = r'''function prefillItem(it){
+ const styleSelect=document.querySelector('select[name="style"]');
+ if(styleSelect){
+   const matchedItems=S.items.filter(candidate=>candidate.kind==='match');
+   let leftItem=null;
+   if(it.bbox){
+     leftItem=matchedItems.filter(candidate=>candidate.id!==it.id && candidate.bbox && candidate.bbox.left<it.bbox.left).sort((a,b)=>b.bbox.left-a.bbox.left)[0] || null;
    }
- };document.getElementById('items').appendChild(b);"""
-    html = _replace_first_variant(html, ("b.onclick=()=>toggle(it.id);document.getElementById('items').appendChild(b);", "b.onclick=()=>toggle(it.id); document.getElementById('items').appendChild(b);"), click_replacement, "could not find glyph-chip click handler")
+   if(!leftItem){
+     const itemIndex=S.items.findIndex(candidate=>candidate.id===it.id);
+     leftItem=itemIndex>0 ? S.items.slice(0,itemIndex).reverse().find(candidate=>candidate.kind==='match') : null;
+   }
+   if(leftItem)styleSelect.value=leftItem.style;
+   else if(it.kind==='match')styleSelect.value=it.style;
+ }
+ if(it.kind==='match')document.getElementById('label').value=it.label;
+}
+'''
+    html = _replace_first_variant(
+        html,
+        old_click_variants,
+        click_replacement,
+        "could not find glyph-chip click handler",
+    )
+    loop_needle = "for(const it of S.items){"
+    if loop_needle not in html:
+        raise ValueError("could not find glyph item loop")
+    html = html.replace(loop_needle, prefill_script + loop_needle, 1)
+
+    mouseup_needle = "window.addEventListener('mouseup',e=>{if(!dragStart)return;dragNow=canvasPixel(e);const x0=Math.min(dragStart.x,dragNow.x),x1=Math.max(dragStart.x,dragNow.x),y0=Math.min(dragStart.y,dragNow.y),y1=Math.max(dragStart.y,dragNow.y);for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const key=x+','+y;if(sourceInk.has(key)){if(dragRemove)chosenPixels.delete(key);else if(x0===x1&&y0===y1&&chosenPixels.has(key))chosenPixels.delete(key);else chosenPixels.add(key);}}dragStart=null;dragNow=null;sync();});"
+    mouseup_replacement = r'''window.addEventListener('mouseup',e=>{if(!dragStart)return;dragNow=canvasPixel(e);const x0=Math.min(dragStart.x,dragNow.x),x1=Math.max(dragStart.x,dragNow.x),y0=Math.min(dragStart.y,dragNow.y),y1=Math.max(dragStart.y,dragNow.y);const next=new Set(chosenPixels);for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const key=x+','+y;if(sourceInk.has(key)){if(dragRemove)next.delete(key);else if(x0===x1&&y0===y1&&next.has(key))next.delete(key);else next.add(key);}}dragStart=null;dragNow=null;if(selectionValid(chosen,next))replaceSet(chosenPixels,next);sync();});'''
+    html = _replace_first_variant(html, (mouseup_needle,), mouseup_replacement, "could not find pixel selection mouseup handler")
+
+    arrow_script = r'''
+window.addEventListener('keydown',e=>{
+ if(e.key!=='ArrowLeft'&&e.key!=='ArrowRight')return;
+ const active=document.activeElement;
+ if(active && ['INPUT','SELECT','TEXTAREA'].includes(active.tagName))return;
+ if(chosen.size!==1 || chosenPixels.size)return;
+ const current=[...chosen][0],index=orderedItems.findIndex(it=>it.id===current);
+ if(index<0)return;
+ const target=orderedItems[index+(e.key==='ArrowLeft'?-1:1)];
+ if(!target)return;
+ e.preventDefault();
+ replaceSet(chosen,new Set([target.id]));sync();prefillItem(target);
+ const button=document.querySelector('.chip[data-id="'+target.id+'"]');if(button)button.focus();
+});
+'''
+    html = html.replace('</script></body></html>', arrow_script + '</script></body></html>', 1)
 
     panel = _manual_two_row_panel(state)
     if panel:
