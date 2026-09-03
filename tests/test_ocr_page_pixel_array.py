@@ -85,6 +85,33 @@ class PagePixelArrayTests(unittest.TestCase):
         self.assertEqual(lower.getpixel((2, 0)), 255)
         self.assertEqual(lower.getpixel((2, 1)), 0)
 
+    def test_single_separator_gives_gap_ink_to_following_row(self):
+        page = Image.new("L", (8, 10), 255)
+        page.putpixel((2, 3), 0)  # last upper-row ink
+        page.putpixel((2, 5), 0)  # protruding lower-row ink before its tight top
+        page.putpixel((2, 7), 0)  # ordinary lower-row ink
+        row_map = {
+            "columns": [
+                {
+                    "left": 0,
+                    "right": 8,
+                    "rows": [
+                        {"page_top": 1, "page_bottom": 4},
+                        {"page_top": 7, "page_bottom": 9},
+                    ],
+                }
+            ]
+        }
+
+        pixels = PagePixelArray.from_image(page)
+        pixels.assign_row_map(row_map)
+
+        self.assertEqual(pixels.value(2, 3), PagePixelArray.row_code(0))
+        # There is no second boundary at row 1's tight page_top=7. Everything
+        # from the separator y=4 belongs to row 1, including this y=5 pixel.
+        self.assertEqual(pixels.value(2, 5), PagePixelArray.row_code(1))
+        self.assertEqual(pixels.value(2, 7), PagePixelArray.row_code(1))
+
     def test_ink_outside_row_geometry_stays_unassigned(self):
         page = Image.new("L", (6, 6), 255)
         page.putpixel((2, 0), 0)
