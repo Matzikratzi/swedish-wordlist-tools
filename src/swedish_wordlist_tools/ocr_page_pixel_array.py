@@ -50,6 +50,45 @@ class PagePixelArray:
     def value(self, x: int, y: int) -> int:
         return self.data[self._offset(x, y)]
 
+    def horizontal_ink_count(self, y: int, *, left: int = 0, right: int | None = None) -> int:
+        """Count source ink on one raster line directly in the byte array."""
+        y = int(y)
+        if not 0 <= y < self.height:
+            return 0
+        left = max(0, int(left))
+        right = self.width if right is None else min(self.width, int(right))
+        if right <= left:
+            return 0
+        start = y * self.width + left
+        end = y * self.width + right
+        return sum(1 for value in self.data[start:end] if value != WHITE)
+
+    def boundary_bridge_count(self, y: int, *, left: int = 0, right: int | None = None) -> int:
+        """Count 8-connected source-ink links crossed by a boundary at ``y``.
+
+        The boundary separates raster lines y-1 and y. This is deliberately a
+        byte-array operation: the common easy boundary needs no PIL conversion,
+        crop, component analysis or glyph matching.
+        """
+        y = int(y)
+        if y <= 0 or y >= self.height:
+            return 0
+        left = max(0, int(left))
+        right = self.width if right is None else min(self.width, int(right))
+        if right <= left:
+            return 0
+        upper_start = (y - 1) * self.width
+        lower_start = y * self.width
+        bridges = 0
+        for x in range(left, right):
+            if self.data[upper_start + x] == WHITE:
+                continue
+            for nx in (x - 1, x, x + 1):
+                if left <= nx < right and self.data[lower_start + nx] != WHITE:
+                    bridges += 1
+                    break
+        return bridges
+
     def mask_dense_black_rectangles(
         self,
         *,
@@ -114,12 +153,7 @@ class PagePixelArray:
             height = max_y - min_y + 1
             area = width * height
             density = pixels / area
-            if (
-                width < min_width
-                or height < min_height
-                or pixels < min_ink_pixels
-                or density < min_density
-            ):
+            if width < min_width or height < min_height or pixels < min_ink_pixels or density < min_density:
                 continue
 
             black_before = 0
@@ -131,14 +165,7 @@ class PagePixelArray:
                         black_before += 1
                     self.data[offset] = WHITE
 
-            regions.append(
-                {
-                    "box": (min_x, min_y, max_x + 1, max_y + 1),
-                    "component_ink_pixels": pixels,
-                    "masked_ink_pixels": black_before,
-                    "density": density,
-                }
-            )
+            regions.append({"box": (min_x, min_y, max_x + 1, max_y + 1), "component_ink_pixels": pixels, "masked_ink_pixels": black_before, "density": density})
 
         return regions
 
@@ -158,10 +185,7 @@ class PagePixelArray:
         assigned = 0
         for column in row_map.get("columns") or []:
             left = max(0, int(column.get("crop_left", column.get("left", 0))))
-            right = min(
-                self.width,
-                int(column.get("crop_right", column.get("right", self.width))),
-            )
+            right = min(self.width, int(column.get("crop_right", column.get("right", self.width))))
             if right <= left:
                 continue
             rows = column.get("rows") or []
@@ -170,10 +194,7 @@ class PagePixelArray:
                 code = self.row_code(row_index)
                 row_left = max(0, int(row.get("crop_left", left)))
                 row_right = min(self.width, int(row.get("crop_right", right)))
-                if previous_separator is None:
-                    top = max(0, int(row["page_top"]))
-                else:
-                    top = max(0, previous_separator)
+                top = max(0, int(row["page_top"])) if previous_separator is None else max(0, previous_separator)
                 bottom = min(self.height, int(row["page_bottom"]))
                 previous_separator = bottom
                 if row_right <= row_left or bottom <= top:
@@ -187,21 +208,11 @@ class PagePixelArray:
                             assigned += 1
         return assigned
 
-    def owner_ink_points(
-        self,
-        *,
-        row_index: int,
-        left: int,
-        top: int,
-        right: int,
-        bottom: int,
-    ) -> set[tuple[int, int]]:
+    def owner_ink_points(self, *, row_index: int, left: int, top: int, right: int, bottom: int) -> set[tuple[int, int]]:
         """Return page-coordinate ink owned by one row inside a rectangle."""
         code = self.row_code(row_index)
-        left = max(0, int(left))
-        right = min(self.width, int(right))
-        top = max(0, int(top))
-        bottom = min(self.height, int(bottom))
+        left = max(0, int(left)); right = min(self.width, int(right))
+        top = max(0, int(top)); bottom = min(self.height, int(bottom))
         points: set[tuple[int, int]] = set()
         for y in range(top, bottom):
             start = y * self.width
@@ -210,24 +221,15 @@ class PagePixelArray:
                     points.add((x, y))
         return points
 
-    def render_owner_crop(
-        self,
-        *,
-        row_index: int,
-        box: tuple[int, int, int, int],
-    ) -> Image.Image:
+    def render_owner_crop(self, *, row_index: int, box: tuple[int, int, int, int]) -> Image.Image:
         """Render only one row's owned ink as a normal monochrome PIL crop."""
         left, top, right, bottom = map(int, box)
-        left = max(0, left)
-        top = max(0, top)
-        right = min(self.width, right)
-        bottom = min(self.height, bottom)
+        left = max(0, left); top = max(0, top)
+        right = min(self.width, right); bottom = min(self.height, bottom)
         if right <= left or bottom <= top:
             raise ValueError(f"empty crop box: {(left, top, right, bottom)}")
-
         code = self.row_code(row_index)
-        crop_width = right - left
-        crop_height = bottom - top
+        crop_width = right - left; crop_height = bottom - top
         out = bytearray([255]) * (crop_width * crop_height)
         for local_y, page_y in enumerate(range(top, bottom)):
             page_start = page_y * self.width
@@ -240,8 +242,4 @@ class PagePixelArray:
     def counts(self) -> dict[str, int]:
         white = self.data.count(WHITE)
         unassigned = self.data.count(UNASSIGNED_INK)
-        return {
-            "white": white,
-            "unassigned_ink": unassigned,
-            "assigned_ink": len(self.data) - white - unassigned,
-        }
+        return {"white": white, "unassigned_ink": unassigned, "assigned_ink": len(self.data) - white - unassigned}
