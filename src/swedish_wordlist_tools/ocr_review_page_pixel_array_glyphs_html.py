@@ -181,12 +181,16 @@ def _load_owned_row_state(context: dict, position: tuple[int, int], models) -> d
     row = physical_rows[row_index]
 
     content_left = (context.get("column_content_lefts") or {}).get(column)
+    # Ownership, not the provisional geometry, is authoritative.  Known-glyph
+    # refinement may rescue descender/ascender pixels a couple of raster lines
+    # across page_top/page_bottom.  A wider viewport is safe because
+    # render_owner_crop whites every pixel owned by neighbouring rows.
     box = fast._row_crop_box(
         row,
         column=column,
         page_width=page.width,
         page_height=page.height,
-        pad_y=1,
+        pad_y=4,
         left_override=content_left,
     )
 
