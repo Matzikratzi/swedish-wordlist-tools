@@ -32,18 +32,21 @@ def _persistent_left_rule_x(
     *,
     threshold: int = 210,
 ) -> int | None:
-    """Find a vertical print rule near the left side of a column.
+    """Find a real vertical print rule at the initial left edge of a body column.
 
-    A real rule is dark through most row-height samples. Aligned first letters
-    are not, so measuring coverage over all retained row pixels separates the
-    two without OCR knowledge.
+    Only the initial margin is inspected.  As soon as ordinary body ink has
+    started we stop, so a repeated internal gap/stroke in headwords (for
+    example ``af|fär...`` on one page) can never be mistaken for the margin.
+    Sampling is restricted to the retained physical body rows; running-header
+    text above those rows is therefore deliberately ignored.
     """
     rows = list(column_entry.get("rows") or [])
     if len(rows) < 8:
         return None
-    left = int(column_entry.get("left") or 0)
-    right = int(column_entry.get("right") or page_image.width)
-    search_right = min(right, left + max(8, (right - left) // 3))
+    left = max(0, int(column_entry.get("left") or 0))
+    right = min(page_image.width, int(column_entry.get("right") or page_image.width))
+    if right <= left:
+        return None
     gray = page_image.convert("L")
     pixels = gray.load()
     ys = [
@@ -53,15 +56,29 @@ def _persistent_left_rule_x(
     ]
     if not ys:
         return None
-    candidates: list[tuple[float, int]] = []
-    for x in range(max(0, left), max(0, search_right)):
-        coverage = sum(1 for y in ys if pixels[x, y] < threshold) / len(ys)
-        if coverage >= 0.72:
-            candidates.append((coverage, x))
-    if not candidates:
+
+    def coverage(x: int) -> float:
+        return sum(1 for y in ys if pixels[x, y] < threshold) / len(ys)
+
+    # Walk only through the initial white margin.  The first x coordinate with
+    # body ink is the only possible start of a printed vertical margin rule.
+    x = left
+    while x < right and coverage(x) == 0.0:
+        x += 1
+    if x >= right:
         return None
-    _, x = max(candidates, key=lambda item: (item[0], -item[1]))
-    return x
+
+    # A real rule is essentially continuous through all sampled body-row
+    # heights.  Glyph strokes, even when aligned from row to row, occupy only a
+    # fraction of those y samples.  Never search farther right for another
+    # candidate: that is what used to let repeated headword structure win.
+    if coverage(x) < 0.90:
+        return None
+
+    rule_x = x
+    while x + 1 < right and coverage(x + 1) >= 0.90:
+        x += 1
+    return rule_x
 
 
 def _row_crop_box(
