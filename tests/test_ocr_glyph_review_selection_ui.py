@@ -6,7 +6,7 @@ from swedish_wordlist_tools.ocr_glyph_review_delete import _RoleWithTypography
 
 
 class GlyphReviewSelectionUiTests(unittest.TestCase):
-    def test_review_html_styles_and_constrains_selection(self):
+    def test_review_html_styles_pixels_and_arrow_navigation(self):
         style = _RoleWithTypography("unknown", "italic", False)
         match = SimpleNamespace(
             label="a",
@@ -57,11 +57,10 @@ class GlyphReviewSelectionUiTests(unittest.TestCase):
         self.assertIn(".chip.italic .glyph-label{font-style:italic", html)
         self.assertIn(".pixel-unit{display:block", html)
         self.assertIn("unit.textContent='px'", html)
-        self.assertIn('"points": [[1, 4], [1, 5]]', html)
-        self.assertIn("function selectionValid(itemIds,pixelKeys)", html)
-        self.assertIn("function itemsContiguous(ids)", html)
-        self.assertIn("function connected8(keys)", html)
-        self.assertIn("if(!setsTouch8(itemKeys,pixelKeys))return false", html)
+        self.assertNotIn("function selectionValid(itemIds,pixelKeys)", html)
+        self.assertNotIn("function itemsContiguous(ids)", html)
+        self.assertNotIn("function connected8(keys)", html)
+        self.assertNotIn("setsTouch8", html)
         self.assertIn("e.key!=='ArrowLeft'&&e.key!=='ArrowRight'", html)
         self.assertIn("replaceSet(chosen,new Set([target.id]))", html)
 
