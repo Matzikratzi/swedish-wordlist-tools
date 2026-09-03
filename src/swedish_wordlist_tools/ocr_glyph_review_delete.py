@@ -212,7 +212,7 @@ def _apply_display_typography(state: dict) -> None:
 
 
 def render_html_with_delete(original_render, state: dict, message: str = "") -> str:
-    """Show true typography and add normal/direct deletion controls."""
+    """Show true typography and add the shared delete action."""
     _apply_display_typography(state)
     html = original_render(state, message)
     needle = '<button name="action" value="relabel" type="submit">Rätta vald glyphs facitmodell</button>'
@@ -224,44 +224,4 @@ def render_html_with_delete(original_render, state: dict, message: str = "") -> 
     )
     if needle not in html:
         raise ValueError("could not find relabel button in glyph editor HTML")
-    html = html.replace(needle, button, 1)
-
-    direct_delete = r'''
-<style>
-.glyph-chip-wrap{display:inline-flex;align-items:stretch;gap:2px}
-.glyph-chip-delete{padding:3px 6px;border:1px solid #a33;background:#fff;color:#922;font-weight:700}
-</style>
-<script>
-(() => {
-  const form=document.getElementById('form');
-  const selected=document.getElementById('selected');
-  const selectedPixels=document.getElementById('selectedPixels');
-  const deleteSubmit=form && form.querySelector('button[name="action"][value="delete"]');
-  const items=document.getElementById('items');
-  if(!form || !selected || !selectedPixels || !deleteSubmit || !items) return;
-  for(const it of S.items){
-    if(it.kind!=='match') continue;
-    const chip=items.querySelector('.chip[data-id="'+it.id+'"]');
-    if(!chip || chip.parentElement.classList.contains('glyph-chip-wrap')) continue;
-    const wrap=document.createElement('span');
-    wrap.className='glyph-chip-wrap';
-    chip.parentNode.insertBefore(wrap,chip);
-    wrap.appendChild(chip);
-    const del=document.createElement('button');
-    del.type='button';
-    del.className='glyph-chip-delete';
-    del.textContent='×';
-    del.title='Radera just '+JSON.stringify(it.label)+' ('+it.pixels+' px) ur facit';
-    del.setAttribute('aria-label','Radera glyphmodell '+JSON.stringify(it.label)+' ur facit');
-    del.addEventListener('click',()=>{
-      if(!confirm('Radera glyphmodellen '+JSON.stringify(it.label)+' ('+it.pixels+' px) ur facit?')) return;
-      selected.value=it.id;
-      selectedPixels.value='';
-      form.requestSubmit(deleteSubmit);
-    });
-    wrap.appendChild(del);
-  }
-})();
-</script>
-'''
-    return html.replace("</body>", direct_delete + "</body>", 1)
+    return html.replace(needle, button, 1)
