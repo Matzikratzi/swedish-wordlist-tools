@@ -12,6 +12,17 @@ from . import ocr_review_row_glyphs_html as legacy
 
 def render_html(state: dict, message: str = "") -> str:
     public = {key: value for key, value in state.items() if key not in {"point_sets", "matches"}}
+    # Matches are built first and residuals afterwards, which used to put every
+    # bad/unknown label at the end of the chip row regardless of where its glyph
+    # actually sits in the source. Present all labels in physical x order.
+    public["items"] = sorted(
+        public.get("items") or [],
+        key=lambda item: (
+            int((item.get("bbox") or {}).get("left", 0)),
+            int((item.get("bbox") or {}).get("top", 0)),
+            str(item.get("id") or ""),
+        ),
+    )
     data = json.dumps(public, ensure_ascii=False).replace("</", "<\\/")
     message_html = message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     return f'''<!doctype html>
