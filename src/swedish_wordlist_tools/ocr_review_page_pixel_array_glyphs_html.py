@@ -274,12 +274,48 @@ def load_review_state_pixel_array(context: dict, position: tuple[int, int], mode
     return add_neighbor_row_raster(context, state, probe_y=8)
 
 
+# ULTRAFAST's mature neighbour renderer predates the distinction between row
+# separators and support guides and therefore paints every guide red. Keep the
+# renderer itself intact, but make STÖDLINJE blue in this byte-array editor.
+_original_editor_render_html = fast.ui.editor.render_html
+
+
+def _render_html_with_blue_support_lines(state, message=""):
+    document = _original_editor_render_html(state, message)
+    old = """    ctx.save();ctx.strokeStyle='rgba(190,25,25,.95)';ctx.lineWidth=2;
+    const boundaries=S.neighbor_row_boundaries || [[S.neighbor_core_top,'target top'],[S.neighbor_core_bottom,'target bottom']];
+    for(const entry of boundaries){
+      const yy=entry[0], label=entry[1];
+      const y=ntop+yy*nscale+.5;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(canvas.width,y);ctx.stroke();
+      ctx.fillStyle='rgba(190,25,25,.95)';ctx.font='11px monospace';ctx.fillText(label,4,Math.max(11,y-2));
+    }
+    ctx.restore();"""
+    new = """    ctx.save();ctx.lineWidth=2;
+    const boundaries=S.neighbor_row_boundaries || [[S.neighbor_core_top,'target top'],[S.neighbor_core_bottom,'target bottom']];
+    for(const entry of boundaries){
+      const yy=entry[0], label=entry[1];
+      const support=String(label).startsWith('STÖDLINJE');
+      const guideColor=support?'rgba(25,90,190,.95)':'rgba(190,25,25,.95)';
+      ctx.strokeStyle=guideColor;
+      const y=ntop+yy*nscale+.5;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(canvas.width,y);ctx.stroke();
+      ctx.fillStyle=guideColor;ctx.font='11px monospace';ctx.fillText(label,4,Math.max(11,y-2));
+    }
+    ctx.restore();"""
+    if old not in document:
+        raise ValueError("could not find three-row guide renderer")
+    return document.replace(old, new, 1)
+
+
+fast.ui.editor.render_html = _render_html_with_blue_support_lines
+
+
 def main() -> int:
     fast.build_page_context = build_page_context_pixel_array
     fast.load_review_state_fast = load_review_state_pixel_array
     print("review: BYTE-ARRAY använder sidglobalt pixelägande; ingen grannpixel kan läcka via crop-padding", flush=True)
     print("review: rena radgränser avgörs direkt i byte-arrayen; glyphmatchning körs bara vid sammanvuxet bläck", flush=True)
     print("review: kända exakta glyphar får korrigera pixelägande över sammanvuxna radgränser", flush=True)
+    print("review: stödlinjer visas en pixel under baseline och alltid i blått", flush=True)
     print("review: stora täta svarta bokstavsrektanglar maskas helt före radägande", flush=True)
     print("review: Visa tre rader och Kopiera diagnostik + raster är åter aktiva som ofiltrerad debug", flush=True)
     return fast.main()
