@@ -80,7 +80,10 @@ class GlyphReviewSelectionUiTests(unittest.TestCase):
         self.assertIn("replaceSet(chosen,new Set([target.id]))", html)
         self.assertIn("topPad=4, bottomPad=20", html)
         self.assertIn("it.kind!=='match' || it.reviewed===false", html)
-        self.assertIn("const wanted=x+w/2-tw/2", html)
+        self.assertIn("let labelRight=-Infinity", html)
+        self.assertIn("const wanted=x", html)
+        self.assertIn("Math.max(wanted,labelRight+2)", html)
+        self.assertIn("labelRight=lx+tw", html)
         self.assertIn("y+h+15", html)
         self.assertIn("#ff5a00", html)
 
