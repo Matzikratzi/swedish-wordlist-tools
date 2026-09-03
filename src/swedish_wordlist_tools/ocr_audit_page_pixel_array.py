@@ -36,8 +36,6 @@ def audit_page(jsonl: Path, page_number: int, models, *, threshold: int = 210) -
     exact = 0
     defective: list[dict] = []
     by_column: dict[int, dict[str, int]] = {}
-    total_positions = len(context["positions"])
-    done = 0
 
     # Deliberately sequential: increasing row number within each column.  This
     # mirrors the ownership model we are moving toward and avoids hiding order
@@ -47,42 +45,42 @@ def audit_page(jsonl: Path, page_number: int, models, *, threshold: int = 210) -
         positions.sort(key=lambda position: position[1])
         column_exact = 0
         column_defective = 0
+        halfway = (len(positions) + 1) // 2
         print(
             f"audit: sida {page_number}: kolumn {column}: {len(positions)} rader",
             flush=True,
         )
-        for position in positions:
-            done += 1
-            print(
-                f"audit: sida {page_number}: [{done}/{total_positions}] "
-                f"kolumn {position[0]} rad {position[1]} ...",
-                end=" ",
-                flush=True,
-            )
+        for local_index, position in enumerate(positions, start=1):
             state = load_review_state_pixel_array(context, position, models)
             if state["fully_exact"]:
                 exact += 1
                 column_exact += 1
+            else:
+                column_defective += 1
+                defective.append(
+                    {
+                        "column": position[0],
+                        "row": position[1],
+                        "covered": state["covered_pixels"],
+                        "source": state["source_pixels"],
+                        "text": state["text"],
+                    }
+                )
+
+            if local_index == halfway and local_index < len(positions):
                 print(
-                    f"exakt {state['covered_pixels']}/{state['source_pixels']} {state['text']!r}",
+                    f"audit: sida {page_number}: kolumn {column} halvvägs "
+                    f"({local_index}/{len(positions)}); exakt {column_exact}, "
+                    f"defekta {column_defective}",
                     flush=True,
                 )
-                continue
-            column_defective += 1
-            print(
-                f"DEFEKT {state['covered_pixels']}/{state['source_pixels']} {state['text']!r}",
-                flush=True,
-            )
-            defective.append(
-                {
-                    "column": position[0],
-                    "row": position[1],
-                    "covered": state["covered_pixels"],
-                    "source": state["source_pixels"],
-                    "text": state["text"],
-                }
-            )
+
         by_column[column] = {"exact": column_exact, "defective": column_defective}
+        print(
+            f"audit: sida {page_number}: kolumn {column} klar; "
+            f"exakt {column_exact}/{len(positions)}, defekta {column_defective}",
+            flush=True,
+        )
 
     return {
         "page": page_number,
