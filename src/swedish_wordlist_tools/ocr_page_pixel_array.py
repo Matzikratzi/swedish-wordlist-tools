@@ -143,12 +143,17 @@ class PagePixelArray:
         return regions
 
     def assign_row_map(self, row_map: dict) -> int:
-        """Assign currently-unassigned ink by the row map's exact geometry.
+        """Assign ink using one horizontal separator between adjacent rows.
 
-        No padding is involved. Pixels outside all physical row rectangles stay
-        at 255, which makes segmentation gaps visible instead of silently giving
-        those pixels to a neighbouring crop. Refined crop bounds are preferred
-        over the bootstrap one-third column bounds.
+        ``page_bottom`` is the exclusive line immediately below the lowest ink
+        currently attributed to a row.  That line is the only separator: the
+        following row owns every still-unassigned black pixel from that y down
+        to its own separator, even when its tight ``page_top`` starts lower.
+
+        Exact known-glyph refinement may subsequently move individual pixels
+        across this geometric separator (for example an upper-row descender
+        touching a lower-row ascender).  Pixels outside the first/last physical
+        row interval remain unassigned.
         """
         assigned = 0
         for column in row_map.get("columns") or []:
@@ -159,12 +164,18 @@ class PagePixelArray:
             )
             if right <= left:
                 continue
-            for row_index, row in enumerate(column.get("rows") or []):
+            rows = column.get("rows") or []
+            previous_separator: int | None = None
+            for row_index, row in enumerate(rows):
                 code = self.row_code(row_index)
                 row_left = max(0, int(row.get("crop_left", left)))
                 row_right = min(self.width, int(row.get("crop_right", right)))
-                top = max(0, int(row["page_top"]))
+                if previous_separator is None:
+                    top = max(0, int(row["page_top"]))
+                else:
+                    top = max(0, previous_separator)
                 bottom = min(self.height, int(row["page_bottom"]))
+                previous_separator = bottom
                 if row_right <= row_left or bottom <= top:
                     continue
                 for y in range(top, bottom):
