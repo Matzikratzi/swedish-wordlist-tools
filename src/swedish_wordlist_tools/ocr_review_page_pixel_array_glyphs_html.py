@@ -7,12 +7,19 @@ is thresholded once into ``PagePixelArray`` and physical row geometry assigns
 black source pixels to rows.  Review crops may still include the familiar +/-1
 vertical context, but only pixels owned by the target row are rendered into the
 image passed to the exact glyph matcher.
+
+The mature ULTRAFAST editor chrome is reused, including the unfiltered
+three-row source raster and the paste-friendly diagnostic export.  Those views
+are diagnostics only: glyph matching still receives the owner-filtered byte
+array crop.
 """
 
-from . import ocr_review_five_rows_glyphs_fast_html as fast
+from . import ocr_review_five_rows_glyphs_ultrafast_html as ultrafast
+from .ocr_neighbor_row_raster import add_neighbor_row_raster
 from .ocr_page_pixel_array import PagePixelArray
 
 
+fast = ultrafast.fast
 _original_build_page_context = fast.build_page_context
 
 
@@ -97,7 +104,7 @@ def load_review_state_pixel_array(context: dict, position: tuple[int, int], mode
             }
         )
 
-    return {
+    state = {
         "source": context["source"],
         "page": context["page_number"],
         "column": column,
@@ -113,6 +120,7 @@ def load_review_state_pixel_array(context: dict, position: tuple[int, int], mode
         "source_pixels": result["source_pixels"],
         "source_ink_points": [[x, y] for x, y in sorted(result["ink"])],
         "removed_neighbor_pixels": 0,
+        "two_row_removed_pixels": 0,
         "fully_exact": result["fully_exact"],
         "text": fast.render_exact_text(selected, source_ink=result["ink"]) if selected else "",
         "markup": fast.render_exact_markup(selected, source_ink=result["ink"]) if selected else "",
@@ -124,13 +132,19 @@ def load_review_state_pixel_array(context: dict, position: tuple[int, int], mode
         "pixel_array_counts": owners.counts(),
     }
 
+    # Keep the old editor's three-row view as an *unfiltered* diagnostic view of
+    # the source PNG.  It never feeds pixels back into the matcher or ownership.
+    return add_neighbor_row_raster(context, state, probe_y=8)
+
 
 def main() -> int:
-    # Reuse the mature synchronized HTML server while replacing only page setup
-    # and row raster production.  This keeps the experiment isolated from the
-    # current boundary implementation.
+    # Importing ULTRAFAST above installs its mature editor decorations: the
+    # three-row checkbox and diagnostic-copy button.  Replace only page setup and
+    # row raster production so those controls also work in byte-array mode.
     fast.build_page_context = build_page_context_pixel_array
     fast.load_review_state_fast = load_review_state_pixel_array
+    print("review: BYTE-ARRAY använder sidglobalt pixelägande; ingen grannpixel kan läcka via crop-padding", flush=True)
+    print("review: Visa tre rader och Kopiera diagnostik + raster är åter aktiva som ofiltrerad debug", flush=True)
     return fast.main()
 
 
