@@ -11,9 +11,6 @@ from .ocr_probe_row_glyphs import row_ink
 from .ocr_probe_row_glyphs_grouped import analyse_row_exact_grouped
 
 
-ONE_SIDED_MIN_MANHATTAN = 6
-
-
 def _page_points(match, *, left: int, top: int) -> set[tuple[int, int]]:
     return {(left + x, top + y) for x, y in match.pixels}
 
@@ -80,7 +77,7 @@ def _baseline_matches(
     """Match only safe x-groups that actually contain a boundary crossing.
 
     A completely white vertical run wider than every known glyph's internal
-    blank run is a proof that no glyph can cross it.  Therefore a bridge near
+    blank run is a proof that no glyph can cross it. Therefore a bridge near
     one word/group never requires exact matching of the rest of the column.
     """
     crop = gray.crop((left, top, right, bottom))
@@ -125,93 +122,6 @@ def _matches_near_boundary(matches, *, crop_left: int, crop_top: int, boundary: 
     return out
 
 
-def _owned_points_in_box(
-    owners: PagePixelArray,
-    row_index: int,
-    *,
-    left: int,
-    top: int,
-    right: int,
-    bottom: int,
-    exclude: set[tuple[int, int]] | None = None,
-) -> set[tuple[int, int]]:
-    points = owners.owner_ink_points(
-        row_index=row_index,
-        left=left,
-        top=top,
-        right=right,
-        bottom=bottom,
-    )
-    if exclude:
-        points -= exclude
-    return points
-
-
-def _minimum_manhattan(a: set[tuple[int, int]], b: set[tuple[int, int]]) -> int | None:
-    if not a or not b:
-        return None
-    return min(abs(ax - bx) + abs(ay - by) for ax, ay in a for bx, by in b)
-
-
-def _one_sided_exact_evidence(
-    owners: PagePixelArray,
-    *,
-    row_index: int,
-    boundary: int,
-    left: int,
-    top: int,
-    right: int,
-    bottom: int,
-    upper_matches,
-    lower_matches,
-    min_manhattan: int,
-) -> tuple[bool, str, int | None]:
-    """Accept an exact glyph from one side when the other row is clearly remote.
-
-    This handles a known descender such as ``j`` whose last pixel crosses the
-    provisional separator while the next physical row starts several pixels
-    away.  Exact glyph identity is the primary proof; Manhattan separation is
-    only the guard that makes one-sided evidence safe.
-    """
-    if upper_matches and not lower_matches:
-        candidate = set().union(*(points for _match, points in upper_matches))
-        if not any(y >= boundary for _x, y in candidate):
-            return False, "upper-only-no-crossing", None
-        other = _owned_points_in_box(
-            owners,
-            row_index + 1,
-            left=left,
-            top=top,
-            right=right,
-            bottom=bottom,
-            exclude=candidate,
-        )
-        distance = _minimum_manhattan(candidate, other)
-        if distance is None or distance >= min_manhattan:
-            return True, "upper-only-exact-isolated", distance
-        return False, "upper-only-too-close", distance
-
-    if lower_matches and not upper_matches:
-        candidate = set().union(*(points for _match, points in lower_matches))
-        if not any(y < boundary for _x, y in candidate):
-            return False, "lower-only-no-crossing", None
-        other = _owned_points_in_box(
-            owners,
-            row_index,
-            left=left,
-            top=top,
-            right=right,
-            bottom=bottom,
-            exclude=candidate,
-        )
-        distance = _minimum_manhattan(candidate, other)
-        if distance is None or distance >= min_manhattan:
-            return True, "lower-only-exact-isolated", distance
-        return False, "lower-only-too-close", distance
-
-    return False, "two-sided-or-empty", None
-
-
 def refine_known_glyph_ownership(
     page: Image.Image,
     row_map: dict,
@@ -221,7 +131,6 @@ def refine_known_glyph_ownership(
     threshold: int = 210,
     radius: int = 6,
     pairs: set[tuple[int, int]] | None = None,
-    one_sided_min_manhattan: int = ONE_SIDED_MIN_MANHATTAN,
 ) -> list[dict]:
     """Let exact glyphs override a touching single row separator.
 
@@ -230,9 +139,10 @@ def refine_known_glyph_ownership(
     exact matcher. Matching is then restricted horizontally to provably
     independent safe-whitespace groups containing those bridge pixels.
 
-    Two-sided exact evidence is accepted as before. One-sided exact evidence is
-    also accepted when the exact glyph actually crosses the separator and is at
-    least ``one_sided_min_manhattan`` pixels from ink owned by the other row.
+    An exact facit glyph is itself sufficient ownership evidence: if a glyph
+    matched on one row's baseline actually needs pixels across the provisional
+    separator, those pixels belong to that row. Manhattan distance is reserved
+    for the later unknown-glyph fallback and is not consulted here.
     """
     changes: list[dict] = []
     gray: Image.Image | None = None
@@ -327,24 +237,6 @@ def refine_known_glyph_ownership(
             if not upper_matches and not lower_matches:
                 continue
 
-            evidence_mode = "two-sided-exact"
-            one_sided_distance: int | None = None
-            if not upper_matches or not lower_matches:
-                accepted, evidence_mode, one_sided_distance = _one_sided_exact_evidence(
-                    owners,
-                    row_index=row_index,
-                    boundary=boundary,
-                    left=left,
-                    top=pair_top,
-                    right=right,
-                    bottom=pair_bottom,
-                    upper_matches=upper_matches,
-                    lower_matches=lower_matches,
-                    min_manhattan=int(one_sided_min_manhattan),
-                )
-                if not accepted:
-                    continue
-
             upper_points = (
                 set().union(*(points for _match, points in upper_matches))
                 if upper_matches
@@ -355,6 +247,18 @@ def refine_known_glyph_ownership(
                 if lower_matches
                 else set()
             )
+
+            if upper_matches and not lower_matches:
+                if not any(y >= boundary for _x, y in upper_points):
+                    continue
+                evidence_mode = "upper-only-exact"
+            elif lower_matches and not upper_matches:
+                if not any(y < boundary for _x, y in lower_points):
+                    continue
+                evidence_mode = "lower-only-exact"
+            else:
+                evidence_mode = "two-sided-exact"
+
             conflicts = upper_points & lower_points
             upper_points -= conflicts
             lower_points -= conflicts
@@ -392,7 +296,6 @@ def refine_known_glyph_ownership(
                         "conflict_pixels": len(conflicts),
                         "bridge_x_pixels": len(bridge_xs),
                         "evidence_mode": evidence_mode,
-                        "one_sided_manhattan": one_sided_distance,
                     }
                 )
 
