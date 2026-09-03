@@ -482,21 +482,25 @@ def render_html_with_delete(original_render, state: dict, message: str = "") -> 
     html = _replace_first_variant(html, ("glyph.textContent=JSON.stringify(it.label);",), "glyph.textContent=it.label;", "could not find glyph label renderer")
     click_replacement = """b.onclick=()=>{
    toggle(it.id);
+   const styleSelect=document.querySelector('select[name="style"]');
+   if(styleSelect){
+     const matchedItems=S.items.filter(candidate=>candidate.kind==='match');
+     let leftItem=null;
+     if(it.bbox){
+       leftItem=matchedItems.filter(candidate=>candidate.id!==it.id && candidate.bbox && candidate.bbox[0]<it.bbox[0]).sort((a,b)=>b.bbox[0]-a.bbox[0])[0] || null;
+     }
+     if(!leftItem){
+       const itemIndex=S.items.findIndex(candidate=>candidate.id===it.id);
+       leftItem=itemIndex>0 ? S.items.slice(0,itemIndex).reverse().find(candidate=>candidate.kind==='match') : null;
+     }
+     if(leftItem){
+       styleSelect.value=leftItem.style;
+     }else if(it.kind==='match'){
+       styleSelect.value=it.style;
+     }
+   }
    if(it.kind==='match'){
      document.getElementById('label').value=it.label;
-     const styleSelect=document.querySelector('select[name="style"]');
-     if(styleSelect){
-       const matchedItems=S.items.filter(candidate=>candidate.kind==='match');
-       let leftItem=null;
-       if(it.bbox){
-         leftItem=matchedItems.filter(candidate=>candidate.id!==it.id && candidate.bbox && candidate.bbox[0]<it.bbox[0]).sort((a,b)=>b.bbox[0]-a.bbox[0])[0] || null;
-       }
-       if(!leftItem){
-         const itemIndex=S.items.findIndex(candidate=>candidate.id===it.id);
-         leftItem=itemIndex>0 ? S.items.slice(0,itemIndex).reverse().find(candidate=>candidate.kind==='match') : null;
-       }
-       styleSelect.value=leftItem ? leftItem.style : it.style;
-     }
    }
  };document.getElementById('items').appendChild(b);"""
     html = _replace_first_variant(html, ("b.onclick=()=>toggle(it.id);document.getElementById('items').appendChild(b);", "b.onclick=()=>toggle(it.id); document.getElementById('items').appendChild(b);"), click_replacement, "could not find glyph-chip click handler")
