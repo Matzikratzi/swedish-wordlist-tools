@@ -347,7 +347,11 @@ def render_html_with_delete(original_render, state: dict, message: str = "") -> 
    if(it.kind==='match'){
      document.getElementById('label').value=it.label;
      const styleSelect=document.querySelector('select[name="style"]');
-     if(styleSelect) styleSelect.value=it.style;
+     if(styleSelect){
+       const itemIndex=S.items.findIndex(candidate=>candidate.id===it.id);
+       const rightItem=itemIndex>=0 ? S.items.slice(itemIndex+1).find(candidate=>candidate.kind==='match') : null;
+       styleSelect.value=rightItem ? rightItem.style : it.style;
+     }
    }
  };document.getElementById('items').appendChild(b);"""
     html = _replace_first_variant(
