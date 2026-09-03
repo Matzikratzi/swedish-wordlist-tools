@@ -7,6 +7,7 @@ import threading
 import time
 
 from . import ocr_review_five_rows_glyphs_ultrafast_html as ultrafast
+from . import ocr_glyph_review_delete as review_delete
 from .ocr_neighbor_row_raster import add_neighbor_row_raster
 from .ocr_page_pixel_array import PagePixelArray
 from .ocr_refine_known_glyph_ownership import refine_known_glyph_ownership
@@ -14,6 +15,8 @@ from .ocr_refine_known_glyph_ownership import refine_known_glyph_ownership
 
 fast = ultrafast.fast
 _current_pixel_context: dict | None = None
+_AUTO_ROW_MANHATTAN_GAP = 6
+_original_manual_two_row_candidates = review_delete.manual_two_row_candidates
 
 
 class _ElapsedStdout:
@@ -117,6 +120,88 @@ def _ensure_known_glyph_ownership(context: dict, pairs: set[tuple[int, int]], mo
     return changed_any
 
 
+def _minimum_manhattan(a: set[tuple[int, int]], b: set[tuple[int, int]]) -> int | None:
+    if not a or not b:
+        return None
+    return min(abs(ax-bx)+abs(ay-by) for ax, ay in a for bx, by in b)
+
+
+def _isolated_above_lower_row(context: dict, column: int, candidate: dict, *, min_distance: int = _AUTO_ROW_MANHATTAN_GAP) -> dict | None:
+    """Prove that a cross-separator component is isolated above the next row's ink."""
+    upper = int(candidate["upper_row"]); lower = int(candidate["lower_row"])
+    if int(candidate.get("upper_owned") or 0) <= 0 or int(candidate.get("lower_owned") or 0) <= 0:
+        return None
+    owners = context["pixel_owners"]
+    columns = context["row_map"].get("columns") or []
+    rows = columns[column].get("rows") or []
+    if not 0 <= upper < lower < len(rows) or lower != upper + 1:
+        return None
+    component = {tuple(point) for point in candidate.get("component_pixels") or []}
+    if not component:
+        return None
+    separator = int(candidate["separator_page_y"])
+    column_entry = columns[column]
+    left = max(0, int(column_entry.get("crop_left", column_entry.get("left", 0))))
+    right = min(owners.width, int(column_entry.get("crop_right", column_entry.get("right", owners.width))))
+    scan_bottom = min(owners.height, int(rows[lower]["page_bottom"]))
+    lower_code = owners.row_code(lower)
+    lower_other: set[tuple[int, int]] = set()
+    for y in range(max(0, separator), scan_bottom):
+        start = y * owners.width
+        for x in range(left, right):
+            if owners.data[start+x] == lower_code and (x, y) not in component:
+                lower_other.add((x, y))
+    if not lower_other:
+        return None
+    component_bottom = max(y for _x, y in component)
+    lower_top = min(y for _x, y in lower_other)
+    if component_bottom >= lower_top:
+        return None
+    distance = _minimum_manhattan(component, lower_other)
+    if distance is None or distance < int(min_distance):
+        return None
+    return {"min_manhattan_distance": distance, "component_bottom": component_bottom, "lower_row_top_ink": lower_top}
+
+
+def _auto_assign_isolated_descenders(context: dict, state: dict) -> list[dict]:
+    """Move an isolated cross-boundary component to the upper row without asking."""
+    column = int(state["column"]); row_index = int(state["row"])
+    records: list[dict] = []
+    candidates = _original_manual_two_row_candidates(context, state)
+    owners = context["pixel_owners"]
+    for candidate in candidates:
+        if int(candidate["upper_row"]) != row_index:
+            continue
+        proof = _isolated_above_lower_row(context, column, candidate)
+        if proof is None:
+            continue
+        target_code = owners.row_code(row_index)
+        changed = 0
+        with context["known_glyph_ownership_lock"]:
+            for x, y in candidate["component_pixels"]:
+                offset = int(y) * owners.width + int(x)
+                if owners.data[offset] != target_code:
+                    owners.data[offset] = target_code; changed += 1
+            if changed:
+                context["pixel_owner_revision"] = int(context.get("pixel_owner_revision") or 0) + 1
+                revisions = context["pixel_owner_row_revisions"]
+                for position in ((column, int(candidate["upper_row"])), (column, int(candidate["lower_row"]))):
+                    revisions[position] = int(revisions.get(position, 0)) + 1
+        if changed:
+            record = {"column": column, "upper_row": int(candidate["upper_row"]), "lower_row": int(candidate["lower_row"]), "pixels": int(candidate["pixels"]), "changed": changed, **proof}
+            records.append(record); context.setdefault("auto_two_row_ownership", []).append(record)
+            print(f"review: automatisk radägare c{column} r{candidate['upper_row']}/{candidate['lower_row']}: isolerad övre komponent {candidate['pixels']} px, Manhattan={proof['min_manhattan_distance']} → rad {candidate['upper_row']}", flush=True)
+    return records
+
+
+def _ambiguous_manual_two_row_candidates(context: dict, state: dict) -> list[dict]:
+    """Manual fallback is only useful while the component is split across rows."""
+    return [candidate for candidate in _original_manual_two_row_candidates(context, state) if int(candidate.get("upper_owned") or 0) > 0 and int(candidate.get("lower_owned") or 0) > 0]
+
+
+review_delete.manual_two_row_candidates = _ambiguous_manual_two_row_candidates
+
+
 def _load_owned_row_state(context: dict, position: tuple[int, int], models) -> dict:
     column, row_index = position; page = context["page"]; row_map = context["row_map"]; threshold = context["threshold"]; owners = context["pixel_owners"]
     column_entry = row_map["columns"][column]; physical_rows = column_entry.get("rows") or []
@@ -142,9 +227,13 @@ def _load_owned_row_state(context: dict, position: tuple[int, int], models) -> d
 
 def load_review_state_pixel_array(context, position, models):
     state=_load_owned_row_state(context,position,models)
+    auto_records=[]
     if not state["fully_exact"]:
         changed=_ensure_known_glyph_ownership(context,_neighbor_pairs(context,position),models); current=_row_owner_revision(context,position)
         if changed or int(state.get("pixel_owner_row_revision") or 0)!=current: state=_load_owned_row_state(context,position,models)
+        if not state["fully_exact"]:
+            auto_records=_auto_assign_isolated_descenders(context,state)
+            if auto_records: state=_load_owned_row_state(context,position,models); state["auto_two_row_ownership"]=auto_records
     return add_neighbor_row_raster(context,state,probe_y=8)
 
 
@@ -215,6 +304,7 @@ def main()->int:
     print("review: glyphägande delas vid säkra vita x-gap och matchar bara grupper med gränsbrygga",flush=True)
     print("review: JSONL-sidkälla söks strömmande och starttider loggas per steg",flush=True)
     print("review: normal rad analyseras först; exakt rad triggar aldrig två-raders glyphägande",flush=True)
+    print("review: isolerad komponent ovanför nästa rads bläck autoägs av övre raden vid Manhattan-avstånd >= 6",flush=True)
     print("review: pixelägande revisionsmärks per rad så andra cachade rader förblir giltiga",flush=True)
     print("review: Visa tre rader sparas i webbläsaren mellan radbyten",flush=True)
     print("review: stödlinjer visas en pixel under baseline och alltid i blått",flush=True)
