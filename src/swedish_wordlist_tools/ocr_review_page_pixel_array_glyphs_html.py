@@ -8,7 +8,7 @@ import time
 
 from . import ocr_review_five_rows_glyphs_ultrafast_html as ultrafast
 from . import ocr_glyph_review_delete as review_delete
-from .ocr_neighbor_row_raster import add_neighbor_row_raster
+from .ocr_neighbor_row_raster import add_neighbor_row_raster, _effective_separator_page
 from .ocr_page_pixel_array import PagePixelArray
 from .ocr_refine_known_glyph_ownership import refine_known_glyph_ownership
 
@@ -202,6 +202,33 @@ def _ambiguous_manual_two_row_candidates(context: dict, state: dict) -> list[dic
 review_delete.manual_two_row_candidates = _ambiguous_manual_two_row_candidates
 
 
+def _effective_owned_row_box(context: dict, column: int, row_index: int, left: int, right: int, *, pad_y: int = 2) -> tuple[tuple[int, int, int, int], int, int]:
+    """Use the same ownership-derived row separators as the three-row view."""
+    rows = context["row_map"]["columns"][column].get("rows") or []
+    row = rows[row_index]
+    core_top = int(row["page_top"])
+    core_bottom = int(row["page_bottom"])
+    if row_index > 0:
+        core_top = _effective_separator_page(
+            context,
+            column=column,
+            upper_row_index=row_index - 1,
+            left=left,
+            right=right,
+        )
+    if row_index + 1 < len(rows):
+        core_bottom = _effective_separator_page(
+            context,
+            column=column,
+            upper_row_index=row_index,
+            left=left,
+            right=right,
+        )
+    top = max(0, core_top - int(pad_y))
+    bottom = min(context["page"].height, core_bottom + int(pad_y))
+    return (left, top, right, bottom), core_top, core_bottom
+
+
 def _load_owned_row_state(context: dict, position: tuple[int, int], models) -> dict:
     column, row_index = position; page = context["page"]; row_map = context["row_map"]; threshold = context["threshold"]; owners = context["pixel_owners"]
     column_entry = row_map["columns"][column]; physical_rows = column_entry.get("rows") or []
@@ -211,8 +238,7 @@ def _load_owned_row_state(context: dict, position: tuple[int, int], models) -> d
     # retain their indentation instead of being left-trimmed independently.
     left = max(0, int(content_left if content_left is not None else column_entry.get("crop_left", column_entry.get("left", 0))))
     right = min(page.width, int(column_entry.get("crop_right", column_entry.get("right", page.width))))
-    base_box = fast._row_crop_box(row, column=column, page_width=page.width, page_height=page.height, pad_y=2, left_override=left)
-    box = (left, base_box[1], right, base_box[3])
+    box, effective_top, effective_bottom = _effective_owned_row_box(context, column, row_index, left, right, pad_y=2)
     with context["known_glyph_ownership_lock"]:
         owner_revision = int(context.get("pixel_owner_revision") or 0); owner_row_revision = _row_owner_revision(context, position); crop = owners.render_owner_crop(row_index=row_index, box=box)
     result = fast.analyse_row_exact(crop, models, threshold=threshold); selected = result["selected"]
@@ -222,7 +248,7 @@ def _load_owned_row_state(context: dict, position: tuple[int, int], models) -> d
         item_id=f"M{index:02d}"; points=frozenset(match.pixels); point_sets[item_id]=points; items.append({"id":item_id,"kind":"match","label":match.label,"style":match.style,"pixels":len(points),"bbox":fast.legacy._bbox(set(points))})
     for index, points in enumerate(residuals):
         item_id=f"U{index:02d}"; point_sets[item_id]=points; items.append({"id":item_id,"kind":"residual","label":"?","style":"unknown","pixels":len(points),"bbox":fast.legacy._bbox(set(points))})
-    return {"source":context["source"],"page":context["page_number"],"column":column,"row":row_index,"row_page_top":int(row["page_top"]),"row_page_bottom":int(row["page_bottom"]),"crop_box":box,"crop_width":crop.width,"crop_height":crop.height,"image":fast.legacy._png_data_uri(crop),"baseline":result["baseline"],"covered_pixels":result["covered_pixels"],"source_pixels":result["source_pixels"],"source_ink_points":[[x,y] for x,y in sorted(result["ink"])],"removed_neighbor_pixels":0,"two_row_removed_pixels":0,"fully_exact":result["fully_exact"],"text":fast.render_exact_text(selected,source_ink=result["ink"]) if selected else "","markup":fast.render_exact_markup(selected,source_ink=result["ink"]) if selected else "","items":items,"point_sets":point_sets,"matches":selected,"pixel_owner_mode":"page-byte-array+known-glyphs","pixel_owner_code":PagePixelArray.row_code(row_index),"pixel_owner_revision":owner_revision,"pixel_owner_row_revision":owner_row_revision,"pixel_array_counts":owners.counts(),"ignored_black_rectangles":context.get("ignored_black_rectangles") or [],"known_glyph_ownership_refinements":context.get("known_glyph_ownership_refinements") or []}
+    return {"source":context["source"],"page":context["page_number"],"column":column,"row":row_index,"row_page_top":int(row["page_top"]),"row_page_bottom":int(row["page_bottom"]),"effective_row_page_top":effective_top,"effective_row_page_bottom":effective_bottom,"crop_box":box,"crop_width":crop.width,"crop_height":crop.height,"image":fast.legacy._png_data_uri(crop),"baseline":result["baseline"],"covered_pixels":result["covered_pixels"],"source_pixels":result["source_pixels"],"source_ink_points":[[x,y] for x,y in sorted(result["ink"])],"removed_neighbor_pixels":0,"two_row_removed_pixels":0,"fully_exact":result["fully_exact"],"text":fast.render_exact_text(selected,source_ink=result["ink"]) if selected else "","markup":fast.render_exact_markup(selected,source_ink=result["ink"]) if selected else "","items":items,"point_sets":point_sets,"matches":selected,"pixel_owner_mode":"page-byte-array+known-glyphs","pixel_owner_code":PagePixelArray.row_code(row_index),"pixel_owner_revision":owner_revision,"pixel_owner_row_revision":owner_row_revision,"pixel_array_counts":owners.counts(),"ignored_black_rectangles":context.get("ignored_black_rectangles") or [],"known_glyph_ownership_refinements":context.get("known_glyph_ownership_refinements") or []}
 
 
 def load_review_state_pixel_array(context, position, models):
@@ -310,6 +336,7 @@ def main()->int:
     print("review: stödlinjer visas en pixel under baseline och alltid i blått",flush=True)
     print("review: stora täta svarta bokstavsrektanglar maskas helt före radägande",flush=True)
     print("review: pixelrader har fast kolumnbredd och kompakt vertikal marginal",flush=True)
+    print("review: en-radsvyn använder samma effektiva radgränser som tre-radersvyn",flush=True)
     return fast.main()
 
 if __name__=="__main__":raise SystemExit(main())
