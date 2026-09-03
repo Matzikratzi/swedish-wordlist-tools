@@ -75,20 +75,20 @@ def refine_known_glyph_ownership(
     *,
     threshold: int = 210,
     radius: int = 6,
+    pairs: set[tuple[int, int]] | None = None,
 ) -> list[dict]:
     """Let exact glyphs override a rectangular split between touching rows.
+
+    ``pairs`` contains ``(column_index, upper_row_index)`` entries.  When it is
+    supplied, only those row boundaries are analysed.  This matters in the
+    interactive editor: exact matching is deliberately expensive, so opening a
+    five-row packet must not trigger a full-page pass over every boundary.
 
     Geometry first assigns every black pixel to a horizontal row rectangle.  At
     a boundary that actually crosses connected ink we estimate the baseline of
     each row from the already-owned glyphs.  We then match the raw two-row source
-    at those two *fixed* baselines.  Exact glyph pixels are authoritative and may
+    at those two fixed baselines.  Exact glyph pixels are authoritative and may
     cross the geometric boundary in either direction.
-
-    Thus a known upper-row ``g`` and known lower-row ``b`` may physically touch
-    and even overlap vertically.  They do not need a horizontal line capable of
-    separating their bounding boxes; their exact, disjoint pixel patterns claim
-    the correct row directly.  A pixel claimed by both baselines is deliberately
-    left at its old ownership and reported as a conflict.
     """
     gray = page.convert("L")
     changes: list[dict] = []
@@ -101,6 +101,8 @@ def refine_known_glyph_ownership(
             continue
 
         for row_index in range(len(rows) - 1):
+            if pairs is not None and (column_index, row_index) not in pairs:
+                continue
             upper = rows[row_index]
             lower = rows[row_index + 1]
             boundary = (int(upper["page_bottom"]) + int(lower["page_top"])) // 2
