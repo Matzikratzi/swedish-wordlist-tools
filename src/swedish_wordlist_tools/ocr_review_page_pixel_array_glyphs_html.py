@@ -2,14 +2,14 @@ from __future__ import annotations
 
 """Experimental glyph review backed by one page-wide byte ownership array.
 
-This deliberately leaves the existing review implementation intact.  The page
+This deliberately leaves the existing review implementation intact. The page
 is thresholded once into ``PagePixelArray`` and physical row geometry assigns
-black source pixels to rows.  Review crops may still include the familiar +/-1
+black source pixels to rows. Review crops may still include the familiar +/-1
 vertical context, but only pixels owned by the target row are rendered into the
 image passed to the exact glyph matcher.
 
 The mature ULTRAFAST editor chrome is reused, including the unfiltered
-three-row source raster and the paste-friendly diagnostic export.  Those views
+three-row source raster and the paste-friendly diagnostic export. Those views
 are diagnostics only: glyph matching still receives the owner-filtered byte
 array crop.
 """
@@ -18,7 +18,7 @@ import threading
 
 from . import ocr_review_five_rows_glyphs_ultrafast_html as ultrafast
 from .ocr_neighbor_row_raster import add_neighbor_row_raster
-from .ocr_page_pixel_array import PagePixelArray
+from .ocr_page_pixel_array import PagePixelArray, WHITE
 from .ocr_refine_known_glyph_ownership import refine_known_glyph_ownership
 
 
@@ -28,14 +28,20 @@ _original_build_page_context = fast.build_page_context
 
 def build_page_context_pixel_array(jsonl, page_number: int, threshold: int = 210) -> dict:
     context = _original_build_page_context(jsonl, page_number, threshold)
-    owners = PagePixelArray.from_image(context["page"], threshold=threshold)
+
+    # Keep one grayscale page for all later boundary probes and glyph crops.
+    # PagePixelArray consumes the same raster, so the audit path does not keep
+    # converting the complete PNG for each row boundary.
+    gray_page = context["page"] if context["page"].mode == "L" else context["page"].convert("L")
+    owners = PagePixelArray.from_image(gray_page, threshold=threshold)
 
     # SAOL's section-letter marker is a large dense black rectangle containing
-    # white upper/lower case letters.  It is page furniture, not body-text ink:
+    # white upper/lower case letters. It is page furniture, not body-text ink:
     # mask its entire rectangle before any row can claim pixels from it.
     ignored_regions = owners.mask_dense_black_rectangles()
     assigned = owners.assign_row_map(context["row_map"])
     context["pixel_owners"] = owners
+    context["pixel_gray_page"] = gray_page
     context["ignored_black_rectangles"] = ignored_regions
     context["known_glyph_ownership_refinements"] = []
     context["known_glyph_ownership_done_pairs"] = set()
@@ -71,12 +77,65 @@ def _neighbor_pairs(context: dict, position: tuple[int, int]) -> set[tuple[int, 
     return pairs
 
 
-def _ensure_known_glyph_ownership(context: dict, position: tuple[int, int], models) -> None:
-    """Refine only boundaries adjacent to the row currently being displayed.
+def _pair_boundary(context: dict, pair: tuple[int, int]) -> tuple[int, int, int] | None:
+    """Return (y, left, right) for the provisional separator of one row pair."""
+    column_index, upper_row_index = pair
+    columns = context["row_map"].get("columns") or []
+    if not 0 <= column_index < len(columns):
+        return None
+    column = columns[column_index]
+    rows = column.get("rows") or []
+    if not 0 <= upper_row_index < len(rows) - 1:
+        return None
+    upper = rows[upper_row_index]
+    lower = rows[upper_row_index + 1]
+    y = (int(upper["page_bottom"]) + int(lower["page_top"])) // 2
+    left = max(0, int(column.get("crop_left", column.get("left", 0))))
+    right = min(
+        context["pixel_owners"].width,
+        int(column.get("crop_right", column.get("right", context["pixel_owners"].width))),
+    )
+    if right <= left:
+        return None
+    return y, left, right
 
-    The previous prototype analysed every boundary on the page on the first GET,
-    which made the browser appear to hang.  A five-row editor packet now causes
-    at most its nearby boundaries to be analysed, once each.
+
+def _pair_has_ink_bridge(context: dict, pair: tuple[int, int]) -> bool:
+    """Cheap byte-array test before any exact-glyph analysis.
+
+    A normal PDF-rendered row boundary is a clean separator. If no black source
+    pixel above the provisional split is 8-connected to black source ink below
+    it, there is nothing for the expensive two-baseline glyph matcher to solve.
+    The test uses the already-thresholded page bytes and therefore does no PIL
+    conversion and no glyph matching.
+    """
+    geometry = _pair_boundary(context, pair)
+    if geometry is None:
+        return False
+    y, left, right = geometry
+    owners: PagePixelArray = context["pixel_owners"]
+    if not 0 < y < owners.height:
+        return False
+
+    upper_start = (y - 1) * owners.width
+    lower_start = y * owners.width
+    data = owners.data
+    for x in range(left, right):
+        if data[upper_start + x] == WHITE:
+            continue
+        for nx in (x - 1, x, x + 1):
+            if left <= nx < right and data[lower_start + nx] != WHITE:
+                return True
+    return False
+
+
+def _ensure_known_glyph_ownership(context: dict, position: tuple[int, int], models) -> None:
+    """Refine only genuinely touching boundaries adjacent to the displayed row.
+
+    Most row separators in the PDF-rendered pages are trivial. They are rejected
+    by a tiny byte-array connectivity probe. Only a boundary where source ink is
+    actually connected across the provisional split reaches the expensive exact
+    glyph analysis, and every pair is considered at most once.
     """
     wanted = _neighbor_pairs(context, position)
     if not wanted:
@@ -87,17 +146,16 @@ def _ensure_known_glyph_ownership(context: dict, position: tuple[int, int], mode
         pending = wanted - done
         if not pending:
             return
-        # Mark them before doing the expensive work. The lock is held while the
-        # shared ownership array changes, so parallel row loaders cannot observe
-        # half-applied corrections.
         done.update(pending)
         for pair in sorted(pending):
+            if not _pair_has_ink_bridge(context, pair):
+                continue
             print(
-                f"review: analyserar glyphägande vid gräns c{pair[0]} r{pair[1]}/r{pair[1] + 1} ...",
+                f"review: sammanvuxen radgräns c{pair[0]} r{pair[1]}/r{pair[1] + 1}; analyserar glyphägande ...",
                 flush=True,
             )
             changes = refine_known_glyph_ownership(
-                context["page"],
+                context["pixel_gray_page"],
                 context["row_map"],
                 context["pixel_owners"],
                 models,
@@ -220,8 +278,8 @@ def main() -> int:
     fast.build_page_context = build_page_context_pixel_array
     fast.load_review_state_fast = load_review_state_pixel_array
     print("review: BYTE-ARRAY använder sidglobalt pixelägande; ingen grannpixel kan läcka via crop-padding", flush=True)
-    print("review: kända exakta glyphar får korrigera pixelägande över geometriska radgränser", flush=True)
-    print("review: glyphägande analyseras bara lokalt runt rader som faktiskt visas", flush=True)
+    print("review: rena radgränser avgörs direkt i byte-arrayen; glyphmatchning körs bara vid sammanvuxet bläck", flush=True)
+    print("review: kända exakta glyphar får korrigera pixelägande över sammanvuxna radgränser", flush=True)
     print("review: stora täta svarta bokstavsrektanglar maskas helt före radägande", flush=True)
     print("review: Visa tre rader och Kopiera diagnostik + raster är åter aktiva som ofiltrerad debug", flush=True)
     return fast.main()
