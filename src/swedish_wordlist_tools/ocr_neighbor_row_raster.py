@@ -60,13 +60,13 @@ def add_neighbor_row_raster(
     """Attach an unfiltered three-row source raster for diagnostics.
 
     The view deliberately shows exactly one separator between adjacent physical
-    rows.  The separator is the upper row's exclusive ``page_bottom``: anything
+    rows. The separator is the upper row's exclusive ``page_bottom``: anything
     below it belongs geometrically to the following row unless exact glyph
     ownership says otherwise.
 
-    Exact support baselines are also shown when known.  The target row's support
-    line comes from its current exact analysis; neighbouring support lines come
-    from already-established two-row glyph evidence.
+    Exact support baselines are also shown when known. For visual clarity the
+    support guide is drawn on the raster line immediately *below* the baseline
+    coordinate; the stored/matching baseline itself is unchanged.
     """
     page = context["page"]
     column = int(state["column"])
@@ -116,10 +116,13 @@ def add_neighbor_row_raster(
     support_by_row = _known_support_lines(context, column, visible_rows)
     if state.get("baseline") is not None:
         support_by_row[row_index] = crop_top + int(state["baseline"])
+
+    # The matcher baseline denotes the glyph support coordinate. On the scaled
+    # diagnostic raster the guide belongs immediately below that pixel row.
     support_lines = [
-        (local_y(page_y), f"row {index}")
+        (local_y(page_y + 1), f"row {index}")
         for index, page_y in sorted(support_by_row.items())
-        if source_top <= page_y <= source_bottom
+        if source_top <= page_y + 1 <= source_bottom
     ]
 
     state = dict(state)
@@ -135,8 +138,6 @@ def add_neighbor_row_raster(
             "neighbor_page_bottom": source_bottom,
             "neighbor_row_boundaries": [[y, label] for y, label in boundaries],
             "neighbor_support_lines": [[y, label] for y, label in support_lines],
-            # The existing canvas renderer draws neighbor_row_boundaries.  Feed
-            # it both kinds of guides for now; labels make the distinction clear.
             "neighbor_display_lines": [
                 *[[y, f"RADGRÄNS {label}"] for y, label in boundaries],
                 *[[y, f"STÖDLINJE {label}"] for y, label in support_lines],
@@ -149,7 +150,7 @@ def add_neighbor_row_raster(
             ),
         }
     )
-    # Backward-compatible renderer hook: the current UI reads this key.  It now
+    # Backward-compatible renderer hook: the current UI reads this key. It now
     # receives the intentionally labelled display lines rather than old top/bottom
     # bbox edges.
     state["neighbor_row_boundaries"] = state["neighbor_display_lines"]
