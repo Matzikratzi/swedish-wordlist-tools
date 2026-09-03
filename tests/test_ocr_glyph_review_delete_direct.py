@@ -12,8 +12,8 @@ from swedish_wordlist_tools.ocr_glyph_review_delete import (
 )
 
 
-class GlyphReviewDirectDeleteTest(unittest.TestCase):
-    def test_render_adds_direct_delete_button_for_each_match(self):
+class GlyphReviewDeleteTest(unittest.TestCase):
+    def test_render_adds_shared_delete_button_without_per_glyph_crosses(self):
         state = {
             "items": [
                 {"id": "M00", "kind": "match", "label": "o", "pixels": 55},
@@ -34,10 +34,10 @@ class GlyphReviewDirectDeleteTest(unittest.TestCase):
 
         html = render_html_with_delete(original_render, state)
         self.assertIn('value="delete"', html)
-        self.assertIn("glyph-chip-delete", html)
-        self.assertIn("selected.value=it.id", html)
-        self.assertIn("form.requestSubmit(deleteSubmit)", html)
-        self.assertIn("if(it.kind!=='match') continue", html)
+        self.assertIn("Radera vald glyphmodell", html)
+        self.assertNotIn("glyph-chip-delete", html)
+        self.assertNotIn("glyph-chip-wrap", html)
+        self.assertNotIn("del.textContent='×'", html)
 
     def _delete_one(self, payload):
         points = {(3, 7), (4, 7), (3, 8)}
@@ -59,7 +59,7 @@ class GlyphReviewDirectDeleteTest(unittest.TestCase):
         self.assertEqual([], saved["glyphs"])
         self.assertIn("raderad glyphmodell", message)
 
-    def test_direct_delete_form_removes_exact_v1_model(self):
+    def test_shared_delete_form_removes_exact_v1_model(self):
         self._delete_one({
             "format": "saol14-manual-glyph-facit-v1",
             "glyphs": [{
@@ -70,7 +70,7 @@ class GlyphReviewDirectDeleteTest(unittest.TestCase):
             }],
         })
 
-    def test_direct_delete_form_removes_exact_v2_model_by_role(self):
+    def test_shared_delete_form_removes_exact_v2_model_by_role(self):
         self._delete_one({
             "format": "saol14-manual-glyph-facit-v2",
             "glyphs": [{
