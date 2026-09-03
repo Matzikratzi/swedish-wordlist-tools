@@ -31,10 +31,13 @@ def parse_pages(spec: str) -> list[int]:
 
 
 def audit_page(jsonl: Path, page_number: int, models, *, threshold: int = 210) -> dict:
+    print(f"audit: sida {page_number}: laddar och segmenterar ...", flush=True)
     context = build_page_context_pixel_array(jsonl, page_number, threshold)
     exact = 0
     defective: list[dict] = []
     by_column: dict[int, dict[str, int]] = {}
+    total_positions = len(context["positions"])
+    done = 0
 
     # Deliberately sequential: increasing row number within each column.  This
     # mirrors the ownership model we are moving toward and avoids hiding order
@@ -44,13 +47,32 @@ def audit_page(jsonl: Path, page_number: int, models, *, threshold: int = 210) -
         positions.sort(key=lambda position: position[1])
         column_exact = 0
         column_defective = 0
+        print(
+            f"audit: sida {page_number}: kolumn {column}: {len(positions)} rader",
+            flush=True,
+        )
         for position in positions:
+            done += 1
+            print(
+                f"audit: sida {page_number}: [{done}/{total_positions}] "
+                f"kolumn {position[0]} rad {position[1]} ...",
+                end=" ",
+                flush=True,
+            )
             state = load_review_state_pixel_array(context, position, models)
             if state["fully_exact"]:
                 exact += 1
                 column_exact += 1
+                print(
+                    f"exakt {state['covered_pixels']}/{state['source_pixels']} {state['text']!r}",
+                    flush=True,
+                )
                 continue
             column_defective += 1
+            print(
+                f"DEFEKT {state['covered_pixels']}/{state['source_pixels']} {state['text']!r}",
+                flush=True,
+            )
             defective.append(
                 {
                     "column": position[0],
@@ -82,11 +104,23 @@ def main() -> int:
     ap.add_argument("--facit", type=Path, default=Path("glyphs/saol14-manual-glyph-facit.json"))
     args = ap.parse_args()
 
+    pages = parse_pages(args.pages)
+    print(
+        f"audit: startar {len(pages)} sidor: {', '.join(map(str, pages))}",
+        flush=True,
+    )
+    print(f"audit: laddar facit {args.facit} ...", flush=True)
     models = load_facit(args.facit)
+    print(f"audit: facit klart: {len(models)} glyphmodeller", flush=True)
+
     total_rows = 0
     total_exact = 0
     total_defective = 0
-    for page_number in parse_pages(args.pages):
+    for page_index, page_number in enumerate(pages, start=1):
+        print(
+            f"audit: ===== sida {page_number} ({page_index}/{len(pages)}) =====",
+            flush=True,
+        )
         result = audit_page(args.jsonl, page_number, models, threshold=args.threshold)
         total_rows += result["rows"]
         total_exact += result["exact"]
@@ -95,16 +129,19 @@ def main() -> int:
         print(
             f"page {page_number}: exact {result['exact']}/{result['rows']}; "
             f"defective {len(result['defective'])}; "
-            f"unassigned ink {counts['unassigned_ink']}"
+            f"unassigned ink {counts['unassigned_ink']}",
+            flush=True,
         )
         for defect in result["defective"]:
             print(
                 f"  c{defect['column']} r{defect['row']}: "
-                f"{defect['covered']}/{defect['source']} {defect['text']!r}"
+                f"{defect['covered']}/{defect['source']} {defect['text']!r}",
+                flush=True,
             )
 
     print(
-        f"TOTAL: exact {total_exact}/{total_rows}; defective {total_defective}"
+        f"TOTAL: exact {total_exact}/{total_rows}; defective {total_defective}",
+        flush=True,
     )
     return 0 if total_defective == 0 else 1
 
