@@ -1,12 +1,18 @@
 import unittest
 from types import SimpleNamespace
 
+from PIL import Image
+
 from swedish_wordlist_tools import ocr_review_row_glyphs_html as legacy
 from swedish_wordlist_tools.ocr_glyph_review_delete import _RoleWithTypography
+from swedish_wordlist_tools.ocr_neighbor_row_raster import (
+    _column_review_left,
+    _compact_review_state,
+)
 
 
 class GlyphReviewSelectionUiTests(unittest.TestCase):
-    def test_review_html_styles_pixels_and_arrow_navigation(self):
+    def test_review_html_styles_pixels_arrows_and_canvas_labels(self):
         style = _RoleWithTypography("unknown", "italic", False)
         match = SimpleNamespace(
             label="a",
@@ -63,6 +69,53 @@ class GlyphReviewSelectionUiTests(unittest.TestCase):
         self.assertNotIn("setsTouch8", html)
         self.assertIn("e.key!=='ArrowLeft'&&e.key!=='ArrowRight'", html)
         self.assertIn("replaceSet(chosen,new Set([target.id]))", html)
+        self.assertIn("topPad=4, bottomPad=18", html)
+        self.assertIn("it.kind!=='match' || it.reviewed===false", html)
+        self.assertIn("x+w/2-tw/2", html)
+        self.assertIn("y+h+15", html)
+        self.assertIn("#ff6500", html)
+
+    def test_column_crop_keeps_homonym_margin_and_is_shared(self):
+        image = Image.new("L", (120, 60), 255)
+        rows = []
+        # Most rows start at the headword anchor x=59. One has a superscript
+        # homonym digit at x=51, and one continuation row starts farther right.
+        starts = [59, 59, 59, 59, 51, 70]
+        for index, x in enumerate(starts):
+            top = index * 10
+            rows.append({"page_top": top, "page_bottom": top + 8})
+            image.putpixel((x, top + 3), 0)
+        context = {
+            "page": image,
+            "pixel_gray_page": image,
+            "threshold": 210,
+            "row_map": {
+                "columns": [{"crop_left": 0, "crop_right": 120, "rows": rows}]
+            },
+        }
+
+        self.assertEqual(_column_review_left(context, 0), 44)
+        self.assertEqual(_column_review_left(context, 0), 44)
+        self.assertEqual(context["review_headword_anchors"][0], 59)
+
+        state = {
+            "column": 0,
+            "row": 0,
+            "crop_box": (0, 0, 120, 8),
+            "crop_width": 120,
+            "source_ink_points": [[51, 3], [59, 3]],
+            "point_sets": {"M00": frozenset({(51, 3)}), "M01": frozenset({(59, 3)})},
+            "items": [
+                {"id": "M00", "bbox": {"left": 51, "top": 3, "right": 52, "bottom": 4}},
+                {"id": "M01", "bbox": {"left": 59, "top": 3, "right": 60, "bottom": 4}},
+            ],
+        }
+        compact = _compact_review_state(context, state)
+        self.assertEqual(compact["crop_box"], (44, 0, 120, 8))
+        self.assertEqual(compact["crop_width"], 76)
+        self.assertEqual(compact["source_ink_points"], [[7, 3], [15, 3]])
+        self.assertEqual(compact["items"][0]["bbox"]["left"], 7)
+        self.assertEqual(compact["items"][1]["bbox"]["left"], 15)
 
 
 if __name__ == "__main__":
