@@ -247,7 +247,6 @@ def apply_edit_with_delete(
     if action == "relabel":
         message = original_apply_edit(state, facit, form)
         payload = json.loads(facit.read_text(encoding="utf-8"))
-        # v1 relabels have no separate role; approve the updated exact model.
         new_label = (form.get("label") or [""])[0]
         new_style = (form.get("style") or ["roman"])[0]
         for glyph in payload.get("glyphs") or []:
@@ -296,6 +295,13 @@ def _apply_display_typography(state: dict) -> None:
         item["reviewed"] = _match_reviewed(match)
 
 
+def _replace_first_variant(html: str, variants: tuple[str, ...], replacement: str, error: str) -> str:
+    for needle in variants:
+        if needle in html:
+            return html.replace(needle, replacement, 1)
+    raise ValueError(error)
+
+
 def render_html_with_delete(original_render, state: dict, message: str = "") -> str:
     """Show review state, prefill matched glyphs and keep the shared delete action."""
     _apply_display_typography(state)
@@ -325,16 +331,17 @@ def render_html_with_delete(original_render, state: dict, message: str = "") -> 
         raise ValueError("could not find editor style block")
     html = html.replace(style_needle, review_style + style_needle, 1)
 
-    class_needle = "b.className='chip '+it.kind+' '+it.style;"
     class_replacement = (
         "b.className='chip '+it.kind+' '+it.style+"
         "((it.kind==='match' && it.reviewed===false)?' needs-review':'');"
     )
-    if class_needle not in html:
-        raise ValueError("could not find glyph-chip class assignment")
-    html = html.replace(class_needle, class_replacement, 1)
+    html = _replace_first_variant(
+        html,
+        ("b.className='chip '+it.kind+' '+it.style;",),
+        class_replacement,
+        "could not find glyph-chip class assignment",
+    )
 
-    click_needle = "b.onclick=()=>toggle(it.id); document.getElementById('items').appendChild(b);"
     click_replacement = """b.onclick=()=>{
    toggle(it.id);
    if(it.kind==='match'){
@@ -342,7 +349,14 @@ def render_html_with_delete(original_render, state: dict, message: str = "") -> 
      const styleSelect=document.querySelector('select[name="style"]');
      if(styleSelect) styleSelect.value=it.style;
    }
- }; document.getElementById('items').appendChild(b);"""
-    if click_needle not in html:
-        raise ValueError("could not find glyph-chip click handler")
-    return html.replace(click_needle, click_replacement, 1)
+ };document.getElementById('items').appendChild(b);"""
+    html = _replace_first_variant(
+        html,
+        (
+            "b.onclick=()=>toggle(it.id);document.getElementById('items').appendChild(b);",
+            "b.onclick=()=>toggle(it.id); document.getElementById('items').appendChild(b);",
+        ),
+        click_replacement,
+        "could not find glyph-chip click handler",
+    )
+    return html
