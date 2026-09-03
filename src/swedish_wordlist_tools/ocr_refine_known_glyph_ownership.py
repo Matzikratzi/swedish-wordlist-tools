@@ -5,7 +5,6 @@ from PIL import Image
 from .ocr_glyph_matcher import exact_matches, select_best_disjoint_exact_for_ink
 from .ocr_page_pixel_array import PagePixelArray
 from .ocr_probe_row_glyphs import analyse_row_exact, row_ink
-from .ocr_refine_row_boundaries import _boundary_bridge_count
 
 
 def _page_points(match, *, left: int, top: int) -> set[tuple[int, int]]:
@@ -77,21 +76,15 @@ def refine_known_glyph_ownership(
     radius: int = 6,
     pairs: set[tuple[int, int]] | None = None,
 ) -> list[dict]:
-    """Let exact glyphs override a rectangular split between touching rows.
+    """Let exact glyphs override a touching single row separator.
 
-    ``pairs`` contains ``(column_index, upper_row_index)`` entries.  When it is
-    supplied, only those row boundaries are analysed.  This matters in the
-    interactive editor: exact matching is deliberately expensive, so opening a
-    five-row packet must not trigger a full-page pass over every boundary.
-
-    Geometry first assigns every black pixel to a horizontal row rectangle.  At
-    a boundary that actually crosses connected ink we estimate the baseline of
-    each row from the already-owned glyphs.  We then match the raw two-row source
-    at those two fixed baselines.  Exact glyph pixels are authoritative and may
-    cross the geometric boundary in either direction.
+    The cheap byte-array bridge test runs before any glyph work.  Only a
+    separator where source ink is actually 8-connected across y-1/y reaches the
+    expensive exact matcher.  The separator itself is the upper row's exclusive
+    ``page_bottom`` -- the same single separator used by page ownership.
     """
-    gray = page.convert("L")
     changes: list[dict] = []
+    gray: Image.Image | None = None
 
     for column_index, column in enumerate(row_map.get("columns") or []):
         rows = column.get("rows") or []
@@ -105,15 +98,18 @@ def refine_known_glyph_ownership(
                 continue
             upper = rows[row_index]
             lower = rows[row_index + 1]
-            boundary = (int(upper["page_bottom"]) + int(lower["page_top"])) // 2
-            if _boundary_bridge_count(
-                gray,
-                y=boundary,
-                left=left,
-                right=right,
-                threshold=threshold,
-            ) == 0:
+            boundary = int(upper["page_bottom"])
+
+            # Overwhelmingly common fast path: the already-thresholded page byte
+            # array shows that no connected source ink crosses this separator.
+            if owners.boundary_bridge_count(boundary, left=left, right=right) == 0:
                 continue
+
+            # Convert the source page only after the cheap test says exact glyph
+            # evidence is actually needed. One call can contain several pairs,
+            # so cache the conversion locally.
+            if gray is None:
+                gray = page.convert("L")
 
             upper_baseline = _row_baseline_page(
                 owners,
@@ -190,16 +186,12 @@ def refine_known_glyph_ownership(
             moved_to_lower = 0
 
             for x, y in upper_points:
-                if gray.getpixel((x, y)) >= threshold:
-                    continue
                 offset = y * owners.width + x
                 if owners.data[offset] != upper_code:
                     owners.data[offset] = upper_code
                     moved_to_upper += 1
 
             for x, y in lower_points:
-                if gray.getpixel((x, y)) >= threshold:
-                    continue
                 offset = y * owners.width + x
                 if owners.data[offset] != lower_code:
                     owners.data[offset] = lower_code
