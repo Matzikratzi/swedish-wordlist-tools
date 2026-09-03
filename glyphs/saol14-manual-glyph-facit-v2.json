@@ -1212,126 +1212,6 @@
       "reviewed": true
     },
     {
-      "label": ".",
-      "pixels_relative_to_baseline": [
-        [
-          0,
-          -1
-        ],
-        [
-          0,
-          0
-        ],
-        [
-          1,
-          0
-        ]
-      ],
-      "sources": [
-        {
-          "expected_word": "pres.",
-          "page": 93,
-          "subnr": "6434",
-          "source_id": "15",
-          "word_file": "words/w00015-roman-sub6434-p93-c3-presu002e.png"
-        },
-        {
-          "expected_word": "pl.",
-          "page": 93,
-          "subnr": "6370",
-          "source_id": "2",
-          "word_file": "words/w00002-roman-sub6370-p93-c1-plu002e.png"
-        },
-        {
-          "expected_word": "best.",
-          "page": 93,
-          "subnr": "6370",
-          "source_id": "3",
-          "word_file": "words/w00003-roman-sub6370-p93-c1-bestu002e.png"
-        },
-        {
-          "expected_word": "pl.",
-          "page": 93,
-          "subnr": "6370",
-          "source_id": "4",
-          "word_file": "words/w00004-roman-sub6370-p93-c1-plu002e.png"
-        },
-        {
-          "expected_word": "mask.",
-          "page": 199,
-          "subnr": "426042",
-          "source_id": "25",
-          "word_file": "words/w00025-roman-sub426042-p199-c3-masku002e.png"
-        },
-        {
-          "expected_word": "best.",
-          "page": 234,
-          "subnr": "433817",
-          "source_id": "30",
-          "word_file": "words/w00030-roman-sub433817-p234-c1-bestu002e.png"
-        },
-        {
-          "expected_word": "best.",
-          "page": 234,
-          "subnr": "433832",
-          "source_id": "32",
-          "word_file": "words/w00032-roman-sub433832-p234-c1-bestu002e.png"
-        },
-        {
-          "expected_word": "pres.",
-          "page": 252,
-          "subnr": "16765",
-          "source_id": "42",
-          "word_file": "words/w00042-roman-sub16765-p252-c1-presu002e.png"
-        },
-        {
-          "expected_word": "n.",
-          "page": 359,
-          "subnr": "24303",
-          "source_id": "58",
-          "word_file": "words/w00058-italic-sub24303-p359-c1-nu002e.png"
-        },
-        {
-          "expected_word": "pres.",
-          "page": 359,
-          "subnr": "24303",
-          "source_id": "59",
-          "word_file": "words/w00059-roman-sub24303-p359-c1-presu002e.png"
-        },
-        {
-          "expected_word": "komp.",
-          "page": 372,
-          "subnr": "25200",
-          "source_id": "66",
-          "word_file": "words/w00066-roman-sub25200-p372-c1-kompu002e.png"
-        },
-        {
-          "expected_word": "superl.",
-          "page": 372,
-          "subnr": "25200",
-          "source_id": "67",
-          "word_file": "words/w00067-roman-sub25200-p372-c1-superlu002e.png"
-        },
-        {
-          "expected_word": "ibl.",
-          "page": 489,
-          "subnr": "497774",
-          "source_id": "89",
-          "word_file": "words/w00089-italic-sub497774-p489-c2-iblu002e.png"
-        },
-        {
-          "expected_word": "el.",
-          "page": 1558,
-          "subnr": "111658",
-          "source_id": "201",
-          "word_file": "words/w00201-roman-sub111658-p1558-c3-elu002e.png"
-        }
-      ],
-      "role": "unknown",
-      "legacy_style": "roman",
-      "reviewed": true
-    },
-    {
       "label": "·",
       "pixels_relative_to_baseline": [
         [
@@ -3194,7 +3074,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": true,
+      "style": "bold"
     },
     {
       "label": "å",
@@ -4270,691 +4151,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
-    },
-    {
-      "label": "ab",
-      "pixels_relative_to_baseline": [
-        [
-          0,
-          -6
-        ],
-        [
-          0,
-          -3
-        ],
-        [
-          0,
-          -2
-        ],
-        [
-          0,
-          -1
-        ],
-        [
-          1,
-          -6
-        ],
-        [
-          1,
-          -5
-        ],
-        [
-          1,
-          -3
-        ],
-        [
-          1,
-          -2
-        ],
-        [
-          1,
-          -1
-        ],
-        [
-          1,
-          0
-        ],
-        [
-          2,
-          -7
-        ],
-        [
-          2,
-          -6
-        ],
-        [
-          2,
-          -3
-        ],
-        [
-          2,
-          -1
-        ],
-        [
-          2,
-          0
-        ],
-        [
-          3,
-          -7
-        ],
-        [
-          3,
-          -6
-        ],
-        [
-          3,
-          -4
-        ],
-        [
-          3,
-          -3
-        ],
-        [
-          3,
-          -1
-        ],
-        [
-          3,
-          0
-        ],
-        [
-          4,
-          -7
-        ],
-        [
-          4,
-          -6
-        ],
-        [
-          4,
-          -5
-        ],
-        [
-          4,
-          -4
-        ],
-        [
-          4,
-          -3
-        ],
-        [
-          4,
-          -2
-        ],
-        [
-          4,
-          -1
-        ],
-        [
-          5,
-          -6
-        ],
-        [
-          5,
-          -5
-        ],
-        [
-          5,
-          -4
-        ],
-        [
-          5,
-          -3
-        ],
-        [
-          5,
-          -2
-        ],
-        [
-          5,
-          -1
-        ],
-        [
-          5,
-          0
-        ],
-        [
-          6,
-          -1
-        ],
-        [
-          7,
-          -10
-        ],
-        [
-          7,
-          -9
-        ],
-        [
-          7,
-          -8
-        ],
-        [
-          7,
-          -7
-        ],
-        [
-          7,
-          -6
-        ],
-        [
-          7,
-          -5
-        ],
-        [
-          7,
-          -4
-        ],
-        [
-          7,
-          -3
-        ],
-        [
-          7,
-          -2
-        ],
-        [
-          7,
-          -1
-        ],
-        [
-          7,
-          0
-        ],
-        [
-          8,
-          -10
-        ],
-        [
-          8,
-          -9
-        ],
-        [
-          8,
-          -8
-        ],
-        [
-          8,
-          -7
-        ],
-        [
-          8,
-          -6
-        ],
-        [
-          8,
-          -5
-        ],
-        [
-          8,
-          -4
-        ],
-        [
-          8,
-          -3
-        ],
-        [
-          8,
-          -2
-        ],
-        [
-          8,
-          -1
-        ],
-        [
-          8,
-          0
-        ],
-        [
-          9,
-          -7
-        ],
-        [
-          9,
-          -6
-        ],
-        [
-          9,
-          -1
-        ],
-        [
-          9,
-          0
-        ],
-        [
-          10,
-          -7
-        ],
-        [
-          10,
-          -6
-        ],
-        [
-          10,
-          -1
-        ],
-        [
-          10,
-          0
-        ],
-        [
-          11,
-          -7
-        ],
-        [
-          11,
-          -6
-        ],
-        [
-          11,
-          -1
-        ],
-        [
-          11,
-          0
-        ],
-        [
-          12,
-          -6
-        ],
-        [
-          12,
-          -5
-        ],
-        [
-          12,
-          -4
-        ],
-        [
-          12,
-          -3
-        ],
-        [
-          12,
-          -2
-        ],
-        [
-          12,
-          -1
-        ],
-        [
-          12,
-          0
-        ],
-        [
-          13,
-          -5
-        ],
-        [
-          13,
-          -4
-        ],
-        [
-          13,
-          -3
-        ],
-        [
-          13,
-          -2
-        ]
-      ],
-      "sources": [
-        {
-          "expected_word": "abcehazisk",
-          "jsonl_word": "abchaz·isk",
-          "jsonl_similarity": 0.947,
-          "page": 1,
-          "subnr": "ocr-2-1-1-1",
-          "source_id": "page:1:ocr:2:1:1:1",
-          "page_word_bbox": [
-            261,
-            67,
-            68,
-            42
-          ],
-          "suggestion": "ab{b}"
-        }
-      ],
-      "role": "unknown",
-      "legacy_style": "bold",
-      "reviewed": false
-    },
-    {
-      "label": "az",
-      "pixels_relative_to_baseline": [
-        [
-          0,
-          -6
-        ],
-        [
-          0,
-          -3
-        ],
-        [
-          0,
-          -2
-        ],
-        [
-          0,
-          -1
-        ],
-        [
-          1,
-          -6
-        ],
-        [
-          1,
-          -5
-        ],
-        [
-          1,
-          -3
-        ],
-        [
-          1,
-          -2
-        ],
-        [
-          1,
-          -1
-        ],
-        [
-          1,
-          0
-        ],
-        [
-          2,
-          -7
-        ],
-        [
-          2,
-          -6
-        ],
-        [
-          2,
-          -3
-        ],
-        [
-          2,
-          -1
-        ],
-        [
-          2,
-          0
-        ],
-        [
-          3,
-          -7
-        ],
-        [
-          3,
-          -6
-        ],
-        [
-          3,
-          -4
-        ],
-        [
-          3,
-          -3
-        ],
-        [
-          3,
-          -1
-        ],
-        [
-          3,
-          0
-        ],
-        [
-          4,
-          -7
-        ],
-        [
-          4,
-          -6
-        ],
-        [
-          4,
-          -5
-        ],
-        [
-          4,
-          -4
-        ],
-        [
-          4,
-          -3
-        ],
-        [
-          4,
-          -2
-        ],
-        [
-          4,
-          -1
-        ],
-        [
-          5,
-          -6
-        ],
-        [
-          5,
-          -5
-        ],
-        [
-          5,
-          -4
-        ],
-        [
-          5,
-          -3
-        ],
-        [
-          5,
-          -2
-        ],
-        [
-          5,
-          -1
-        ],
-        [
-          5,
-          0
-        ],
-        [
-          6,
-          -1
-        ],
-        [
-          7,
-          -1
-        ],
-        [
-          7,
-          0
-        ],
-        [
-          8,
-          -7
-        ],
-        [
-          8,
-          -6
-        ],
-        [
-          8,
-          -2
-        ],
-        [
-          8,
-          -1
-        ],
-        [
-          8,
-          0
-        ],
-        [
-          9,
-          -7
-        ],
-        [
-          9,
-          -6
-        ],
-        [
-          9,
-          -3
-        ],
-        [
-          9,
-          -2
-        ],
-        [
-          9,
-          -1
-        ],
-        [
-          9,
-          0
-        ],
-        [
-          10,
-          -7
-        ],
-        [
-          10,
-          -6
-        ],
-        [
-          10,
-          -4
-        ],
-        [
-          10,
-          -3
-        ],
-        [
-          10,
-          -2
-        ],
-        [
-          10,
-          -1
-        ],
-        [
-          10,
-          0
-        ],
-        [
-          11,
-          -7
-        ],
-        [
-          11,
-          -6
-        ],
-        [
-          11,
-          -5
-        ],
-        [
-          11,
-          -4
-        ],
-        [
-          11,
-          -1
-        ],
-        [
-          11,
-          0
-        ],
-        [
-          12,
-          -7
-        ],
-        [
-          12,
-          -6
-        ],
-        [
-          12,
-          -5
-        ],
-        [
-          12,
-          -1
-        ],
-        [
-          12,
-          0
-        ],
-        [
-          13,
-          -7
-        ],
-        [
-          13,
-          -6
-        ],
-        [
-          13,
-          -1
-        ]
-      ],
-      "sources": [
-        {
-          "expected_word": "Abchazien",
-          "jsonl_word": "Abchazi·en",
-          "jsonl_similarity": 1,
-          "page": 1,
-          "subnr": "ocr-11-6-2-1",
-          "source_id": "page:1:ocr:11:6:2:1",
-          "page_word_bbox": [
-            57,
-            910,
-            72,
-            22
-          ],
-          "suggestion": "az{b}"
-        },
-        {
-          "expected_word": "abchazier",
-          "jsonl_word": "abchazi·er",
-          "jsonl_similarity": 1,
-          "page": 1,
-          "subnr": "ocr-11-8-2-1",
-          "source_id": "page:1:ocr:11:8:2:1",
-          "page_word_bbox": [
-            58,
-            963,
-            68,
-            22
-          ],
-          "suggestion": "az{b}"
-        },
-        {
-          "expected_word": "abchaziska",
-          "jsonl_word": "abchaz·iska",
-          "jsonl_similarity": 1,
-          "page": 1,
-          "subnr": "ocr-4-1-1-1",
-          "source_id": "page:1:ocr:4:1:1:1",
-          "page_word_bbox": [
-            265,
-            95,
-            79,
-            22
-          ],
-          "suggestion": "az{b}"
-        }
-      ],
-      "role": "unknown",
-      "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": true,
+      "style": "bold"
     },
     {
       "label": "b",
@@ -5984,7 +5182,8 @@
       ],
       "role": "unknown",
       "legacy_style": "italic",
-      "reviewed": false
+      "reviewed": true,
+      "style": "italic"
     },
     {
       "label": "c",
@@ -6097,7 +5296,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": true,
+      "style": "bold"
     },
     {
       "label": "c",
@@ -7309,406 +6509,6 @@
       "reviewed": false
     },
     {
-      "label": "dl",
-      "pixels_relative_to_baseline": [
-        [
-          0,
-          -3
-        ],
-        [
-          0,
-          -2
-        ],
-        [
-          0,
-          -1
-        ],
-        [
-          1,
-          -5
-        ],
-        [
-          1,
-          -4
-        ],
-        [
-          1,
-          0
-        ],
-        [
-          2,
-          -6
-        ],
-        [
-          2,
-          -1
-        ],
-        [
-          3,
-          -6
-        ],
-        [
-          3,
-          -2
-        ],
-        [
-          4,
-          -6
-        ],
-        [
-          4,
-          -5
-        ],
-        [
-          4,
-          -4
-        ],
-        [
-          4,
-          -3
-        ],
-        [
-          4,
-          -2
-        ],
-        [
-          4,
-          -1
-        ],
-        [
-          4,
-          0
-        ],
-        [
-          5,
-          -10
-        ],
-        [
-          5,
-          -7
-        ],
-        [
-          5,
-          -6
-        ],
-        [
-          5,
-          -5
-        ],
-        [
-          5,
-          -1
-        ],
-        [
-          6,
-          -10
-        ],
-        [
-          6,
-          -9
-        ],
-        [
-          6,
-          -8
-        ],
-        [
-          6,
-          -1
-        ],
-        [
-          7,
-          -1
-        ],
-        [
-          7,
-          0
-        ],
-        [
-          8,
-          -10
-        ],
-        [
-          8,
-          -5
-        ],
-        [
-          8,
-          -4
-        ],
-        [
-          8,
-          -3
-        ],
-        [
-          8,
-          -2
-        ],
-        [
-          8,
-          0
-        ],
-        [
-          9,
-          -10
-        ],
-        [
-          9,
-          -9
-        ],
-        [
-          9,
-          -8
-        ],
-        [
-          9,
-          -7
-        ],
-        [
-          9,
-          -6
-        ],
-        [
-          9,
-          0
-        ],
-        [
-          10,
-          -10
-        ]
-      ],
-      "sources": [
-        {
-          "expected_word": " abestridsmedlet;",
-          "jsonl_word": "abc-stridsmedlet;",
-          "jsonl_similarity": 0.933,
-          "page": 1,
-          "subnr": "ocr-4-1-5-4",
-          "source_id": "page:1:ocr:4:1:5:4",
-          "page_word_bbox": [
-            271,
-            167,
-            108,
-            24
-          ],
-          "suggestion": ""
-        },
-        {
-          "expected_word": "abe-stridsmedlen",
-          "jsonl_word": "abc-stridsmedle",
-          "jsonl_similarity": 0.897,
-          "page": 1,
-          "subnr": "ocr-4-1-6-6",
-          "source_id": "page:1:ocr:4:1:6:6",
-          "page_word_bbox": [
-            290,
-            185,
-            108,
-            24
-          ],
-          "suggestion": ""
-        }
-      ],
-      "role": "unknown",
-      "legacy_style": "italic",
-      "reviewed": false
-    },
-    {
-      "label": "ds",
-      "pixels_relative_to_baseline": [
-        [
-          0,
-          -3
-        ],
-        [
-          0,
-          -2
-        ],
-        [
-          0,
-          -1
-        ],
-        [
-          1,
-          -5
-        ],
-        [
-          1,
-          -4
-        ],
-        [
-          1,
-          0
-        ],
-        [
-          2,
-          -6
-        ],
-        [
-          2,
-          -1
-        ],
-        [
-          3,
-          -6
-        ],
-        [
-          3,
-          -2
-        ],
-        [
-          4,
-          -6
-        ],
-        [
-          4,
-          -5
-        ],
-        [
-          4,
-          -4
-        ],
-        [
-          4,
-          -3
-        ],
-        [
-          4,
-          -2
-        ],
-        [
-          4,
-          -1
-        ],
-        [
-          4,
-          0
-        ],
-        [
-          5,
-          -10
-        ],
-        [
-          5,
-          -7
-        ],
-        [
-          5,
-          -6
-        ],
-        [
-          5,
-          -5
-        ],
-        [
-          5,
-          -1
-        ],
-        [
-          6,
-          -10
-        ],
-        [
-          6,
-          -9
-        ],
-        [
-          6,
-          -8
-        ],
-        [
-          6,
-          -1
-        ],
-        [
-          7,
-          -1
-        ],
-        [
-          8,
-          -1
-        ],
-        [
-          8,
-          0
-        ],
-        [
-          9,
-          -5
-        ],
-        [
-          9,
-          -4
-        ],
-        [
-          9,
-          0
-        ],
-        [
-          10,
-          -6
-        ],
-        [
-          10,
-          -3
-        ],
-        [
-          10,
-          0
-        ],
-        [
-          11,
-          -6
-        ],
-        [
-          11,
-          -5
-        ],
-        [
-          11,
-          -2
-        ],
-        [
-          11,
-          -1
-        ]
-      ],
-      "sources": [
-        {
-          "expected_word": " abestridsmedlet;",
-          "jsonl_word": "abc-stridsmedlet;",
-          "jsonl_similarity": 0.933,
-          "page": 1,
-          "subnr": "ocr-4-1-5-4",
-          "source_id": "page:1:ocr:4:1:5:4",
-          "page_word_bbox": [
-            271,
-            167,
-            108,
-            24
-          ],
-          "suggestion": ""
-        },
-        {
-          "expected_word": "abe-stridsmedlen",
-          "jsonl_word": "abc-stridsmedle",
-          "jsonl_similarity": 0.897,
-          "page": 1,
-          "subnr": "ocr-4-1-6-6",
-          "source_id": "page:1:ocr:4:1:6:6",
-          "page_word_bbox": [
-            290,
-            185,
-            108,
-            24
-          ],
-          "suggestion": ""
-        }
-      ],
-      "role": "unknown",
-      "legacy_style": "italic",
-      "reviewed": false
-    },
-    {
       "label": "e",
       "pixels_relative_to_baseline": [
         [
@@ -8451,570 +7251,6 @@
       "legacy_style": "bold",
       "reviewed": true,
       "style": "bold"
-    },
-    {
-      "label": "em",
-      "pixels_relative_to_baseline": [
-        [
-          0,
-          -2
-        ],
-        [
-          0,
-          -1
-        ],
-        [
-          1,
-          -5
-        ],
-        [
-          1,
-          -4
-        ],
-        [
-          1,
-          -3
-        ],
-        [
-          1,
-          0
-        ],
-        [
-          2,
-          -6
-        ],
-        [
-          2,
-          -3
-        ],
-        [
-          2,
-          0
-        ],
-        [
-          3,
-          -6
-        ],
-        [
-          3,
-          -4
-        ],
-        [
-          3,
-          -1
-        ],
-        [
-          4,
-          -5
-        ],
-        [
-          4,
-          -1
-        ],
-        [
-          5,
-          -5
-        ],
-        [
-          5,
-          0
-        ],
-        [
-          6,
-          -6
-        ],
-        [
-          6,
-          -3
-        ],
-        [
-          6,
-          -2
-        ],
-        [
-          6,
-          -1
-        ],
-        [
-          7,
-          -6
-        ],
-        [
-          7,
-          -5
-        ],
-        [
-          7,
-          -4
-        ],
-        [
-          7,
-          -3
-        ],
-        [
-          8,
-          -4
-        ],
-        [
-          9,
-          -5
-        ],
-        [
-          9,
-          0
-        ],
-        [
-          10,
-          -6
-        ],
-        [
-          10,
-          -3
-        ],
-        [
-          10,
-          -2
-        ],
-        [
-          10,
-          -1
-        ],
-        [
-          11,
-          -6
-        ],
-        [
-          11,
-          -5
-        ],
-        [
-          11,
-          -4
-        ],
-        [
-          11,
-          -3
-        ],
-        [
-          12,
-          -4
-        ],
-        [
-          13,
-          -5
-        ],
-        [
-          13,
-          0
-        ],
-        [
-          14,
-          -6
-        ],
-        [
-          14,
-          -3
-        ],
-        [
-          14,
-          -2
-        ],
-        [
-          14,
-          -1
-        ],
-        [
-          14,
-          0
-        ],
-        [
-          15,
-          -6
-        ],
-        [
-          15,
-          -5
-        ],
-        [
-          15,
-          -4
-        ],
-        [
-          15,
-          -1
-        ]
-      ],
-      "sources": [
-        {
-          "expected_word": "abomnemang:",
-          "jsonl_word": "ab·orig·in",
-          "jsonl_similarity": 0.444,
-          "page": 1,
-          "subnr": "ocr-6-1-2-4",
-          "source_id": "page:1:ocr:6:1:2:4",
-          "page_word_bbox": [
-            478,
-            610,
-            86,
-            24
-          ],
-          "suggestion": ""
-        },
-        {
-          "expected_word": "en",
-          "jsonl_word": "+en",
-          "jsonl_similarity": 1,
-          "page": 1,
-          "subnr": "ocr-11-1-1-11",
-          "source_id": "page:1:ocr:11:1:1:11",
-          "page_word_bbox": [
-            500,
-            632,
-            15,
-            17
-          ],
-          "suggestion": ""
-        }
-      ],
-      "role": "unknown",
-      "legacy_style": "italic",
-      "reviewed": false
-    },
-    {
-      "label": "en",
-      "pixels_relative_to_baseline": [
-        [
-          0,
-          -2
-        ],
-        [
-          0,
-          -1
-        ],
-        [
-          1,
-          -5
-        ],
-        [
-          1,
-          -4
-        ],
-        [
-          1,
-          -3
-        ],
-        [
-          1,
-          0
-        ],
-        [
-          2,
-          -6
-        ],
-        [
-          2,
-          -3
-        ],
-        [
-          2,
-          0
-        ],
-        [
-          3,
-          -6
-        ],
-        [
-          3,
-          -4
-        ],
-        [
-          3,
-          -1
-        ],
-        [
-          4,
-          -5
-        ],
-        [
-          4,
-          -1
-        ],
-        [
-          5,
-          -5
-        ],
-        [
-          5,
-          0
-        ],
-        [
-          6,
-          -6
-        ],
-        [
-          6,
-          -3
-        ],
-        [
-          6,
-          -2
-        ],
-        [
-          6,
-          -1
-        ],
-        [
-          7,
-          -6
-        ],
-        [
-          7,
-          -5
-        ],
-        [
-          7,
-          -4
-        ],
-        [
-          7,
-          -3
-        ],
-        [
-          8,
-          -4
-        ],
-        [
-          9,
-          -5
-        ],
-        [
-          10,
-          -6
-        ],
-        [
-          10,
-          -2
-        ],
-        [
-          10,
-          -1
-        ],
-        [
-          10,
-          0
-        ],
-        [
-          11,
-          -6
-        ],
-        [
-          11,
-          -5
-        ],
-        [
-          11,
-          -4
-        ],
-        [
-          11,
-          -3
-        ],
-        [
-          11,
-          0
-        ],
-        [
-          12,
-          -6
-        ],
-        [
-          12,
-          -1
-        ]
-      ],
-      "sources": [
-        {
-          "expected_word": "en",
-          "jsonl_word": "+en",
-          "jsonl_similarity": 1,
-          "page": 1,
-          "subnr": "ocr-11-1-1-11",
-          "source_id": "page:1:ocr:11:1:1:11",
-          "page_word_bbox": [
-            500,
-            632,
-            15,
-            17
-          ],
-          "suggestion": ""
-        }
-      ],
-      "role": "unknown",
-      "legacy_style": "italic",
-      "reviewed": false
-    },
-    {
-      "label": "es",
-      "pixels_relative_to_baseline": [
-        [
-          0,
-          -2
-        ],
-        [
-          0,
-          -1
-        ],
-        [
-          1,
-          -5
-        ],
-        [
-          1,
-          -4
-        ],
-        [
-          1,
-          -3
-        ],
-        [
-          1,
-          0
-        ],
-        [
-          2,
-          -6
-        ],
-        [
-          2,
-          -3
-        ],
-        [
-          2,
-          0
-        ],
-        [
-          3,
-          -6
-        ],
-        [
-          3,
-          -4
-        ],
-        [
-          3,
-          -1
-        ],
-        [
-          4,
-          -5
-        ],
-        [
-          4,
-          -1
-        ],
-        [
-          5,
-          -1
-        ],
-        [
-          6,
-          -1
-        ],
-        [
-          6,
-          0
-        ],
-        [
-          7,
-          -5
-        ],
-        [
-          7,
-          -4
-        ],
-        [
-          7,
-          0
-        ],
-        [
-          8,
-          -6
-        ],
-        [
-          8,
-          -3
-        ],
-        [
-          8,
-          0
-        ],
-        [
-          9,
-          -6
-        ],
-        [
-          9,
-          -5
-        ],
-        [
-          9,
-          -2
-        ],
-        [
-          9,
-          -1
-        ]
-      ],
-      "sources": [
-        {
-          "expected_word": "abessinskor",
-          "jsonl_word": "abessinskor",
-          "jsonl_similarity": 1,
-          "page": 1,
-          "subnr": "ocr-11-3-2-8",
-          "source_id": "page:1:ocr:11:3:2:8",
-          "page_word_bbox": [
-            291,
-            752,
-            75,
-            21
-          ],
-          "suggestion": "e{i}"
-        },
-        {
-          "expected_word": "abomnemang:",
-          "jsonl_word": "ab·orig·in",
-          "jsonl_similarity": 0.444,
-          "page": 1,
-          "subnr": "ocr-6-1-2-4",
-          "source_id": "page:1:ocr:6:1:2:4",
-          "page_word_bbox": [
-            478,
-            610,
-            86,
-            24
-          ],
-          "suggestion": ""
-        },
-        {
-          "expected_word": "en",
-          "jsonl_word": "+en",
-          "jsonl_similarity": 1,
-          "page": 1,
-          "subnr": "ocr-11-1-1-11",
-          "source_id": "page:1:ocr:11:1:1:11",
-          "page_word_bbox": [
-            500,
-            632,
-            15,
-            17
-          ],
-          "suggestion": "+en{b}"
-        }
-      ],
-      "role": "unknown",
-      "legacy_style": "italic",
-      "reviewed": false
     },
     {
       "label": "f",
@@ -10827,7 +9063,8 @@
       ],
       "role": "unknown",
       "legacy_style": "italic",
-      "reviewed": false
+      "reviewed": true,
+      "style": "italic"
     },
     {
       "label": "ga",
@@ -11715,7 +9952,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": true,
+      "style": "bold"
     },
     {
       "label": "h",
@@ -12112,7 +10350,8 @@
       ],
       "role": "unknown",
       "legacy_style": "italic",
-      "reviewed": false
+      "reviewed": true,
+      "style": "italic"
     },
     {
       "label": "i",
@@ -12661,7 +10900,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": false
+      "reviewed": true,
+      "style": "roman"
     },
     {
       "label": "j",
@@ -13081,7 +11321,8 @@
       ],
       "role": "unknown",
       "legacy_style": "italic",
-      "reviewed": false
+      "reviewed": true,
+      "style": "italic"
     },
     {
       "label": "k",
@@ -13590,7 +11831,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": false
+      "reviewed": true,
+      "style": "roman"
     },
     {
       "label": "l",
@@ -13807,7 +12049,8 @@
       ],
       "role": "unknown",
       "legacy_style": "italic",
-      "reviewed": false
+      "reviewed": true,
+      "style": "italic"
     },
     {
       "label": "l",
@@ -13931,7 +12174,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": true,
+      "style": "bold"
     },
     {
       "label": "l",
@@ -14423,7 +12667,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": false
+      "reviewed": true,
+      "style": "roman"
     },
     {
       "label": "m",
@@ -14642,7 +12887,8 @@
       ],
       "role": "unknown",
       "legacy_style": "italic",
-      "reviewed": false
+      "reviewed": true,
+      "style": "italic"
     },
     {
       "label": "m",
@@ -14871,7 +13117,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": true,
+      "style": "bold"
     },
     {
       "label": "m",
@@ -15037,223 +13284,6 @@
       "role": "unknown",
       "legacy_style": "roman",
       "reviewed": true
-    },
-    {
-      "label": "mn",
-      "pixels_relative_to_baseline": [
-        [
-          0,
-          -5
-        ],
-        [
-          0,
-          0
-        ],
-        [
-          1,
-          -5
-        ],
-        [
-          1,
-          -4
-        ],
-        [
-          1,
-          -3
-        ],
-        [
-          1,
-          -2
-        ],
-        [
-          1,
-          -1
-        ],
-        [
-          1,
-          0
-        ],
-        [
-          2,
-          -5
-        ],
-        [
-          2,
-          0
-        ],
-        [
-          3,
-          -5
-        ],
-        [
-          4,
-          -5
-        ],
-        [
-          4,
-          0
-        ],
-        [
-          5,
-          -4
-        ],
-        [
-          5,
-          -3
-        ],
-        [
-          5,
-          -2
-        ],
-        [
-          5,
-          -1
-        ],
-        [
-          5,
-          0
-        ],
-        [
-          6,
-          -5
-        ],
-        [
-          6,
-          0
-        ],
-        [
-          7,
-          -5
-        ],
-        [
-          8,
-          -5
-        ],
-        [
-          8,
-          0
-        ],
-        [
-          9,
-          -4
-        ],
-        [
-          9,
-          -3
-        ],
-        [
-          9,
-          -2
-        ],
-        [
-          9,
-          -1
-        ],
-        [
-          9,
-          0
-        ],
-        [
-          10,
-          0
-        ],
-        [
-          11,
-          -5
-        ],
-        [
-          11,
-          0
-        ],
-        [
-          12,
-          -5
-        ],
-        [
-          12,
-          -4
-        ],
-        [
-          12,
-          -3
-        ],
-        [
-          12,
-          -2
-        ],
-        [
-          12,
-          -1
-        ],
-        [
-          12,
-          0
-        ],
-        [
-          13,
-          -5
-        ],
-        [
-          13,
-          0
-        ],
-        [
-          14,
-          -5
-        ],
-        [
-          15,
-          -5
-        ],
-        [
-          15,
-          0
-        ],
-        [
-          16,
-          -4
-        ],
-        [
-          16,
-          -3
-        ],
-        [
-          16,
-          -2
-        ],
-        [
-          16,
-          -1
-        ],
-        [
-          16,
-          0
-        ],
-        [
-          17,
-          0
-        ]
-      ],
-      "sources": [
-        {
-          "expected_word": "[abesi'ni-]namn",
-          "jsonl_word": "Abessini·en",
-          "jsonl_similarity": 0.762,
-          "page": 1,
-          "subnr": "ocr-6-1-2-2",
-          "source_id": "page:1:ocr:6:1:2:2",
-          "page_word_bbox": [
-            345,
-            608,
-            106,
-            27
-          ],
-          "suggestion": ""
-        }
-      ],
-      "role": "unknown",
-      "legacy_style": "roman",
-      "reviewed": false
     },
     {
       "label": "n",
@@ -15749,207 +13779,6 @@
       "role": "unknown",
       "legacy_style": "roman",
       "reviewed": true
-    },
-    {
-      "label": "nu",
-      "pixels_relative_to_baseline": [
-        [
-          0,
-          -6
-        ],
-        [
-          0,
-          0
-        ],
-        [
-          1,
-          -6
-        ],
-        [
-          1,
-          -4
-        ],
-        [
-          1,
-          -3
-        ],
-        [
-          1,
-          -2
-        ],
-        [
-          1,
-          -1
-        ],
-        [
-          2,
-          -6
-        ],
-        [
-          2,
-          -5
-        ],
-        [
-          2,
-          -3
-        ],
-        [
-          3,
-          -4
-        ],
-        [
-          4,
-          -5
-        ],
-        [
-          4,
-          -1
-        ],
-        [
-          4,
-          0
-        ],
-        [
-          5,
-          -6
-        ],
-        [
-          5,
-          -5
-        ],
-        [
-          5,
-          -4
-        ],
-        [
-          5,
-          -3
-        ],
-        [
-          5,
-          -2
-        ],
-        [
-          5,
-          0
-        ],
-        [
-          6,
-          -6
-        ],
-        [
-          6,
-          0
-        ],
-        [
-          7,
-          -6
-        ],
-        [
-          7,
-          0
-        ],
-        [
-          8,
-          -6
-        ],
-        [
-          8,
-          -4
-        ],
-        [
-          8,
-          -3
-        ],
-        [
-          8,
-          -2
-        ],
-        [
-          8,
-          -1
-        ],
-        [
-          8,
-          0
-        ],
-        [
-          9,
-          -6
-        ],
-        [
-          9,
-          -5
-        ],
-        [
-          9,
-          -1
-        ],
-        [
-          10,
-          -2
-        ],
-        [
-          11,
-          -3
-        ],
-        [
-          11,
-          -1
-        ],
-        [
-          11,
-          0
-        ],
-        [
-          12,
-          -5
-        ],
-        [
-          12,
-          -4
-        ],
-        [
-          12,
-          -3
-        ],
-        [
-          12,
-          -2
-        ],
-        [
-          12,
-          0
-        ],
-        [
-          13,
-          -6
-        ],
-        [
-          13,
-          0
-        ]
-      ],
-      "sources": [
-        {
-          "expected_word": "-momren",
-          "jsonl_word": "-numren",
-          "jsonl_similarity": 0.667,
-          "page": 1,
-          "subnr": "ocr-4-1-27-6",
-          "source_id": "page:1:ocr:4:1:27:6",
-          "page_word_bbox": [
-            478,
-            561,
-            56,
-            17
-          ],
-          "suggestion": "nu{i}"
-        }
-      ],
-      "role": "unknown",
-      "legacy_style": "italic",
-      "reviewed": false
     },
     {
       "label": "o",
@@ -16715,7 +14544,8 @@
       ],
       "role": "unknown",
       "legacy_style": "italic",
-      "reviewed": false
+      "reviewed": true,
+      "style": "italic"
     },
     {
       "label": "ö",
@@ -16920,7 +14750,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": true,
+      "style": "bold"
     },
     {
       "label": "ö",
@@ -19028,6 +16859,14 @@
           "subnr": "79754",
           "source_id": "192",
           "word_file": "words/w00192-italic-sub79754-p1558-c1-sebror.png"
+        },
+        {
+          "page": 1,
+          "column": 2,
+          "row": 31,
+          "review_selection": [],
+          "review_pixel_count": 13,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
       "role": "unknown",
@@ -20287,7 +18126,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": false
+      "reviewed": true,
+      "style": "roman"
     },
     {
       "label": "u",
@@ -20413,7 +18253,8 @@
       ],
       "role": "unknown",
       "legacy_style": "italic",
-      "reviewed": false
+      "reviewed": true,
+      "style": "italic"
     },
     {
       "label": "u",
@@ -21098,7 +18939,8 @@
       ],
       "role": "unknown",
       "legacy_style": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "style": "italic"
     },
     {
       "label": "v",
@@ -22825,7 +20667,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": true,
+      "style": "bold"
     },
     {
       "label": "z",
@@ -22978,7 +20821,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": true,
+      "style": "bold"
     },
     {
       "label": "z",
@@ -23069,7 +20913,8 @@
       ],
       "role": "unknown",
       "legacy_style": "italic",
-      "reviewed": false
+      "reviewed": true,
+      "style": "italic"
     },
     {
       "label": "Z",
@@ -25605,6 +23450,16 @@
             "U00"
           ],
           "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        },
+        {
+          "page": 1,
+          "column": 2,
+          "row": 30,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 25,
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
@@ -29174,6 +27029,3842 @@
           "row": 36,
           "review_selection": [
             "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "ʃ",
+      "style": "roman",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          2
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          -9
+        ],
+        [
+          3,
+          -8
+        ],
+        [
+          3,
+          -7
+        ],
+        [
+          3,
+          -6
+        ],
+        [
+          3,
+          -5
+        ],
+        [
+          3,
+          -4
+        ],
+        [
+          3,
+          -3
+        ],
+        [
+          3,
+          -2
+        ],
+        [
+          3,
+          -1
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          3,
+          1
+        ],
+        [
+          3,
+          2
+        ],
+        [
+          4,
+          -10
+        ],
+        [
+          5,
+          -9
+        ],
+        [
+          6,
+          -9
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 0,
+          "row": 42,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "S",
+      "style": "roman",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -9
+        ],
+        [
+          0,
+          -8
+        ],
+        [
+          0,
+          -2
+        ],
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -10
+        ],
+        [
+          1,
+          -7
+        ],
+        [
+          1,
+          -6
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          2,
+          -11
+        ],
+        [
+          2,
+          -6
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          3,
+          -11
+        ],
+        [
+          3,
+          -5
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          4,
+          -11
+        ],
+        [
+          4,
+          -5
+        ],
+        [
+          4,
+          -1
+        ],
+        [
+          5,
+          -10
+        ],
+        [
+          5,
+          -9
+        ],
+        [
+          5,
+          -4
+        ],
+        [
+          5,
+          -3
+        ],
+        [
+          5,
+          -2
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 0,
+          "row": 44,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "A",
+      "style": "roman",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          2,
+          -3
+        ],
+        [
+          2,
+          -2
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          3,
+          -7
+        ],
+        [
+          3,
+          -6
+        ],
+        [
+          3,
+          -5
+        ],
+        [
+          3,
+          -4
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          4,
+          -9
+        ],
+        [
+          4,
+          -8
+        ],
+        [
+          4,
+          -4
+        ],
+        [
+          5,
+          -11
+        ],
+        [
+          5,
+          -10
+        ],
+        [
+          5,
+          -9
+        ],
+        [
+          5,
+          -4
+        ],
+        [
+          6,
+          -8
+        ],
+        [
+          6,
+          -7
+        ],
+        [
+          6,
+          -6
+        ],
+        [
+          6,
+          -4
+        ],
+        [
+          7,
+          -5
+        ],
+        [
+          7,
+          -4
+        ],
+        [
+          7,
+          -3
+        ],
+        [
+          7,
+          0
+        ],
+        [
+          8,
+          -2
+        ],
+        [
+          8,
+          -1
+        ],
+        [
+          8,
+          0
+        ],
+        [
+          9,
+          0
+        ],
+        [
+          10,
+          0
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 0,
+          "row": 47,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "z",
+      "style": "roman",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -6
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          -7
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          2,
+          -7
+        ],
+        [
+          2,
+          -2
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          3,
+          -7
+        ],
+        [
+          3,
+          -4
+        ],
+        [
+          3,
+          -3
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          4,
+          -7
+        ],
+        [
+          4,
+          -6
+        ],
+        [
+          4,
+          -5
+        ],
+        [
+          4,
+          0
+        ],
+        [
+          5,
+          -7
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          6,
+          -8
+        ],
+        [
+          6,
+          -1
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 0,
+          "row": 47,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "g",
+      "style": "roman",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -3
+        ],
+        [
+          0,
+          -1
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          2
+        ],
+        [
+          1,
+          -4
+        ],
+        [
+          1,
+          -2
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          1,
+          3
+        ],
+        [
+          2,
+          -5
+        ],
+        [
+          2,
+          -2
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          -5
+        ],
+        [
+          3,
+          -2
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          3,
+          3
+        ],
+        [
+          4,
+          -4
+        ],
+        [
+          4,
+          -3
+        ],
+        [
+          4,
+          0
+        ],
+        [
+          4,
+          3
+        ],
+        [
+          5,
+          -4
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          5,
+          2
+        ],
+        [
+          6,
+          -4
+        ],
+        [
+          6,
+          1
+        ],
+        [
+          6,
+          2
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 1,
+          "row": 7,
+          "review_selection": [],
+          "review_pixel_count": 26,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": ",",
+      "style": "roman",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          3
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          2,
+          2
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 1,
+          "row": 7,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "C",
+      "style": "italic",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -7
+        ],
+        [
+          0,
+          -6
+        ],
+        [
+          0,
+          -5
+        ],
+        [
+          0,
+          -4
+        ],
+        [
+          0,
+          -3
+        ],
+        [
+          1,
+          -8
+        ],
+        [
+          1,
+          -2
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          2,
+          -9
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          3,
+          -10
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          4,
+          -10
+        ],
+        [
+          4,
+          0
+        ],
+        [
+          5,
+          -10
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          6,
+          -9
+        ],
+        [
+          6,
+          -2
+        ],
+        [
+          6,
+          -1
+        ],
+        [
+          7,
+          -9
+        ],
+        [
+          7,
+          -8
+        ],
+        [
+          7,
+          -3
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 1,
+          "row": 7,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "B",
+      "style": "italic",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          2,
+          -10
+        ],
+        [
+          2,
+          -4
+        ],
+        [
+          2,
+          -3
+        ],
+        [
+          2,
+          -2
+        ],
+        [
+          2,
+          -1
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          3,
+          -10
+        ],
+        [
+          3,
+          -9
+        ],
+        [
+          3,
+          -8
+        ],
+        [
+          3,
+          -7
+        ],
+        [
+          3,
+          -6
+        ],
+        [
+          3,
+          -5
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          4,
+          -10
+        ],
+        [
+          4,
+          -5
+        ],
+        [
+          4,
+          0
+        ],
+        [
+          5,
+          -10
+        ],
+        [
+          5,
+          -5
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          6,
+          -10
+        ],
+        [
+          6,
+          -6
+        ],
+        [
+          6,
+          -4
+        ],
+        [
+          6,
+          -1
+        ],
+        [
+          7,
+          -9
+        ],
+        [
+          7,
+          -8
+        ],
+        [
+          7,
+          -7
+        ],
+        [
+          7,
+          -4
+        ],
+        [
+          7,
+          -3
+        ],
+        [
+          7,
+          -2
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 1,
+          "row": 7,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "R",
+      "style": "italic",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          2,
+          -10
+        ],
+        [
+          2,
+          -4
+        ],
+        [
+          2,
+          -3
+        ],
+        [
+          2,
+          -2
+        ],
+        [
+          2,
+          -1
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          3,
+          -10
+        ],
+        [
+          3,
+          -9
+        ],
+        [
+          3,
+          -8
+        ],
+        [
+          3,
+          -7
+        ],
+        [
+          3,
+          -6
+        ],
+        [
+          3,
+          -5
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          4,
+          -10
+        ],
+        [
+          4,
+          -5
+        ],
+        [
+          5,
+          -10
+        ],
+        [
+          5,
+          -5
+        ],
+        [
+          5,
+          -4
+        ],
+        [
+          5,
+          -3
+        ],
+        [
+          6,
+          -10
+        ],
+        [
+          6,
+          -6
+        ],
+        [
+          6,
+          -2
+        ],
+        [
+          7,
+          -9
+        ],
+        [
+          7,
+          -8
+        ],
+        [
+          7,
+          -7
+        ],
+        [
+          7,
+          -1
+        ],
+        [
+          7,
+          0
+        ],
+        [
+          8,
+          0
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 1,
+          "row": 7,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "N",
+      "style": "italic",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          -10
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          2,
+          -10
+        ],
+        [
+          2,
+          -7
+        ],
+        [
+          2,
+          -6
+        ],
+        [
+          2,
+          -5
+        ],
+        [
+          2,
+          -4
+        ],
+        [
+          2,
+          -3
+        ],
+        [
+          2,
+          -2
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          3,
+          -9
+        ],
+        [
+          3,
+          -8
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          4,
+          -8
+        ],
+        [
+          4,
+          -7
+        ],
+        [
+          5,
+          -6
+        ],
+        [
+          5,
+          -5
+        ],
+        [
+          6,
+          -5
+        ],
+        [
+          6,
+          -4
+        ],
+        [
+          7,
+          -3
+        ],
+        [
+          7,
+          -2
+        ],
+        [
+          8,
+          -1
+        ],
+        [
+          8,
+          0
+        ],
+        [
+          9,
+          -10
+        ],
+        [
+          9,
+          -6
+        ],
+        [
+          9,
+          -5
+        ],
+        [
+          9,
+          -4
+        ],
+        [
+          9,
+          -3
+        ],
+        [
+          9,
+          -2
+        ],
+        [
+          9,
+          0
+        ],
+        [
+          10,
+          -10
+        ],
+        [
+          10,
+          -9
+        ],
+        [
+          10,
+          -8
+        ],
+        [
+          10,
+          -7
+        ],
+        [
+          11,
+          -10
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 1,
+          "row": 7,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": ".",
+      "style": "roman",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -1
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          0
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 1,
+          "row": 8,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "ä",
+      "style": "italic",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -2
+        ],
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -4
+        ],
+        [
+          1,
+          -3
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          2,
+          -5
+        ],
+        [
+          2,
+          -1
+        ],
+        [
+          3,
+          -10
+        ],
+        [
+          3,
+          -9
+        ],
+        [
+          3,
+          -6
+        ],
+        [
+          3,
+          -2
+        ],
+        [
+          3,
+          -1
+        ],
+        [
+          4,
+          -6
+        ],
+        [
+          4,
+          -2
+        ],
+        [
+          4,
+          -1
+        ],
+        [
+          4,
+          0
+        ],
+        [
+          5,
+          -5
+        ],
+        [
+          5,
+          -4
+        ],
+        [
+          5,
+          -3
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          6,
+          -10
+        ],
+        [
+          6,
+          -9
+        ],
+        [
+          6,
+          -6
+        ],
+        [
+          6,
+          -1
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 1,
+          "row": 14,
+          "review_selection": [
+            "U00",
+            "U01",
+            "M22"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "d",
+      "style": "italic",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -3
+        ],
+        [
+          0,
+          -2
+        ],
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -4
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          2,
+          -5
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          3,
+          -6
+        ],
+        [
+          3,
+          -1
+        ],
+        [
+          4,
+          -6
+        ],
+        [
+          4,
+          -2
+        ],
+        [
+          5,
+          -6
+        ],
+        [
+          5,
+          -5
+        ],
+        [
+          5,
+          -4
+        ],
+        [
+          5,
+          -3
+        ],
+        [
+          5,
+          -2
+        ],
+        [
+          5,
+          -1
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          6,
+          -11
+        ],
+        [
+          6,
+          -7
+        ],
+        [
+          6,
+          -6
+        ],
+        [
+          6,
+          -5
+        ],
+        [
+          6,
+          0
+        ],
+        [
+          7,
+          -11
+        ],
+        [
+          7,
+          -10
+        ],
+        [
+          7,
+          -9
+        ],
+        [
+          7,
+          -8
+        ],
+        [
+          7,
+          -1
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 1,
+          "row": 14,
+          "review_selection": [],
+          "review_pixel_count": 28,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "v",
+      "style": "italic",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -5
+        ],
+        [
+          1,
+          -6
+        ],
+        [
+          1,
+          -2
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          2,
+          -6
+        ],
+        [
+          2,
+          -5
+        ],
+        [
+          2,
+          -4
+        ],
+        [
+          2,
+          -3
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          4,
+          -1
+        ],
+        [
+          5,
+          -3
+        ],
+        [
+          5,
+          -2
+        ],
+        [
+          6,
+          -6
+        ],
+        [
+          6,
+          -5
+        ],
+        [
+          6,
+          -4
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 1,
+          "row": 14,
+          "review_selection": [
+            "M21"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "m",
+      "style": "italic",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -5
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          -6
+        ],
+        [
+          1,
+          -2
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          2,
+          -6
+        ],
+        [
+          2,
+          -5
+        ],
+        [
+          2,
+          -4
+        ],
+        [
+          2,
+          -3
+        ],
+        [
+          3,
+          -4
+        ],
+        [
+          4,
+          -5
+        ],
+        [
+          5,
+          -5
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          6,
+          -6
+        ],
+        [
+          6,
+          -3
+        ],
+        [
+          6,
+          -2
+        ],
+        [
+          6,
+          -1
+        ],
+        [
+          7,
+          -6
+        ],
+        [
+          7,
+          -5
+        ],
+        [
+          7,
+          -4
+        ],
+        [
+          7,
+          -3
+        ],
+        [
+          8,
+          -4
+        ],
+        [
+          9,
+          -5
+        ],
+        [
+          9,
+          0
+        ],
+        [
+          10,
+          -6
+        ],
+        [
+          10,
+          -3
+        ],
+        [
+          10,
+          -2
+        ],
+        [
+          10,
+          -1
+        ],
+        [
+          10,
+          0
+        ],
+        [
+          11,
+          -6
+        ],
+        [
+          11,
+          -5
+        ],
+        [
+          11,
+          -4
+        ],
+        [
+          11,
+          -1
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 1,
+          "row": 15,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "g",
+      "style": "italic",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          2
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          3
+        ],
+        [
+          2,
+          -5
+        ],
+        [
+          2,
+          -4
+        ],
+        [
+          2,
+          -3
+        ],
+        [
+          2,
+          -1
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          -6
+        ],
+        [
+          3,
+          -2
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          3,
+          3
+        ],
+        [
+          4,
+          -6
+        ],
+        [
+          4,
+          -2
+        ],
+        [
+          4,
+          0
+        ],
+        [
+          4,
+          3
+        ],
+        [
+          5,
+          -5
+        ],
+        [
+          5,
+          -4
+        ],
+        [
+          5,
+          -3
+        ],
+        [
+          5,
+          1
+        ],
+        [
+          5,
+          2
+        ],
+        [
+          6,
+          -5
+        ],
+        [
+          7,
+          -6
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 1,
+          "row": 15,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": ".",
+      "style": "roman",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -1
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 1,
+          "row": 15,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": ";",
+      "style": "roman",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          3
+        ],
+        [
+          1,
+          -5
+        ],
+        [
+          1,
+          -4
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          1,
+          3
+        ],
+        [
+          2,
+          -4
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          2,
+          2
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 1,
+          "row": 16,
+          "review_selection": [
+            "U00",
+            "U01"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "j",
+      "style": "roman",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -7
+        ],
+        [
+          0,
+          4
+        ],
+        [
+          1,
+          -11
+        ],
+        [
+          1,
+          -10
+        ],
+        [
+          1,
+          -7
+        ],
+        [
+          1,
+          -6
+        ],
+        [
+          1,
+          -5
+        ],
+        [
+          1,
+          -4
+        ],
+        [
+          1,
+          -3
+        ],
+        [
+          1,
+          -2
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          1,
+          3
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 1,
+          "row": 29,
+          "review_selection": [
+            "U00",
+            "U01"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "E",
+      "style": "roman",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -11
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          -11
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          2,
+          -11
+        ],
+        [
+          2,
+          -10
+        ],
+        [
+          2,
+          -9
+        ],
+        [
+          2,
+          -8
+        ],
+        [
+          2,
+          -7
+        ],
+        [
+          2,
+          -6
+        ],
+        [
+          2,
+          -5
+        ],
+        [
+          2,
+          -4
+        ],
+        [
+          2,
+          -3
+        ],
+        [
+          2,
+          -2
+        ],
+        [
+          2,
+          -1
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          3,
+          -11
+        ],
+        [
+          3,
+          -6
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          4,
+          -11
+        ],
+        [
+          4,
+          -6
+        ],
+        [
+          4,
+          0
+        ],
+        [
+          5,
+          -11
+        ],
+        [
+          5,
+          -6
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          6,
+          -11
+        ],
+        [
+          6,
+          -6
+        ],
+        [
+          6,
+          0
+        ],
+        [
+          7,
+          -11
+        ],
+        [
+          7,
+          -7
+        ],
+        [
+          7,
+          -6
+        ],
+        [
+          7,
+          -5
+        ],
+        [
+          7,
+          -4
+        ],
+        [
+          7,
+          0
+        ],
+        [
+          8,
+          -11
+        ],
+        [
+          8,
+          0
+        ],
+        [
+          9,
+          -11
+        ],
+        [
+          9,
+          -10
+        ],
+        [
+          9,
+          -9
+        ],
+        [
+          9,
+          0
+        ],
+        [
+          10,
+          -2
+        ],
+        [
+          10,
+          -1
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 1,
+          "row": 31,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "y",
+      "style": "roman",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -5
+        ],
+        [
+          1,
+          -5
+        ],
+        [
+          1,
+          -4
+        ],
+        [
+          1,
+          -3
+        ],
+        [
+          1,
+          3
+        ],
+        [
+          2,
+          -5
+        ],
+        [
+          2,
+          -2
+        ],
+        [
+          2,
+          -1
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          2,
+          2
+        ],
+        [
+          3,
+          -1
+        ],
+        [
+          4,
+          -5
+        ],
+        [
+          4,
+          -4
+        ],
+        [
+          4,
+          -3
+        ],
+        [
+          4,
+          -2
+        ],
+        [
+          5,
+          -5
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 1,
+          "row": 44,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "(",
+      "style": "roman",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -6
+        ],
+        [
+          0,
+          -5
+        ],
+        [
+          0,
+          -4
+        ],
+        [
+          0,
+          -3
+        ],
+        [
+          0,
+          -2
+        ],
+        [
+          0,
+          -1
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          -8
+        ],
+        [
+          1,
+          -7
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          -9
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 1,
+          "row": 45,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": ")",
+      "style": "roman",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -9
+        ],
+        [
+          1,
+          -8
+        ],
+        [
+          1,
+          -7
+        ],
+        [
+          1,
+          -6
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          -5
+        ],
+        [
+          2,
+          -4
+        ],
+        [
+          2,
+          -3
+        ],
+        [
+          2,
+          -2
+        ],
+        [
+          2,
+          -1
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 1,
+          "row": 45,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "F",
+      "style": "roman",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -9
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          -9
+        ],
+        [
+          1,
+          -8
+        ],
+        [
+          1,
+          -7
+        ],
+        [
+          1,
+          -6
+        ],
+        [
+          1,
+          -5
+        ],
+        [
+          1,
+          -4
+        ],
+        [
+          1,
+          -3
+        ],
+        [
+          1,
+          -2
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          2,
+          -9
+        ],
+        [
+          2,
+          -4
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          3,
+          -9
+        ],
+        [
+          3,
+          -4
+        ],
+        [
+          4,
+          -9
+        ],
+        [
+          4,
+          -5
+        ],
+        [
+          4,
+          -4
+        ],
+        [
+          4,
+          -3
+        ],
+        [
+          5,
+          -9
+        ],
+        [
+          5,
+          -8
+        ],
+        [
+          5,
+          -7
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 1,
+          "row": 45,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "y",
+      "style": "roman",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -7
+        ],
+        [
+          1,
+          -7
+        ],
+        [
+          1,
+          -6
+        ],
+        [
+          1,
+          3
+        ],
+        [
+          1,
+          4
+        ],
+        [
+          2,
+          -7
+        ],
+        [
+          2,
+          -5
+        ],
+        [
+          2,
+          -4
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          -7
+        ],
+        [
+          3,
+          -3
+        ],
+        [
+          3,
+          -2
+        ],
+        [
+          3,
+          -1
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          3,
+          1
+        ],
+        [
+          3,
+          2
+        ],
+        [
+          4,
+          -2
+        ],
+        [
+          5,
+          -7
+        ],
+        [
+          5,
+          -4
+        ],
+        [
+          5,
+          -3
+        ],
+        [
+          6,
+          -7
+        ],
+        [
+          6,
+          -6
+        ],
+        [
+          6,
+          -5
+        ],
+        [
+          7,
+          -7
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 1,
+          "row": 48,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "1",
+      "style": "roman",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -8
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          -8
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          2,
+          -9
+        ],
+        [
+          2,
+          -8
+        ],
+        [
+          2,
+          -7
+        ],
+        [
+          2,
+          -6
+        ],
+        [
+          2,
+          -5
+        ],
+        [
+          2,
+          -4
+        ],
+        [
+          2,
+          -3
+        ],
+        [
+          2,
+          -2
+        ],
+        [
+          2,
+          -1
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          3,
+          0
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 2,
+          "row": 9,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "8",
+      "style": "roman",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -7
+        ],
+        [
+          0,
+          -3
+        ],
+        [
+          0,
+          -2
+        ],
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -8
+        ],
+        [
+          1,
+          -6
+        ],
+        [
+          1,
+          -5
+        ],
+        [
+          1,
+          -4
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          2,
+          -9
+        ],
+        [
+          2,
+          -5
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          3,
+          -9
+        ],
+        [
+          3,
+          -5
+        ],
+        [
+          3,
+          -4
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          4,
+          -8
+        ],
+        [
+          4,
+          -7
+        ],
+        [
+          4,
+          -6
+        ],
+        [
+          4,
+          -3
+        ],
+        [
+          4,
+          -2
+        ],
+        [
+          4,
+          -1
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 2,
+          "row": 9,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "0",
+      "style": "roman",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -7
+        ],
+        [
+          0,
+          -6
+        ],
+        [
+          0,
+          -5
+        ],
+        [
+          0,
+          -4
+        ],
+        [
+          0,
+          -3
+        ],
+        [
+          0,
+          -2
+        ],
+        [
+          1,
+          -8
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          2,
+          -9
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          3,
+          -9
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          4,
+          -8
+        ],
+        [
+          4,
+          -1
+        ],
+        [
+          5,
+          -7
+        ],
+        [
+          5,
+          -6
+        ],
+        [
+          5,
+          -5
+        ],
+        [
+          5,
+          -4
+        ],
+        [
+          5,
+          -3
+        ],
+        [
+          5,
+          -2
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 2,
+          "row": 9,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "-",
+      "style": "roman",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -3
+        ],
+        [
+          1,
+          -3
+        ],
+        [
+          2,
+          -3
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 2,
+          "row": 9,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "ŋ",
+      "style": "roman",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -7
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          -7
+        ],
+        [
+          1,
+          -6
+        ],
+        [
+          1,
+          -5
+        ],
+        [
+          1,
+          -4
+        ],
+        [
+          1,
+          -3
+        ],
+        [
+          1,
+          -2
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          2,
+          -6
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          2,
+          2
+        ],
+        [
+          3,
+          -7
+        ],
+        [
+          3,
+          3
+        ],
+        [
+          4,
+          -7
+        ],
+        [
+          4,
+          3
+        ],
+        [
+          5,
+          -6
+        ],
+        [
+          5,
+          -5
+        ],
+        [
+          5,
+          -4
+        ],
+        [
+          5,
+          -3
+        ],
+        [
+          5,
+          -2
+        ],
+        [
+          5,
+          -1
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          5,
+          1
+        ],
+        [
+          5,
+          2
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 2,
+          "row": 11,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "ft",
+      "style": "bold",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -7
+        ],
+        [
+          0,
+          -6
+        ],
+        [
+          1,
+          -10
+        ],
+        [
+          1,
+          -9
+        ],
+        [
+          1,
+          -8
+        ],
+        [
+          1,
+          -7
+        ],
+        [
+          1,
+          -6
+        ],
+        [
+          1,
+          -5
+        ],
+        [
+          1,
+          -4
+        ],
+        [
+          1,
+          -3
+        ],
+        [
+          1,
+          -2
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          2,
+          -11
+        ],
+        [
+          2,
+          -10
+        ],
+        [
+          2,
+          -9
+        ],
+        [
+          2,
+          -8
+        ],
+        [
+          2,
+          -7
+        ],
+        [
+          2,
+          -6
+        ],
+        [
+          2,
+          -5
+        ],
+        [
+          2,
+          -4
+        ],
+        [
+          2,
+          -3
+        ],
+        [
+          2,
+          -2
+        ],
+        [
+          2,
+          -1
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          3,
+          -11
+        ],
+        [
+          3,
+          -10
+        ],
+        [
+          3,
+          -7
+        ],
+        [
+          3,
+          -6
+        ],
+        [
+          4,
+          -11
+        ],
+        [
+          4,
+          -10
+        ],
+        [
+          4,
+          -7
+        ],
+        [
+          4,
+          -6
+        ],
+        [
+          5,
+          -9
+        ],
+        [
+          5,
+          -8
+        ],
+        [
+          5,
+          -7
+        ],
+        [
+          5,
+          -6
+        ],
+        [
+          5,
+          -5
+        ],
+        [
+          5,
+          -4
+        ],
+        [
+          5,
+          -3
+        ],
+        [
+          5,
+          -2
+        ],
+        [
+          5,
+          -1
+        ],
+        [
+          6,
+          -9
+        ],
+        [
+          6,
+          -8
+        ],
+        [
+          6,
+          -7
+        ],
+        [
+          6,
+          -6
+        ],
+        [
+          6,
+          -5
+        ],
+        [
+          6,
+          -4
+        ],
+        [
+          6,
+          -3
+        ],
+        [
+          6,
+          -2
+        ],
+        [
+          6,
+          -1
+        ],
+        [
+          6,
+          0
+        ],
+        [
+          7,
+          -7
+        ],
+        [
+          7,
+          -6
+        ],
+        [
+          7,
+          -1
+        ],
+        [
+          7,
+          0
+        ],
+        [
+          8,
+          -7
+        ],
+        [
+          8,
+          -1
+        ],
+        [
+          8,
+          0
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 2,
+          "row": 13,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "u",
+      "style": "italic",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -5
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          -5
+        ],
+        [
+          1,
+          -3
+        ],
+        [
+          1,
+          -2
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          2,
+          -6
+        ],
+        [
+          2,
+          -5
+        ],
+        [
+          2,
+          -4
+        ],
+        [
+          2,
+          -1
+        ],
+        [
+          3,
+          -1
+        ],
+        [
+          4,
+          -3
+        ],
+        [
+          4,
+          -2
+        ],
+        [
+          5,
+          -4
+        ],
+        [
+          5,
+          -2
+        ],
+        [
+          5,
+          -1
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          6,
+          -5
+        ],
+        [
+          6,
+          -4
+        ],
+        [
+          6,
+          -3
+        ],
+        [
+          6,
+          0
+        ],
+        [
+          7,
+          -6
+        ],
+        [
+          7,
+          -1
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 2,
+          "row": 30,
+          "review_selection": [],
+          "review_pixel_count": 24,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "p",
+      "style": "italic",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -5
+        ],
+        [
+          0,
+          2
+        ],
+        [
+          0,
+          3
+        ],
+        [
+          1,
+          -5
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          3
+        ],
+        [
+          2,
+          -5
+        ],
+        [
+          2,
+          -4
+        ],
+        [
+          2,
+          -3
+        ],
+        [
+          2,
+          -2
+        ],
+        [
+          2,
+          -1
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          -7
+        ],
+        [
+          3,
+          -6
+        ],
+        [
+          3,
+          -5
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          4,
+          -8
+        ],
+        [
+          4,
+          -6
+        ],
+        [
+          4,
+          0
+        ],
+        [
+          5,
+          -6
+        ],
+        [
+          5,
+          -1
+        ],
+        [
+          6,
+          -6
+        ],
+        [
+          6,
+          -2
+        ],
+        [
+          7,
+          -5
+        ],
+        [
+          7,
+          -4
+        ],
+        [
+          7,
+          -3
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 2,
+          "row": 31,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "d",
+      "style": "italic",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -3
+        ],
+        [
+          0,
+          -2
+        ],
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -4
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          2,
+          -5
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          3,
+          -6
+        ],
+        [
+          3,
+          -1
+        ],
+        [
+          4,
+          -6
+        ],
+        [
+          4,
+          -2
+        ],
+        [
+          5,
+          -6
+        ],
+        [
+          5,
+          -5
+        ],
+        [
+          5,
+          -4
+        ],
+        [
+          5,
+          -3
+        ],
+        [
+          5,
+          -2
+        ],
+        [
+          5,
+          -1
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          6,
+          -11
+        ],
+        [
+          6,
+          -7
+        ],
+        [
+          6,
+          -6
+        ],
+        [
+          6,
+          -5
+        ],
+        [
+          6,
+          0
+        ],
+        [
+          7,
+          -11
+        ],
+        [
+          7,
+          -10
+        ],
+        [
+          7,
+          -9
+        ],
+        [
+          7,
+          -8
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 2,
+          "row": 31,
+          "review_selection": [],
+          "review_pixel_count": 27,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "f",
+      "style": "italic",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          2
+        ],
+        [
+          0,
+          3
+        ],
+        [
+          1,
+          -6
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          2,
+          -6
+        ],
+        [
+          2,
+          -5
+        ],
+        [
+          2,
+          -4
+        ],
+        [
+          2,
+          -3
+        ],
+        [
+          2,
+          -2
+        ],
+        [
+          3,
+          -9
+        ],
+        [
+          3,
+          -8
+        ],
+        [
+          3,
+          -7
+        ],
+        [
+          3,
+          -6
+        ],
+        [
+          4,
+          -10
+        ],
+        [
+          4,
+          -6
+        ],
+        [
+          5,
+          -11
+        ],
+        [
+          6,
+          -11
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 2,
+          "row": 31,
+          "review_selection": [],
+          "review_pixel_count": 19,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+        }
+      ],
+      "reviewed": true
+    },
+    {
+      "label": "ö",
+      "style": "roman",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -4
+        ],
+        [
+          0,
+          -3
+        ],
+        [
+          0,
+          -2
+        ],
+        [
+          1,
+          -8
+        ],
+        [
+          1,
+          -5
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          2,
+          -5
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          3,
+          -5
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          4,
+          -8
+        ],
+        [
+          4,
+          -4
+        ],
+        [
+          4,
+          0
+        ],
+        [
+          5,
+          -3
+        ],
+        [
+          5,
+          -2
+        ],
+        [
+          5,
+          -1
+        ]
+      ],
+      "sources": [
+        {
+          "page": 1,
+          "column": 2,
+          "row": 45,
+          "review_selection": [
+            "M02",
+            "U00",
+            "U01"
           ],
           "review_pixel_count": 0,
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
