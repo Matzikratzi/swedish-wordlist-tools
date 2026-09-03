@@ -86,7 +86,29 @@ for(const it of S.items){{
         self.assertIn("needs-review", html)
         self.assertIn("text-decoration-color:#e58a00", html)
         self.assertIn("document.getElementById('label').value=it.label", html)
-        self.assertIn("styleSelect.value=it.style", html)
+        self.assertIn("rightItem ? rightItem.style : it.style", html)
+
+    def test_prefill_style_comes_from_following_matched_glyph(self):
+        first_role = Role("unknown")
+        first_role.typographic_style = "bold"
+        first_role.reviewed = False
+        second_role = Role("unknown")
+        second_role.typographic_style = "italic"
+        second_role.reviewed = True
+        state = {
+            "matches": [SimpleNamespace(style=first_role), SimpleNamespace(style=second_role)],
+            "items": [
+                {"id": "M00", "kind": "match", "label": "a", "style": "unknown", "pixels": 3},
+                {"id": "M01", "kind": "match", "label": "b", "style": "unknown", "pixels": 4},
+            ],
+        }
+
+        html = render_html_with_delete(lambda *_args: self._render_shell(), state)
+
+        self.assertEqual("bold", state["items"][0]["style"])
+        self.assertEqual("italic", state["items"][1]["style"])
+        self.assertIn("S.items.slice(itemIndex+1).find", html)
+        self.assertIn("candidate.kind==='match'", html)
 
     def test_prefill_hook_accepts_paint_editor_click_spacing(self):
         state = self._unreviewed_state()
@@ -94,7 +116,7 @@ for(const it of S.items){{
             lambda *_args: self._render_shell(paint_spacing=True), state
         )
         self.assertIn("document.getElementById('label').value=it.label", html)
-        self.assertIn("styleSelect.value=it.style", html)
+        self.assertIn("rightItem ? rightItem.style : it.style", html)
 
     def test_v2_relabel_changes_typography_preserves_role_and_approves(self):
         payload = self._facit_payload()
