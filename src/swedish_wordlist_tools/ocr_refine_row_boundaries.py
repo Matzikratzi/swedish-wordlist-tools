@@ -13,11 +13,15 @@ def _boundary_bridge_count(
 ) -> int:
     """Count 8-connected ink links crossed by a horizontal boundary at y.
 
-    A boundary at y separates source rows y-1 and y.  Sparse descenders often
+    A boundary at y separates source rows y-1 and y. Sparse descenders often
     make y itself look like a low-ink line even when that split cuts straight
-    through a glyph.  Counting links across the split detects that case.
+    through a glyph. Counting links across the split detects that case.
+
+    Callers that inspect many boundaries should pass an already-grayscale page;
+    this function deliberately avoids reconverting an ``L`` image for every
+    candidate boundary.
     """
-    gray = page.convert("L")
+    gray = page if page.mode == "L" else page.convert("L")
     if y <= 0 or y >= gray.height:
         return 0
     pixels = gray.load()
@@ -44,27 +48,28 @@ def refine_row_boundaries_by_connectivity(
     """Move only row boundaries that currently cut connected source ink.
 
     The existing white-gap segmentation remains authoritative when it already
-    places a boundary between components.  For a bad split we search only a few
+    places a boundary between components. For a bad split we search only a few
     raster lines around the current boundary and choose the nearest position
-    that crosses fewer 8-connected ink links.  This lets a descender stay with
+    that crosses fewer 8-connected ink links. This lets a descender stay with
     its row without changing otherwise-good page geometry.
     """
+    gray = page if page.mode == "L" else page.convert("L")
     changes: list[dict] = []
     for column_index, column in enumerate(row_map.get("columns") or []):
         rows = column.get("rows") or []
         left = int(column.get("crop_left", column.get("left", 0)))
-        right = int(column.get("crop_right", column.get("right", page.width)))
+        right = int(column.get("crop_right", column.get("right", gray.width)))
         for row_index in range(len(rows) - 1):
             upper = rows[row_index]
             lower = rows[row_index + 1]
             old_upper_bottom = int(upper["page_bottom"])
             old_lower_top = int(lower["page_top"])
             old_boundary = (old_upper_bottom + old_lower_top) // 2
-            if not (0 < old_boundary < page.height):
+            if not (0 < old_boundary < gray.height):
                 continue
 
             current = _boundary_bridge_count(
-                page,
+                gray,
                 y=old_boundary,
                 left=left,
                 right=right,
@@ -78,7 +83,7 @@ def refine_row_boundaries_by_connectivity(
             candidates = []
             for y in range(lo, hi + 1):
                 bridges = _boundary_bridge_count(
-                    page,
+                    gray,
                     y=y,
                     left=left,
                     right=right,
