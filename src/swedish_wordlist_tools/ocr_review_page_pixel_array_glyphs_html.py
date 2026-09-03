@@ -18,7 +18,7 @@ import threading
 
 from . import ocr_review_five_rows_glyphs_ultrafast_html as ultrafast
 from .ocr_neighbor_row_raster import add_neighbor_row_raster
-from .ocr_page_pixel_array import PagePixelArray, WHITE
+from .ocr_page_pixel_array import PagePixelArray
 from .ocr_refine_known_glyph_ownership import refine_known_glyph_ownership
 
 
@@ -78,7 +78,7 @@ def _neighbor_pairs(context: dict, position: tuple[int, int]) -> set[tuple[int, 
 
 
 def _pair_boundary(context: dict, pair: tuple[int, int]) -> tuple[int, int, int] | None:
-    """Return (y, left, right) for the provisional separator of one row pair."""
+    """Return (y, left, right) for the single separator of one row pair."""
     column_index, upper_row_index = pair
     columns = context["row_map"].get("columns") or []
     if not 0 <= column_index < len(columns):
@@ -88,12 +88,14 @@ def _pair_boundary(context: dict, pair: tuple[int, int]) -> tuple[int, int, int]
     if not 0 <= upper_row_index < len(rows) - 1:
         return None
     upper = rows[upper_row_index]
-    lower = rows[upper_row_index + 1]
-    y = (int(upper["page_bottom"]) + int(lower["page_top"])) // 2
+    # page_bottom is exclusive: this is precisely the separator immediately
+    # below the upper row. There is no second separator at lower.page_top.
+    y = int(upper["page_bottom"])
+    owners: PagePixelArray = context["pixel_owners"]
     left = max(0, int(column.get("crop_left", column.get("left", 0))))
     right = min(
-        context["pixel_owners"].width,
-        int(column.get("crop_right", column.get("right", context["pixel_owners"].width))),
+        owners.width,
+        int(column.get("crop_right", column.get("right", owners.width))),
     )
     if right <= left:
         return None
@@ -101,32 +103,13 @@ def _pair_boundary(context: dict, pair: tuple[int, int]) -> tuple[int, int, int]
 
 
 def _pair_has_ink_bridge(context: dict, pair: tuple[int, int]) -> bool:
-    """Cheap byte-array test before any exact-glyph analysis.
-
-    A normal PDF-rendered row boundary is a clean separator. If no black source
-    pixel above the provisional split is 8-connected to black source ink below
-    it, there is nothing for the expensive two-baseline glyph matcher to solve.
-    The test uses the already-thresholded page bytes and therefore does no PIL
-    conversion and no glyph matching.
-    """
+    """Cheap byte-array test before any exact-glyph analysis."""
     geometry = _pair_boundary(context, pair)
     if geometry is None:
         return False
     y, left, right = geometry
     owners: PagePixelArray = context["pixel_owners"]
-    if not 0 < y < owners.height:
-        return False
-
-    upper_start = (y - 1) * owners.width
-    lower_start = y * owners.width
-    data = owners.data
-    for x in range(left, right):
-        if data[upper_start + x] == WHITE:
-            continue
-        for nx in (x - 1, x, x + 1):
-            if left <= nx < right and data[lower_start + nx] != WHITE:
-                return True
-    return False
+    return owners.boundary_bridge_count(y, left=left, right=right) > 0
 
 
 def _ensure_known_glyph_ownership(context: dict, position: tuple[int, int], models) -> None:
@@ -134,8 +117,8 @@ def _ensure_known_glyph_ownership(context: dict, position: tuple[int, int], mode
 
     Most row separators in the PDF-rendered pages are trivial. They are rejected
     by a tiny byte-array connectivity probe. Only a boundary where source ink is
-    actually connected across the provisional split reaches the expensive exact
-    glyph analysis, and every pair is considered at most once.
+    actually connected across the single separator reaches expensive exact glyph
+    analysis, and every pair is considered at most once.
     """
     wanted = _neighbor_pairs(context, position)
     if not wanted:
