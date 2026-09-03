@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from PIL import Image
 
+from .ocr_glyph_gap_matcher import max_internal_blank_run, safe_ink_groups
 from .ocr_glyph_matcher import exact_matches, select_best_disjoint_exact_for_ink
 from .ocr_page_pixel_array import PagePixelArray
-from .ocr_probe_row_glyphs import analyse_row_exact, row_ink
+from .ocr_probe_row_glyphs import row_ink
+from .ocr_probe_row_glyphs_grouped import analyse_row_exact_grouped
 
 
 def _page_points(match, *, left: int, top: int) -> set[tuple[int, int]]:
@@ -26,9 +30,35 @@ def _row_baseline_page(
     if bottom <= top:
         return None
     crop = owners.render_owner_crop(row_index=row_index, box=(left, top, right, bottom))
-    result = analyse_row_exact(crop, models, threshold=threshold)
+    # Baseline discovery itself must use the same safe-white-gap partitioning as
+    # normal row review.  The old whole-column matcher made the rare boundary
+    # fallback unexpectedly expensive.
+    result = analyse_row_exact_grouped(crop, models, threshold=threshold)
     baseline = result["baseline"]
     return None if baseline is None else top + int(baseline)
+
+
+def _boundary_bridge_xs(
+    owners: PagePixelArray,
+    boundary: int,
+    *,
+    left: int,
+    right: int,
+) -> set[int]:
+    """Return x positions participating in an 8-connected separator crossing."""
+    if boundary <= 0 or boundary >= owners.height:
+        return set()
+    upper_start = (boundary - 1) * owners.width
+    lower_start = boundary * owners.width
+    xs: set[int] = set()
+    for x in range(left, right):
+        if owners.data[upper_start + x] == 0:
+            continue
+        for nx in (x - 1, x, x + 1):
+            if left <= nx < right and owners.data[lower_start + nx] != 0:
+                xs.add(x)
+                xs.add(nx)
+    return xs
 
 
 def _baseline_matches(
@@ -41,18 +71,44 @@ def _baseline_matches(
     baseline_page: int,
     models,
     threshold: int,
+    bridge_xs: set[int],
+    max_internal_gap: int,
 ):
+    """Match only safe x-groups that actually contain a boundary crossing.
+
+    A completely white vertical run wider than every known glyph's internal
+    blank run is a proof that no glyph can cross it.  Therefore a bridge near
+    one word/group never requires exact matching of the rest of the column.
+    """
     crop = gray.crop((left, top, right, bottom))
     ink = row_ink(crop, threshold=threshold)
-    candidates = exact_matches(
+    selected = []
+    for group_left, group_right, local_ink in safe_ink_groups(
         ink,
-        crop.width,
-        crop.height,
-        models,
-        baseline_only=baseline_page - top,
-        require_whole_components=False,
-    )
-    return select_best_disjoint_exact_for_ink(candidates, ink)
+        max_internal_gap=max_internal_gap,
+    ):
+        page_group_left = left + group_left
+        page_group_right = left + group_right
+        if not any(page_group_left - 1 <= x <= page_group_right for x in bridge_xs):
+            continue
+        candidates = exact_matches(
+            local_ink,
+            group_right - group_left,
+            crop.height,
+            models,
+            baseline_only=baseline_page - top,
+            require_whole_components=False,
+        )
+        chosen = select_best_disjoint_exact_for_ink(candidates, local_ink)
+        selected.extend(
+            replace(
+                match,
+                x=match.x + group_left,
+                pixels=frozenset((x + group_left, y) for x, y in match.pixels),
+            )
+            for match in chosen
+        )
+    return sorted(selected, key=lambda match: (match.x, match.baseline, match.label, match.style))
 
 
 def _matches_near_boundary(matches, *, crop_left: int, crop_top: int, boundary: int, radius: int):
@@ -78,13 +134,15 @@ def refine_known_glyph_ownership(
 ) -> list[dict]:
     """Let exact glyphs override a touching single row separator.
 
-    The cheap byte-array bridge test runs before any glyph work.  Only a
+    The cheap byte-array bridge test runs before any glyph work. Only a
     separator where source ink is actually 8-connected across y-1/y reaches the
-    expensive exact matcher.  The separator itself is the upper row's exclusive
-    ``page_bottom`` -- the same single separator used by page ownership.
+    exact matcher. Matching is then restricted horizontally to provably
+    independent safe-whitespace groups containing those bridge pixels.
     """
     changes: list[dict] = []
     gray: Image.Image | None = None
+    model_rows = list(models)
+    internal_gap = max_internal_blank_run(model_rows)
 
     for column_index, column in enumerate(row_map.get("columns") or []):
         rows = column.get("rows") or []
@@ -100,16 +158,12 @@ def refine_known_glyph_ownership(
             lower = rows[row_index + 1]
             boundary = int(upper["page_bottom"])
 
-            # Overwhelmingly common fast path: the already-thresholded page byte
-            # array shows that no connected source ink crosses this separator.
-            if owners.boundary_bridge_count(boundary, left=left, right=right) == 0:
+            bridge_xs = _boundary_bridge_xs(owners, boundary, left=left, right=right)
+            if not bridge_xs:
                 continue
 
-            # Convert the source page only after the cheap test says exact glyph
-            # evidence is actually needed. One call can contain several pairs,
-            # so cache the conversion locally.
             if gray is None:
-                gray = page.convert("L")
+                gray = page if page.mode == "L" else page.convert("L")
 
             upper_baseline = _row_baseline_page(
                 owners,
@@ -117,7 +171,7 @@ def refine_known_glyph_ownership(
                 upper,
                 left=left,
                 right=right,
-                models=models,
+                models=model_rows,
                 threshold=threshold,
             )
             lower_baseline = _row_baseline_page(
@@ -126,7 +180,7 @@ def refine_known_glyph_ownership(
                 lower,
                 left=left,
                 right=right,
-                models=models,
+                models=model_rows,
                 threshold=threshold,
             )
             if upper_baseline is None or lower_baseline is None or upper_baseline == lower_baseline:
@@ -144,8 +198,10 @@ def refine_known_glyph_ownership(
                 right=right,
                 bottom=pair_bottom,
                 baseline_page=upper_baseline,
-                models=models,
+                models=model_rows,
                 threshold=threshold,
+                bridge_xs=bridge_xs,
+                max_internal_gap=internal_gap,
             )
             lower_all = _baseline_matches(
                 gray,
@@ -154,8 +210,10 @@ def refine_known_glyph_ownership(
                 right=right,
                 bottom=pair_bottom,
                 baseline_page=lower_baseline,
-                models=models,
+                models=model_rows,
                 threshold=threshold,
+                bridge_xs=bridge_xs,
+                max_internal_gap=internal_gap,
             )
             upper_matches = _matches_near_boundary(
                 upper_all,
@@ -211,6 +269,7 @@ def refine_known_glyph_ownership(
                         "moved_to_upper": moved_to_upper,
                         "moved_to_lower": moved_to_lower,
                         "conflict_pixels": len(conflicts),
+                        "bridge_x_pixels": len(bridge_xs),
                     }
                 )
 
