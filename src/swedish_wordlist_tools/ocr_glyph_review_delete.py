@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 from . import ocr_glyph_matcher as matcher
@@ -185,8 +186,177 @@ def _mark_added_reviewed(state: dict, payload: dict, form: dict[str, list[str]])
         found[0]["reviewed"] = True
 
 
+def _pixel_context_for_state(state: dict) -> dict | None:
+    module = sys.modules.get("swedish_wordlist_tools.ocr_review_page_pixel_array_glyphs_html")
+    context = getattr(module, "_current_pixel_context", None) if module is not None else None
+    if not context or int(context.get("page_number", -1)) != int(state.get("page", -2)):
+        return None
+    return context
+
+
+def _source_is_black(context: dict, x: int, y: int) -> bool:
+    page = context["pixel_gray_page"]
+    if not (0 <= x < page.width and 0 <= y < page.height):
+        return False
+    return int(page.getpixel((x, y))) < int(context.get("threshold", 210))
+
+
+def _connected_source_component(context: dict, seeds: set[tuple[int, int]], box: tuple[int, int, int, int]) -> set[tuple[int, int]]:
+    left, top, right, bottom = map(int, box)
+    pending = [point for point in seeds if left <= point[0] < right and top <= point[1] < bottom and _source_is_black(context, *point)]
+    seen = set(pending)
+    while pending:
+        x, y = pending.pop()
+        for ny in range(y - 1, y + 2):
+            for nx in range(x - 1, x + 2):
+                if (nx, ny) == (x, y) or (nx, ny) in seen:
+                    continue
+                if not (left <= nx < right and top <= ny < bottom):
+                    continue
+                if not _source_is_black(context, nx, ny):
+                    continue
+                seen.add((nx, ny))
+                pending.append((nx, ny))
+    return seen
+
+
+def manual_two_row_candidates(context: dict, state: dict) -> list[dict]:
+    """Find residual source components that actually cross an adjacent row separator."""
+    if int(state.get("covered_pixels") or 0) == int(state.get("source_pixels") or 0):
+        return []
+    column = int(state["column"])
+    row_index = int(state["row"])
+    columns = context.get("row_map", {}).get("columns") or []
+    if not 0 <= column < len(columns):
+        return []
+    column_entry = columns[column]
+    rows = column_entry.get("rows") or []
+    if not 0 <= row_index < len(rows):
+        return []
+    crop_left, crop_top, _crop_right, _crop_bottom = map(int, state["crop_box"])
+    owners = context["pixel_owners"]
+    left = max(0, int(column_entry.get("crop_left", column_entry.get("left", 0))))
+    right = min(owners.width, int(column_entry.get("crop_right", column_entry.get("right", owners.width))))
+
+    pairs: list[tuple[int, int, int]] = []
+    if row_index > 0:
+        pairs.append((row_index - 1, row_index, int(rows[row_index - 1]["page_bottom"])))
+    if row_index + 1 < len(rows):
+        pairs.append((row_index, row_index + 1, int(rows[row_index]["page_bottom"])))
+
+    candidates: list[dict] = []
+    seen_components: set[tuple[int, int, frozenset[tuple[int, int]]]] = set()
+    for item in state.get("items") or []:
+        if item.get("kind") != "residual":
+            continue
+        local_points = set((state.get("point_sets") or {}).get(item.get("id")) or [])
+        if not local_points:
+            continue
+        page_points = {(crop_left + int(x), crop_top + int(y)) for x, y in local_points}
+        for upper_row, lower_row, separator in pairs:
+            edge_points = {
+                (x, y)
+                for x, y in page_points
+                if abs(y - separator) <= 1
+                or y == separator - 1
+            }
+            if not edge_points:
+                continue
+            has_cross_link = False
+            for x, y in edge_points:
+                if y < separator:
+                    other_y = separator
+                else:
+                    other_y = separator - 1
+                if any(_source_is_black(context, nx, other_y) for nx in (x - 1, x, x + 1)):
+                    has_cross_link = True
+                    break
+            if not has_cross_link:
+                continue
+            scan_top = max(0, int(rows[upper_row]["page_top"]) - 2)
+            scan_bottom = min(owners.height, int(rows[lower_row]["page_bottom"]) + 2)
+            component = _connected_source_component(context, page_points, (left, scan_top, right, scan_bottom))
+            if not component or not any(y < separator for _x, y in component) or not any(y >= separator for _x, y in component):
+                continue
+            key = (upper_row, lower_row, frozenset(component))
+            if key in seen_components:
+                continue
+            seen_components.add(key)
+            upper_code = owners.row_code(upper_row)
+            lower_code = owners.row_code(lower_row)
+            upper_owned = sum(1 for x, y in component if owners.value(x, y) == upper_code)
+            lower_owned = sum(1 for x, y in component if owners.value(x, y) == lower_code)
+            neighbor_top = int(state.get("neighbor_page_top", scan_top))
+            candidates.append({
+                "id": len(candidates),
+                "upper_row": upper_row,
+                "lower_row": lower_row,
+                "separator_page_y": separator,
+                "component_pixels": sorted(component),
+                "neighbor_pixels": [[x - crop_left, y - neighbor_top] for x, y in sorted(component)],
+                "pixels": len(component),
+                "upper_owned": upper_owned,
+                "lower_owned": lower_owned,
+                "residual_ids": [item.get("id")],
+            })
+    return candidates
+
+
+def _apply_manual_two_row_ownership(state: dict, form: dict[str, list[str]]) -> str:
+    context = _pixel_context_for_state(state)
+    if context is None:
+        raise ValueError("tvåradsägande finns bara i byte-array-editorn")
+    try:
+        candidate_index = int((form.get("ownership_candidate") or [""])[0])
+    except ValueError as exc:
+        raise ValueError("ogiltig tvåradskandidat") from exc
+    action = (form.get("action") or [""])[0]
+    candidates = manual_two_row_candidates(context, state)
+    if not 0 <= candidate_index < len(candidates):
+        raise ValueError("tvåradskandidaten finns inte längre; räkna om raden")
+    candidate = candidates[candidate_index]
+    if action == "ownership_upper":
+        target_row = int(candidate["upper_row"])
+    elif action == "ownership_lower":
+        target_row = int(candidate["lower_row"])
+    else:
+        raise ValueError(f"okänd tvåradsåtgärd: {action!r}")
+    owners = context["pixel_owners"]
+    target_code = owners.row_code(target_row)
+    changed = 0
+    with context["known_glyph_ownership_lock"]:
+        for x, y in candidate["component_pixels"]:
+            offset = y * owners.width + x
+            if owners.data[offset] != target_code:
+                owners.data[offset] = target_code
+                changed += 1
+        if changed:
+            context["pixel_owner_revision"] = int(context.get("pixel_owner_revision") or 0) + 1
+            revisions = context["pixel_owner_row_revisions"]
+            for position in (
+                (int(state["column"]), int(candidate["upper_row"])),
+                (int(state["column"]), int(candidate["lower_row"])),
+            ):
+                revisions[position] = int(revisions.get(position, 0)) + 1
+            context.setdefault("manual_two_row_ownership", []).append({
+                "column": int(state["column"]),
+                "upper_row": int(candidate["upper_row"]),
+                "lower_row": int(candidate["lower_row"]),
+                "target_row": target_row,
+                "pixels": int(candidate["pixels"]),
+                "changed": changed,
+            })
+    return (
+        f"tvåradsägande: komponent {candidate_index + 1} → rad {target_row}; "
+        f"{changed} pixlar flyttade"
+    )
+
+
 def apply_edit_with_delete(original_apply_edit, state: dict, facit: Path, form: dict[str, list[str]]) -> str:
     action = (form.get("action") or [""])[0]
+    if action in {"ownership_upper", "ownership_lower"}:
+        return _apply_manual_two_row_ownership(state, form)
+
     payload = None
     if action in {"delete", "relabel"}:
         payload = json.loads(facit.read_text(encoding="utf-8"))
@@ -246,6 +416,38 @@ def _replace_first_variant(html: str, variants: tuple[str, ...], replacement: st
     raise ValueError(error)
 
 
+def _manual_two_row_panel(state: dict) -> str:
+    context = _pixel_context_for_state(state)
+    if context is None:
+        return ""
+    candidates = manual_two_row_candidates(context, state)
+    if not candidates:
+        return ""
+    blocks = []
+    for candidate in candidates:
+        upper = candidate["upper_row"]
+        lower = candidate["lower_row"]
+        index = candidate["id"]
+        blocks.append(
+            '<div class="two-row-candidate">'
+            f'<b>Brygga rad {upper}/{lower}</b>: sammanhängande komponent {candidate["pixels"]} px '
+            f'({candidate["upper_owned"]} hos rad {upper}, {candidate["lower_owned"]} hos rad {lower}). '
+            '<form method="post" class="two-row-form">'
+            f'<input type="hidden" name="ownership_candidate" value="{index}">'
+            f'<button name="action" value="ownership_upper" type="submit">Hela komponenten → rad {upper}</button> '
+            f'<button name="action" value="ownership_lower" type="submit">Hela komponenten → rad {lower}</button>'
+            '</form></div>'
+        )
+    return (
+        '<section class="two-row-fallback">'
+        '<h2>Tvåradsgranskning</h2>'
+        '<p>En omatchad komponent korsar en radgräns och kunde inte avgöras med en känd facitglyph. '
+        'Tre-radersrastret öppnas automatiskt. Välj vilken fysisk rad hela den sammanhängande komponenten hör till.</p>'
+        + ''.join(blocks)
+        + '</section>'
+    )
+
+
 def render_html_with_delete(original_render, state: dict, message: str = "") -> str:
     _apply_display_typography(state)
     html = original_render(state, message)
@@ -267,6 +469,9 @@ def render_html_with_delete(original_render, state: dict, message: str = "") -> 
   text-decoration-thickness:3px;
   text-underline-offset:4px;
 }
+.two-row-fallback{max-width:1100px;border:2px solid #c77b00;background:#fff7e6;padding:10px 12px;margin:10px 0 14px}
+.two-row-fallback h2{font-size:18px;margin:0 0 5px}.two-row-fallback p{margin:4px 0 8px}
+.two-row-candidate{padding:7px 0;border-top:1px solid #e0bf7c}.two-row-form{display:inline-block;margin-left:8px}.two-row-form button{padding:4px 7px}
 '''
     if style_needle not in html:
         raise ValueError("could not find editor style block")
@@ -295,6 +500,18 @@ def render_html_with_delete(original_render, state: dict, message: str = "") -> 
    }
  };document.getElementById('items').appendChild(b);"""
     html = _replace_first_variant(html, ("b.onclick=()=>toggle(it.id);document.getElementById('items').appendChild(b);", "b.onclick=()=>toggle(it.id); document.getElementById('items').appendChild(b);"), click_replacement, "could not find glyph-chip click handler")
+
+    panel = _manual_two_row_panel(state)
+    if panel:
+        form_needle = '<form method="post" id="form">'
+        if form_needle not in html:
+            raise ValueError("could not find glyph form for two-row fallback")
+        html = html.replace(form_needle, panel + form_needle, 1)
+        html = html.replace(
+            '</body>',
+            '''<script>document.addEventListener('DOMContentLoaded',()=>{const c=document.getElementById('showNeighbors');if(c){c.checked=true;c.dispatchEvent(new Event('change'));}});</script></body>''',
+            1,
+        )
     return html
 
 
