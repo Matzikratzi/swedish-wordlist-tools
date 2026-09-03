@@ -14,10 +14,12 @@ are diagnostics only: glyph matching still receives the owner-filtered byte
 array crop.
 """
 
+import threading
+
 from . import ocr_review_five_rows_glyphs_ultrafast_html as ultrafast
 from .ocr_neighbor_row_raster import add_neighbor_row_raster
 from .ocr_page_pixel_array import PagePixelArray
-from .ocr_refine_row_boundaries import refine_row_boundaries_by_connectivity
+from .ocr_refine_known_glyph_ownership import refine_known_glyph_ownership
 
 
 fast = ultrafast.fast
@@ -26,29 +28,6 @@ _original_build_page_context = fast.build_page_context
 
 def build_page_context_pixel_array(jsonl, page_number: int, threshold: int = 210) -> dict:
     context = _original_build_page_context(jsonl, page_number, threshold)
-
-    # Keep the mature segmentation when it already separates glyph components,
-    # but repair a boundary that actually cuts connected source ink.  This is
-    # deliberately conservative: a boundary with zero crossed links is never
-    # moved.
-    boundary_changes = refine_row_boundaries_by_connectivity(
-        context["page"], context["row_map"], threshold=threshold
-    )
-    context["row_boundary_refinements"] = boundary_changes
-    if boundary_changes:
-        print(
-            f"review: flyttade {len(boundary_changes)} radgränser som skar genom sammanhängande glyph-pixlar",
-            flush=True,
-        )
-        for change in boundary_changes:
-            print(
-                "review: radgräns "
-                f"c{change['column']} r{change['upper_row']}/r{change['lower_row']} "
-                f"y={change['old_boundary']}->{change['new_boundary']} "
-                f"bryggor={change['old_bridges']}->{change['new_bridges']}",
-                flush=True,
-            )
-
     owners = PagePixelArray.from_image(context["page"], threshold=threshold)
 
     # SAOL's section-letter marker is a large dense black rectangle containing
@@ -58,6 +37,9 @@ def build_page_context_pixel_array(jsonl, page_number: int, threshold: int = 210
     assigned = owners.assign_row_map(context["row_map"])
     context["pixel_owners"] = owners
     context["ignored_black_rectangles"] = ignored_regions
+    context["known_glyph_ownership_refinements"] = []
+    context["known_glyph_ownership_ready"] = False
+    context["known_glyph_ownership_lock"] = threading.Lock()
     counts = owners.counts()
     if ignored_regions:
         for region in ignored_regions:
@@ -75,7 +57,43 @@ def build_page_context_pixel_array(jsonl, page_number: int, threshold: int = 210
     return context
 
 
+def _ensure_known_glyph_ownership(context: dict, models) -> None:
+    """Run exact-glyph ownership refinement once, after facit is available."""
+    if context.get("known_glyph_ownership_ready"):
+        return
+    lock = context["known_glyph_ownership_lock"]
+    with lock:
+        if context.get("known_glyph_ownership_ready"):
+            return
+        changes = refine_known_glyph_ownership(
+            context["page"],
+            context["row_map"],
+            context["pixel_owners"],
+            models,
+            threshold=context["threshold"],
+        )
+        context["known_glyph_ownership_refinements"] = changes
+        context["known_glyph_ownership_ready"] = True
+        if changes:
+            print(
+                f"review: exakt glyphägande korrigerade {len(changes)} sammanvuxna radpar",
+                flush=True,
+            )
+            for change in changes:
+                print(
+                    "review: glyphägande "
+                    f"c{change['column']} r{change['upper_row']}/r{change['lower_row']} "
+                    f"y={change['boundary']} "
+                    f"övre={change['upper_labels']!r} undre={change['lower_labels']!r} "
+                    f"flyttade={change['moved_to_upper']}/{change['moved_to_lower']} "
+                    f"konflikt={change['conflict_pixels']}",
+                    flush=True,
+                )
+
+
 def load_review_state_pixel_array(context: dict, position: tuple[int, int], models) -> dict:
+    _ensure_known_glyph_ownership(context, models)
+
     column, row_index = position
     page = context["page"]
     row_map = context["row_map"]
@@ -98,8 +116,8 @@ def load_review_state_pixel_array(context: dict, position: tuple[int, int], mode
         left_override=content_left,
     )
 
-    # Important difference from the old path: the padded rectangle does not
-    # decide ownership.  It is merely a viewport over the page-wide byte array.
+    # The padded rectangle is only a viewport.  Ownership comes from the global
+    # byte array, including exact-glyph corrections for touching row pairs.
     crop = owners.render_owner_crop(row_index=row_index, box=box)
     crop, trimmed_left = fast.legacy._trim_leading_white_columns(crop, threshold=threshold, keep=2)
     if trimmed_left:
@@ -164,11 +182,11 @@ def load_review_state_pixel_array(context: dict, position: tuple[int, int], mode
         "items": items,
         "point_sets": point_sets,
         "matches": selected,
-        "pixel_owner_mode": "page-byte-array",
+        "pixel_owner_mode": "page-byte-array+known-glyphs",
         "pixel_owner_code": PagePixelArray.row_code(row_index),
         "pixel_array_counts": owners.counts(),
         "ignored_black_rectangles": context.get("ignored_black_rectangles") or [],
-        "row_boundary_refinements": context.get("row_boundary_refinements") or [],
+        "known_glyph_ownership_refinements": context.get("known_glyph_ownership_refinements") or [],
     }
 
     # Keep the old editor's three-row view as an *unfiltered* diagnostic view of
@@ -183,7 +201,7 @@ def main() -> int:
     fast.build_page_context = build_page_context_pixel_array
     fast.load_review_state_fast = load_review_state_pixel_array
     print("review: BYTE-ARRAY använder sidglobalt pixelägande; ingen grannpixel kan läcka via crop-padding", flush=True)
-    print("review: radgränser som skär sammanhängande glyph-pixlar flyttas konservativt", flush=True)
+    print("review: kända exakta glyphar får korrigera pixelägande över geometriska radgränser", flush=True)
     print("review: stora täta svarta bokstavsrektanglar maskas helt före radägande", flush=True)
     print("review: Visa tre rader och Kopiera diagnostik + raster är åter aktiva som ofiltrerad debug", flush=True)
     return fast.main()
