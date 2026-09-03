@@ -17,6 +17,7 @@ array crop.
 from . import ocr_review_five_rows_glyphs_ultrafast_html as ultrafast
 from .ocr_neighbor_row_raster import add_neighbor_row_raster
 from .ocr_page_pixel_array import PagePixelArray
+from .ocr_refine_row_boundaries import refine_row_boundaries_by_connectivity
 
 
 fast = ultrafast.fast
@@ -25,6 +26,29 @@ _original_build_page_context = fast.build_page_context
 
 def build_page_context_pixel_array(jsonl, page_number: int, threshold: int = 210) -> dict:
     context = _original_build_page_context(jsonl, page_number, threshold)
+
+    # Keep the mature segmentation when it already separates glyph components,
+    # but repair a boundary that actually cuts connected source ink.  This is
+    # deliberately conservative: a boundary with zero crossed links is never
+    # moved.
+    boundary_changes = refine_row_boundaries_by_connectivity(
+        context["page"], context["row_map"], threshold=threshold
+    )
+    context["row_boundary_refinements"] = boundary_changes
+    if boundary_changes:
+        print(
+            f"review: flyttade {len(boundary_changes)} radgränser som skar genom sammanhängande glyph-pixlar",
+            flush=True,
+        )
+        for change in boundary_changes:
+            print(
+                "review: radgräns "
+                f"c{change['column']} r{change['upper_row']}/r{change['lower_row']} "
+                f"y={change['old_boundary']}->{change['new_boundary']} "
+                f"bryggor={change['old_bridges']}->{change['new_bridges']}",
+                flush=True,
+            )
+
     owners = PagePixelArray.from_image(context["page"], threshold=threshold)
 
     # SAOL's section-letter marker is a large dense black rectangle containing
@@ -144,6 +168,7 @@ def load_review_state_pixel_array(context: dict, position: tuple[int, int], mode
         "pixel_owner_code": PagePixelArray.row_code(row_index),
         "pixel_array_counts": owners.counts(),
         "ignored_black_rectangles": context.get("ignored_black_rectangles") or [],
+        "row_boundary_refinements": context.get("row_boundary_refinements") or [],
     }
 
     # Keep the old editor's three-row view as an *unfiltered* diagnostic view of
@@ -158,6 +183,7 @@ def main() -> int:
     fast.build_page_context = build_page_context_pixel_array
     fast.load_review_state_fast = load_review_state_pixel_array
     print("review: BYTE-ARRAY använder sidglobalt pixelägande; ingen grannpixel kan läcka via crop-padding", flush=True)
+    print("review: radgränser som skär sammanhängande glyph-pixlar flyttas konservativt", flush=True)
     print("review: stora täta svarta bokstavsrektanglar maskas helt före radägande", flush=True)
     print("review: Visa tre rader och Kopiera diagnostik + raster är åter aktiva som ofiltrerad debug", flush=True)
     return fast.main()
