@@ -348,8 +348,17 @@ def render_html_with_delete(original_render, state: dict, message: str = "") -> 
      document.getElementById('label').value=it.label;
      const styleSelect=document.querySelector('select[name="style"]');
      if(styleSelect){
-       const itemIndex=S.items.findIndex(candidate=>candidate.id===it.id);
-       const rightItem=itemIndex>=0 ? S.items.slice(itemIndex+1).find(candidate=>candidate.kind==='match') : null;
+       const matchedItems=S.items.filter(candidate=>candidate.kind==='match');
+       let rightItem=null;
+       if(it.bbox){
+         rightItem=matchedItems
+           .filter(candidate=>candidate.id!==it.id && candidate.bbox && candidate.bbox[0]>it.bbox[0])
+           .sort((a,b)=>a.bbox[0]-b.bbox[0])[0] || null;
+       }
+       if(!rightItem){
+         const itemIndex=S.items.findIndex(candidate=>candidate.id===it.id);
+         rightItem=itemIndex>=0 ? S.items.slice(itemIndex+1).find(candidate=>candidate.kind==='match') : null;
+       }
        styleSelect.value=rightItem ? rightItem.style : it.style;
      }
    }
