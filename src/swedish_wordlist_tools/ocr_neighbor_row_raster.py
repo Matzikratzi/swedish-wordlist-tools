@@ -5,6 +5,26 @@ import io
 from typing import Any
 
 
+# Glyph matching is CPU-heavy. The review server used to run every visible row
+# in a ThreadPoolExecutor, which made a difficult current-row ownership repair
+# compete with speculative rows below it. Patch the shared cache class as soon
+# as this module is imported: visible rows are now requested in order and every
+# completed state still remains in the cache.
+#
+# The page-byte-array editor imports this module after the fast review module,
+# so the class already exists here. Keeping this policy next to the diagnostic
+# raster avoids changing the generic fast editor for other entry points.
+try:
+    from . import ocr_review_five_rows_glyphs_fast_html as _fast_review
+
+    def _sequential_get_many(self, positions):
+        return [self.get(position) for position in positions]
+
+    _fast_review.SynchronizedStateCache.get_many = _sequential_get_many
+except ImportError:
+    pass
+
+
 def _png_data_uri(image) -> str:
     buf = io.BytesIO()
     image.save(buf, format="PNG")
