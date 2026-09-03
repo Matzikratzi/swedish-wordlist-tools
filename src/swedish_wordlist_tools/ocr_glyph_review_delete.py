@@ -469,6 +469,7 @@ def render_html_with_delete(original_render, state: dict, message: str = "") -> 
 .pixel-unit{display:block;font-size:9px;line-height:1;margin-top:1px}
 .rowbox + .items{margin-top:6px}
 .row-summary code{font-size:2em;line-height:1.15}
+.chip.match.needs-review{min-width:114px}
 .chip.match.needs-review .glyph-label{
   text-decoration-line:underline;
   text-decoration-color:#e58a00;
