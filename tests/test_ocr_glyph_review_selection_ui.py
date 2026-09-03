@@ -3,11 +3,15 @@ from types import SimpleNamespace
 
 from PIL import Image
 
-from swedish_wordlist_tools import ocr_review_row_glyphs_html as legacy
-from swedish_wordlist_tools.ocr_glyph_review_delete import _RoleWithTypography
+from swedish_wordlist_tools import ocr_review_row_glyphs_paint_html as paint
+from swedish_wordlist_tools.ocr_glyph_review_delete import (
+    _RoleWithTypography,
+    render_html_with_delete,
+)
 from swedish_wordlist_tools.ocr_neighbor_row_raster import (
     _column_review_left,
     _compact_review_state,
+    _decorate_review_html,
 )
 
 
@@ -58,7 +62,12 @@ class GlyphReviewSelectionUiTests(unittest.TestCase):
             "matches": [match],
         }
 
-        html = legacy.render_html(state)
+        html = _decorate_review_html(
+            lambda current_state, message="": render_html_with_delete(
+                paint.render_html, current_state, message
+            ),
+            state,
+        )
 
         self.assertIn(".chip.italic .glyph-label{font-style:italic", html)
         self.assertIn(".pixel-unit{display:block", html)
@@ -69,21 +78,23 @@ class GlyphReviewSelectionUiTests(unittest.TestCase):
         self.assertNotIn("setsTouch8", html)
         self.assertIn("e.key!=='ArrowLeft'&&e.key!=='ArrowRight'", html)
         self.assertIn("replaceSet(chosen,new Set([target.id]))", html)
-        self.assertIn("topPad=4, bottomPad=18", html)
+        self.assertIn("topPad=4, bottomPad=20", html)
         self.assertIn("it.kind!=='match' || it.reviewed===false", html)
-        self.assertIn("x+w/2-tw/2", html)
+        self.assertIn("const wanted=x+w/2-tw/2", html)
         self.assertIn("y+h+15", html)
-        self.assertIn("#ff6500", html)
+        self.assertIn("#ff5a00", html)
 
-    def test_column_crop_keeps_homonym_margin_and_is_shared(self):
+    def test_column_crop_ignores_left_furniture_and_keeps_homonym_margin(self):
         image = Image.new("L", (120, 60), 255)
         rows = []
-        # Most rows start at the headword anchor x=59. One has a superscript
-        # homonym digit at x=51, and one continuation row starts farther right.
+        # x=2 simulates the far-left column furniture that fooled the first
+        # implementation. Most lexical rows start at headword x=59; one row has
+        # a superscript homonym at x=51 and one continuation starts at x=70.
         starts = [59, 59, 59, 59, 51, 70]
         for index, x in enumerate(starts):
             top = index * 10
             rows.append({"page_top": top, "page_bottom": top + 8})
+            image.putpixel((2, top + 3), 0)
             image.putpixel((x, top + 3), 0)
         context = {
             "page": image,
