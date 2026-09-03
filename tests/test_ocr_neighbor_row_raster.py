@@ -20,9 +20,8 @@ class NeighborRowRasterTests(unittest.TestCase):
         self.assertEqual(result["neighbor_core_top"], 8)
         self.assertEqual(result["neighbor_core_bottom"], 18)
 
-    def test_three_rows_and_ascii_pixels_are_included(self):
+    def test_three_rows_use_one_separator_per_pair(self):
         page = Image.new("L", (20, 40), 255)
-        # One black pixel in each physical row.
         for point in ((4, 5), (5, 15), (6, 25)):
             page.putpixel(point, 0)
         rows = [
@@ -43,13 +42,41 @@ class NeighborRowRasterTests(unittest.TestCase):
         self.assertEqual(result["neighbor_raster_height"], 28)
         self.assertEqual(result["neighbor_core_top"], 10)
         self.assertEqual(result["neighbor_core_bottom"], 18)
+        self.assertEqual(
+            result["neighbor_row_boundaries"],
+            [[8, "RADGRÄNS row 0/1"], [18, "RADGRÄNS row 1/2"]],
+        )
         ascii_raster = result["neighbor_raster_ascii"]
-        self.assertIn("--- row 0 top y=0 ---", ascii_raster)
-        self.assertIn("--- TARGET row 1 top y=10 ---", ascii_raster)
-        self.assertIn("--- row 2 bottom y=28 ---", ascii_raster)
+        self.assertIn("--- RADGRÄNS row 0/1 y=8 ---", ascii_raster)
+        self.assertIn("--- RADGRÄNS row 1/2 y=18 ---", ascii_raster)
+        self.assertNotIn("row 1 top", ascii_raster)
         self.assertGreaterEqual(ascii_raster.count("#"), 3)
-        self.assertIn(".", ascii_raster)
         self.assertTrue(result["neighbor_raster_image"].startswith("data:image/png;base64,"))
+
+    def test_support_line_is_displayed_one_pixel_below_matching_baseline(self):
+        page = Image.new("L", (20, 40), 255)
+        rows = [
+            {"page_top": 2, "page_bottom": 10},
+            {"page_top": 12, "page_bottom": 20},
+            {"page_top": 22, "page_bottom": 30},
+        ]
+        context = {
+            "page": page,
+            "threshold": 210,
+            "row_map": {"columns": [{"rows": rows}]},
+        }
+        # crop_top=11 and matcher baseline=5 -> page baseline 16; visual guide
+        # belongs at page y=17, i.e. local y=15 when source_top=2.
+        state = {
+            "column": 0,
+            "row": 1,
+            "crop_box": (2, 11, 10, 21),
+            "baseline": 5,
+        }
+        result = add_neighbor_row_raster(context, state, probe_y=8)
+        self.assertIn([15, "row 1"], result["neighbor_support_lines"])
+        self.assertIn([15, "STÖDLINJE row 1"], result["neighbor_row_boundaries"])
+        self.assertIn("--- STÖDLINJE row 1 y=15 ---", result["neighbor_raster_ascii"])
 
 
 if __name__ == "__main__":
