@@ -156,6 +156,12 @@ showGrid.addEventListener('change',draw);showBaseline.addEventListener('change',
 </script></body></html>'''
 
 
+# Keep an immutable handle to the raw renderer. Other review modules decorate
+# render_html at import time; tests and composable wrappers must be able to start
+# from the undecorated HTML exactly once regardless of import order.
+BASE_RENDER_HTML = render_html
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Open a local rectangle-plus-pixel-touchup editor for one exact SAOL row.")
     ap.add_argument("jsonl", type=Path)
