@@ -51,6 +51,70 @@ def _known_support_lines(context: dict[str, Any], column: int, row_indexes: set[
     return out
 
 
+def _effective_separator_page(
+    context: dict[str, Any],
+    *,
+    column: int,
+    upper_row_index: int,
+    left: int,
+    right: int,
+) -> int:
+    """Return a horizontal separator that agrees with current pixel ownership.
+
+    Exact glyph refinement may move a descender one or more pixels below the
+    provisional geometry. The one-row view then correctly contains the whole
+    glyph while a geometry-only three-row guide would appear to cut it. For the
+    diagnostic view, move the separator directly below the lowest pixel actually
+    owned by the upper row whenever that still leaves every lower-row owned pixel
+    below the separator.
+
+    If upper/lower ownership overlaps vertically, no single horizontal line can
+    represent the true per-pixel ownership. In that case keep the provisional
+    separator; the byte array remains authoritative.
+    """
+    rows = context["row_map"]["columns"][column]["rows"]
+    upper = rows[upper_row_index]
+    provisional = int(upper["page_bottom"])
+    owners = context.get("pixel_owners")
+    if owners is None or upper_row_index + 1 >= len(rows):
+        return provisional
+
+    lower_row_index = upper_row_index + 1
+    upper_code = owners.row_code(upper_row_index)
+    lower_code = owners.row_code(lower_row_index)
+    scan_top = max(0, int(upper["page_top"]) - 2)
+    scan_bottom = min(owners.height, int(rows[lower_row_index]["page_bottom"]) + 2)
+    left = max(0, int(left))
+    right = min(owners.width, int(right))
+
+    max_upper_y: int | None = None
+    min_lower_y: int | None = None
+    data = owners.data
+    for y in range(scan_top, scan_bottom):
+        start = y * owners.width
+        has_upper = False
+        has_lower = False
+        for x in range(left, right):
+            value = data[start + x]
+            if value == upper_code:
+                has_upper = True
+            elif value == lower_code:
+                has_lower = True
+            if has_upper and has_lower:
+                break
+        if has_upper:
+            max_upper_y = y
+        if has_lower and min_lower_y is None:
+            min_lower_y = y
+
+    if max_upper_y is None:
+        return provisional
+    candidate = max_upper_y + 1
+    if min_lower_y is None or candidate <= min_lower_y:
+        return candidate
+    return provisional
+
+
 def add_neighbor_row_raster(
     context: dict[str, Any],
     state: dict[str, Any],
@@ -59,10 +123,11 @@ def add_neighbor_row_raster(
 ) -> dict[str, Any]:
     """Attach an unfiltered three-row source raster for diagnostics.
 
-    The view deliberately shows exactly one separator between adjacent physical
-    rows. The separator is the upper row's exclusive ``page_bottom``: anything
-    below it belongs geometrically to the following row unless exact glyph
-    ownership says otherwise.
+    The view shows one separator between adjacent physical rows. When exact
+    glyph ownership has rescued pixels across the provisional geometry, the
+    displayed separator follows that effective ownership whenever one horizontal
+    line can represent it. This keeps the three-row view consistent with the
+    owner-filtered one-row view.
 
     Exact support baselines are also shown when known. For visual clarity the
     support guide is drawn on the raster line immediately *below* the baseline
@@ -96,17 +161,25 @@ def add_neighbor_row_raster(
     core_top = local_y(int(row["page_top"]))
     core_bottom = local_y(int(row["page_bottom"]))
 
-    # One and only one separator per neighbouring row pair: directly below the
-    # upper row's lowest geometrically attributed pixel.
     boundaries: list[tuple[int, str]] = []
     if previous is not None:
-        boundaries.append(
-            (local_y(int(previous["page_bottom"])), f"row {row_index - 1}/{row_index}")
+        separator = _effective_separator_page(
+            context,
+            column=column,
+            upper_row_index=row_index - 1,
+            left=crop_left,
+            right=crop_right,
         )
+        boundaries.append((local_y(separator), f"row {row_index - 1}/{row_index}"))
     if following is not None:
-        boundaries.append(
-            (local_y(int(row["page_bottom"])), f"row {row_index}/{row_index + 1}")
+        separator = _effective_separator_page(
+            context,
+            column=column,
+            upper_row_index=row_index,
+            left=crop_left,
+            right=crop_right,
         )
+        boundaries.append((local_y(separator), f"row {row_index}/{row_index + 1}"))
 
     visible_rows = {row_index}
     if previous is not None:
@@ -117,8 +190,6 @@ def add_neighbor_row_raster(
     if state.get("baseline") is not None:
         support_by_row[row_index] = crop_top + int(state["baseline"])
 
-    # The matcher baseline denotes the glyph support coordinate. On the scaled
-    # diagnostic raster the guide belongs immediately below that pixel row.
     support_lines = [
         (local_y(page_y + 1), f"row {index}")
         for index, page_y in sorted(support_by_row.items())
@@ -150,8 +221,5 @@ def add_neighbor_row_raster(
             ),
         }
     )
-    # Backward-compatible renderer hook: the current UI reads this key. It now
-    # receives the intentionally labelled display lines rather than old top/bottom
-    # bbox edges.
     state["neighbor_row_boundaries"] = state["neighbor_display_lines"]
     return state
