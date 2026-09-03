@@ -2,12 +2,58 @@ from __future__ import annotations
 
 from PIL import Image
 
-from .ocr_probe_row_glyphs import analyse_row_exact
+from .ocr_glyph_matcher import exact_matches, select_best_disjoint_exact_for_ink
 from .ocr_page_pixel_array import PagePixelArray
+from .ocr_probe_row_glyphs import analyse_row_exact, row_ink
+from .ocr_refine_row_boundaries import _boundary_bridge_count
 
 
 def _page_points(match, *, left: int, top: int) -> set[tuple[int, int]]:
     return {(left + x, top + y) for x, y in match.pixels}
+
+
+def _row_baseline_page(
+    owners: PagePixelArray,
+    row_index: int,
+    row: dict,
+    *,
+    left: int,
+    right: int,
+    models,
+    threshold: int,
+) -> int | None:
+    top = max(0, int(row["page_top"]))
+    bottom = min(owners.height, int(row["page_bottom"]))
+    if bottom <= top:
+        return None
+    crop = owners.render_owner_crop(row_index=row_index, box=(left, top, right, bottom))
+    result = analyse_row_exact(crop, models, threshold=threshold)
+    baseline = result["baseline"]
+    return None if baseline is None else top + int(baseline)
+
+
+def _baseline_matches(
+    gray: Image.Image,
+    *,
+    left: int,
+    top: int,
+    right: int,
+    bottom: int,
+    baseline_page: int,
+    models,
+    threshold: int,
+):
+    crop = gray.crop((left, top, right, bottom))
+    ink = row_ink(crop, threshold=threshold)
+    candidates = exact_matches(
+        ink,
+        crop.width,
+        crop.height,
+        models,
+        baseline_only=baseline_page - top,
+        require_whole_components=False,
+    )
+    return select_best_disjoint_exact_for_ink(candidates, ink)
 
 
 def _matches_near_boundary(matches, *, crop_left: int, crop_top: int, boundary: int, radius: int):
@@ -32,17 +78,17 @@ def refine_known_glyph_ownership(
 ) -> list[dict]:
     """Let exact glyphs override a rectangular split between touching rows.
 
-    Row geometry is only the initial ownership guess.  Around every touching
-    boundary we analyse two overlapping raw-source crops: the upper crop ends a
-    few pixels below the boundary and the lower crop starts a few pixels above
-    it.  Each crop chooses one exact baseline.  Pixels belonging to exact glyphs
-    on that baseline are then assigned to that physical row even when the glyph
-    crosses the geometric y boundary.
+    Geometry first assigns every black pixel to a horizontal row rectangle.  At
+    a boundary that actually crosses connected ink we estimate the baseline of
+    each row from the already-owned glyphs.  We then match the raw two-row source
+    at those two *fixed* baselines.  Exact glyph pixels are authoritative and may
+    cross the geometric boundary in either direction.
 
-    This is the important case for a descender (for example g) touching an
-    ascender (for example b): both complete glyphs may have overlapping vertical
-    extents, so no single horizontal cut can preserve both.  Pixel ownership can.
-    Ambiguous pixels claimed by exact glyphs from both rows are left untouched.
+    Thus a known upper-row ``g`` and known lower-row ``b`` may physically touch
+    and even overlap vertically.  They do not need a horizontal line capable of
+    separating their bounding boxes; their exact, disjoint pixel patterns claim
+    the correct row directly.  A pixel claimed by both baselines is deliberately
+    left at its old ownership and reported as a conflict.
     """
     gray = page.convert("L")
     changes: list[dict] = []
@@ -58,32 +104,72 @@ def refine_known_glyph_ownership(
             upper = rows[row_index]
             lower = rows[row_index + 1]
             boundary = (int(upper["page_bottom"]) + int(lower["page_top"])) // 2
-
-            upper_top = max(0, int(upper["page_top"]) - 1)
-            upper_bottom = min(page.height, boundary + radius + 1)
-            lower_top = max(0, boundary - radius)
-            lower_bottom = min(page.height, int(lower["page_bottom"]) + 1)
-            if upper_bottom <= upper_top or lower_bottom <= lower_top:
+            if _boundary_bridge_count(
+                gray,
+                y=boundary,
+                left=left,
+                right=right,
+                threshold=threshold,
+            ) == 0:
                 continue
 
-            upper_crop = gray.crop((left, upper_top, right, upper_bottom))
-            lower_crop = gray.crop((left, lower_top, right, lower_bottom))
-            upper_result = analyse_row_exact(upper_crop, models, threshold=threshold)
-            lower_result = analyse_row_exact(lower_crop, models, threshold=threshold)
-            if upper_result["baseline"] is None or lower_result["baseline"] is None:
+            upper_baseline = _row_baseline_page(
+                owners,
+                row_index,
+                upper,
+                left=left,
+                right=right,
+                models=models,
+                threshold=threshold,
+            )
+            lower_baseline = _row_baseline_page(
+                owners,
+                row_index + 1,
+                lower,
+                left=left,
+                right=right,
+                models=models,
+                threshold=threshold,
+            )
+            if upper_baseline is None or lower_baseline is None or upper_baseline == lower_baseline:
                 continue
 
+            pair_top = max(0, int(upper["page_top"]) - 1)
+            pair_bottom = min(page.height, int(lower["page_bottom"]) + 1)
+            if pair_bottom <= pair_top:
+                continue
+
+            upper_all = _baseline_matches(
+                gray,
+                left=left,
+                top=pair_top,
+                right=right,
+                bottom=pair_bottom,
+                baseline_page=upper_baseline,
+                models=models,
+                threshold=threshold,
+            )
+            lower_all = _baseline_matches(
+                gray,
+                left=left,
+                top=pair_top,
+                right=right,
+                bottom=pair_bottom,
+                baseline_page=lower_baseline,
+                models=models,
+                threshold=threshold,
+            )
             upper_matches = _matches_near_boundary(
-                upper_result["selected"],
+                upper_all,
                 crop_left=left,
-                crop_top=upper_top,
+                crop_top=pair_top,
                 boundary=boundary,
                 radius=radius,
             )
             lower_matches = _matches_near_boundary(
-                lower_result["selected"],
+                lower_all,
                 crop_left=left,
-                crop_top=lower_top,
+                crop_top=pair_top,
                 boundary=boundary,
                 radius=radius,
             )
@@ -102,8 +188,6 @@ def refine_known_glyph_ownership(
             moved_to_lower = 0
 
             for x, y in upper_points:
-                if not (0 <= x < owners.width and 0 <= y < owners.height):
-                    continue
                 if gray.getpixel((x, y)) >= threshold:
                     continue
                 offset = y * owners.width + x
@@ -112,8 +196,6 @@ def refine_known_glyph_ownership(
                     moved_to_upper += 1
 
             for x, y in lower_points:
-                if not (0 <= x < owners.width and 0 <= y < owners.height):
-                    continue
                 if gray.getpixel((x, y)) >= threshold:
                     continue
                 offset = y * owners.width + x
@@ -128,6 +210,8 @@ def refine_known_glyph_ownership(
                         "upper_row": row_index,
                         "lower_row": row_index + 1,
                         "boundary": boundary,
+                        "upper_baseline": upper_baseline,
+                        "lower_baseline": lower_baseline,
                         "upper_labels": "".join(match.label for match, _points in upper_matches),
                         "lower_labels": "".join(match.label for match, _points in lower_matches),
                         "moved_to_upper": moved_to_upper,
