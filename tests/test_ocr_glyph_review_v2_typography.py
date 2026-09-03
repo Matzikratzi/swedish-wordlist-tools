@@ -33,8 +33,13 @@ class GlyphReviewV2TypographyTest(unittest.TestCase):
             ],
         }
 
-    def _render_shell(self):
-        return '''<html><head><style></style></head><body>
+    def _render_shell(self, *, paint_spacing: bool = False):
+        click = (
+            "b.onclick=()=>toggle(it.id);document.getElementById('items').appendChild(b);"
+            if paint_spacing
+            else "b.onclick=()=>toggle(it.id); document.getElementById('items').appendChild(b);"
+        )
+        return f'''<html><head><style></style></head><body>
 <div id="items"></div>
 <form id="form">
 <input id="selected"><input id="selectedPixels"><input id="label">
@@ -42,10 +47,10 @@ class GlyphReviewV2TypographyTest(unittest.TestCase):
 <button name="action" value="relabel" type="submit">Rätta vald glyphs facitmodell</button>
 </form>
 <script>
-for(const it of S.items){
+for(const it of S.items){{
  const b=document.createElement('button'); b.type='button'; b.dataset.id=it.id; b.className='chip '+it.kind+' '+it.style;
- b.onclick=()=>toggle(it.id); document.getElementById('items').appendChild(b);
-}
+ {click}
+}}
 </script></body></html>'''
 
     def test_v2_loader_preserves_role_typography_and_review_state(self):
@@ -60,24 +65,34 @@ for(const it of S.items){
         self.assertEqual("italic", models[0].style.typographic_style)
         self.assertTrue(models[0].style.reviewed)
 
-    def test_unreviewed_match_gets_orange_underline_and_prefill(self):
+    def _unreviewed_state(self):
         role = Role("unknown")
         role.typographic_style = "bold"
         role.reviewed = False
         match = SimpleNamespace(style=role)
-        state = {
+        return {
             "matches": [match],
             "items": [
                 {"id": "M00", "kind": "match", "label": "a", "style": "unknown", "pixels": 3}
             ],
         }
 
+    def test_unreviewed_match_gets_orange_underline_and_prefill(self):
+        state = self._unreviewed_state()
         html = render_html_with_delete(lambda *_args: self._render_shell(), state)
         self.assertEqual("bold", state["items"][0]["style"])
         self.assertEqual("unknown", state["items"][0]["role"])
         self.assertFalse(state["items"][0]["reviewed"])
         self.assertIn("needs-review", html)
         self.assertIn("text-decoration-color:#e58a00", html)
+        self.assertIn("document.getElementById('label').value=it.label", html)
+        self.assertIn("styleSelect.value=it.style", html)
+
+    def test_prefill_hook_accepts_paint_editor_click_spacing(self):
+        state = self._unreviewed_state()
+        html = render_html_with_delete(
+            lambda *_args: self._render_shell(paint_spacing=True), state
+        )
         self.assertIn("document.getElementById('label').value=it.label", html)
         self.assertIn("styleSelect.value=it.style", html)
 
