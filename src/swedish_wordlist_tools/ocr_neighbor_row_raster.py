@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import io
+import sys
 from statistics import median
 from typing import Any
 
@@ -11,10 +12,6 @@ from typing import Any
 # compete with speculative rows below it. Patch the shared cache class as soon
 # as this module is imported: visible rows are now requested in order and every
 # completed state still remains in the cache.
-#
-# The page-byte-array editor imports this module after the fast review module,
-# so the class already exists here. Keeping this policy next to the diagnostic
-# raster avoids changing the generic fast editor for other entry points.
 try:
     from . import ocr_review_five_rows_glyphs_fast_html as _fast_review
 
@@ -49,11 +46,10 @@ def _row_leftmost_ink(gray, row: dict[str, Any], *, left: int, right: int, thres
 def _column_review_left(context: dict[str, Any], column: int) -> int:
     """Choose one compact left edge for every review row in a column.
 
-    SAOL headwords share a stable x anchor while occasional superscript homonym
-    digits sit a little to its left. Estimate the dominant first-ink anchor over
-    all physical rows, then retain 15 pixels to its left. The edge is also
-    clamped before the leftmost actual row ink so the compact view never cuts a
-    printed glyph.
+    Ignore the far-left column furniture when estimating the dominant headword
+    anchor. SAOL headwords then form a tight x cluster while superscript homonym
+    digits sit a little to the left. Every review row starts exactly 15 pixels
+    before that shared headword anchor.
     """
     cache = context.setdefault("review_column_lefts", {})
     if column in cache:
@@ -64,24 +60,35 @@ def _column_review_left(context: dict[str, Any], column: int) -> int:
     entry = context["row_map"]["columns"][column]
     crop_left = max(0, int(entry.get("crop_left", entry.get("left", 0))))
     crop_right = min(gray.width, int(entry.get("crop_right", entry.get("right", gray.width))))
-    search_right = min(crop_right, crop_left + max(80, (crop_right - crop_left) // 2))
+    width = max(1, crop_right - crop_left)
+    # The old persistent-rule detector can regard page/column furniture as x=0
+    # ink. Skip that zone when estimating the lexical headword anchor.
+    anchor_search_left = min(crop_right - 1, crop_left + max(24, width // 10))
+    search_right = min(crop_right, crop_left + max(90, width * 2 // 3))
     candidates = [
         x
         for row in entry.get("rows") or []
-        if (x := _row_leftmost_ink(gray, row, left=crop_left, right=search_right, threshold=threshold)) is not None
+        if (x := _row_leftmost_ink(
+            gray,
+            row,
+            left=anchor_search_left,
+            right=search_right,
+            threshold=threshold,
+        )) is not None
     ]
     if not candidates:
         cache[column] = crop_left
         return crop_left
 
     def cluster_score(value: int) -> tuple[int, int]:
+        # Prefer the most populated alignment; on ties prefer the farther-right
+        # candidate so a sparse homonym-number column does not become the anchor.
         return (sum(abs(other - value) <= _HEADWORD_CLUSTER_RADIUS for other in candidates), value)
 
     center = max(candidates, key=cluster_score)
     members = [value for value in candidates if abs(value - center) <= _HEADWORD_CLUSTER_RADIUS]
     headword_anchor = int(round(median(members))) if members else int(center)
-    leftmost_ink = min(candidates)
-    review_left = max(crop_left, min(headword_anchor - _HEADWORD_LEFT_PAD, leftmost_ink))
+    review_left = max(crop_left, headword_anchor - _HEADWORD_LEFT_PAD)
     cache[column] = review_left
     context.setdefault("review_headword_anchors", {})[column] = headword_anchor
     return review_left
@@ -190,19 +197,7 @@ def _effective_separator_page(
     left: int,
     right: int,
 ) -> int:
-    """Return a horizontal separator that agrees with current pixel ownership.
-
-    Exact glyph refinement may move a descender one or more pixels below the
-    provisional geometry. The one-row view then correctly contains the whole
-    glyph while a geometry-only three-row guide would appear to cut it. For the
-    diagnostic view, move the separator directly below the lowest pixel actually
-    owned by the upper row whenever that still leaves every lower-row owned pixel
-    below the separator.
-
-    If upper/lower ownership overlaps vertically, no single horizontal line can
-    represent the true per-pixel ownership. In that case keep the provisional
-    separator; the byte array remains authoritative.
-    """
+    """Return a horizontal separator that agrees with current pixel ownership."""
     rows = context["row_map"]["columns"][column]["rows"]
     upper = rows[upper_row_index]
     provisional = int(upper["page_bottom"])
@@ -252,22 +247,7 @@ def add_neighbor_row_raster(
     *,
     probe_y: int = 8,
 ) -> dict[str, Any]:
-    """Attach an unfiltered three-row source raster for diagnostics.
-
-    The one-row review is first rebased to one shared compact left edge per
-    column. That edge is 15 pixels before the estimated headword anchor and is
-    kept before all actual row ink, leaving room for superscript homonym digits.
-
-    The view shows one separator between adjacent physical rows. When exact
-    glyph ownership has rescued pixels across the provisional geometry, the
-    displayed separator follows that effective ownership whenever one horizontal
-    line can represent it. This keeps the three-row view consistent with the
-    owner-filtered one-row view.
-
-    Exact support baselines are also shown when known. For visual clarity the
-    support guide is drawn on the raster line immediately *below* the baseline
-    coordinate; the stored/matching baseline itself is unchanged.
-    """
+    """Attach an unfiltered three-row source raster for diagnostics."""
     state = _compact_review_state(context, state)
     page = context["page"]
     column = int(state["column"])
@@ -361,50 +341,62 @@ def add_neighbor_row_raster(
     return state
 
 
-# The page-byte-array editor imports this module after ocr_glyph_review_delete,
-# whose wrapper has already added review metadata to the item JSON. Add a final
-# presentation-only wrapper: labels sit immediately below their glyphs, while
-# residuals and unreviewed known glyphs use a deliberately vivid orange.
-try:
-    from . import ocr_review_row_glyphs_html as _legacy_editor
+def _decorate_review_html(original_render, state: dict, message: str = "") -> str:
+    """Place canvas labels under glyphs and make review-needed items vivid orange."""
+    document = original_render(state, message)
+    document = document.replace(
+        "const scale=7, topPad=34;",
+        "const scale=7, topPad=4, bottomPad=20;",
+        1,
+    )
+    document = document.replace(
+        "canvas.width=S.crop_width*scale;canvas.height=S.crop_height*scale+topPad;",
+        "canvas.width=S.crop_width*scale;canvas.height=S.crop_height*scale+topPad+bottomPad;",
+        1,
+    )
+    document = document.replace(
+        "if(it.kind!=='match') return '#c77b00';",
+        "if(it.kind!=='match' || it.reviewed===false) return '#ff5a00';",
+        1,
+    )
+    old_label = "ctx.fillStyle=on?'#1769d2':color;ctx.fillText(it.kind==='match'?it.label:'?',x,topPad-3);"
+    new_label = (
+        "ctx.fillStyle=on?'#1769d2':color;"
+        "const label=it.kind==='match'?it.label:'?';"
+        "const tw=ctx.measureText(label).width;"
+        "const wanted=x+w/2-tw/2;"
+        "const lx=Math.max(0,Math.min(canvas.width-tw,wanted));"
+        "const ly=Math.min(canvas.height-2,y+h+15);"
+        "ctx.fillText(label,lx,ly);"
+    )
+    if old_label not in document:
+        raise ValueError("could not find paint glyph canvas label renderer")
+    document = document.replace(old_label, new_label, 1)
+    style_needle = "</style></head><body>"
+    orange_css = (
+        "\n.chip.residual,.chip.match.needs-review{"
+        "border-color:#ff5a00!important;color:#d94700!important;"
+        "background:#fff0e8!important}\n"
+    )
+    if style_needle in document:
+        document = document.replace(style_needle, orange_css + style_needle, 1)
+    return document
 
-    _original_review_render_html = _legacy_editor.render_html
 
-    def _render_compact_labels(original_render, state: dict, message: str = "") -> str:
-        document = original_render(state, message)
-        document = document.replace(
-            "const S=", 
-            "const S=",
-            1,
-        )
-        document = document.replace(
-            "const scale=7, topPad=34;",
-            "const scale=7, topPad=4, bottomPad=18;",
-            1,
-        )
-        document = document.replace(
-            "canvas.width=S.crop_width*scale; canvas.height=S.crop_height*scale+topPad;",
-            "canvas.width=S.crop_width*scale; canvas.height=S.crop_height*scale+topPad+bottomPad;",
-            1,
-        )
-        document = document.replace(
-            "if(it.kind!=='match') return '#c77b00';",
-            "if(it.kind!=='match' || it.reviewed===false) return '#ff6500';",
-            1,
-        )
-        old_label = "ctx.fillStyle=on?'#1769d2':color;ctx.fillText(it.kind==='match'?it.label:'?',x,topPad-3);"
-        new_label = "ctx.fillStyle=on?'#1769d2':color;const label=it.kind==='match'?it.label:'?';const tw=ctx.measureText(label).width;const lx=Math.max(0,Math.min(canvas.width-tw,x+w/2-tw/2));const ly=Math.min(canvas.height-2,y+h+15);ctx.fillText(label,lx,ly);"
-        if old_label not in document:
-            raise ValueError("could not find glyph canvas label renderer")
-        document = document.replace(old_label, new_label, 1)
-        style_needle = "</style></head><body>"
-        orange_css = "\n.chip.residual,.chip.match.needs-review{border-color:#ff6500!important;color:#d94f00!important}\n"
-        if style_needle in document:
-            document = document.replace(style_needle, orange_css + style_needle, 1)
-        return document
+# ultrafast imports render_html_with_delete before importing this module. Replace
+# that already-bound global while ultrafast is still being imported, so the
+# actual paint editor used by the page-byte-array UI gets the decoration.
+_ultrafast = sys.modules.get("swedish_wordlist_tools.ocr_review_five_rows_glyphs_ultrafast_html")
+if _ultrafast is not None and hasattr(_ultrafast, "render_html_with_delete"):
+    _base_render_with_delete = _ultrafast.render_html_with_delete
 
-    _legacy_editor.render_html = (
-        lambda original: lambda state, message="": _render_compact_labels(original, state, message)
-    )(_original_review_render_html)
-except ImportError:
-    pass
+    def _render_with_delete_and_layout(original_render, state: dict, message: str = "") -> str:
+        return _decorate_review_html(
+            lambda current_state, current_message="": _base_render_with_delete(
+                original_render, current_state, current_message
+            ),
+            state,
+            message,
+        )
+
+    _ultrafast.render_html_with_delete = _render_with_delete_and_layout
