@@ -38,7 +38,7 @@ def build_page_context_pixel_array(jsonl, page_number: int, threshold: int = 210
     context["pixel_owners"] = owners
     context["ignored_black_rectangles"] = ignored_regions
     context["known_glyph_ownership_refinements"] = []
-    context["known_glyph_ownership_ready"] = False
+    context["known_glyph_ownership_done_pairs"] = set()
     context["known_glyph_ownership_lock"] = threading.Lock()
     counts = owners.counts()
     if ignored_regions:
@@ -57,28 +57,54 @@ def build_page_context_pixel_array(jsonl, page_number: int, threshold: int = 210
     return context
 
 
-def _ensure_known_glyph_ownership(context: dict, models) -> None:
-    """Run exact-glyph ownership refinement once, after facit is available."""
-    if context.get("known_glyph_ownership_ready"):
+def _neighbor_pairs(context: dict, position: tuple[int, int]) -> set[tuple[int, int]]:
+    column, row_index = position
+    columns = context["row_map"].get("columns") or []
+    if not 0 <= column < len(columns):
+        return set()
+    row_count = len(columns[column].get("rows") or [])
+    pairs: set[tuple[int, int]] = set()
+    if row_index > 0:
+        pairs.add((column, row_index - 1))
+    if row_index + 1 < row_count:
+        pairs.add((column, row_index))
+    return pairs
+
+
+def _ensure_known_glyph_ownership(context: dict, position: tuple[int, int], models) -> None:
+    """Refine only boundaries adjacent to the row currently being displayed.
+
+    The previous prototype analysed every boundary on the page on the first GET,
+    which made the browser appear to hang.  A five-row editor packet now causes
+    at most its nearby boundaries to be analysed, once each.
+    """
+    wanted = _neighbor_pairs(context, position)
+    if not wanted:
         return
     lock = context["known_glyph_ownership_lock"]
     with lock:
-        if context.get("known_glyph_ownership_ready"):
+        done = context["known_glyph_ownership_done_pairs"]
+        pending = wanted - done
+        if not pending:
             return
-        changes = refine_known_glyph_ownership(
-            context["page"],
-            context["row_map"],
-            context["pixel_owners"],
-            models,
-            threshold=context["threshold"],
-        )
-        context["known_glyph_ownership_refinements"] = changes
-        context["known_glyph_ownership_ready"] = True
-        if changes:
+        # Mark them before doing the expensive work. The lock is held while the
+        # shared ownership array changes, so parallel row loaders cannot observe
+        # half-applied corrections.
+        done.update(pending)
+        for pair in sorted(pending):
             print(
-                f"review: exakt glyphägande korrigerade {len(changes)} sammanvuxna radpar",
+                f"review: analyserar glyphägande vid gräns c{pair[0]} r{pair[1]}/r{pair[1] + 1} ...",
                 flush=True,
             )
+            changes = refine_known_glyph_ownership(
+                context["page"],
+                context["row_map"],
+                context["pixel_owners"],
+                models,
+                threshold=context["threshold"],
+                pairs={pair},
+            )
+            context["known_glyph_ownership_refinements"].extend(changes)
             for change in changes:
                 print(
                     "review: glyphägande "
@@ -92,7 +118,7 @@ def _ensure_known_glyph_ownership(context: dict, models) -> None:
 
 
 def load_review_state_pixel_array(context: dict, position: tuple[int, int], models) -> dict:
-    _ensure_known_glyph_ownership(context, models)
+    _ensure_known_glyph_ownership(context, position, models)
 
     column, row_index = position
     page = context["page"]
@@ -116,8 +142,6 @@ def load_review_state_pixel_array(context: dict, position: tuple[int, int], mode
         left_override=content_left,
     )
 
-    # The padded rectangle is only a viewport.  Ownership comes from the global
-    # byte array, including exact-glyph corrections for touching row pairs.
     crop = owners.render_owner_crop(row_index=row_index, box=box)
     crop, trimmed_left = fast.legacy._trim_leading_white_columns(crop, threshold=threshold, keep=2)
     if trimmed_left:
@@ -189,19 +213,15 @@ def load_review_state_pixel_array(context: dict, position: tuple[int, int], mode
         "known_glyph_ownership_refinements": context.get("known_glyph_ownership_refinements") or [],
     }
 
-    # Keep the old editor's three-row view as an *unfiltered* diagnostic view of
-    # the source PNG.  It never feeds pixels back into the matcher or ownership.
     return add_neighbor_row_raster(context, state, probe_y=8)
 
 
 def main() -> int:
-    # Importing ULTRAFAST above installs its mature editor decorations: the
-    # three-row checkbox and diagnostic-copy button.  Replace only page setup and
-    # row raster production so those controls also work in byte-array mode.
     fast.build_page_context = build_page_context_pixel_array
     fast.load_review_state_fast = load_review_state_pixel_array
     print("review: BYTE-ARRAY använder sidglobalt pixelägande; ingen grannpixel kan läcka via crop-padding", flush=True)
     print("review: kända exakta glyphar får korrigera pixelägande över geometriska radgränser", flush=True)
+    print("review: glyphägande analyseras bara lokalt runt rader som faktiskt visas", flush=True)
     print("review: stora täta svarta bokstavsrektanglar maskas helt före radägande", flush=True)
     print("review: Visa tre rader och Kopiera diagnostik + raster är åter aktiva som ofiltrerad debug", flush=True)
     return fast.main()
