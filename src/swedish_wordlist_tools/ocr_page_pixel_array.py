@@ -50,6 +50,98 @@ class PagePixelArray:
     def value(self, x: int, y: int) -> int:
         return self.data[self._offset(x, y)]
 
+    def mask_dense_black_rectangles(
+        self,
+        *,
+        min_width: int = 24,
+        min_height: int = 24,
+        min_ink_pixels: int = 1000,
+        min_density: float = 0.55,
+    ) -> list[dict]:
+        """Remove large dense black rectangular ornaments from text accounting.
+
+        SAOL uses a black section-letter rectangle containing white upper/lower
+        case letters.  The black background is one large connected component;
+        normal glyphs and rules are either much smaller or too thin.  For every
+        qualifying component, the *entire bounding rectangle* is set to WHITE,
+        so neither its black background nor anything inside the ornament can be
+        counted as body-text ink later.
+        """
+        seen = bytearray(self.width * self.height)
+        regions: list[dict] = []
+
+        for seed in range(len(self.data)):
+            if seen[seed] or self.data[seed] != UNASSIGNED_INK:
+                continue
+            stack = [seed]
+            seen[seed] = 1
+            pixels = 0
+            min_x = max_x = seed % self.width
+            min_y = max_y = seed // self.width
+
+            while stack:
+                offset = stack.pop()
+                pixels += 1
+                x = offset % self.width
+                y = offset // self.width
+                min_x = min(min_x, x)
+                max_x = max(max_x, x)
+                min_y = min(min_y, y)
+                max_y = max(max_y, y)
+
+                if x > 0:
+                    neighbor = offset - 1
+                    if not seen[neighbor] and self.data[neighbor] == UNASSIGNED_INK:
+                        seen[neighbor] = 1
+                        stack.append(neighbor)
+                if x + 1 < self.width:
+                    neighbor = offset + 1
+                    if not seen[neighbor] and self.data[neighbor] == UNASSIGNED_INK:
+                        seen[neighbor] = 1
+                        stack.append(neighbor)
+                if y > 0:
+                    neighbor = offset - self.width
+                    if not seen[neighbor] and self.data[neighbor] == UNASSIGNED_INK:
+                        seen[neighbor] = 1
+                        stack.append(neighbor)
+                if y + 1 < self.height:
+                    neighbor = offset + self.width
+                    if not seen[neighbor] and self.data[neighbor] == UNASSIGNED_INK:
+                        seen[neighbor] = 1
+                        stack.append(neighbor)
+
+            width = max_x - min_x + 1
+            height = max_y - min_y + 1
+            area = width * height
+            density = pixels / area
+            if (
+                width < min_width
+                or height < min_height
+                or pixels < min_ink_pixels
+                or density < min_density
+            ):
+                continue
+
+            black_before = 0
+            for y in range(min_y, max_y + 1):
+                start = y * self.width + min_x
+                end = y * self.width + max_x + 1
+                for offset in range(start, end):
+                    if self.data[offset] != WHITE:
+                        black_before += 1
+                    self.data[offset] = WHITE
+
+            regions.append(
+                {
+                    "box": (min_x, min_y, max_x + 1, max_y + 1),
+                    "component_ink_pixels": pixels,
+                    "masked_ink_pixels": black_before,
+                    "density": density,
+                }
+            )
+
+        return regions
+
     def assign_row_map(self, row_map: dict) -> int:
         """Assign currently-unassigned ink by the row map's exact geometry.
 
