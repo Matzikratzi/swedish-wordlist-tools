@@ -44,10 +44,10 @@ class RefineKnownGlyphOwnershipTests(unittest.TestCase):
             for x, y in model.pixels:
                 page.putpixel((x0 + x, baseline + y), 0)
 
-        draw(models[0], 2, 10)   # upper-row baseline evidence
-        draw(models[1], 8, 10)   # g descends through y=12
-        draw(models[2], 10, 18)  # b ascends above y=12 and touches g
-        draw(models[3], 20, 18)  # lower-row baseline evidence
+        draw(models[0], 2, 10)
+        draw(models[1], 8, 10)
+        draw(models[2], 10, 18)
+        draw(models[3], 20, 18)
 
         row_map = {
             "columns": [
@@ -68,8 +68,8 @@ class RefineKnownGlyphOwnershipTests(unittest.TestCase):
 
         upper = PagePixelArray.row_code(0)
         lower = PagePixelArray.row_code(1)
-        self.assertEqual(owners.value(9, 12), lower)  # g wrongly below cut
-        self.assertEqual(owners.value(10, 10), upper)  # b wrongly above cut
+        self.assertEqual(owners.value(9, 12), lower)
+        self.assertEqual(owners.value(10, 10), upper)
         self.assertEqual(owners.value(10, 11), upper)
 
         changes = refine_known_glyph_ownership(page, row_map, owners, models)
@@ -83,7 +83,7 @@ class RefineKnownGlyphOwnershipTests(unittest.TestCase):
         self.assertEqual(owners.value(10, 10), lower)
         self.assertEqual(owners.value(10, 11), lower)
 
-    def test_isolated_known_descender_needs_no_lower_boundary_match(self):
+    def test_known_descender_claims_needed_pixel_without_manhattan_guard(self):
         page = Image.new("L", (34, 28), 255)
         upper_anchor = GlyphModel(
             "A",
@@ -110,8 +110,9 @@ class RefineKnownGlyphOwnershipTests(unittest.TestCase):
                 page.putpixel((x0 + x, baseline + y), 0)
 
         draw(upper_anchor, 2, 10)
-        draw(known_j, 8, 10)       # lowest j pixel is at (9, 12), below the cut
-        draw(lower_anchor, 24, 24) # real lower-row text is far away
+        draw(known_j, 8, 10)       # lowest j pixel is (9, 12), below the cut
+        page.putpixel((10, 12), 0) # unrelated lower-row ink only Manhattan 1 away
+        draw(lower_anchor, 24, 24)
 
         row_map = {
             "columns": [
@@ -132,16 +133,17 @@ class RefineKnownGlyphOwnershipTests(unittest.TestCase):
         upper = PagePixelArray.row_code(0)
         lower = PagePixelArray.row_code(1)
         self.assertEqual(owners.value(9, 12), lower)
+        self.assertEqual(owners.value(10, 12), lower)
 
         changes = refine_known_glyph_ownership(page, row_map, owners, models)
 
         self.assertEqual(len(changes), 1)
-        self.assertEqual(changes[0]["evidence_mode"], "upper-only-exact-isolated")
+        self.assertEqual(changes[0]["evidence_mode"], "upper-only-exact")
         self.assertEqual(changes[0]["upper_labels"], "j")
         self.assertEqual(changes[0]["lower_labels"], "")
-        self.assertGreaterEqual(changes[0]["one_sided_manhattan"], 6)
         self.assertEqual(changes[0]["moved_to_upper"], 1)
         self.assertEqual(owners.value(9, 12), upper)
+        self.assertEqual(owners.value(10, 12), lower)
 
 
 if __name__ == "__main__":
