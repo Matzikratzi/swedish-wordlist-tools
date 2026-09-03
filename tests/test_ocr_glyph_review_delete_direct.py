@@ -39,21 +39,10 @@ class GlyphReviewDirectDeleteTest(unittest.TestCase):
         self.assertIn("form.requestSubmit(deleteSubmit)", html)
         self.assertIn("if(it.kind!=='match') continue", html)
 
-    def test_direct_delete_form_removes_exact_model(self):
+    def _delete_one(self, payload):
         points = {(3, 7), (4, 7), (3, 8)}
         baseline = 8
-        normalized = [[0, -1], [0, 0], [1, -1]]
         match = SimpleNamespace(label="o", style="unknown", pixels=points, baseline=baseline)
-        payload = {
-            "glyphs": [
-                {
-                    "label": "o",
-                    "style": "unknown",
-                    "pixels_relative_to_baseline": normalized,
-                    "sources": [],
-                }
-            ]
-        }
         state = {"matches": [match]}
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -69,6 +58,28 @@ class GlyphReviewDirectDeleteTest(unittest.TestCase):
 
         self.assertEqual([], saved["glyphs"])
         self.assertIn("raderad glyphmodell", message)
+
+    def test_direct_delete_form_removes_exact_v1_model(self):
+        self._delete_one({
+            "format": "saol14-manual-glyph-facit-v1",
+            "glyphs": [{
+                "label": "o",
+                "style": "unknown",
+                "pixels_relative_to_baseline": [[0, -1], [0, 0], [1, -1]],
+                "sources": [],
+            }],
+        })
+
+    def test_direct_delete_form_removes_exact_v2_model_by_role(self):
+        self._delete_one({
+            "format": "saol14-manual-glyph-facit-v2",
+            "glyphs": [{
+                "label": "o",
+                "role": "unknown",
+                "pixels_relative_to_baseline": [[0, -1], [0, 0], [1, -1]],
+                "sources": [],
+            }],
+        })
 
 
 if __name__ == "__main__":
