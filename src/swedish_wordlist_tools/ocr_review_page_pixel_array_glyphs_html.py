@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Glyph review backed by one page-wide byte ownership array."""
 
+import sys
 import threading
 import time
 
@@ -15,6 +16,40 @@ fast = ultrafast.fast
 _current_pixel_context: dict | None = None
 
 
+class _ElapsedStdout:
+    """Prefix every editor stdout line with time elapsed since process startup."""
+
+    def __init__(self, stream, started: float):
+        self.stream = stream
+        self.started = started
+        self.at_line_start = True
+        self.lock = threading.Lock()
+
+    def write(self, text: str) -> int:
+        if not text:
+            return 0
+        with self.lock:
+            for part in text.splitlines(keepends=True):
+                if self.at_line_start:
+                    self.stream.write(f"[+{time.perf_counter() - self.started:8.3f}s] ")
+                    self.at_line_start = False
+                self.stream.write(part)
+                if part.endswith("\n") or part.endswith("\r"):
+                    self.at_line_start = True
+        return len(text)
+
+    def flush(self) -> None:
+        with self.lock:
+            self.stream.flush()
+
+    def isatty(self) -> bool:
+        return bool(getattr(self.stream, "isatty", lambda: False)())
+
+    @property
+    def encoding(self):
+        return getattr(self.stream, "encoding", None)
+
+
 def _timed(label: str, started: float) -> None:
     print(f"review: tid {label}: {time.perf_counter() - started:.3f} s", flush=True)
 
@@ -26,8 +61,6 @@ def build_page_context_pixel_array(jsonl, page_number: int, threshold: int = 210
     print(f"review: laddar sida {page_number} och segmenterar geometri en gång ...", flush=True)
 
     started = time.perf_counter()
-    # read_jsonl is a generator and source_for_page returns immediately on the
-    # first exact SAOL14_XXXXX.png hit.  Do not materialise the complete JSONL.
     source = fast.source_for_page(fast.read_jsonl(jsonl), page_number)
     _timed("JSONL -> sidkälla", started)
     if not source:
@@ -196,7 +229,8 @@ def _ensure_known_glyph_ownership(context: dict, pairs: set[tuple[int, int]], mo
                     f"y={change['boundary']} "
                     f"övre={change['upper_labels']!r} undre={change['lower_labels']!r} "
                     f"flyttade={change['moved_to_upper']}/{change['moved_to_lower']} "
-                    f"konflikt={change['conflict_pixels']}",
+                    f"konflikt={change['conflict_pixels']} "
+                    f"brygg-x={change.get('bridge_x_pixels', '?')}",
                     flush=True,
                 )
     return changed_any
@@ -224,8 +258,6 @@ def _load_owned_row_state(context: dict, position: tuple[int, int], models) -> d
         left_override=content_left,
     )
 
-    # Snapshot the owner-filtered crop under the same short lock used for owner
-    # mutation.  Exact matching itself runs outside the lock and stays parallel.
     with context["known_glyph_ownership_lock"]:
         owner_revision = int(context.get("pixel_owner_revision") or 0)
         crop = owners.render_owner_crop(row_index=row_index, box=box)
@@ -298,9 +330,6 @@ def load_review_state_pixel_array(context: dict, position: tuple[int, int], mode
     return add_neighbor_row_raster(context, state, probe_y=8)
 
 
-# The five-row cache can compute neighbouring rows concurrently.  Ownership can
-# change while those futures are running, so reject states produced from an old
-# page-ownership revision before the packet is rendered.
 _original_cache_get_many = fast.SynchronizedStateCache.get_many
 
 
@@ -323,7 +352,56 @@ def _get_many_owner_revision_safe(self, positions):
 fast.SynchronizedStateCache.get_many = _get_many_owner_revision_safe
 
 
-# ULTRAFAST's renderer paints all guides red.  Keep its UI but make support
+# This editor only needs the active row plus two rows ahead.  Ownership repair
+# itself can still inspect the row above through the page-wide ownership array;
+# that row does not need a separately rendered/analyzed card.
+_original_packet_positions = fast.ui.packet_positions
+_original_defect_packet = fast.ui.defect_packet
+_original_packet_render = fast.ui.render_five_row_html
+
+
+def _three_forward_positions(positions, current, size=3):
+    if current not in positions:
+        raise ValueError(f"row {current} is not present on page")
+    start = positions.index(current)
+    return positions[start : start + 3]
+
+
+def _three_defect_packet(positions, anchor, state_for, *, direction=1, size=3):
+    return _original_defect_packet(
+        positions,
+        anchor,
+        state_for,
+        direction=direction,
+        size=3,
+    )
+
+
+def _render_three_row_packet(states, active_position, all_positions, message="", *, mode="all", anchor=None):
+    document = _original_packet_render(
+        states,
+        active_position,
+        all_positions,
+        message,
+        mode=mode,
+        anchor=anchor,
+    )
+    return (
+        document
+        .replace("repeat(5,minmax(145px,1fr))", "repeat(3,minmax(145px,1fr))")
+        .replace("← Fem föregående", "← Tre föregående")
+        .replace("Fem nästa →", "Tre nästa →")
+        .replace("Byte mellan de fem", "Byte mellan de tre")
+    )
+
+
+fast.ui.PACKET_SIZE = 3
+fast.ui.packet_positions = _three_forward_positions
+fast.ui.defect_packet = _three_defect_packet
+fast.ui.render_five_row_html = _render_three_row_packet
+
+
+# ULTRAFAST's renderer paints all guides red. Keep its UI but make support
 # lines blue and persist the three-row checkbox across normal row navigation.
 _original_editor_render_html = fast.ui.editor.render_html
 
@@ -373,12 +451,18 @@ fast.ui.editor.render_html = _render_html_with_blue_support_lines
 
 
 def main() -> int:
+    run_started = time.perf_counter()
+    if not isinstance(sys.stdout, _ElapsedStdout):
+        sys.stdout = _ElapsedStdout(sys.stdout, run_started)
     fast.build_page_context = build_page_context_pixel_array
     fast.load_review_state_fast = load_review_state_pixel_array
     print("review: BYTE-ARRAY använder en sidglobal raster; PNG/threshold görs en gång", flush=True)
+    print("review: varje loggrad har relativ tidsstämpel från editorstart", flush=True)
+    print("review: visar/analyserar aktuell rad plus högst två rader framåt", flush=True)
+    print("review: glyphägande delas vid säkra vita x-gap och matchar bara grupper med gränsbrygga", flush=True)
     print("review: JSONL-sidkälla söks strömmande och starttider loggas per steg", flush=True)
     print("review: normal rad analyseras först; exakt rad triggar aldrig två-raders glyphägande", flush=True)
-    print("review: pixelägande revisionsmärks så parallella femradersresultat inte kan bli stale", flush=True)
+    print("review: pixelägande revisionsmärks så parallella radresultat inte kan bli stale", flush=True)
     print("review: Visa tre rader sparas i webbläsaren mellan radbyten", flush=True)
     print("review: stödlinjer visas en pixel under baseline och alltid i blått", flush=True)
     print("review: stora täta svarta bokstavsrektanglar maskas helt före radägande", flush=True)
