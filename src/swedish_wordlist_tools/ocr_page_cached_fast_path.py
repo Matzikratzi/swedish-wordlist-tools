@@ -21,12 +21,11 @@ _Prepared = tuple[GlyphModel, int, tuple[tuple[int, int], ...]]
 
 # Experimental fixed prefix learned from the 1-10 page observation run.
 # Values are 1-based ranks in the canonical bucket order, not labels, so
-# different exact rasters with the same label remain distinct.  Roman is
-# intentionally absent: its top-12 detail line was not available in the
-# captured benchmark output used for this experiment.
+# different exact rasters with the same label remain distinct.
 _POPULAR_CANONICAL_RANKS: dict[str, tuple[int, ...]] = {
     "homonym": (14, 19, 1, 22, 20, 3, 18, 2, 11, 21, 4, 7),
     "bold": (72, 31, 67, 43, 41, 59, 50, 34, 42, 22, 69, 40),
+    "roman": (155, 83, 95, 60, 119, 140, 103, 105, 113, 124, 104, 136),
     "italic": (109, 83, 54, 60, 105, 85, 27, 89, 101, 113, 71, 77),
 }
 
