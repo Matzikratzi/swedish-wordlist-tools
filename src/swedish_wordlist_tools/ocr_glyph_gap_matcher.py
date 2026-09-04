@@ -75,6 +75,118 @@ def _shift_match(match: Match, dx: int) -> Match:
     )
 
 
+def fast_exact_cover(
+    ink: set[tuple[int, int]],
+    width: int,
+    height: int,
+    models: Iterable[GlyphModel],
+    *,
+    max_states: int = 20000,
+) -> tuple[int, list[Match], int] | None:
+    """Find a complete exact cover without sliding every model across the row.
+
+    The leftmost uncovered source pixel proves the horizontal placement of the
+    next glyph: a disjoint exact cover cannot contain a new glyph with ink to
+    its left.  We therefore anchor each candidate model's leftmost ink column
+    at that x coordinate and only try baselines implied by pixels in that model
+    column.  Internal blank columns (for example in a bold ``k``) are irrelevant
+    and remain fully supported.
+
+    This is deliberately only a fast *success* path.  It returns a result only
+    when every source pixel is covered exactly by non-overlapping learned glyphs
+    on one baseline.  If search becomes ambiguous/large, or a piecewise baseline
+    is needed, the caller falls back to the existing exhaustive matcher.
+    """
+    if not ink:
+        return None
+
+    model_rows = [model for model in models if model.pixels]
+    prepared: list[tuple[GlyphModel, int, tuple[tuple[int, int], ...]]] = []
+    for model in model_rows:
+        min_x = min(x for x, _y in model.pixels)
+        left_pixels = tuple(sorted((x, y) for x, y in model.pixels if x == min_x))
+        prepared.append((model, min_x, left_pixels))
+
+    # Prefer strong, information-rich models first so ordinary exact rows finish
+    # without exploring alternative partitions.  The exhaustive fallback remains
+    # authoritative whenever this bounded search does not find a complete cover.
+    prepared.sort(
+        key=lambda row: (
+            -len(row[0].pixels),
+            -int(row[0].sources),
+            row[0].label,
+            row[0].style,
+        )
+    )
+
+    target = frozenset(ink)
+    failed: set[tuple[frozenset[tuple[int, int]], int | None]] = set()
+    states = 0
+    placements_tested = 0
+
+    def search(
+        remaining: frozenset[tuple[int, int]],
+        baseline: int | None,
+    ) -> tuple[Match, ...] | None:
+        nonlocal states, placements_tested
+        if not remaining:
+            return ()
+        state = (remaining, baseline)
+        if state in failed:
+            return None
+        states += 1
+        if states > max_states:
+            return None
+
+        anchor_x = min(x for x, _y in remaining)
+        anchor_y = min(y for x, y in remaining if x == anchor_x)
+
+        for model, min_x, left_pixels in prepared:
+            x0 = anchor_x - min_x
+            if x0 < 0 or x0 + model.width > width:
+                continue
+            for _mx, my in left_pixels:
+                candidate_baseline = anchor_y - my
+                if baseline is not None and candidate_baseline != baseline:
+                    continue
+                if candidate_baseline < -model.min_y:
+                    continue
+                if candidate_baseline > height - 1 - model.max_y:
+                    continue
+                placements_tested += 1
+                placed = frozenset(
+                    (x0 + x, candidate_baseline + y)
+                    for x, y in model.pixels
+                )
+                if not placed.issubset(remaining):
+                    continue
+                match = Match(
+                    label=model.label,
+                    style=model.style,
+                    x=x0,
+                    baseline=candidate_baseline,
+                    pixels=placed,
+                    model_pixels=len(model.pixels),
+                    sources=model.sources,
+                )
+                tail = search(
+                    frozenset(remaining.difference(placed)),
+                    candidate_baseline if baseline is None else baseline,
+                )
+                if tail is not None:
+                    return (match,) + tail
+
+        failed.add(state)
+        return None
+
+    chosen = search(target, None)
+    if chosen is None:
+        return None
+    selected = sorted(chosen, key=lambda match: (match.x, match.baseline, match.label, match.style))
+    baseline = selected[0].baseline
+    return baseline, selected, placements_tested
+
+
 def _drop_partial_component_matches(
     selected: Iterable[Match],
     ink: set[tuple[int, int]],
