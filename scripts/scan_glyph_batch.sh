@@ -35,6 +35,11 @@ PYTHONPATH="${PYTHONPATH:-src}" python -m swedish_wordlist_tools.ocr_find_unrevi
             }
             next
         }
+        /^scan: page [0-9]+: [0-9]+ rows need work \/ [0-9]+ rows / {
+            print
+            fflush()
+            next
+        }
         /^page [0-9]+ column [0-9]+ row [0-9]+:/ {
             print
             fflush()
