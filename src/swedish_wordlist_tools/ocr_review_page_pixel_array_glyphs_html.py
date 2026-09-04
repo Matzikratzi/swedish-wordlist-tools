@@ -139,7 +139,7 @@ def _minimum_manhattan(a: set[tuple[int, int]], b: set[tuple[int, int]]) -> int 
 
 
 def _isolated_above_lower_row(context: dict, column: int, candidate: dict, *, min_distance: int = _AUTO_ROW_MANHATTAN_GAP) -> dict | None:
-    """Prove that a cross-separator component is isolated above the next row's ink."""
+    """Detect a cross-separator component isolated above the next row's other ink."""
     upper = int(candidate["upper_row"]); lower = int(candidate["lower_row"])
     if int(candidate.get("upper_owned") or 0) <= 0 or int(candidate.get("lower_owned") or 0) <= 0:
         return None
@@ -176,35 +176,41 @@ def _isolated_above_lower_row(context: dict, column: int, candidate: dict, *, mi
 
 
 def _auto_assign_isolated_descenders(context: dict, state: dict) -> list[dict]:
-    """Move an isolated cross-boundary component to the upper row without asking."""
+    """Keep Manhattan-isolated cross-row components ambiguous.
+
+    Manhattan distance can prove that a split component is isolated from the
+    lower row's other ink, but it cannot prove whether that component is an
+    upper-row descender or a lower-row superscript/ascender.  Exact facit
+    ownership may decide the row; otherwise the existing manual two-row choice
+    must remain available.  In particular, never rewrite the page ownership
+    array from Manhattan distance alone.
+    """
     column = int(state["column"]); row_index = int(state["row"])
-    records: list[dict] = []
-    candidates = _original_manual_two_row_candidates(context, state)
-    owners = context["pixel_owners"]
-    for candidate in candidates:
+    for candidate in _original_manual_two_row_candidates(context, state):
         if int(candidate["upper_row"]) != row_index:
             continue
         proof = _isolated_above_lower_row(context, column, candidate)
         if proof is None:
             continue
-        target_code = owners.row_code(row_index)
-        changed = 0
-        with context["known_glyph_ownership_lock"]:
-            for x, y in candidate["component_pixels"]:
-                offset = int(y) * owners.width + int(x)
-                if owners.data[offset] != target_code:
-                    owners.data[offset] = target_code; changed += 1
-            if changed:
-                context["pixel_owner_revision"] = int(context.get("pixel_owner_revision") or 0) + 1
-                revisions = context["pixel_owner_row_revisions"]
-                for position in ((column, int(candidate["upper_row"])), (column, int(candidate["lower_row"]))):
-                    revisions[position] = int(revisions.get(position, 0)) + 1
-        if changed:
-            record = {"column": column, "upper_row": int(candidate["upper_row"]), "lower_row": int(candidate["lower_row"]), "pixels": int(candidate["pixels"]), "changed": changed, **proof}
-            records.append(record); context.setdefault("auto_two_row_ownership", []).append(record)
+        record = {
+            "column": column,
+            "upper_row": int(candidate["upper_row"]),
+            "lower_row": int(candidate["lower_row"]),
+            "pixels": int(candidate["pixels"]),
+            "decision": "ambiguous-manhattan-only",
+            **proof,
+        }
+        bucket = context.setdefault("ambiguous_two_row_ownership", [])
+        if record not in bucket:
+            bucket.append(record)
             if _ownership_success_logging(context):
-                print(f"review: automatisk radägare c{column} r{candidate['upper_row']}/{candidate['lower_row']}: isolerad övre komponent {candidate['pixels']} px, Manhattan={proof['min_manhattan_distance']} → rad {candidate['upper_row']}", flush=True)
-    return records
+                print(
+                    f"review: oklar radägare c{column} r{candidate['upper_row']}/{candidate['lower_row']}: "
+                    f"isolerad tvåradskomponent {candidate['pixels']} px, "
+                    f"Manhattan={proof['min_manhattan_distance']}; ingen automatisk flytt",
+                    flush=True,
+                )
+    return []
 
 
 def _ambiguous_manual_two_row_candidates(context: dict, state: dict) -> list[dict]:
@@ -327,7 +333,7 @@ def main()->int:
     print("review: glyphägande delas vid säkra vita x-gap och matchar bara grupper med gränsbrygga",flush=True)
     print("review: JSONL-sidkälla söks strömmande och starttider loggas per steg",flush=True)
     print("review: normal rad analyseras först; exakt rad triggar aldrig två-raders glyphägande",flush=True)
-    print("review: isolerad komponent ovanför nästa rads bläck autoägs av övre raden vid Manhattan-avstånd >= 6",flush=True)
+    print("review: Manhattan-avstånd används bara som varning; det får aldrig ensamt välja radägare",flush=True)
     print("review: pixelägande revisionsmärks per rad så andra cachade rader förblir giltiga",flush=True)
     print("review: Visa tre rader sparas i webbläsaren mellan radbyten",flush=True)
     print("review: stödlinjer visas en pixel under baseline och alltid i blått",flush=True)
