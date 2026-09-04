@@ -2,20 +2,21 @@ from __future__ import annotations
 
 """Page-scoped preparation for the prioritized exact glyph fast path.
 
-The facit models do not change while one page is being analysed.  Preparing
-model geometry, typography buckets and raster groups once per physical page
-therefore avoids repeating the same work for every row while preserving the
-existing result-neutral candidate ordering.
+The facit does not change while one page is analysed. Prepare model geometry,
+typography buckets and raster grouping once per page, then let the recursive
+search iterate those immutable buckets directly. No candidate order is built
+inside ordinary row analysis.
 """
 
 from dataclasses import dataclass
 from typing import Iterable
 
-from .ocr_glyph_matcher import GlyphModel, Match
 from . import ocr_priority_fast_path as priority
+from .ocr_glyph_matcher import GlyphModel, Match
 
 
 _CONTEXT_KEY = "_priority_page_candidates"
+_Prepared = tuple[GlyphModel, int, tuple[tuple[int, int], ...]]
 
 
 @dataclass(frozen=True)
@@ -24,12 +25,13 @@ class _PageCandidates:
     model_count: int
     first_model_id: int | None
     last_model_id: int | None
-    homonym: tuple[tuple[GlyphModel, int, tuple[tuple[int, int], ...]], ...]
-    bold: tuple[tuple[GlyphModel, int, tuple[tuple[int, int], ...]], ...]
-    roman: tuple[tuple[GlyphModel, int, tuple[tuple[int, int], ...]], ...]
-    italic: tuple[tuple[GlyphModel, int, tuple[tuple[int, int], ...]], ...]
-    other: tuple[tuple[GlyphModel, int, tuple[tuple[int, int], ...]], ...]
-    orders: object
+    homonym: tuple[_Prepared, ...]
+    bold: tuple[_Prepared, ...]
+    roman: tuple[_Prepared, ...]
+    italic: tuple[_Prepared, ...]
+    other: tuple[_Prepared, ...]
+    cross_bucket_raster: bool
+    fallback_orders: object
 
 
 def _model_signature(models) -> tuple[int, int, int | None, int | None]:
@@ -45,18 +47,49 @@ def _model_signature(models) -> tuple[int, int, int | None, int | None]:
         return id(models), count, None, None
 
 
+def _bucket_name(model: GlyphModel) -> str:
+    if priority._is_homonym_model(model):
+        return "homonym"
+    typography = priority._typographic_style(model.style)
+    return typography if typography in {"bold", "roman", "italic"} else "other"
+
+
+def _canonicalize_bucket(rows: list[_Prepared]) -> tuple[_Prepared, ...]:
+    """Keep exact-raster models contiguous in the old canonical order."""
+    groups: dict[tuple[tuple[int, int], ...], list[_Prepared]] = {}
+    for row in rows:
+        groups.setdefault(priority._raster_key(row[0]), []).append(row)
+
+    compiled = []
+    for raster, group_rows in groups.items():
+        canonical_rows = tuple(
+            sorted(group_rows, key=lambda row: priority._canonical_model_key(row[0]))
+        )
+        compiled.append(
+            (
+                priority._canonical_model_key(canonical_rows[0][0]),
+                raster,
+                canonical_rows,
+            )
+        )
+    compiled.sort(key=lambda item: (item[0], item[1]))
+    return tuple(row for _canonical, _raster, group_rows in compiled for row in group_rows)
+
+
 def _build_page_candidates(models: Iterable[GlyphModel]) -> _PageCandidates:
     if not hasattr(models, "__len__") or not hasattr(models, "__getitem__"):
         models = tuple(models)
 
-    buckets: dict[str, list[tuple[GlyphModel, int, tuple[tuple[int, int], ...]]]] = {
+    raw_buckets: dict[str, list[_Prepared]] = {
         "homonym": [],
         "bold": [],
         "roman": [],
         "italic": [],
         "other": [],
     }
-    prepared: list[tuple[GlyphModel, int, tuple[tuple[int, int], ...]]] = []
+    prepared: list[_Prepared] = []
+    raster_buckets: dict[tuple[tuple[int, int], ...], set[str]] = {}
+
     for model in models:
         if not model.pixels:
             continue
@@ -64,25 +97,25 @@ def _build_page_candidates(models: Iterable[GlyphModel]) -> _PageCandidates:
         left_pixels = tuple(sorted((x, y) for x, y in model.pixels if x == min_x))
         row = (model, min_x, left_pixels)
         prepared.append(row)
-        if priority._is_homonym_model(model):
-            bucket = "homonym"
-        else:
-            typography = priority._typographic_style(model.style)
-            bucket = typography if typography in {"bold", "roman", "italic"} else "other"
-        buckets[bucket].append(row)
+        bucket = _bucket_name(model)
+        raw_buckets[bucket].append(row)
+        raster_buckets.setdefault(priority._raster_key(model), set()).add(bucket)
 
+    buckets = {name: _canonicalize_bucket(rows) for name, rows in raw_buckets.items()}
+    cross_bucket_raster = any(len(names) > 1 for names in raster_buckets.values())
     models_id, model_count, first_model_id, last_model_id = _model_signature(models)
     return _PageCandidates(
         models_id=models_id,
         model_count=model_count,
         first_model_id=first_model_id,
         last_model_id=last_model_id,
-        homonym=tuple(buckets["homonym"]),
-        bold=tuple(buckets["bold"]),
-        roman=tuple(buckets["roman"]),
-        italic=tuple(buckets["italic"]),
-        other=tuple(buckets["other"]),
-        orders=priority._PreparedCandidateOrders(prepared),
+        homonym=buckets["homonym"],
+        bold=buckets["bold"],
+        roman=buckets["roman"],
+        italic=buckets["italic"],
+        other=buckets["other"],
+        cross_bucket_raster=cross_bucket_raster,
+        fallback_orders=priority._PreparedCandidateOrders(prepared),
     )
 
 
@@ -107,6 +140,7 @@ def bind_page_candidates(context: dict, models: Iterable[GlyphModel]) -> _PageCa
             "italic": len(cached.italic),
             "other": len(cached.other),
         }
+        context["priority_cross_bucket_raster"] = cached.cross_bucket_raster
     priority._tls.page_candidates = cached
     return cached
 
@@ -121,10 +155,84 @@ def _bound_page_candidates(models: Iterable[GlyphModel]) -> _PageCandidates:
         cached.last_model_id,
     ) == signature:
         return cached
-    # Direct callers outside the shared page loader retain the old behaviour:
-    # they get a private preparation rather than accidentally reusing stale page
-    # state from some previous call.
     return _build_page_candidates(models)
+
+
+def _bucket_sequence(
+    candidates: _PageCandidates,
+    *,
+    first_glyph: bool,
+    previous_style: str | None,
+    row_kind: str,
+    leading_homonym_seen: bool,
+    baseline_established: bool,
+) -> tuple[tuple[_Prepared, ...], ...]:
+    """Return references to page buckets only; never concatenate or sort them."""
+    h = candidates.homonym
+    b = candidates.bold
+    r = candidates.roman
+    i = candidates.italic
+    o = candidates.other
+
+    if first_glyph:
+        if row_kind == "homonym":
+            return (h, b, r, i, o)
+        if row_kind == "headword":
+            return (b, r, i, o, h)
+        if row_kind == "continuation":
+            return (r, i, o, h, b)
+        return (r, i, o, b, h)
+
+    if row_kind == "homonym" and leading_homonym_seen and not baseline_established:
+        return (b, r, i, o, h)
+
+    if previous_style == "bold":
+        return (b, r, i, o, h)
+    if previous_style == "italic":
+        if row_kind == "continuation":
+            return (i, r, o, h, b)
+        return (i, r, o, b, h)
+    if previous_style == "roman":
+        if row_kind == "continuation":
+            return (r, i, o, h, b)
+        return (r, i, o, b, h)
+
+    if row_kind == "continuation":
+        return (r, i, o, h, b)
+    return (r, i, o, b, h)
+
+
+def _iter_candidates(
+    candidates: _PageCandidates,
+    *,
+    first_glyph: bool,
+    previous_style: str | None,
+    row_kind: str,
+    leading_homonym_seen: bool,
+    baseline_established: bool,
+):
+    if candidates.cross_bucket_raster:
+        # A raster represented in more than one bucket can make bucket order
+        # choose different metadata for the same pixels. Preserve the old
+        # canonical ordering for that unusual/ambiguous facit state.
+        yield from candidates.fallback_orders.ordered(
+            first_glyph=first_glyph,
+            previous_style=previous_style,
+            row_kind=row_kind,
+            leading_homonym_seen=leading_homonym_seen,
+            baseline_established=baseline_established,
+        )
+        return
+
+    for bucket in _bucket_sequence(
+        candidates,
+        first_glyph=first_glyph,
+        previous_style=previous_style,
+        row_kind=row_kind,
+        leading_homonym_seen=leading_homonym_seen,
+        baseline_established=baseline_established,
+    ):
+        yield from bucket
 
 
 def page_cached_prioritized_fast_exact_cover(
@@ -135,13 +243,11 @@ def page_cached_prioritized_fast_exact_cover(
     *,
     max_states: int = 20000,
 ) -> tuple[int, list[Match], int] | None:
-    """The existing prioritized exact cover using page-prepared candidates."""
+    """Anchored exact cover iterating immutable page buckets directly."""
     if not ink:
         return None
 
     page_candidates = _bound_page_candidates(models)
-    candidate_orders = page_candidates.orders
-
     row_kind = str(getattr(priority._tls, "row_kind", "unknown"))
     stats = priority._stats()
     stats["calls"] += 1
@@ -171,24 +277,22 @@ def page_cached_prioritized_fast_exact_cover(
         anchor_x = min(x for x, _y in remaining)
         anchor_y = min(y for x, y in remaining if x == anchor_x)
         first_glyph = len(remaining) == len(target)
-        ordered = candidate_orders.ordered(
+
+        for model, min_x, left_pixels in _iter_candidates(
+            page_candidates,
             first_glyph=first_glyph,
             previous_style=previous_style,
             row_kind=row_kind,
             leading_homonym_seen=leading_homonym_seen,
             baseline_established=baseline is not None,
-        )
-
-        for model, min_x, left_pixels in ordered:
+        ):
             x0 = anchor_x - min_x
             if x0 < 0 or x0 + model.width > width:
                 continue
             for _mx, my in left_pixels:
                 candidate_baseline = anchor_y - my
                 is_leading_homonym = (
-                    first_glyph
-                    and row_kind == "homonym"
-                    and priority._is_homonym_model(model)
+                    first_glyph and row_kind == "homonym" and priority._is_homonym_model(model)
                 )
                 if baseline is not None and candidate_baseline != baseline:
                     continue
@@ -233,11 +337,11 @@ def page_cached_prioritized_fast_exact_cover(
     stats["placements_tested"] += placements_tested
     if chosen is None:
         return None
+
     selected = sorted(
         chosen,
         key=lambda match: (match.x, match.baseline, match.label, str(match.style)),
     )
-
     if row_kind == "homonym" and selected and priority._is_homonym_match(selected[0]):
         normal = next(
             (match for match in selected[1:] if not priority._is_homonym_match(match)),
