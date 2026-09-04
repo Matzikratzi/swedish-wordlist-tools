@@ -14,6 +14,7 @@ from typing import Iterable
 from .ocr_glyph_matcher import GlyphModel, Match
 
 _tls = local()
+_HOMONYM_MIN_RAISE = 4
 
 
 def reset_priority_stats() -> None:
@@ -55,6 +56,11 @@ def _is_homonym_model(model: GlyphModel) -> bool:
     return len(model.label) == 1 and model.label in "123456789"
 
 
+def _is_homonym_match(match) -> bool:
+    label = str(getattr(match, "label", ""))
+    return len(label) == 1 and label in "123456789"
+
+
 def _model_order_key(
     model: GlyphModel,
     *,
@@ -62,12 +68,7 @@ def _model_order_key(
     previous_style: str | None,
     row_kind: str,
 ) -> tuple[int, int, int, str, str]:
-    """Order candidates without ever excluding one.
-
-    Position wins at row start. Afterwards local typography continuity wins.
-    On continuation rows headword-bold is deliberately last unless it was just
-    proved by the previous glyph.
-    """
+    """Order candidates without ever excluding one."""
     priority = 1
     if first_glyph:
         if row_kind == "homonym":
@@ -104,9 +105,12 @@ def prioritized_fast_exact_cover(
 ) -> tuple[int, list[Match], int] | None:
     """Anchored exact cover with layout/style-prioritized candidate order.
 
-    This intentionally mirrors ``ocr_glyph_gap_matcher.fast_exact_cover``.
-    Only candidate order differs; all exactness tests and fallback semantics are
-    unchanged.
+    Homonym digits are printed raised relative to the headword. On a row already
+    classified as a homonym row, an exact leading digit is therefore allowed to
+    keep its own baseline. It does not establish the shared text baseline; the
+    following non-homonym glyph does. This preserves the anchored fast path for
+    the real SAOL typography instead of forcing the raised digit onto the
+    headword baseline.
     """
     if not ink:
         return None
@@ -124,7 +128,7 @@ def prioritized_fast_exact_cover(
     stats[f"{row_kind}_hints"] += 1
 
     target = frozenset(ink)
-    failed: set[tuple[frozenset[tuple[int, int]], int | None]] = set()
+    failed: set[tuple[frozenset[tuple[int, int]], int | None, bool]] = set()
     states = 0
     placements_tested = 0
 
@@ -132,11 +136,12 @@ def prioritized_fast_exact_cover(
         remaining: frozenset[tuple[int, int]],
         baseline: int | None,
         previous_style: str | None,
+        leading_raised_homonym_seen: bool,
     ) -> tuple[Match, ...] | None:
         nonlocal states, placements_tested
         if not remaining:
             return ()
-        state = (remaining, baseline)
+        state = (remaining, baseline, leading_raised_homonym_seen)
         if state in failed:
             return None
         states += 1
@@ -162,6 +167,9 @@ def prioritized_fast_exact_cover(
                 continue
             for _mx, my in left_pixels:
                 candidate_baseline = anchor_y - my
+                is_leading_homonym = (
+                    first_glyph and row_kind == "homonym" and _is_homonym_model(model)
+                )
                 if baseline is not None and candidate_baseline != baseline:
                     continue
                 if candidate_baseline < -model.min_y:
@@ -184,10 +192,17 @@ def prioritized_fast_exact_cover(
                     model_pixels=len(model.pixels),
                     sources=model.sources,
                 )
+                if is_leading_homonym:
+                    next_baseline = None
+                    saw_homonym = True
+                else:
+                    next_baseline = candidate_baseline if baseline is None else baseline
+                    saw_homonym = leading_raised_homonym_seen
                 tail = search(
                     frozenset(remaining.difference(placed)),
-                    candidate_baseline if baseline is None else baseline,
+                    next_baseline,
                     model.style,
+                    saw_homonym,
                 )
                 if tail is not None:
                     return (match,) + tail
@@ -195,13 +210,21 @@ def prioritized_fast_exact_cover(
         failed.add(state)
         return None
 
-    chosen = search(target, None, None)
+    chosen = search(target, None, None, False)
     stats["placements_tested"] += placements_tested
     if chosen is None:
         return None
-    stats["successful_calls"] += 1
     selected = sorted(chosen, key=lambda match: (match.x, match.baseline, match.label, match.style))
-    baseline = selected[0].baseline
+
+    # A raised leading homonym digit is not the row baseline. Prefer the first
+    # following glyph's baseline; ordinary rows retain their first glyph baseline.
+    if row_kind == "homonym" and selected and _is_homonym_match(selected[0]):
+        normal = next((m for m in selected[1:] if not _is_homonym_match(m)), None)
+        baseline = normal.baseline if normal is not None else selected[0].baseline
+    else:
+        baseline = selected[0].baseline
+
+    stats["successful_calls"] += 1
     return baseline, selected, placements_tested
 
 
@@ -215,24 +238,42 @@ def _column_counters(context: dict, key: str, column: int) -> Counter[int]:
 
 
 def observe_row_layout(context: dict, state: dict) -> None:
-    """Learn stable absolute x positions from already exact facit evidence."""
-    matches = sorted(state.get("matches") or [], key=lambda m: (m.x, m.baseline))
+    """Learn stable absolute x positions from already exact facit evidence.
+
+    Test doubles and partially constructed states are deliberately tolerated;
+    layout observation is an optimization and must never make OCR state loading
+    fail.
+    """
+    raw_matches = state.get("matches") or []
+    matches = [m for m in raw_matches if hasattr(m, "x") and hasattr(m, "baseline")]
+    matches.sort(key=lambda m: (int(m.x), int(m.baseline)))
     if not matches:
         return
-    crop_left = int(state["crop_box"][0])
-    column = int(state["column"])
+    crop_box = state.get("crop_box")
+    if not crop_box:
+        return
+    crop_left = int(crop_box[0])
+    column = int(state.get("column", 0))
     first = matches[0]
     absolute_x = crop_left + int(first.x)
 
-    if first.style == "headword-bold":
+    if getattr(first, "style", None) == "headword-bold":
         _column_counters(context, "priority_headword_x_counts", column)[absolute_x] += 1
 
-    if _is_homonym_model(first):
-        # A homonym number is layout evidence only when the same row also has
-        # headword typography after it; ordinary digits elsewhere must not teach
-        # the homonym margin.
-        if any(match.x > first.x and match.style == "headword-bold" for match in matches[1:]):
-            _column_counters(context, "priority_homonym_x_counts", column)[absolute_x] += 1
+    if _is_homonym_match(first):
+        # Ordinary digits elsewhere must not teach the homonym margin. Require a
+        # following bold headword and use the characteristic raised placement as
+        # extra geometric evidence: the homonym baseline is at least four pixels
+        # above the headword baseline in the SAOL layout.
+        following_bold = [
+            match
+            for match in matches[1:]
+            if int(match.x) > int(first.x) and getattr(match, "style", None) == "headword-bold"
+        ]
+        if following_bold:
+            headword_baseline = int(following_bold[0].baseline)
+            if headword_baseline - int(first.baseline) >= _HOMONYM_MIN_RAISE:
+                _column_counters(context, "priority_homonym_x_counts", column)[absolute_x] += 1
 
 
 def _most_common_x(context: dict, key: str, column: int) -> int | None:
