@@ -20,13 +20,15 @@ trap 'rm -f "$log"' EXIT
 
 echo "Scanning pages ${start_page}-${end_page} ..." >&2
 
-PYTHONPATH="${PYTHONPATH:-src}" python -m swedish_wordlist_tools.ocr_find_unreviewed_glyph_rows_shared \
+# -u plus line-buffered awk/tee makes progress visible immediately even though
+# the scanner is piped through the compact-output filter.
+PYTHONPATH="${PYTHONPATH:-src}" python -u -m swedish_wordlist_tools.ocr_find_unreviewed_glyph_rows_shared \
     "$jsonl" \
     --facit "$facit" \
     --start-page "$start_page" \
     --end-page "$end_page" \
     --output "$queue" \
-    2>&1 | awk '
+    2>&1 | stdbuf -oL awk '
         /^scan: page [0-9]+: förbereder sida/ {
             print
             fflush()
@@ -60,7 +62,7 @@ PYTHONPATH="${PYTHONPATH:-src}" python -m swedish_wordlist_tools.ocr_find_unrevi
         END {
             if (summary != "") print summary
         }
-    ' | tee "$log"
+    ' | stdbuf -oL tee "$log"
 status=${PIPESTATUS[0]}
 if [[ "$status" -ne 0 ]]; then
     exit "$status"
