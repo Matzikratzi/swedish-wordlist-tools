@@ -43,6 +43,23 @@ class PageCachedFastPathTests(unittest.TestCase):
             context["priority_page_bucket_counts"],
             {"homonym": 1, "bold": 1, "roman": 1, "italic": 1, "other": 0},
         )
+        self.assertFalse(context["priority_cross_bucket_raster"])
+
+    def test_direct_page_buckets_build_no_runtime_orders(self):
+        models = [
+            GlyphModel("a", _RoleWithTypography("unknown", "roman"), frozenset({(0, 0)}), 3),
+            GlyphModel("b", _RoleWithTypography("unknown", "bold"), frozenset({(0, 0), (1, 0)}), 2),
+            GlyphModel("i", _RoleWithTypography("unknown", "italic"), frozenset({(0, 0), (1, 1)}), 1),
+        ]
+        bind_page_candidates({}, models)
+        set_row_priority_hint("continuation")
+
+        result = page_cached_prioritized_fast_exact_cover(
+            {(0, 0), (2, 0), (4, 0)}, 5, 2, models
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(priority_stats()["order_builds"], 0)
 
     def test_identical_raster_still_keeps_canonical_model_on_headword_row(self):
         pixels = frozenset({(0, 0)})
@@ -53,7 +70,9 @@ class PageCachedFastPathTests(unittest.TestCase):
             "z", _RoleWithTypography("unknown", "bold"), pixels, 1
         )
         models = [hinted_bold, canonical]
-        bind_page_candidates({}, models)
+        context = {}
+        bind_page_candidates(context, models)
+        self.assertTrue(context["priority_cross_bucket_raster"])
         set_row_priority_hint("headword")
 
         result = page_cached_prioritized_fast_exact_cover({(0, 0)}, 1, 1, models)
@@ -61,6 +80,7 @@ class PageCachedFastPathTests(unittest.TestCase):
         self.assertIsNotNone(result)
         _baseline, selected, _tested = result
         self.assertEqual([match.label for match in selected], ["a"])
+        self.assertGreater(priority_stats()["order_builds"], 0)
 
     def test_raised_homonym_still_does_not_lock_bold_baseline(self):
         homonym = GlyphModel("1", "unknown", frozenset({(0, 0)}), 2)
