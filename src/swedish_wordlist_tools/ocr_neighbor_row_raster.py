@@ -216,7 +216,55 @@ def _known_support_lines(context: dict[str, Any], column: int, row_indexes: set[
     return out
 
 
+def _separator_overlap_warning(
+    context: dict[str, Any],
+    *,
+    column: int,
+    upper_row_index: int,
+    separator: int,
+    lower_top: int,
+    provisional: int,
+) -> None:
+    """Record once when adjacent rows geometrically overlap.
+
+    The upper row still defines the separator.  Ink already proven to belong to
+    the lower row may extend above that separator; that is evidence of the rare
+    touching/overlapping-row case, not a reason to move the separator back to a
+    projection minimum.
+    """
+    key = (int(column), int(upper_row_index))
+    warning = {
+        "column": int(column),
+        "upper_row": int(upper_row_index),
+        "lower_row": int(upper_row_index) + 1,
+        "separator": int(separator),
+        "lower_top": int(lower_top),
+        "overlap_pixels_y": int(separator) - int(lower_top),
+        "provisional_separator": int(provisional),
+    }
+    warnings = context.setdefault("row_overlap_warnings", {})
+    previous = warnings.get(key)
+    warnings[key] = warning
+    if previous == warning:
+        return
+    print(
+        "review: VARNING överlappande rader "
+        f"c{column} r{upper_row_index}/r{upper_row_index + 1}: "
+        f"övre radens sista pixel ger gräns y={separator}, "
+        f"undre radens ägda bläck börjar y={lower_top} "
+        f"({separator - lower_top} px ovanför gränsen); "
+        f"gammal geometrigräns y={provisional}",
+        flush=True,
+    )
+
+
 def _effective_separator_page(context: dict[str, Any], *, column: int, upper_row_index: int, left: int, right: int) -> int:
+    """Put the separator immediately after the upper row's last owned pixel.
+
+    The neighbouring lower row is deliberately not allowed to move this
+    separator.  If lower-owned ink reaches above it, record an overlap warning;
+    known-glyph ownership is the mechanism that resolves the special case.
+    """
     rows = context["row_map"]["columns"][column]["rows"]
     upper = rows[upper_row_index]
     provisional = int(upper["page_bottom"])
@@ -238,8 +286,16 @@ def _effective_separator_page(context: dict[str, Any], *, column: int, upper_row
         if has_lower and min_lower_y is None: min_lower_y = y
     if max_upper_y is None: return provisional
     candidate = max_upper_y + 1
-    if min_lower_y is None or candidate <= min_lower_y: return candidate
-    return provisional
+    if min_lower_y is not None and min_lower_y < candidate:
+        _separator_overlap_warning(
+            context,
+            column=column,
+            upper_row_index=upper_row_index,
+            separator=candidate,
+            lower_top=min_lower_y,
+            provisional=provisional,
+        )
+    return candidate
 
 
 def add_neighbor_row_raster(context: dict[str, Any], state: dict[str, Any], *, probe_y: int = 8) -> dict[str, Any]:
