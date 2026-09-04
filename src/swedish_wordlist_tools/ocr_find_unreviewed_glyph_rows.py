@@ -59,22 +59,33 @@ def _stat_delta(before: dict[str, int], after: dict[str, int], key: str) -> int:
     return int(after.get(key, 0)) - int(before.get(key, 0))
 
 
-def format_slow_row(
+def _format_stage_timings(state: dict) -> str:
+    timings = state.get("shared_stage_timings") or {}
+    if not timings:
+        return ""
+    return " stages=" + ",".join(
+        f"{name}:{float(value):.3f}s" for name, value in timings.items()
+    )
+
+
+def format_timed_row(
+    prefix: str,
     page: int,
     position: tuple[int, int],
     elapsed: float,
+    state: dict,
     *,
     stats_before: dict[str, int] | None = None,
     stats_after: dict[str, int] | None = None,
 ) -> str:
     column, row = position
-    text = f"slow-row: page {page} column {column} row {row}: {elapsed:.3f} s"
+    text = f"{prefix}: page {page} column {column} row {row}: {elapsed:.3f} s"
     if stats_before is not None and stats_after is not None:
         calls = _stat_delta(stats_before, stats_after, "calls")
         success = _stat_delta(stats_before, stats_after, "successful_calls")
         placements = _stat_delta(stats_before, stats_after, "placements_tested")
         text += f" fast_calls={calls} fast_success={success} placements={placements}"
-    return text
+    return text + _format_stage_timings(state)
 
 
 def write_review_queue(path: Path, rows: list[RowWork]) -> None:
@@ -151,9 +162,17 @@ def main() -> int:
         default=0.5,
         help="report rows whose glyph analysis takes at least this many seconds; 0 disables (default: 0.5)",
     )
+    ap.add_argument(
+        "--sample-every",
+        type=int,
+        default=10,
+        help="also report every Nth non-slow row for comparison; 0 disables (default: 10)",
+    )
     args = ap.parse_args()
     if args.slow_row_seconds < 0:
         raise ValueError("--slow-row-seconds must be >= 0")
+    if args.sample_every < 0:
+        raise ValueError("--sample-every must be >= 0")
 
     available = _available_pages(args.jsonl)
     pages = _selected_pages(
@@ -173,9 +192,6 @@ def main() -> int:
         print(f"scan: page {page}: förbereder sida ...", flush=True)
         context = build_page_context_pixel_array(args.jsonl, page, args.threshold)
         prepare_elapsed = perf_counter() - page_prepare_started
-        # The scanner only needs periodic progress plus rows that require human
-        # attention. Successful automatic ownership repairs are implementation
-        # detail; true ownership conflicts remain visible as FEL diagnostics.
         context["quiet_successful_ownership"] = not args.progress
         positions = context["positions"]
         print(
@@ -197,18 +213,36 @@ def main() -> int:
             state = load_review_state_pixel_array(context, position, models)
             row_elapsed = perf_counter() - row_started
             stats_after = priority_stats()
+            is_slow = args.slow_row_seconds > 0 and row_elapsed >= args.slow_row_seconds
+            is_sample = args.sample_every > 0 and index % args.sample_every == 0 and not is_slow
+
             if args.progress:
                 print(
                     f"scan: page {page}: [{index}] c{column} r{row} klar på {row_elapsed:.3f} s",
                     flush=True,
                 )
             else:
-                if args.slow_row_seconds > 0 and row_elapsed >= args.slow_row_seconds:
+                if is_slow:
                     print(
-                        format_slow_row(
+                        format_timed_row(
+                            "slow-row",
                             page,
                             position,
                             row_elapsed,
+                            state,
+                            stats_before=stats_before,
+                            stats_after=stats_after,
+                        ),
+                        flush=True,
+                    )
+                elif is_sample:
+                    print(
+                        format_timed_row(
+                            "sample-row",
+                            page,
+                            position,
+                            row_elapsed,
+                            state,
                             stats_before=stats_before,
                             stats_after=stats_after,
                         ),
