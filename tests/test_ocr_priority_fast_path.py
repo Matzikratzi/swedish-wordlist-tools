@@ -55,6 +55,29 @@ class PriorityFastPathTests(unittest.TestCase):
         _baseline, selected, _tested = result
         self.assertEqual([(m.label, m.style) for m in selected], [("a", "definition-roman")])
 
+    def test_identical_rasters_keep_old_canonical_model_order(self):
+        pixels = frozenset({(0, 0)})
+        canonical = GlyphModel(
+            label="a",
+            style=_RoleWithTypography("unknown", "roman"),
+            pixels=pixels,
+            sources=10,
+        )
+        hinted_bold = GlyphModel(
+            label="z",
+            style=_RoleWithTypography("unknown", "bold"),
+            pixels=pixels,
+            sources=1,
+        )
+
+        reset_priority_stats()
+        set_row_priority_hint("headword")
+        result = prioritized_fast_exact_cover({(0, 0)}, 1, 1, [hinted_bold, canonical])
+
+        self.assertIsNotNone(result)
+        _baseline, selected, _tested = result
+        self.assertEqual([(m.label, str(m.style)) for m in selected], [("a", "unknown")])
+
     def test_raised_homonym_does_not_lock_headword_baseline(self):
         homonym = GlyphModel(
             label="1",
