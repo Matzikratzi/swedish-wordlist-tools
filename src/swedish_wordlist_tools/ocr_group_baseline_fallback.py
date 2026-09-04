@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from time import perf_counter
 from typing import Iterable
 
+from . import ocr_priority_fast_path as priority
 from .ocr_glyph_facit_write_redirect import install_facit_write_redirect
 from .ocr_glyph_gap_matcher import (
     _drop_partial_component_matches,
@@ -11,10 +13,19 @@ from .ocr_glyph_matcher import GlyphModel, Match, select_best_disjoint_exact_for
 from .ocr_probe_row_glyphs_grouped import analyse_row_exact_grouped
 
 
-# All current exact-glyph review editors import this grouped analyser. Keep their
-# existing --facit command line, but redirect writes of the v2 aggregate into
-# the canonical per-model store before regenerating the aggregate mirror.
 install_facit_write_redirect()
+
+
+def _trace_stage(name: str, elapsed: float, **fields) -> None:
+    if elapsed < 0.2:
+        return
+    page = getattr(priority._tls, "trace_page", None)
+    position = getattr(priority._tls, "trace_position", None)
+    where = ""
+    if page is not None and position is not None:
+        where = f" page {page} column {position[0]} row {position[1]}"
+    extra = "".join(f" {key}={value}" for key, value in fields.items())
+    print(f"glyph-stage:{where} stage={name} elapsed={elapsed:.3f}s{extra}", flush=True)
 
 
 def _covered(matches: Iterable[Match]) -> set[tuple[int, int]]:
@@ -44,19 +55,7 @@ def analyse_row_exact_grouped_with_baseline_fallback(
     *,
     threshold: int = 210,
 ) -> dict:
-    """Allow exact safe groups to choose a local ±1 baseline independently.
-
-    The ordinary grouped matcher first chooses the best baseline for the whole
-    physical row. Any safe-whitespace group that remains incomplete is then
-    retried one pixel above and below that main baseline.
-
-    A local fallback is accepted whenever one of those alternate baselines
-    explains *all* source ink in the group exactly. A single exact glyph is
-    enough evidence; there is no artificial two-glyph requirement. This also
-    means the first group on a row gets the same chance as every later group.
-
-    The decision remains purely pixel/facit based. JSONL text is never used.
-    """
+    """Allow exact safe groups to choose a local ±1 baseline independently."""
     model_rows = list(models)
     result = analyse_row_exact_grouped(crop, model_rows, threshold=threshold)
     main_baseline = result.get("baseline")
@@ -70,8 +69,16 @@ def analyse_row_exact_grouped_with_baseline_fallback(
         )
         return result
 
+    started = perf_counter()
     candidates, bounds = exact_matches_by_safe_gaps(
         result["ink"], crop.width, crop.height, model_rows
+    )
+    _trace_stage(
+        "local_baseline_candidates",
+        perf_counter() - started,
+        groups=len(bounds),
+        candidates=len(candidates),
+        baseline=main_baseline,
     )
     if bounds != groups:
         groups = bounds
@@ -83,7 +90,6 @@ def analyse_row_exact_grouped_with_baseline_fallback(
         group_ink = {(x, y) for x, y in result["ink"] if left <= x < right}
         if not group_ink:
             continue
-
         existing = [m for m in selected if left <= m.x < right]
         if _covered(existing) == group_ink:
             continue
@@ -91,12 +97,20 @@ def analyse_row_exact_grouped_with_baseline_fallback(
         best = None
         for delta in (-1, 1):
             baseline = int(main_baseline) + delta
+            started = perf_counter()
             chosen = _exact_group_at_baseline(
                 candidates,
                 group_ink,
                 left=left,
                 right=right,
                 baseline=baseline,
+            )
+            _trace_stage(
+                "local_baseline_select",
+                perf_counter() - started,
+                group=group_index,
+                delta=delta,
+                group_pixels=len(group_ink),
             )
             if not chosen:
                 continue
@@ -112,7 +126,6 @@ def analyse_row_exact_grouped_with_baseline_fallback(
 
         if best is None:
             continue
-
         _key, delta, chosen = best
         local_baseline = int(main_baseline) + int(delta)
         selected = [m for m in selected if not (left <= m.x < right)] + list(chosen)
@@ -141,10 +154,6 @@ def analyse_row_exact_grouped_with_baseline_fallback(
         fallbacks,
         key=lambda item: (int(item["group"]), str(item["status"])),
     )
-
-    # This field is diagnostic only. Keep the main physical-row baseline and
-    # list each exact local deviation explicitly rather than pretending one
-    # shift persists through unrelated whitespace groups.
     result["baseline_segments"] = [
         {"left": 0, "right": crop.width, "baseline": int(main_baseline)}
     ] + [
