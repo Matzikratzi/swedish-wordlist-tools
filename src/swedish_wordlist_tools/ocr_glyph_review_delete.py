@@ -510,18 +510,23 @@ function toggle(id){chosen.has(id)?chosen.delete(id):chosen.add(id);sync();retur
         "b.onclick=()=>toggle(it.id);document.getElementById('items').appendChild(b);",
         "b.onclick=()=>toggle(it.id); document.getElementById('items').appendChild(b);",
     )
-    prefill_script = r'''function prefillItem(it){
+    prefill_script = r'''function previousMatchedItem(it){
+ const matchedItems=S.items.filter(candidate=>candidate.kind==='match');
+ let leftItem=null;
+ if(it.bbox){
+   leftItem=matchedItems.filter(candidate=>candidate.id!==it.id && candidate.bbox && candidate.bbox.left<it.bbox.left).sort((a,b)=>b.bbox.left-a.bbox.left)[0] || null;
+ }
+ if(!leftItem){
+   const itemIndex=S.items.findIndex(candidate=>candidate.id===it.id);
+   leftItem=itemIndex>0 ? S.items.slice(0,itemIndex).reverse().find(candidate=>candidate.kind==='match') : null;
+ }
+ return leftItem;
+}
+function prefillItem(it){
  const styleSelect=document.querySelector('select[name="style"]');
  if(styleSelect){
-   const matchedItems=S.items.filter(candidate=>candidate.kind==='match');
-   let leftItem=null;
-   if(it.bbox){
-     leftItem=matchedItems.filter(candidate=>candidate.id!==it.id && candidate.bbox && candidate.bbox.left<it.bbox.left).sort((a,b)=>b.bbox.left-a.bbox.left)[0] || null;
-   }
-   if(!leftItem){
-     const itemIndex=S.items.findIndex(candidate=>candidate.id===it.id);
-     leftItem=itemIndex>0 ? S.items.slice(0,itemIndex).reverse().find(candidate=>candidate.kind==='match') : null;
-   }
+   let leftItem=previousMatchedItem(it);
+   while(leftItem && leftItem.label==='.') leftItem=previousMatchedItem(leftItem);
    if(leftItem)styleSelect.value=leftItem.style;
    else if(it.kind==='match')styleSelect.value=it.style;
  }
