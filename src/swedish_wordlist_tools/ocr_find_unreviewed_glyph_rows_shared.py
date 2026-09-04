@@ -28,6 +28,8 @@ def main() -> int:
         f"fast_calls={stats['calls']} "
         f"fast_success={stats['successful_calls']} "
         f"placements={stats['placements_tested']} "
+        f"page_prepares={stats.get('page_prepares', 0)} "
+        f"order_builds={stats.get('order_builds', 0)} "
         f"hints=headword:{stats['headword_hints']},homonym:{stats['homonym_hints']},"
         f"continuation:{stats['continuation_hints']},unknown:{stats['unknown_hints']}",
         flush=True,
