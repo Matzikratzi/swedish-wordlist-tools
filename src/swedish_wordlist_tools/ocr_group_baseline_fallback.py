@@ -48,8 +48,9 @@ def analyse_row_exact_grouped_with_baseline_fallback(
     for the rest of the physical row. Subsequent incomplete whitespace groups
     are therefore retried at the already-proved baseline even when they contain
     only one glyph. This is still purely pixel/facit based; no JSONL text is
-    consulted. The immediately preceding incomplete group may also inherit the
-    newly proved shift, as before.
+    consulted. Earlier unresolved groups may also inherit the proved baseline,
+    but only while each group is explained completely and exactly at that same
+    baseline.
     """
     model_rows = list(models)
     result = analyse_row_exact_grouped(crop, model_rows, threshold=threshold)
@@ -162,53 +163,53 @@ def analyse_row_exact_grouped_with_baseline_fallback(
             }
         )
 
-        # A single glyph immediately before the proving group was deliberately
-        # not allowed to establish a shift. Now that the following group has
-        # proved it, retry exactly that one preceding incomplete group at the
-        # same baseline. Never walk farther backwards.
-        previous_index = group_index - 1
-        if previous_index <= 0:
-            continue
-        previous_left, previous_right = groups[previous_index]
-        previous_ink = {
-            (x, y)
-            for x, y in result["ink"]
-            if previous_left <= x < previous_right
-        }
-        previous_existing = [
-            m for m in selected if previous_left <= m.x < previous_right
-        ]
-        if not previous_ink or _covered(previous_existing) == previous_ink:
-            continue
-        previous_chosen = _exact_group_at_baseline(
-            candidates,
-            previous_ink,
-            left=previous_left,
-            right=previous_right,
-            baseline=proven_baseline,
-        )
-        if not previous_chosen:
-            continue
-        shift_start_left = previous_left
-        selected = [
-            m for m in selected if not (previous_left <= m.x < previous_right)
-        ] + list(previous_chosen)
-        fallbacks.append(
-            {
-                "group": previous_index,
-                "left": previous_left,
-                "right": previous_right,
-                "from_baseline": int(main_baseline),
-                "to_baseline": proven_baseline,
-                "delta": int(delta),
-                "labels": "".join(
-                    m.label for m in sorted(previous_chosen, key=lambda m: m.x)
-                ),
-                "pixels": len(previous_ink),
-                "status": "retroactive-preceding-group-fallback",
-                "proved_by_group": group_index,
+        # The proving group establishes a real support-line shift. Walk left
+        # across preceding unresolved safe groups while each one is explained
+        # completely at the same proved baseline. Stop at the first group that
+        # is already complete on the main baseline or cannot be covered exactly.
+        for previous_index in range(group_index - 1, -1, -1):
+            previous_left, previous_right = groups[previous_index]
+            previous_ink = {
+                (x, y)
+                for x, y in result["ink"]
+                if previous_left <= x < previous_right
             }
-        )
+            previous_existing = [
+                m for m in selected if previous_left <= m.x < previous_right
+            ]
+            if not previous_ink:
+                continue
+            if _covered(previous_existing) == previous_ink:
+                break
+            previous_chosen = _exact_group_at_baseline(
+                candidates,
+                previous_ink,
+                left=previous_left,
+                right=previous_right,
+                baseline=proven_baseline,
+            )
+            if not previous_chosen:
+                break
+            shift_start_left = previous_left
+            selected = [
+                m for m in selected if not (previous_left <= m.x < previous_right)
+            ] + list(previous_chosen)
+            fallbacks.append(
+                {
+                    "group": previous_index,
+                    "left": previous_left,
+                    "right": previous_right,
+                    "from_baseline": int(main_baseline),
+                    "to_baseline": proven_baseline,
+                    "delta": int(delta),
+                    "labels": "".join(
+                        m.label for m in sorted(previous_chosen, key=lambda m: m.x)
+                    ),
+                    "pixels": len(previous_ink),
+                    "status": "retroactive-proven-baseline-fallback",
+                    "proved_by_group": group_index,
+                }
+            )
 
     selected.sort(key=lambda m: (m.x, m.baseline, m.label, m.style))
     covered = _covered(selected)
