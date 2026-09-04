@@ -16,6 +16,7 @@ def _typography(glyph: dict) -> str:
 
 
 def _semantic_key(glyph: dict) -> tuple[str, str, tuple[tuple[int, int], ...]]:
+    """Identity for deduplication; role is intentionally irrelevant."""
     return (str(glyph.get("label") or ""), _typography(glyph), _pixels(glyph))
 
 
@@ -61,6 +62,8 @@ def audit_duplicates(payload: dict) -> dict:
     for group in raster_groups.values():
         if len(group) < 2:
             continue
+        # Role is deliberately ignored everywhere in this audit. Only a
+        # different glyph label or typography makes an exact raster ambiguous.
         semantic = {(str(g.get("label") or ""), _typography(g)) for g in group}
         if len(semantic) < 2:
             continue
@@ -82,8 +85,7 @@ def audit_duplicates(payload: dict) -> dict:
 
 def _model_text(glyph: dict) -> str:
     reviewed = "verified" if bool(glyph.get("reviewed", False)) else "UNVERIFIED"
-    role = str(glyph.get("role") or "unknown")
-    return f"{glyph.get('model_id')} {glyph.get('label')!r}/{_typography(glyph)} role={role} {reviewed} sources={len(glyph.get('sources') or [])}"
+    return f"{glyph.get('model_id')} {glyph.get('label')!r}/{_typography(glyph)} {reviewed} sources={len(glyph.get('sources') or [])}"
 
 
 def render_report(report: dict) -> str:
@@ -91,11 +93,11 @@ def render_report(report: dict) -> str:
         f"modeller: {report['models']}",
         f"verkliga duplikatgrupper: {len(report['duplicate_groups'])}",
         f"modeller som kan tas bort: {report['duplicate_models_removable']}",
-        f"pixelidentiska men semantiskt olika grupper: {len(report['raster_ambiguity_groups'])}",
+        f"pixelidentiska men label/typografi-olika grupper: {len(report['raster_ambiguity_groups'])}",
     ]
 
     if report["duplicate_groups"]:
-        lines.append("\nVERKLIGA DUPLIKAT")
+        lines.append("\nVERKLIGA DUPLIKAT — SAMMA LABEL, TYPOGRAFI, PIXLAR OCH BASLINJE")
         for index, item in enumerate(report["duplicate_groups"], 1):
             lines.append(f"[{index}] {item['label']!r}/{item['style']} {item['pixels']} px")
             lines.append("  KEEP   " + _model_text(item["keep"]))
@@ -103,7 +105,7 @@ def render_report(report: dict) -> str:
                 lines.append("  REMOVE " + _model_text(glyph))
 
     if report["raster_ambiguity_groups"]:
-        lines.append("\nPIXELIDENTISKA MEN SEMANTISKT OLIKA — RADERA INTE AUTOMATISKT")
+        lines.append("\nPIXEL- OCH BASLINJEIDENTISKA MEN LABEL/TYPOGRAFI OLIKA — RADERA INTE AUTOMATISKT")
         for index, item in enumerate(report["raster_ambiguity_groups"], 1):
             lines.append(f"[{index}] {item['pixels']} px")
             for glyph in item["models"]:
@@ -113,7 +115,7 @@ def render_report(report: dict) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Audit exact duplicate and pixel-ambiguous glyph facit models")
+    parser = argparse.ArgumentParser(description="Audit baseline-relative exact duplicate and raster-ambiguous glyph facit models; role is ignored")
     parser.add_argument("store", type=Path, nargs="?", default=Path("glyphs/facit-v2"))
     args = parser.parse_args(argv)
     payload = load_split_facit(args.store)
