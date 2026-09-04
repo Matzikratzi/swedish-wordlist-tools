@@ -16,9 +16,14 @@ def _covered(matches) -> set[tuple[int, int]]:
     return set().union(*(set(match.pixels) for match in rows)) if rows else set()
 
 
+def _point_set(points) -> set[tuple[int, int]]:
+    """Normalize JSON-/UI-friendly [x, y] points into hashable integer tuples."""
+    return {(int(point[0]), int(point[1])) for point in (points or [])}
+
+
 def _same_shape_repeats(state: dict, candidates) -> list[dict]:
     selected = list(state.get("matches") or [])
-    source = set(state.get("source_ink_points") or [])
+    source = _point_set(state.get("source_ink_points"))
     residual = source - _covered(selected)
     if not residual:
         return []
@@ -78,7 +83,7 @@ def main() -> int:
     context["quiet_successful_ownership"] = True
     state = load_review_state_pixel_array(context, (args.column, args.row), models)
 
-    source = set(state.get("source_ink_points") or [])
+    source = _point_set(state.get("source_ink_points"))
     crop_left, crop_top, crop_right, crop_bottom = map(int, state["crop_box"])
     candidates, groups = exact_matches_by_safe_gaps(
         source,
