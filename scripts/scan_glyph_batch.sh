@@ -20,50 +20,19 @@ trap 'rm -f "$log"' EXIT
 
 echo "Scanning pages ${start_page}-${end_page} ..." >&2
 
-# -u plus line-buffered awk/tee makes progress visible immediately even though
-# the scanner is piped through the compact-output filter.
+# Do not put awk or another filter between the scanner and the terminal.
+# Python already flushes every progress line; tee mirrors the same live stream
+# to a temporary log so we can still decide whether any rows need review.
+set +e
 PYTHONPATH="${PYTHONPATH:-src}" python -u -m swedish_wordlist_tools.ocr_find_unreviewed_glyph_rows_shared \
     "$jsonl" \
     --facit "$facit" \
     --start-page "$start_page" \
     --end-page "$end_page" \
     --output "$queue" \
-    2>&1 | stdbuf -oL awk '
-        /^scan: page [0-9]+: förbereder sida/ {
-            print
-            fflush()
-            next
-        }
-        /^scan: page [0-9]+: förberedelse klar / {
-            print
-            fflush()
-            next
-        }
-        /^scan: page [0-9]+: [0-9]+ rader analyserade,/ {
-            print
-            fflush()
-            next
-        }
-        /^scan: page [0-9]+: [0-9]+ rows need work \/ [0-9]+ rows / {
-            print
-            fflush()
-            next
-        }
-        /^page [0-9]+ column [0-9]+ row [0-9]+:/ {
-            print
-            fflush()
-            next
-        }
-        /^scan: [0-9]+ rows need work \/ [0-9]+ scanned rows on [0-9]+ pages$/ {
-            summary = $0
-            next
-        }
-        { next }
-        END {
-            if (summary != "") print summary
-        }
-    ' | stdbuf -oL tee "$log"
+    2>&1 | tee "$log"
 status=${PIPESTATUS[0]}
+set -e
 if [[ "$status" -ne 0 ]]; then
     exit "$status"
 fi
