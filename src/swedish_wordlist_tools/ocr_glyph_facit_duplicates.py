@@ -115,6 +115,24 @@ def _model_text(glyph: dict) -> str:
     return f"{glyph.get('model_id')} {glyph.get('label')!r}/{_typography(glyph)} {reviewed} sources={len(glyph.get('sources') or [])}"
 
 
+def _raster_ascii(glyph: dict) -> list[str]:
+    """Render the exact baseline-relative model; y=0 is visibly marked."""
+    points = set(_pixels(glyph))
+    if not points:
+        return ["    (tom raster)"]
+    min_x = min(x for x, _y in points)
+    max_x = max(x for x, _y in points)
+    min_y = min(min(y for _x, y in points), 0)
+    max_y = max(max(y for _x, y in points), 0)
+    lines = []
+    for y in range(min_y, max_y + 1):
+        marker = ">" if y == 0 else " "
+        raster = "".join("#" if (x, y) in points else "." for x in range(min_x, max_x + 1))
+        suffix = "  <- baseline y=0" if y == 0 else ""
+        lines.append(f"    {marker} {y:>3} {raster}{suffix}")
+    return lines
+
+
 def _render_cross_typography(report: dict) -> list[str]:
     groups = report.get("cross_typography_groups") or []
     lines = [f"\nSAMMA LABEL + PIXLAR + BASLINJE, MEN OLIKA TYPOGRAFI: {len(groups)} grupper"]
@@ -122,6 +140,8 @@ def _render_cross_typography(report: dict) -> list[str]:
         lines.append(f"[{index}] {item['pixels']} px — LÄMNAS ORÖRD")
         for glyph in item["models"]:
             lines.append("  " + _model_text(glyph))
+        lines.append("  exakt gemensamt baslinjerelativt raster (#=svart, .=vit):")
+        lines.extend(_raster_ascii(item["models"][0]))
     return lines
 
 
