@@ -27,12 +27,19 @@ PYTHONPATH="${PYTHONPATH:-src}" python -m swedish_wordlist_tools.ocr_find_unrevi
     --end-page "$end_page" \
     --output "$queue" \
     2>&1 | awk '
+        /^scan: page [0-9]+: förbereder sida/ {
+            print
+            fflush()
+            next
+        }
+        /^scan: page [0-9]+: förberedelse klar / {
+            print
+            fflush()
+            next
+        }
         /^scan: page [0-9]+: [0-9]+ rader analyserade,/ {
-            rows = $4 + 0
-            if (rows % 50 == 0) {
-                print
-                fflush()
-            }
+            print
+            fflush()
             next
         }
         /^scan: page [0-9]+: [0-9]+ rows need work \/ [0-9]+ rows / {
