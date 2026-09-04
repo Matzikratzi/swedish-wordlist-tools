@@ -49,15 +49,15 @@ def render(facit: Path, labels: list[str]) -> str:
         for role in sorted(roles):
             cards = []
             for index, model in roles[role]:
-                points = _points(model); reviewed = model.get("reviewed")
+                points = _points(model); reviewed = model.get("reviewed"); number = index + 1
                 model_json = json.dumps(model, ensure_ascii=False, indent=2)
                 payload = html.escape(model_json, quote=True)
                 safe_label = "glyph" if not label.isalnum() else label
                 safe_role = "".join(c if c.isalnum() or c in "-_" else "-" for c in role)
-                stem = f"glyph-{safe_label}-{index}-{safe_role}"
+                stem = f"glyph-{safe_label}-{number}-{safe_role}"
                 cards.append(
                     '<div class="card">'
-                    f'<div class="meta">#{index} &nbsp; {len(points)} px' + (" &nbsp; reviewed" if reviewed is True else "") + '</div>'
+                    f'<div class="meta">#{number} &nbsp; {len(points)} px' + (" &nbsp; reviewed" if reviewed is True else "") + f'<div class="diag">array index {index}</div></div>'
                     + _svg(points)
                     + '<div class="buttons">'
                     + f'<button onclick="saveSvg(this,\'{stem}.svg\')">SVG</button>'
@@ -74,9 +74,9 @@ def render(facit: Path, labels: list[str]) -> str:
 <style>
 body{{font-family:system-ui,sans-serif;margin:24px;background:#fafafa;color:#222}} section{{margin-bottom:32px}} h2{{font-size:30px;margin-bottom:8px}} h3{{margin:14px 0 8px}}
 .cards{{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start}} .card{{background:white;border:1px solid #bbb;border-radius:6px;padding:10px;min-width:110px}}
-.meta{{font:12px ui-monospace,monospace;margin-bottom:8px;color:#555}} svg{{display:block;background:#fff;border:1px solid #eee;image-rendering:pixelated}}
+.meta{{font:12px ui-monospace,monospace;margin-bottom:8px;color:#555}} .diag{{font-size:10px;color:#888;margin-top:2px}} svg{{display:block;background:#fff;border:1px solid #eee;image-rendering:pixelated}}
 rect{{fill:#111}} .baseline{{stroke:#e33;stroke-width:1;opacity:.55}} .empty{{color:#888}} .buttons{{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}} button{{font-size:11px;padding:3px 6px}}
-</style></head><body><h1>Glyphvarianter</h1><p>Facit: <code>{html.escape(str(facit))}</code>. Röd linje = baseline.</p>{"".join(sections)}
+</style></head><body><h1>Glyphvarianter</h1><p>Facit: <code>{html.escape(str(facit))}</code>. Röd linje = baseline. Modellnummer är 1-baserade; rått arrayindex visas under.</p>{"".join(sections)}
 <script>
 function download(name, blob){{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}}
 function cardSvg(btn){{return btn.closest('.card').querySelector('svg')}}
