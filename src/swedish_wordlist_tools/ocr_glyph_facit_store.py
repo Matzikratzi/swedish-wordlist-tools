@@ -8,6 +8,8 @@ from pathlib import Path
 FACIT_V2 = "saol14-manual-glyph-facit-v2"
 META_FILE = "_meta.json"
 MODEL_ID_PREFIX = "g"
+CANONICAL_AGGREGATE_NAME = "saol14-manual-glyph-facit-v2.json"
+CANONICAL_STORE_NAME = "facit-v2"
 
 
 def _read_json(path: Path) -> dict:
@@ -15,8 +17,10 @@ def _read_json(path: Path) -> dict:
 
 
 def _write_json(path: Path, payload: dict) -> None:
+    """Write JSON without Path.write_text so editor write redirection cannot recurse."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    with path.open("w", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
 
 
 def _validate_v2(payload: dict) -> None:
@@ -31,6 +35,14 @@ def label_directory(label: str) -> str:
     if not label:
         return "empty"
     return "-".join(f"u{ord(char):04x}" for char in label)
+
+
+def canonical_store_for_facit(facit_path: Path) -> Path | None:
+    """Return the canonical split-store path for the project's v2 aggregate."""
+    facit_path = Path(facit_path)
+    if facit_path.name != CANONICAL_AGGREGATE_NAME:
+        return None
+    return facit_path.parent / CANONICAL_STORE_NAME
 
 
 def _parse_model_id(value: object) -> int | None:
@@ -69,13 +81,11 @@ def ensure_model_ids(payload: dict) -> int:
     return changed
 
 
-def split_facit(facit_path: Path, store_dir: Path, *, write_ids: bool = True) -> tuple[int, int]:
-    """Materialize one JSON file per glyph model while keeping the aggregate facit compatible."""
-    payload = _read_json(facit_path)
+def write_split_facit(payload: dict, store_dir: Path) -> tuple[int, int]:
+    """Persist one canonical JSON file per model and remove stale/moved files."""
     _validate_v2(payload)
     assigned = ensure_model_ids(payload)
-    if write_ids and assigned:
-        _write_json(facit_path, payload)
+    store_dir = Path(store_dir)
 
     meta = {key: value for key, value in payload.items() if key != "glyphs"}
     _write_json(store_dir / META_FILE, meta)
@@ -97,6 +107,34 @@ def split_facit(facit_path: Path, store_dir: Path, *, write_ids: bool = True) ->
             except OSError:
                 pass
     return len(payload["glyphs"]), assigned
+
+
+def persist_facit_payload(facit_path: Path, payload: dict, *, store_dir: Path | None = None) -> tuple[int, int]:
+    """Write split store first, then regenerate the compatibility aggregate.
+
+    This is the canonical editor persistence path. The per-model store is the
+    durable source; the historical aggregate remains available to existing
+    readers and command lines, but is rebuilt from the just-written split store.
+    """
+    facit_path = Path(facit_path)
+    if store_dir is None:
+        store_dir = canonical_store_for_facit(facit_path)
+    if store_dir is None:
+        raise ValueError(f"no canonical split store configured for {facit_path}")
+    count, assigned = write_split_facit(payload, store_dir)
+    rebuilt = load_split_facit(store_dir)
+    _write_json(facit_path, rebuilt)
+    return count, assigned
+
+
+def split_facit(facit_path: Path, store_dir: Path, *, write_ids: bool = True) -> tuple[int, int]:
+    """Materialize one JSON file per glyph model while keeping the aggregate facit compatible."""
+    payload = _read_json(facit_path)
+    _validate_v2(payload)
+    count, assigned = write_split_facit(payload, store_dir)
+    if write_ids and assigned:
+        _write_json(facit_path, payload)
+    return count, assigned
 
 
 def load_split_facit(store_dir: Path) -> dict:
