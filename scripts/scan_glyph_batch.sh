@@ -20,7 +20,7 @@ trap 'rm -f "$log"' EXIT
 
 echo "Scanning pages ${start_page}-${end_page} ..." >&2
 
-PYTHONPATH="${PYTHONPATH:-src}" python -m swedish_wordlist_tools.ocr_find_unreviewed_glyph_rows \
+PYTHONPATH="${PYTHONPATH:-src}" python -m swedish_wordlist_tools.ocr_find_unreviewed_glyph_rows_shared \
     "$jsonl" \
     --facit "$facit" \
     --start-page "$start_page" \
