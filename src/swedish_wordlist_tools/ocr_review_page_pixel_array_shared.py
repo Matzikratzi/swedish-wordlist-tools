@@ -9,18 +9,22 @@ interactive review see the same state.
 from . import ocr_probe_row_glyphs_grouped as grouped_probe
 from . import ocr_review_page_pixel_array_glyphs_html as page_editor
 from .ocr_disconnected_glyph_ownership import repair_lower_row_disconnected_glyphs
+from .ocr_page_cached_fast_path import (
+    bind_page_candidates,
+    page_cached_prioritized_fast_exact_cover,
+)
 from .ocr_priority_fast_path import (
     classify_row_start,
     observe_row_layout,
-    prioritized_fast_exact_cover,
     set_row_priority_hint,
 )
 from .ocr_probe_merge_with_lower_row import apply_merge_down, probe_zero_match_merge_down
 
 
 # The grouped exact analyser imports the fast-path symbol directly. Replace only
-# that bounded success path; the exhaustive fallback remains untouched.
-grouped_probe.fast_exact_cover = prioritized_fast_exact_cover
+# that bounded success path; the exhaustive fallback remains untouched. Candidate
+# geometry and typography buckets are prepared once per physical page context.
+grouped_probe.fast_exact_cover = page_cached_prioritized_fast_exact_cover
 
 _base_load_review_state_pixel_array = page_editor.load_review_state_pixel_array
 
@@ -36,6 +40,7 @@ def _mark_absorbed_empty(state: dict, proof: dict) -> dict:
 
 def _base_load_with_priority(context, position, models):
     """Run the unchanged row analyser with a result-neutral candidate hint."""
+    bind_page_candidates(context, models)
     set_row_priority_hint(classify_row_start(context, position))
     state = _base_load_review_state_pixel_array(context, position, models)
     observe_row_layout(context, state)
