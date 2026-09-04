@@ -68,6 +68,11 @@ def _format_stage_timings(state: dict) -> str:
     )
 
 
+def _format_state_text(state: dict) -> str:
+    text = str(state.get("text") or "").replace("\n", " ").strip()
+    return f" text={text!r}" if text else ""
+
+
 def format_timed_row(
     prefix: str,
     page: int,
@@ -84,8 +89,13 @@ def format_timed_row(
         calls = _stat_delta(stats_before, stats_after, "calls")
         success = _stat_delta(stats_before, stats_after, "successful_calls")
         placements = _stat_delta(stats_before, stats_after, "placements_tested")
+        segmented = _stat_delta(stats_before, stats_after, "segmented_success")
+        probes = _stat_delta(stats_before, stats_after, "segmented_probes")
+        parts = _stat_delta(stats_before, stats_after, "segmented_parts")
         text += f" fast_calls={calls} fast_success={success} placements={placements}"
-    return text + _format_stage_timings(state)
+        if probes or segmented:
+            text += f" split={segmented}/{probes} parts={parts}"
+    return text + _format_stage_timings(state) + _format_state_text(state)
 
 
 def write_review_queue(path: Path, rows: list[RowWork]) -> None:
