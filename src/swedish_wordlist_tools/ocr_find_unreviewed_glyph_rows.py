@@ -138,16 +138,22 @@ def main() -> int:
     work_rows: list[RowWork] = []
     scanned_rows = 0
     for page in pages:
+        page_prepare_started = perf_counter()
+        print(f"scan: page {page}: förbereder sida ...", flush=True)
         context = build_page_context_pixel_array(args.jsonl, page, args.threshold)
+        prepare_elapsed = perf_counter() - page_prepare_started
         # The scanner only needs periodic progress plus rows that require human
         # attention. Successful automatic ownership repairs are implementation
         # detail; true ownership conflicts remain visible as FEL diagnostics.
         context["quiet_successful_ownership"] = not args.progress
         positions = context["positions"]
+        print(
+            f"scan: page {page}: förberedelse klar på {prepare_elapsed:.1f} s; "
+            f"börjar glyphanalys av {len(positions)} rader",
+            flush=True,
+        )
         page_found = 0
         page_scan_started = perf_counter()
-        if args.progress:
-            print(f"scan: page {page}: börjar glyphanalys", flush=True)
         for index, position in enumerate(positions, start=1):
             column, row = position
             if args.progress:
