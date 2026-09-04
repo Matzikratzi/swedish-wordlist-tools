@@ -13,6 +13,7 @@ from typing import Iterable
 
 from . import ocr_priority_fast_path as priority
 from .ocr_glyph_matcher import GlyphModel, Match
+from .ocr_glyph_popularity_stats import record_model_hit, register_bucket
 
 
 _CONTEXT_KEY = "_priority_page_candidates"
@@ -119,6 +120,14 @@ def _build_page_candidates(models: Iterable[GlyphModel]) -> _PageCandidates:
     )
 
 
+def _register_popularity_candidates(cached: _PageCandidates) -> None:
+    register_bucket("homonym", cached.homonym, typography_of=priority._typographic_style)
+    register_bucket("bold", cached.bold, typography_of=priority._typographic_style)
+    register_bucket("roman", cached.roman, typography_of=priority._typographic_style)
+    register_bucket("italic", cached.italic, typography_of=priority._typographic_style)
+    register_bucket("other", cached.other, typography_of=priority._typographic_style)
+
+
 def bind_page_candidates(context: dict, models: Iterable[GlyphModel]) -> _PageCandidates:
     """Bind one immutable candidate preparation to the current page context."""
     signature = _model_signature(models)
@@ -141,6 +150,7 @@ def bind_page_candidates(context: dict, models: Iterable[GlyphModel]) -> _PageCa
             "other": len(cached.other),
         }
         context["priority_cross_bucket_raster"] = cached.cross_bucket_raster
+        _register_popularity_candidates(cached)
     priority._tls.page_candidates = cached
     return cached
 
@@ -155,7 +165,9 @@ def _bound_page_candidates(models: Iterable[GlyphModel]) -> _PageCandidates:
         cached.last_model_id,
     ) == signature:
         return cached
-    return _build_page_candidates(models)
+    cached = _build_page_candidates(models)
+    _register_popularity_candidates(cached)
+    return cached
 
 
 def _bucket_sequence(
@@ -328,6 +340,7 @@ def page_cached_prioritized_fast_exact_cover(
                     saw_homonym,
                 )
                 if tail is not None:
+                    record_model_hit(model)
                     return (match,) + tail
 
         failed.add(state)
