@@ -29,6 +29,84 @@ from .ocr_traced_page_cached_fast_path import (
 grouped_probe.fast_exact_cover = traced_page_cached_prioritized_fast_exact_cover
 
 _base_load_review_state_pixel_array = page_editor.load_review_state_pixel_array
+_original_load_owned_row_state = page_editor._load_owned_row_state
+_original_ensure_known_glyph_ownership = page_editor._ensure_known_glyph_ownership
+_original_assign_split_components_below_known_extent = page_editor._assign_split_components_below_known_extent
+
+
+def _state_page_ink(state: dict) -> set[tuple[int, int]]:
+    """Translate one row state's local source ink back to page coordinates."""
+    box = state.get("crop_box") or (0, 0, 0, 0)
+    left, top = int(box[0]), int(box[1])
+    return {
+        (left + int(x), top + int(y))
+        for x, y in state.get("source_ink_points") or []
+    }
+
+
+def _format_x_damage(changed: set[tuple[int, int]]) -> str:
+    if not changed:
+        return "none"
+    xs = [x for x, _y in changed]
+    return f"{min(xs)}..{max(xs)}"
+
+
+def _traced_load_owned_row_state(context: dict, position: tuple[int, int], models) -> dict:
+    """Observe repeated analyses inside the core editor without changing them."""
+    state = _original_load_owned_row_state(context, position, models)
+    trace = context.get("_row_reanalysis_trace")
+    if not trace or tuple(trace.get("position") or ()) != tuple(position):
+        return state
+
+    previous = trace.get("state")
+    attempt = int(trace.get("attempt") or 0) + 1
+    trace["attempt"] = attempt
+    if previous is not None:
+        changed = _state_page_ink(previous) ^ _state_page_ink(state)
+        old_rev = int(previous.get("pixel_owner_revision") or 0)
+        new_rev = int(state.get("pixel_owner_revision") or 0)
+        old_row_rev = int(previous.get("pixel_owner_row_revision") or 0)
+        new_row_rev = int(state.get("pixel_owner_row_revision") or 0)
+        old_box = previous.get("crop_box") or (0, 0, 0, 0)
+        new_box = state.get("crop_box") or (0, 0, 0, 0)
+        reason = str(trace.get("next_reason") or "unknown")
+        print(
+            "row-reanalyse: "
+            f"page {context.get('page_number')} column {position[0]} row {position[1]} "
+            f"attempt={attempt} reason={reason} "
+            f"revision={old_rev}->{new_rev} row_revision={old_row_rev}->{new_row_rev} "
+            f"changed_px={len(changed)} changed_x={_format_x_damage(changed)} "
+            f"crop_y={int(old_box[1])}..{int(old_box[3])}->{int(new_box[1])}..{int(new_box[3])}",
+            flush=True,
+        )
+    trace["state"] = state
+    trace["next_reason"] = "unknown"
+    return state
+
+
+def _traced_ensure_known_glyph_ownership(context: dict, pairs, models) -> bool:
+    changed = _original_ensure_known_glyph_ownership(context, pairs, models)
+    trace = context.get("_row_reanalysis_trace")
+    if trace is not None:
+        trace["next_reason"] = (
+            "known-glyph-ownership" if changed else "owner-revision-sync"
+        )
+    return changed
+
+
+def _traced_assign_split_components_below_known_extent(context: dict, state: dict):
+    records = _original_assign_split_components_below_known_extent(context, state)
+    trace = context.get("_row_reanalysis_trace")
+    if records and trace is not None:
+        trace["next_reason"] = "known-upper-extent"
+    return records
+
+
+# The core editor calls these globals dynamically.  Wrapping them here lets the
+# shared scanner expose exactly why its internal second/third row analyses run.
+page_editor._load_owned_row_state = _traced_load_owned_row_state
+page_editor._ensure_known_glyph_ownership = _traced_ensure_known_glyph_ownership
+page_editor._assign_split_components_below_known_extent = _traced_assign_split_components_below_known_extent
 
 
 def _mark_absorbed_empty(state: dict, proof: dict) -> dict:
@@ -45,7 +123,16 @@ def _base_load_with_priority(context, position, models):
     bind_page_candidates(context, models)
     set_row_priority_hint(classify_row_start(context, position))
     set_trace_row(context.get("page_number"), position)
-    state = _base_load_review_state_pixel_array(context, position, models)
+    context["_row_reanalysis_trace"] = {
+        "position": tuple(position),
+        "attempt": 0,
+        "state": None,
+        "next_reason": "initial",
+    }
+    try:
+        state = _base_load_review_state_pixel_array(context, position, models)
+    finally:
+        context.pop("_row_reanalysis_trace", None)
     observe_row_layout(context, state)
     return state
 
