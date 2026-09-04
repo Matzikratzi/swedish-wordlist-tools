@@ -8,6 +8,7 @@ from time import perf_counter
 
 from .ocr_glyph_review_delete import _match_reviewed, load_facit_with_typography
 from .ocr_prepare_sequential_page import _page_from_row, read_jsonl
+from .ocr_priority_fast_path import priority_stats
 from .ocr_review_page_pixel_array_glyphs_html import (
     build_page_context_pixel_array,
     load_review_state_pixel_array,
@@ -54,9 +55,26 @@ def format_row_work(work: RowWork) -> str:
     )
 
 
-def format_slow_row(page: int, position: tuple[int, int], elapsed: float) -> str:
+def _stat_delta(before: dict[str, int], after: dict[str, int], key: str) -> int:
+    return int(after.get(key, 0)) - int(before.get(key, 0))
+
+
+def format_slow_row(
+    page: int,
+    position: tuple[int, int],
+    elapsed: float,
+    *,
+    stats_before: dict[str, int] | None = None,
+    stats_after: dict[str, int] | None = None,
+) -> str:
     column, row = position
-    return f"slow-row: page {page} column {column} row {row}: {elapsed:.3f} s"
+    text = f"slow-row: page {page} column {column} row {row}: {elapsed:.3f} s"
+    if stats_before is not None and stats_after is not None:
+        calls = _stat_delta(stats_before, stats_after, "calls")
+        success = _stat_delta(stats_before, stats_after, "successful_calls")
+        placements = _stat_delta(stats_before, stats_after, "placements_tested")
+        text += f" fast_calls={calls} fast_success={success} placements={placements}"
+    return text
 
 
 def write_review_queue(path: Path, rows: list[RowWork]) -> None:
@@ -174,9 +192,11 @@ def main() -> int:
                     f"scan: page {page}: [{index}] analyserar c{column} r{row} ...",
                     flush=True,
                 )
+            stats_before = priority_stats()
             row_started = perf_counter()
             state = load_review_state_pixel_array(context, position, models)
             row_elapsed = perf_counter() - row_started
+            stats_after = priority_stats()
             if args.progress:
                 print(
                     f"scan: page {page}: [{index}] c{column} r{row} klar på {row_elapsed:.3f} s",
@@ -184,7 +204,16 @@ def main() -> int:
                 )
             else:
                 if args.slow_row_seconds > 0 and row_elapsed >= args.slow_row_seconds:
-                    print(format_slow_row(page, position, row_elapsed), flush=True)
+                    print(
+                        format_slow_row(
+                            page,
+                            position,
+                            row_elapsed,
+                            stats_before=stats_before,
+                            stats_after=stats_after,
+                        ),
+                        flush=True,
+                    )
                 if index % 10 == 0:
                     elapsed = perf_counter() - page_scan_started
                     print(
