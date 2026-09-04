@@ -54,6 +54,11 @@ def format_row_work(work: RowWork) -> str:
     )
 
 
+def format_slow_row(page: int, position: tuple[int, int], elapsed: float) -> str:
+    column, row = position
+    return f"slow-row: page {page} column {column} row {row}: {elapsed:.3f} s"
+
+
 def write_review_queue(path: Path, rows: list[RowWork]) -> None:
     payload = {
         "format": QUEUE_FORMAT,
@@ -122,7 +127,15 @@ def main() -> int:
         action="store_true",
         help="print every row before and after glyph analysis, including elapsed time",
     )
+    ap.add_argument(
+        "--slow-row-seconds",
+        type=float,
+        default=0.5,
+        help="report rows whose glyph analysis takes at least this many seconds; 0 disables (default: 0.5)",
+    )
     args = ap.parse_args()
+    if args.slow_row_seconds < 0:
+        raise ValueError("--slow-row-seconds must be >= 0")
 
     available = _available_pages(args.jsonl)
     pages = _selected_pages(
@@ -169,13 +182,16 @@ def main() -> int:
                     f"scan: page {page}: [{index}] c{column} r{row} klar på {row_elapsed:.3f} s",
                     flush=True,
                 )
-            elif index % 10 == 0:
-                elapsed = perf_counter() - page_scan_started
-                print(
-                    f"scan: page {page}: {index} rader analyserade, senast c{column} r{row} "
-                    f"({elapsed:.1f} s)",
-                    flush=True,
-                )
+            else:
+                if args.slow_row_seconds > 0 and row_elapsed >= args.slow_row_seconds:
+                    print(format_slow_row(page, position, row_elapsed), flush=True)
+                if index % 10 == 0:
+                    elapsed = perf_counter() - page_scan_started
+                    print(
+                        f"scan: page {page}: {index} rader analyserade, senast c{column} r{row} "
+                        f"({elapsed:.1f} s)",
+                        flush=True,
+                    )
             scanned_rows += 1
             work = classify_row_state(page, position, state)
             if not work.needs_work:
