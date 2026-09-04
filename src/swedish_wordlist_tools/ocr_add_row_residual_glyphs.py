@@ -78,7 +78,19 @@ def glyph_from_components(
     }
 
 
+def _apply_reviewed_role(payload: dict, glyph: dict) -> None:
+    """Persist the editor's reviewed typography choice in v2's active role field.
+
+    The review UI still names the three visual choices ``roman``, ``italic`` and
+    ``bold``.  Facit v2 loads ``role`` rather than legacy ``style``.  Keep the
+    legacy field for provenance, but make the reviewed choice active as well.
+    """
+    if payload.get("format") == "saol14-manual-glyph-facit-v2":
+        glyph["role"] = glyph.get("style") or "unknown"
+
+
 def add_or_merge_glyph(payload: dict, glyph: dict) -> str:
+    _apply_reviewed_role(payload, glyph)
     key = (
         glyph["label"],
         glyph["style"],
@@ -92,6 +104,12 @@ def add_or_merge_glyph(payload: dict, glyph: dict) -> str:
         )
         if existing_key != key:
             continue
+        if payload.get("format") == "saol14-manual-glyph-facit-v2":
+            # Selecting a concrete visual style in the editor is an explicit
+            # review decision. Replace an absent/unknown semantic role so the
+            # model is immediately loadable with that reviewed classification.
+            if not existing.get("role") or existing.get("role") == "unknown":
+                existing["role"] = glyph["role"]
         known = {json.dumps(item, sort_keys=True, ensure_ascii=False) for item in existing.get("sources") or []}
         for source in glyph.get("sources") or []:
             encoded = json.dumps(source, sort_keys=True, ensure_ascii=False)
