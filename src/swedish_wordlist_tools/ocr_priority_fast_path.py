@@ -14,7 +14,6 @@ from typing import Iterable
 from .ocr_glyph_matcher import GlyphModel, Match
 
 _tls = local()
-_HOMONYM_MIN_RAISE = 4
 
 
 def reset_priority_stats() -> None:
@@ -67,6 +66,8 @@ def _model_order_key(
     first_glyph: bool,
     previous_style: str | None,
     row_kind: str,
+    leading_homonym_seen: bool,
+    baseline_established: bool,
 ) -> tuple[int, int, int, str, str]:
     """Order candidates without ever excluding one."""
     priority = 1
@@ -80,6 +81,12 @@ def _model_order_key(
             priority = 0 if model.style == "headword-bold" else 1
         elif row_kind == "continuation":
             priority = 2 if model.style == "headword-bold" else 1
+    elif row_kind == "homonym" and leading_homonym_seen and not baseline_established:
+        # Once an exact raised homonym digit has been consumed, the following
+        # headword glyph is the strongest layout hypothesis and establishes the
+        # ordinary text baseline. This is only ordering: every other model is
+        # still tried if no bold glyph fits exactly.
+        priority = 0 if model.style == "headword-bold" else 1
     elif previous_style is not None:
         if model.style == previous_style:
             priority = 0
@@ -105,12 +112,10 @@ def prioritized_fast_exact_cover(
 ) -> tuple[int, list[Match], int] | None:
     """Anchored exact cover with layout/style-prioritized candidate order.
 
-    Homonym digits are printed raised relative to the headword. On a row already
-    classified as a homonym row, an exact leading digit is therefore allowed to
-    keep its own baseline. It does not establish the shared text baseline; the
-    following non-homonym glyph does. This preserves the anchored fast path for
-    the real SAOL typography instead of forcing the raised digit onto the
-    headword baseline.
+    On a row classified as a homonym row, an exact leading homonym digit keeps
+    its own facit-derived placement baseline. It does not establish the shared
+    text baseline; the following non-homonym glyph does. No fixed vertical
+    offset is assumed: exact facit geometry decides every placement.
     """
     if not ink:
         return None
@@ -136,12 +141,12 @@ def prioritized_fast_exact_cover(
         remaining: frozenset[tuple[int, int]],
         baseline: int | None,
         previous_style: str | None,
-        leading_raised_homonym_seen: bool,
+        leading_homonym_seen: bool,
     ) -> tuple[Match, ...] | None:
         nonlocal states, placements_tested
         if not remaining:
             return ()
-        state = (remaining, baseline, leading_raised_homonym_seen)
+        state = (remaining, baseline, leading_homonym_seen)
         if state in failed:
             return None
         states += 1
@@ -158,6 +163,8 @@ def prioritized_fast_exact_cover(
                 first_glyph=first_glyph,
                 previous_style=previous_style,
                 row_kind=row_kind,
+                leading_homonym_seen=leading_homonym_seen,
+                baseline_established=baseline is not None,
             ),
         )
 
@@ -197,7 +204,7 @@ def prioritized_fast_exact_cover(
                     saw_homonym = True
                 else:
                     next_baseline = candidate_baseline if baseline is None else baseline
-                    saw_homonym = leading_raised_homonym_seen
+                    saw_homonym = leading_homonym_seen
                 tail = search(
                     frozenset(remaining.difference(placed)),
                     next_baseline,
@@ -216,8 +223,6 @@ def prioritized_fast_exact_cover(
         return None
     selected = sorted(chosen, key=lambda match: (match.x, match.baseline, match.label, match.style))
 
-    # A raised leading homonym digit is not the row baseline. Prefer the first
-    # following glyph's baseline; ordinary rows retain their first glyph baseline.
     if row_kind == "homonym" and selected and _is_homonym_match(selected[0]):
         normal = next((m for m in selected[1:] if not _is_homonym_match(m)), None)
         baseline = normal.baseline if normal is not None else selected[0].baseline
@@ -261,19 +266,15 @@ def observe_row_layout(context: dict, state: dict) -> None:
         _column_counters(context, "priority_headword_x_counts", column)[absolute_x] += 1
 
     if _is_homonym_match(first):
-        # Ordinary digits elsewhere must not teach the homonym margin. Require a
-        # following bold headword and use the characteristic raised placement as
-        # extra geometric evidence: the homonym baseline is at least four pixels
-        # above the headword baseline in the SAOL layout.
-        following_bold = [
-            match
+        # Ordinary digits elsewhere must not teach the homonym margin. A leading
+        # digit followed by exact headword-bold evidence is enough; the facit
+        # already contains each glyph's geometry relative to its own baseline,
+        # so no fixed vertical-offset heuristic belongs here.
+        if any(
+            int(match.x) > int(first.x) and getattr(match, "style", None) == "headword-bold"
             for match in matches[1:]
-            if int(match.x) > int(first.x) and getattr(match, "style", None) == "headword-bold"
-        ]
-        if following_bold:
-            headword_baseline = int(following_bold[0].baseline)
-            if headword_baseline - int(first.baseline) >= _HOMONYM_MIN_RAISE:
-                _column_counters(context, "priority_homonym_x_counts", column)[absolute_x] += 1
+        ):
+            _column_counters(context, "priority_homonym_x_counts", column)[absolute_x] += 1
 
 
 def _most_common_x(context: dict, key: str, column: int) -> int | None:
