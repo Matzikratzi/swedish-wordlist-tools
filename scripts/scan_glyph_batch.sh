@@ -28,9 +28,7 @@ PYTHONPATH="${PYTHONPATH:-src}" python -m swedish_wordlist_tools.ocr_find_unrevi
     --output "$queue" \
     2>&1 | awk '
         /^scan: page [0-9]+: [0-9]+ rader analyserade,/ {
-            split($4, a, ":")
-            page = a[1]
-            rows = $5 + 0
+            rows = $4 + 0
             if (rows % 50 == 0) {
                 print
                 fflush()
