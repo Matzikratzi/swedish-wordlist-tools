@@ -3,8 +3,9 @@ from __future__ import annotations
 """Result-neutral candidate ordering for the anchored exact glyph fast path.
 
 The search space is unchanged: layout and previous typography only decide which
-facit models are tried first. If a preferred class does not fit exactly, every
-other model remains available as before.
+facit raster classes are tried first. Models with identical raster geometry keep
+the old canonical order so metadata/label choice cannot change merely because a
+layout hint was added.
 """
 
 from collections import Counter
@@ -52,13 +53,7 @@ def _stats() -> dict[str, int]:
 
 
 def _typographic_style(style) -> str:
-    """Return roman/italic/bold without changing the semantic facit role.
-
-    Facit v2 review loading stores the semantic role in the string value and
-    attaches the older typography as ``style.typographic_style``. Many verified
-    models intentionally still have semantic role ``unknown``; typography is
-    nevertheless known and is sufficient for candidate ordering.
-    """
+    """Return roman/italic/bold without changing the semantic facit role."""
     typography = getattr(style, "typographic_style", None)
     if typography in {"roman", "italic", "bold"}:
         return str(typography)
@@ -69,11 +64,7 @@ def _typographic_style(style) -> str:
         return "bold"
     if raw in {"inflection-italic", "context-italic"}:
         return "italic"
-    if raw in {
-        "pos-roman",
-        "definition-roman",
-        "inflection-label-roman",
-    }:
+    if raw in {"pos-roman", "definition-roman", "inflection-label-roman"}:
         return "roman"
     return "unknown"
 
@@ -96,7 +87,17 @@ def _is_homonym_match(match) -> bool:
     return len(label) == 1 and label in "123456789"
 
 
-def _model_order_key(
+def _canonical_model_key(model: GlyphModel) -> tuple[int, int, str, str]:
+    """The pre-priority fast path's deterministic model ordering."""
+    return (-len(model.pixels), -int(model.sources), model.label, str(model.style))
+
+
+def _raster_key(model: GlyphModel) -> tuple[tuple[int, int], ...]:
+    """Normalized exact raster identity, independent of label/role metadata."""
+    return tuple(sorted((int(x), int(y)) for x, y in model.pixels))
+
+
+def _priority_class(
     model: GlyphModel,
     *,
     first_glyph: bool,
@@ -104,8 +105,7 @@ def _model_order_key(
     row_kind: str,
     leading_homonym_seen: bool,
     baseline_established: bool,
-) -> tuple[int, int, int, str, str]:
-    """Order candidates without ever excluding one."""
+) -> int:
     priority = 1
     typography = _typographic_style(model.style)
     if first_glyph:
@@ -119,24 +119,56 @@ def _model_order_key(
         elif row_kind == "continuation":
             priority = 2 if _is_headword_model(model) else 1
     elif row_kind == "homonym" and leading_homonym_seen and not baseline_established:
-        # Once an exact raised homonym digit has been consumed, the following
-        # bold headword glyph is the strongest layout hypothesis and establishes
-        # the ordinary text baseline. This is only ordering: every other model
-        # is still tried if no bold glyph fits exactly.
         priority = 0 if _is_headword_model(model) else 1
     elif previous_style is not None:
         if typography == previous_style:
             priority = 0
         elif row_kind == "continuation" and _is_headword_model(model):
             priority = 2
+    return priority
 
-    return (
-        priority,
-        -len(model.pixels),
-        -int(model.sources),
-        model.label,
-        str(model.style),
-    )
+
+def _ordered_prepared(
+    prepared: list[tuple[GlyphModel, int, tuple[tuple[int, int], ...]]],
+    *,
+    first_glyph: bool,
+    previous_style: str | None,
+    row_kind: str,
+    leading_homonym_seen: bool,
+    baseline_established: bool,
+) -> list[tuple[GlyphModel, int, tuple[tuple[int, int], ...]]]:
+    """Prioritize raster classes, never metadata variants of one raster.
+
+    The old fast path sorts models by pixel count, source count, label and role.
+    If two facit models have identical normalized pixels they yield the exact
+    same placement. Reordering those models can therefore alter recognized
+    metadata while leaving pixel coverage unchanged. Keep their old order and
+    use the best layout priority of the whole raster class only to position that
+    class relative to other geometries.
+    """
+    groups: dict[tuple[tuple[int, int], ...], list[tuple[GlyphModel, int, tuple[tuple[int, int], ...]]]] = {}
+    for row in prepared:
+        groups.setdefault(_raster_key(row[0]), []).append(row)
+
+    ordered_groups = []
+    for raster, rows in groups.items():
+        canonical_rows = sorted(rows, key=lambda row: _canonical_model_key(row[0]))
+        class_priority = min(
+            _priority_class(
+                row[0],
+                first_glyph=first_glyph,
+                previous_style=previous_style,
+                row_kind=row_kind,
+                leading_homonym_seen=leading_homonym_seen,
+                baseline_established=baseline_established,
+            )
+            for row in rows
+        )
+        representative = canonical_rows[0][0]
+        ordered_groups.append((class_priority, _canonical_model_key(representative), raster, canonical_rows))
+
+    ordered_groups.sort(key=lambda item: (item[0], item[1], item[2]))
+    return [row for _priority, _canonical, _raster, rows in ordered_groups for row in rows]
 
 
 def prioritized_fast_exact_cover(
@@ -147,7 +179,7 @@ def prioritized_fast_exact_cover(
     *,
     max_states: int = 20000,
 ) -> tuple[int, list[Match], int] | None:
-    """Anchored exact cover with layout/style-prioritized candidate order.
+    """Anchored exact cover with layout/style-prioritized raster ordering.
 
     On a row classified as a homonym row, an exact leading homonym digit keeps
     its own facit-derived placement baseline. It does not establish the shared
@@ -193,16 +225,13 @@ def prioritized_fast_exact_cover(
         anchor_x = min(x for x, _y in remaining)
         anchor_y = min(y for x, y in remaining if x == anchor_x)
         first_glyph = len(remaining) == len(target)
-        ordered = sorted(
+        ordered = _ordered_prepared(
             prepared,
-            key=lambda row: _model_order_key(
-                row[0],
-                first_glyph=first_glyph,
-                previous_style=previous_style,
-                row_kind=row_kind,
-                leading_homonym_seen=leading_homonym_seen,
-                baseline_established=baseline is not None,
-            ),
+            first_glyph=first_glyph,
+            previous_style=previous_style,
+            row_kind=row_kind,
+            leading_homonym_seen=leading_homonym_seen,
+            baseline_established=baseline is not None,
         )
 
         for model, min_x, left_pixels in ordered:
@@ -211,9 +240,7 @@ def prioritized_fast_exact_cover(
                 continue
             for _mx, my in left_pixels:
                 candidate_baseline = anchor_y - my
-                is_leading_homonym = (
-                    first_glyph and row_kind == "homonym" and _is_homonym_model(model)
-                )
+                is_leading_homonym = first_glyph and row_kind == "homonym" and _is_homonym_model(model)
                 if baseline is not None and candidate_baseline != baseline:
                     continue
                 if candidate_baseline < -model.min_y:
@@ -221,10 +248,7 @@ def prioritized_fast_exact_cover(
                 if candidate_baseline > height - 1 - model.max_y:
                     continue
                 placements_tested += 1
-                placed = frozenset(
-                    (x0 + x, candidate_baseline + y)
-                    for x, y in model.pixels
-                )
+                placed = frozenset((x0 + x, candidate_baseline + y) for x, y in model.pixels)
                 if not placed.issubset(remaining):
                     continue
                 match = Match(
@@ -280,12 +304,7 @@ def _column_counters(context: dict, key: str, column: int) -> Counter[int]:
 
 
 def observe_row_layout(context: dict, state: dict) -> None:
-    """Learn stable absolute x positions from already exact facit evidence.
-
-    Test doubles and partially constructed states are deliberately tolerated;
-    layout observation is an optimization and must never make OCR state loading
-    fail.
-    """
+    """Learn stable absolute x positions from already exact facit evidence."""
     raw_matches = state.get("matches") or []
     matches = [m for m in raw_matches if hasattr(m, "x") and hasattr(m, "baseline")]
     matches.sort(key=lambda m: (int(m.x), int(m.baseline)))
@@ -303,14 +322,7 @@ def observe_row_layout(context: dict, state: dict) -> None:
         _column_counters(context, "priority_headword_x_counts", column)[absolute_x] += 1
 
     if _is_homonym_match(first):
-        # Ordinary digits elsewhere must not teach the homonym margin. A leading
-        # digit followed by exact bold headword evidence is enough; the facit
-        # already contains each glyph's geometry relative to its own baseline,
-        # so no fixed vertical-offset heuristic belongs here.
-        if any(
-            int(match.x) > int(first.x) and _is_headword_match(match)
-            for match in matches[1:]
-        ):
+        if any(int(match.x) > int(first.x) and _is_headword_match(match) for match in matches[1:]):
             _column_counters(context, "priority_homonym_x_counts", column)[absolute_x] += 1
 
 
