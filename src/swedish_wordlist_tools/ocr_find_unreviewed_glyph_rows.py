@@ -4,6 +4,7 @@ import argparse
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from time import perf_counter
 
 from .ocr_glyph_review_delete import _match_reviewed, load_facit_with_typography
 from .ocr_prepare_sequential_page import _page_from_row, read_jsonl
@@ -116,6 +117,11 @@ def main() -> int:
         type=Path,
         help="save all reported rows as a JSON review queue",
     )
+    ap.add_argument(
+        "--progress",
+        action="store_true",
+        help="print every row before and after glyph analysis, including elapsed time",
+    )
     args = ap.parse_args()
 
     available = _available_pages(args.jsonl)
@@ -133,9 +139,26 @@ def main() -> int:
     scanned_rows = 0
     for page in pages:
         context = build_page_context_pixel_array(args.jsonl, page, args.threshold)
+        positions = context["positions"]
         page_found = 0
-        for position in context["positions"]:
+        page_scan_started = perf_counter()
+        if args.progress:
+            print(f"scan: page {page}: börjar glyphanalys av {len(positions)} rader", flush=True)
+        for index, position in enumerate(positions, start=1):
+            column, row = position
+            if args.progress:
+                print(
+                    f"scan: page {page}: [{index}/{len(positions)}] analyserar c{column} r{row} ...",
+                    flush=True,
+                )
+            row_started = perf_counter()
             state = load_review_state_pixel_array(context, position, models)
+            row_elapsed = perf_counter() - row_started
+            if args.progress:
+                print(
+                    f"scan: page {page}: [{index}/{len(positions)}] c{column} r{row} klar på {row_elapsed:.3f} s",
+                    flush=True,
+                )
             scanned_rows += 1
             work = classify_row_state(page, position, state)
             if not work.needs_work:
@@ -143,8 +166,10 @@ def main() -> int:
             print(format_row_work(work), flush=True)
             work_rows.append(work)
             page_found += 1
+        page_scan_elapsed = perf_counter() - page_scan_started
         print(
-            f"scan: page {page}: {page_found} rows need work / {len(context['positions'])} rows",
+            f"scan: page {page}: {page_found} rows need work / {len(positions)} rows "
+            f"(glyphanalys {page_scan_elapsed:.3f} s)",
             flush=True,
         )
 
