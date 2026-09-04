@@ -20,24 +20,44 @@ trap 'rm -f "$log"' EXIT
 
 echo "Scanning pages ${start_page}-${end_page} ..." >&2
 
-if ! PYTHONPATH="${PYTHONPATH:-src}" python -m swedish_wordlist_tools.ocr_find_unreviewed_glyph_rows \
+PYTHONPATH="${PYTHONPATH:-src}" python -m swedish_wordlist_tools.ocr_find_unreviewed_glyph_rows \
     "$jsonl" \
     --facit "$facit" \
     --start-page "$start_page" \
     --end-page "$end_page" \
     --output "$queue" \
-    >"$log" 2>&1; then
-    cat "$log" >&2
-    exit 1
+    2>&1 | awk '
+        /^scan: page [0-9]+: [0-9]+ rader analyserade,/ {
+            split($4, a, ":")
+            page = a[1]
+            rows = $5 + 0
+            if (rows % 50 == 0) {
+                print
+                fflush()
+            }
+            next
+        }
+        /^page [0-9]+ column [0-9]+ row [0-9]+:/ {
+            print
+            fflush()
+            next
+        }
+        /^scan: [0-9]+ rows need work \/ [0-9]+ scanned rows on [0-9]+ pages$/ {
+            summary = $0
+            next
+        }
+        { next }
+        END {
+            if (summary != "") print summary
+        }
+    ' | tee "$log"
+status=${PIPESTATUS[0]}
+if [[ "$status" -ne 0 ]]; then
+    exit "$status"
 fi
 
-awk '
-    /^page [0-9]+ column [0-9]+ row [0-9]+:/ { print; found=1 }
-    /^scan: [0-9]+ rows need work \/ [0-9]+ scanned rows on [0-9]+ pages$/ { summary=$0 }
-    END {
-        if (!found) print "No rows need work."
-        if (summary != "") print summary
-    }
-' "$log"
+if ! grep -qE '^page [0-9]+ column [0-9]+ row [0-9]+:' "$log"; then
+    echo "No rows need work."
+fi
 
 echo "Review queue: $queue" >&2
