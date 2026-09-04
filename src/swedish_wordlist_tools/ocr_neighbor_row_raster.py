@@ -23,7 +23,8 @@ except ImportError:
     pass
 
 
-_HEADWORD_LEFT_PAD = 25
+_HEADWORD_LEFT_PAD = 15
+_LEFT_SAFETY_WHITE_COLUMNS = 10
 _HEADWORD_CLUSTER_RADIUS = 3
 
 
@@ -44,13 +45,12 @@ def _row_leftmost_ink(gray, row: dict[str, Any], *, left: int, right: int, thres
 
 
 def _column_review_left(context: dict[str, Any], column: int) -> int:
-    """Choose one compact left edge for every review row in a column.
+    """Choose the established compact lexical left edge for a column.
 
-    Ignore the far-left column furniture when estimating the dominant headword
-    anchor. SAOL headwords then form a tight x cluster while superscript homonym
-    digits sit a little to the left. Every review row starts exactly 25 pixels
-    before that shared headword anchor: the established 15-pixel crop plus a
-    ten-pixel safety margin.
+    The shared headword anchor deliberately ignores far-left page furniture.
+    Homonym digits can sit left of the headword, so the lexical crop starts 15
+    pixels before the dominant headword anchor. Row-specific white safety is
+    added later without crossing any source ink.
     """
     cache = context.setdefault("review_column_lefts", {})
     if column in cache:
@@ -91,6 +91,39 @@ def _column_review_left(context: dict[str, Any], column: int) -> int:
     return review_left
 
 
+def _verified_white_safety_left(
+    context: dict[str, Any],
+    state: dict[str, Any],
+    base_left: int,
+    *,
+    desired: int = _LEFT_SAFETY_WHITE_COLUMNS,
+) -> int:
+    """Extend left only through columns proven white for this owned row.
+
+    This operates on the page-wide ownership array, not on a guessed page crop.
+    Starting at the established lexical left edge, walk at most ``desired``
+    pixels left. The first column containing ink owned by this physical row is a
+    hard stop, so a page/column rule can never be pulled into the review crop.
+    If fewer than ten white columns exist before such a rule we keep the maximum
+    safe white run; importantly, the crop boundary itself is then white.
+    """
+    owners = context.get("pixel_owners")
+    if owners is None:
+        return int(base_left)
+    column = int(state["column"])
+    row_index = int(state["row"])
+    entry = context["row_map"]["columns"][column]
+    hard_left = max(0, int(entry.get("crop_left", entry.get("left", 0))))
+    _old_left, top, _right, bottom = map(int, state["crop_box"])
+    row_code = owners.row_code(row_index)
+    safe_left = max(hard_left, int(base_left))
+    for x in range(safe_left - 1, max(hard_left, safe_left - int(desired)) - 1, -1):
+        if any(owners.data[y * owners.width + x] == row_code for y in range(max(0, top), min(owners.height, bottom))):
+            break
+        safe_left = x
+    return safe_left
+
+
 def _bbox(points: set[tuple[int, int]]) -> dict[str, int]:
     xs = [x for x, _y in points]
     ys = [y for _x, y in points]
@@ -98,9 +131,10 @@ def _bbox(points: set[tuple[int, int]]) -> dict[str, int]:
 
 
 def _compact_review_state(context: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
-    """Rebase the one-row editor to the shared compact column left edge."""
+    """Rebase the one-row editor to a compact, verified-safe left edge."""
     old_left, top, right, bottom = map(int, state["crop_box"])
-    new_left = _column_review_left(context, int(state["column"]))
+    base_left = _column_review_left(context, int(state["column"]))
+    new_left = _verified_white_safety_left(context, state, base_left)
     if new_left <= old_left:
         return state
     new_left = min(new_left, right - 1)
@@ -147,6 +181,8 @@ def _compact_review_state(context: dict[str, Any], state: dict[str, Any]) -> dic
     out["covered_pixels"] = len(covered)
     out["fully_exact"] = bool(source_ink) and covered == source_ink
     out["review_page_left"] = new_left
+    out["review_base_left"] = base_left
+    out["review_left_safety_columns"] = base_left - new_left
     out["review_headword_anchor"] = (context.get("review_headword_anchors") or {}).get(int(state["column"]))
     return out
 
