@@ -2,12 +2,19 @@ from __future__ import annotations
 
 from typing import Iterable
 
+from .ocr_glyph_facit_write_redirect import install_facit_write_redirect
 from .ocr_glyph_gap_matcher import (
     _drop_partial_component_matches,
     exact_matches_by_safe_gaps,
 )
 from .ocr_glyph_matcher import GlyphModel, Match, select_best_disjoint_exact_for_ink
 from .ocr_probe_row_glyphs_grouped import analyse_row_exact_grouped
+
+
+# All current exact-glyph review editors import this grouped analyser. Keep their
+# existing --facit command line, but redirect writes of the v2 aggregate into
+# the canonical per-model store before regenerating the aggregate mirror.
+install_facit_write_redirect()
 
 
 def _covered(matches: Iterable[Match]) -> set[tuple[int, int]]:
