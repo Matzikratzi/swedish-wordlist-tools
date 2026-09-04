@@ -139,6 +139,10 @@ def main() -> int:
     scanned_rows = 0
     for page in pages:
         context = build_page_context_pixel_array(args.jsonl, page, args.threshold)
+        # The scanner only needs periodic progress plus rows that require human
+        # attention. Successful automatic ownership repairs are implementation
+        # detail; true ownership conflicts remain visible as FEL diagnostics.
+        context["quiet_successful_ownership"] = not args.progress
         positions = context["positions"]
         page_found = 0
         page_scan_started = perf_counter()
