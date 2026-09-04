@@ -28,10 +28,7 @@ class GroupBaselineFallbackTests(unittest.TestCase):
         image = Image.new("L", (30, 12), 255)
         models = models_with_one_internal_blank_column()
 
-        # Main group on baseline 5. It is deliberately larger so the ordinary
-        # whole-row decision remains baseline 5.
         main = {(2, 3), (2, 4), (2, 5), (3, 5), (5, 3), (5, 4), (5, 5), (6, 5)}
-        # After a safe whitespace gap, two known glyphs are printed one pixel low.
         shifted = {(15, 5), (15, 6), (16, 6), (18, 5), (19, 5), (18, 6)}
         for point in main | shifted:
             image.putpixel(point, 0)
@@ -64,19 +61,14 @@ class GroupBaselineFallbackTests(unittest.TestCase):
         image = Image.new("L", (40, 12), 255)
         models = models_with_one_internal_blank_column()
 
-        # Four A glyphs on baseline 5 make the main row baseline unambiguous.
-        # One-column inter-glyph gaps keep them in the same safe group.
         main = set()
         for x in (2, 5, 8, 11):
             main.update({(x, 3), (x, 4), (x, 5), (x + 1, 5)})
-        # First shifted safe group contains only one glyph, so it may not prove
-        # the shift by itself.
-        shifted_first = {(18, 5), (18, 6), (19, 6)}  # b at baseline 6
-        # The following safe group contains two exact glyphs and proves +1.
+        shifted_first = {(18, 5), (18, 6), (19, 6)}
         shifted_proof = {
             (25, 5), (26, 5), (25, 6),
             (28, 5), (29, 5), (28, 6),
-        }  # cc at baseline 6
+        }
         for point in main | shifted_first | shifted_proof:
             image.putpixel(point, 0)
 
@@ -84,11 +76,10 @@ class GroupBaselineFallbackTests(unittest.TestCase):
 
         self.assertEqual(result["baseline"], 5)
         self.assertTrue(result["fully_exact"])
-        self.assertEqual(len(result["baseline_fallbacks"]), 2)
         retro = next(
             item
             for item in result["baseline_fallbacks"]
-            if item["status"] == "retroactive-preceding-group-fallback"
+            if item["status"] == "retroactive-proven-baseline-fallback"
         )
         proof = next(
             item
@@ -102,6 +93,40 @@ class GroupBaselineFallbackTests(unittest.TestCase):
         self.assertEqual(result["baseline_segments"][1]["baseline"], 6)
         self.assertEqual(result["baseline_segments"][1]["left"], 18)
 
+    def test_proven_shift_propagates_back_across_multiple_unresolved_groups(self) -> None:
+        image = Image.new("L", (48, 12), 255)
+        models = models_with_one_internal_blank_column()
+
+        # A large main group on baseline 5 fixes the ordinary whole-row baseline.
+        main = set()
+        for x in (28, 31, 34, 37):
+            main.update({(x, 3), (x, 4), (x, 5), (x + 1, 5)})
+
+        # Two earlier safe groups are both one pixel low and individually too
+        # weak to establish the shift: first b, then a dot.
+        shifted_first = {(2, 5), (2, 6), (3, 6)}
+        shifted_second = {(10, 6)}
+        # The third group has two glyphs and proves baseline 6.
+        shifted_proof = {
+            (17, 5), (17, 6), (18, 6),
+            (20, 5), (21, 5), (20, 6),
+        }
+        for point in main | shifted_first | shifted_second | shifted_proof:
+            image.putpixel(point, 0)
+
+        result = analyse_row_exact_grouped_with_baseline_fallback(image, models)
+
+        self.assertTrue(result["fully_exact"])
+        retro = [
+            item
+            for item in result["baseline_fallbacks"]
+            if item["status"] == "retroactive-proven-baseline-fallback"
+        ]
+        self.assertEqual([item["group"] for item in retro], [0, 1])
+        self.assertEqual([item["labels"] for item in retro], ["b", "."])
+        self.assertTrue(all(item["to_baseline"] == 6 for item in retro))
+        self.assertEqual(result["baseline_segments"][1]["left"], 2)
+
     def test_proven_shift_persists_to_later_single_glyph_groups(self) -> None:
         image = Image.new("L", (52, 12), 255)
         models = models_with_one_internal_blank_column()
@@ -109,13 +134,10 @@ class GroupBaselineFallbackTests(unittest.TestCase):
         main = set()
         for x in (2, 5, 8, 11):
             main.update({(x, 3), (x, 4), (x, 5), (x + 1, 5)})
-        # This two-glyph group proves baseline 6.
         shifted_proof = {
             (20, 5), (20, 6), (21, 6),
             (23, 5), (24, 5), (23, 6),
-        }  # bc
-        # Later groups contain only one glyph each. They cannot independently
-        # prove a shift, but should inherit the already-proved support line.
+        }
         later_b = {(34, 5), (34, 6), (35, 6)}
         later_dot = {(44, 6)}
         for point in main | shifted_proof | later_b | later_dot:
