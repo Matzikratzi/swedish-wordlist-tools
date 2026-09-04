@@ -143,12 +143,12 @@ def main() -> int:
         page_found = 0
         page_scan_started = perf_counter()
         if args.progress:
-            print(f"scan: page {page}: börjar glyphanalys av {len(positions)} rader", flush=True)
+            print(f"scan: page {page}: börjar glyphanalys", flush=True)
         for index, position in enumerate(positions, start=1):
             column, row = position
             if args.progress:
                 print(
-                    f"scan: page {page}: [{index}/{len(positions)}] analyserar c{column} r{row} ...",
+                    f"scan: page {page}: [{index}] analyserar c{column} r{row} ...",
                     flush=True,
                 )
             row_started = perf_counter()
@@ -156,7 +156,14 @@ def main() -> int:
             row_elapsed = perf_counter() - row_started
             if args.progress:
                 print(
-                    f"scan: page {page}: [{index}/{len(positions)}] c{column} r{row} klar på {row_elapsed:.3f} s",
+                    f"scan: page {page}: [{index}] c{column} r{row} klar på {row_elapsed:.3f} s",
+                    flush=True,
+                )
+            elif index % 10 == 0:
+                elapsed = perf_counter() - page_scan_started
+                print(
+                    f"scan: page {page}: {index} rader analyserade, senast c{column} r{row} "
+                    f"({elapsed:.1f} s)",
                     flush=True,
                 )
             scanned_rows += 1
