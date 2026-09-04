@@ -51,6 +51,42 @@ def _stats() -> dict[str, int]:
     return stats
 
 
+def _typographic_style(style) -> str:
+    """Return roman/italic/bold without changing the semantic facit role.
+
+    Facit v2 review loading stores the semantic role in the string value and
+    attaches the older typography as ``style.typographic_style``. Many verified
+    models intentionally still have semantic role ``unknown``; typography is
+    nevertheless known and is sufficient for candidate ordering.
+    """
+    typography = getattr(style, "typographic_style", None)
+    if typography in {"roman", "italic", "bold"}:
+        return str(typography)
+    raw = str(style)
+    if raw in {"roman", "italic", "bold"}:
+        return raw
+    if raw == "headword-bold":
+        return "bold"
+    if raw in {"inflection-italic", "context-italic"}:
+        return "italic"
+    if raw in {
+        "pos-roman",
+        "definition-roman",
+        "inflection-label-roman",
+    }:
+        return "roman"
+    return "unknown"
+
+
+def _is_headword_model(model: GlyphModel) -> bool:
+    return str(model.style) == "headword-bold" or _typographic_style(model.style) == "bold"
+
+
+def _is_headword_match(match) -> bool:
+    style = getattr(match, "style", None)
+    return str(style) == "headword-bold" or _typographic_style(style) == "bold"
+
+
 def _is_homonym_model(model: GlyphModel) -> bool:
     return len(model.label) == 1 and model.label in "123456789"
 
@@ -71,26 +107,27 @@ def _model_order_key(
 ) -> tuple[int, int, int, str, str]:
     """Order candidates without ever excluding one."""
     priority = 1
+    typography = _typographic_style(model.style)
     if first_glyph:
         if row_kind == "homonym":
             if _is_homonym_model(model):
                 priority = 0
-            elif model.style == "headword-bold":
+            elif _is_headword_model(model):
                 priority = 2
         elif row_kind == "headword":
-            priority = 0 if model.style == "headword-bold" else 1
+            priority = 0 if _is_headword_model(model) else 1
         elif row_kind == "continuation":
-            priority = 2 if model.style == "headword-bold" else 1
+            priority = 2 if _is_headword_model(model) else 1
     elif row_kind == "homonym" and leading_homonym_seen and not baseline_established:
         # Once an exact raised homonym digit has been consumed, the following
-        # headword glyph is the strongest layout hypothesis and establishes the
-        # ordinary text baseline. This is only ordering: every other model is
-        # still tried if no bold glyph fits exactly.
-        priority = 0 if model.style == "headword-bold" else 1
+        # bold headword glyph is the strongest layout hypothesis and establishes
+        # the ordinary text baseline. This is only ordering: every other model
+        # is still tried if no bold glyph fits exactly.
+        priority = 0 if _is_headword_model(model) else 1
     elif previous_style is not None:
-        if model.style == previous_style:
+        if typography == previous_style:
             priority = 0
-        elif row_kind == "continuation" and model.style == "headword-bold":
+        elif row_kind == "continuation" and _is_headword_model(model):
             priority = 2
 
     return (
@@ -98,7 +135,7 @@ def _model_order_key(
         -len(model.pixels),
         -int(model.sources),
         model.label,
-        model.style,
+        str(model.style),
     )
 
 
@@ -208,7 +245,7 @@ def prioritized_fast_exact_cover(
                 tail = search(
                     frozenset(remaining.difference(placed)),
                     next_baseline,
-                    model.style,
+                    _typographic_style(model.style),
                     saw_homonym,
                 )
                 if tail is not None:
@@ -221,7 +258,7 @@ def prioritized_fast_exact_cover(
     stats["placements_tested"] += placements_tested
     if chosen is None:
         return None
-    selected = sorted(chosen, key=lambda match: (match.x, match.baseline, match.label, match.style))
+    selected = sorted(chosen, key=lambda match: (match.x, match.baseline, match.label, str(match.style)))
 
     if row_kind == "homonym" and selected and _is_homonym_match(selected[0]):
         normal = next((m for m in selected[1:] if not _is_homonym_match(m)), None)
@@ -262,16 +299,16 @@ def observe_row_layout(context: dict, state: dict) -> None:
     first = matches[0]
     absolute_x = crop_left + int(first.x)
 
-    if getattr(first, "style", None) == "headword-bold":
+    if _is_headword_match(first):
         _column_counters(context, "priority_headword_x_counts", column)[absolute_x] += 1
 
     if _is_homonym_match(first):
         # Ordinary digits elsewhere must not teach the homonym margin. A leading
-        # digit followed by exact headword-bold evidence is enough; the facit
+        # digit followed by exact bold headword evidence is enough; the facit
         # already contains each glyph's geometry relative to its own baseline,
         # so no fixed vertical-offset heuristic belongs here.
         if any(
-            int(match.x) > int(first.x) and getattr(match, "style", None) == "headword-bold"
+            int(match.x) > int(first.x) and _is_headword_match(match)
             for match in matches[1:]
         ):
             _column_counters(context, "priority_homonym_x_counts", column)[absolute_x] += 1
