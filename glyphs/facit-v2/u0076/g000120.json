@@ -114,6 +114,21 @@
         21
       ],
       "suggestion": ""
+    },
+    {
+      "expected_word": "abonmerav.",
+      "jsonl_word": "abonn·era",
+      "jsonl_similarity": 0.824,
+      "page": 1,
+      "subnr": "ocr-4-1-28-6",
+      "source_id": "page:1:ocr:4:1:28:6",
+      "page_word_bbox": [
+        465,
+        527,
+        233,
+        76
+      ],
+      "suggestion": ""
     }
   ],
   "role": "unknown",

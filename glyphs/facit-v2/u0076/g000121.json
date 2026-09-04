@@ -115,6 +115,16 @@
       "subnr": "111178",
       "source_id": "149",
       "word_file": "words/w00149-italic-sub111178-p1547-c1-vävde.png"
+    },
+    {
+      "page": 1,
+      "column": 1,
+      "row": 14,
+      "review_selection": [
+        "M21"
+      ],
+      "review_pixel_count": 0,
+      "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
     }
   ],
   "role": "unknown",

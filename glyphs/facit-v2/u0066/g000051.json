@@ -137,6 +137,16 @@
       "subnr": 386492,
       "source_id": "next20:9:1550:386492",
       "word_file": "words-next/n09-p1550-sub386492-wallraffa.png"
+    },
+    {
+      "page": 1,
+      "column": 0,
+      "row": 33,
+      "review_selection": [
+        "M11"
+      ],
+      "review_pixel_count": 0,
+      "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
     }
   ],
   "role": "unknown",

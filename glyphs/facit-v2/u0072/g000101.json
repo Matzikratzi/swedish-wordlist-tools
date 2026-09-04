@@ -74,6 +74,14 @@
       "subnr": "25200",
       "source_id": "67",
       "word_file": "words/w00067-roman-sub25200-p372-c1-superlu002e.png"
+    },
+    {
+      "page": 1,
+      "column": 0,
+      "row": 20,
+      "review_selection": [],
+      "review_pixel_count": 11,
+      "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
     }
   ],
   "role": "unknown",

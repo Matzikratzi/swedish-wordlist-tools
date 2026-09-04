@@ -219,6 +219,16 @@
       "subnr": "111645",
       "source_id": "200",
       "word_file": "words/w00200-italic-sub111645-p1558-c3-u002dbaljor.png"
+    },
+    {
+      "page": 1,
+      "column": 0,
+      "row": 24,
+      "review_selection": [
+        "M01"
+      ],
+      "review_pixel_count": 0,
+      "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
     }
   ],
   "role": "unknown",

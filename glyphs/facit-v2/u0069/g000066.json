@@ -81,6 +81,14 @@
       "subnr": "106877",
       "source_id": "182",
       "word_file": "words/w00182-italic-sub106877-p1550-c1-walesiskor.png"
+    },
+    {
+      "page": 1,
+      "column": 0,
+      "row": 24,
+      "review_selection": [],
+      "review_pixel_count": 11,
+      "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
     }
   ],
   "role": "unknown",

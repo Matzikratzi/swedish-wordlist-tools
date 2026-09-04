@@ -107,6 +107,21 @@
       "subnr": "111658",
       "source_id": "201",
       "word_file": "words/w00201-roman-sub111658-p1558-c3-elu002e.png"
+    },
+    {
+      "expected_word": "pl",
+      "jsonl_word": "pl.",
+      "jsonl_similarity": 1,
+      "page": 1,
+      "subnr": "ocr-4-1-20-5",
+      "source_id": "page:1:ocr:4:1:20:5",
+      "page_word_bbox": [
+        465,
+        403,
+        233,
+        72
+      ],
+      "suggestion": ""
     }
   ],
   "role": "unknown",

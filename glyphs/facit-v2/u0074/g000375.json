@@ -1,6 +1,6 @@
 {
   "label": "t",
-  "role": "inflection-italic",
+  "style": "italic",
   "pixels_relative_to_baseline": [
     [
       0,
@@ -61,21 +61,17 @@
   ],
   "sources": [
     {
-      "expected_word": "-t",
-      "jsonl_word": "+t",
-      "jsonl_similarity": 1,
       "page": 1,
-      "subnr": "ocr-4-1-28-8",
-      "source_id": "page:1:ocr:4:1:28:8",
-      "page_word_bbox": [
-        465,
-        527,
-        233,
-        76
+      "column": 0,
+      "row": 0,
+      "review_selection": [
+        "U00"
       ],
-      "suggestion": ""
+      "review_pixel_count": 0,
+      "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
     }
   ],
-  "reviewed": false,
-  "model_id": "g000004"
+  "role": "italic",
+  "model_id": "g000375",
+  "reviewed": true
 }
