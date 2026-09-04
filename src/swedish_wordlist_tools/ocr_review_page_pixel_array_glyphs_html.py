@@ -46,6 +46,10 @@ def _row_owner_revision(context: dict, position: tuple[int, int]) -> int:
     return int((context.get("pixel_owner_row_revisions") or {}).get(position, 0))
 
 
+def _ownership_success_logging(context: dict) -> bool:
+    return not bool(context.get("quiet_successful_ownership"))
+
+
 def build_page_context_pixel_array(jsonl, page_number: int, threshold: int = 210) -> dict:
     global _current_pixel_context
     total_started = time.perf_counter(); print(f"review: laddar sida {page_number} och segmenterar geometri en gång ...", flush=True)
@@ -107,16 +111,24 @@ def _ensure_known_glyph_ownership(context: dict, pairs: set[tuple[int, int]], mo
         done.update(pending)
         for pair in sorted(pending):
             if not _pair_has_ink_bridge(context, pair): continue
-            print(f"review: bläck korsar geometrisk radgräns c{pair[0]} r{pair[1]}/r{pair[1]+1}; analyserar glyphägande ...", flush=True); started = time.perf_counter()
+            started = time.perf_counter()
+            if _ownership_success_logging(context):
+                print(f"review: bläck korsar geometrisk radgräns c{pair[0]} r{pair[1]}/r{pair[1]+1}; analyserar glyphägande ...", flush=True)
             changes = refine_known_glyph_ownership(context["pixel_gray_page"], context["row_map"], context["pixel_owners"], models, threshold=context["threshold"], pairs={pair})
             moved = sum(int(c.get("moved_to_upper") or 0) + int(c.get("moved_to_lower") or 0) for c in changes)
             if moved:
                 changed_any = True; context["pixel_owner_revision"] = int(context.get("pixel_owner_revision") or 0) + 1; revisions = context["pixel_owner_row_revisions"]
                 for pos in ((pair[0], pair[1]), (pair[0], pair[1]+1)): revisions[pos] = int(revisions.get(pos, 0)) + 1
             context["known_glyph_ownership_refinements"].extend(changes)
-            print(f"review: glyphägande c{pair[0]} r{pair[1]}/r{pair[1]+1} klart på {time.perf_counter()-started:.3f} s; revision={context['pixel_owner_revision']}", flush=True)
-            for c in changes:
-                print(f"review: glyphägande c{c['column']} r{c['upper_row']}/r{c['lower_row']} y={c['boundary']} övre={c['upper_labels']!r} undre={c['lower_labels']!r} flyttade={c['moved_to_upper']}/{c['moved_to_lower']} konflikt={c['conflict_pixels']} brygg-x={c.get('bridge_x_pixels','?')}", flush=True)
+            conflicts = [c for c in changes if int(c.get("conflict_pixels") or 0) > 0]
+            if _ownership_success_logging(context):
+                print(f"review: glyphägande c{pair[0]} r{pair[1]}/r{pair[1]+1} klart på {time.perf_counter()-started:.3f} s; revision={context['pixel_owner_revision']}", flush=True)
+                rows_to_print = changes
+            else:
+                rows_to_print = conflicts
+            for c in rows_to_print:
+                prefix = "review: FEL glyphägande" if c in conflicts else "review: glyphägande"
+                print(f"{prefix} c{c['column']} r{c['upper_row']}/r{c['lower_row']} y={c['boundary']} övre={c['upper_labels']!r} undre={c['lower_labels']!r} flyttade={c['moved_to_upper']}/{c['moved_to_lower']} konflikt={c['conflict_pixels']} brygg-x={c.get('bridge_x_pixels','?')}", flush=True)
     return changed_any
 
 
@@ -190,7 +202,8 @@ def _auto_assign_isolated_descenders(context: dict, state: dict) -> list[dict]:
         if changed:
             record = {"column": column, "upper_row": int(candidate["upper_row"]), "lower_row": int(candidate["lower_row"]), "pixels": int(candidate["pixels"]), "changed": changed, **proof}
             records.append(record); context.setdefault("auto_two_row_ownership", []).append(record)
-            print(f"review: automatisk radägare c{column} r{candidate['upper_row']}/{candidate['lower_row']}: isolerad övre komponent {candidate['pixels']} px, Manhattan={proof['min_manhattan_distance']} → rad {candidate['upper_row']}", flush=True)
+            if _ownership_success_logging(context):
+                print(f"review: automatisk radägare c{column} r{candidate['upper_row']}/{candidate['lower_row']}: isolerad övre komponent {candidate['pixels']} px, Manhattan={proof['min_manhattan_distance']} → rad {candidate['upper_row']}", flush=True)
     return records
 
 
