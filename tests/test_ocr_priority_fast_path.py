@@ -24,6 +24,13 @@ class _Owners:
         return row + 1
 
 
+class _RoleWithTypography(str):
+    def __new__(cls, role: str, typography: str):
+        obj = str.__new__(cls, role)
+        obj.typographic_style = typography
+        return obj
+
+
 class PriorityFastPathTests(unittest.TestCase):
     def test_priority_changes_order_not_result(self):
         bold_wrong = GlyphModel(
@@ -61,7 +68,6 @@ class PriorityFastPathTests(unittest.TestCase):
             pixels=frozenset({(0, 0)}),
             sources=2,
         )
-        # Homonym baseline 1, headword baseline 5: four pixels lower.
         ink = {(0, 1), (2, 5)}
 
         reset_priority_stats()
@@ -129,6 +135,25 @@ class PriorityFastPathTests(unittest.TestCase):
         self.assertEqual(classify_row_start(context, (0, 0)), "headword")
         self.assertEqual(classify_row_start(context, (0, 1)), "homonym")
         self.assertEqual(classify_row_start(context, (0, 2)), "continuation")
+
+    def test_unknown_role_uses_known_bold_typography_for_layout(self):
+        context = {}
+
+        class M:
+            label = "a"
+            style = _RoleWithTypography("unknown", "bold")
+            x = 7
+            baseline = 12
+
+        observe_row_layout(
+            context,
+            {
+                "column": 2,
+                "crop_box": (100, 0, 120, 20),
+                "matches": [M()],
+            },
+        )
+        self.assertEqual(context["priority_headword_x_counts"][2][107], 1)
 
     def test_layout_observation_ignores_non_match_test_doubles(self):
         context = {}
