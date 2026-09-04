@@ -22,7 +22,7 @@ class HeadwordInitialHintTests(unittest.TestCase):
     def _context(self, jsonl: Path, *, starts: list[int]) -> dict:
         width = 20
         height = len(starts) * 3 + 1
-        owners = PagePixelArray(width, height)
+        owners = PagePixelArray(width=width, height=height, data=bytearray(width * height))
         rows = []
         for row_index, x in enumerate(starts):
             top = row_index * 3
