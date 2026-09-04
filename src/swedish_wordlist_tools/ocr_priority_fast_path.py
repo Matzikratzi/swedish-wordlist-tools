@@ -4,8 +4,10 @@ from __future__ import annotations
 
 The search space is unchanged: layout and previous typography only decide which
 facit raster classes are tried first. Models with identical raster geometry keep
-the old canonical order so metadata/label choice cannot change merely because a
-layout hint was added.
+the old canonical order on ordinary rows so metadata/label choice cannot change
+merely because a layout hint was added. On a row already classified as a homonym
+row, the known position is allowed to distinguish otherwise identical metadata
+variants: leading homonym digit first, then bold headword.
 """
 
 from collections import Counter
@@ -137,22 +139,42 @@ def _ordered_prepared(
     leading_homonym_seen: bool,
     baseline_established: bool,
 ) -> list[tuple[GlyphModel, int, tuple[tuple[int, int], ...]]]:
-    """Prioritize raster classes, never metadata variants of one raster.
+    """Prioritize raster classes while keeping metadata choice stable.
 
-    The old fast path sorts models by pixel count, source count, label and role.
-    If two facit models have identical normalized pixels they yield the exact
-    same placement. Reordering those models can therefore alter recognized
-    metadata while leaving pixel coverage unchanged. Keep their old order and
-    use the best layout priority of the whole raster class only to position that
-    class relative to other geometries.
+    Ordinary headword/continuation/unknown rows keep the pre-priority canonical
+    order among models with identical pixels. A row already classified as a
+    homonym row is the deliberate exception: its x-position carries information
+    that pixels alone cannot encode, so within an identical raster we may prefer
+    a homonym digit at the first position and bold headword immediately after it.
+    This is still ordering only; no candidate is discarded.
     """
-    groups: dict[tuple[tuple[int, int], ...], list[tuple[GlyphModel, int, tuple[tuple[int, int], ...]]]] = {}
+    groups: dict[
+        tuple[tuple[int, int], ...],
+        list[tuple[GlyphModel, int, tuple[tuple[int, int], ...]]],
+    ] = {}
     for row in prepared:
         groups.setdefault(_raster_key(row[0]), []).append(row)
 
     ordered_groups = []
     for raster, rows in groups.items():
-        canonical_rows = sorted(rows, key=lambda row: _canonical_model_key(row[0]))
+        if row_kind == "homonym":
+            canonical_rows = sorted(
+                rows,
+                key=lambda row: (
+                    _priority_class(
+                        row[0],
+                        first_glyph=first_glyph,
+                        previous_style=previous_style,
+                        row_kind=row_kind,
+                        leading_homonym_seen=leading_homonym_seen,
+                        baseline_established=baseline_established,
+                    ),
+                    _canonical_model_key(row[0]),
+                ),
+            )
+        else:
+            canonical_rows = sorted(rows, key=lambda row: _canonical_model_key(row[0]))
+
         class_priority = min(
             _priority_class(
                 row[0],
@@ -164,8 +186,10 @@ def _ordered_prepared(
             )
             for row in rows
         )
-        representative = canonical_rows[0][0]
-        ordered_groups.append((class_priority, _canonical_model_key(representative), raster, canonical_rows))
+        representative = min(rows, key=lambda row: _canonical_model_key(row[0]))[0]
+        ordered_groups.append(
+            (class_priority, _canonical_model_key(representative), raster, canonical_rows)
+        )
 
     ordered_groups.sort(key=lambda item: (item[0], item[1], item[2]))
     return [row for _priority, _canonical, _raster, rows in ordered_groups for row in rows]
@@ -240,7 +264,9 @@ def prioritized_fast_exact_cover(
                 continue
             for _mx, my in left_pixels:
                 candidate_baseline = anchor_y - my
-                is_leading_homonym = first_glyph and row_kind == "homonym" and _is_homonym_model(model)
+                is_leading_homonym = (
+                    first_glyph and row_kind == "homonym" and _is_homonym_model(model)
+                )
                 if baseline is not None and candidate_baseline != baseline:
                     continue
                 if candidate_baseline < -model.min_y:
@@ -248,7 +274,9 @@ def prioritized_fast_exact_cover(
                 if candidate_baseline > height - 1 - model.max_y:
                     continue
                 placements_tested += 1
-                placed = frozenset((x0 + x, candidate_baseline + y) for x, y in model.pixels)
+                placed = frozenset(
+                    (x0 + x, candidate_baseline + y) for x, y in model.pixels
+                )
                 if not placed.issubset(remaining):
                     continue
                 match = Match(
@@ -282,7 +310,10 @@ def prioritized_fast_exact_cover(
     stats["placements_tested"] += placements_tested
     if chosen is None:
         return None
-    selected = sorted(chosen, key=lambda match: (match.x, match.baseline, match.label, str(match.style)))
+    selected = sorted(
+        chosen,
+        key=lambda match: (match.x, match.baseline, match.label, str(match.style)),
+    )
 
     if row_kind == "homonym" and selected and _is_homonym_match(selected[0]):
         normal = next((m for m in selected[1:] if not _is_homonym_match(m)), None)
@@ -322,7 +353,10 @@ def observe_row_layout(context: dict, state: dict) -> None:
         _column_counters(context, "priority_headword_x_counts", column)[absolute_x] += 1
 
     if _is_homonym_match(first):
-        if any(int(match.x) > int(first.x) and _is_headword_match(match) for match in matches[1:]):
+        if any(
+            int(match.x) > int(first.x) and _is_headword_match(match)
+            for match in matches[1:]
+        ):
             _column_counters(context, "priority_homonym_x_counts", column)[absolute_x] += 1
 
 
@@ -347,15 +381,27 @@ def classify_row_start(context: dict, position: tuple[int, int]) -> str:
     if owners is None:
         return "unknown"
     row = rows[row_index]
-    left = max(0, int((context.get("column_content_lefts") or {}).get(column) or columns[column].get("crop_left", columns[column].get("left", 0))))
-    right = min(owners.width, int(columns[column].get("crop_right", columns[column].get("right", owners.width))))
+    left = max(
+        0,
+        int(
+            (context.get("column_content_lefts") or {}).get(column)
+            or columns[column].get("crop_left", columns[column].get("left", 0))
+        ),
+    )
+    right = min(
+        owners.width,
+        int(columns[column].get("crop_right", columns[column].get("right", owners.width))),
+    )
     top = max(0, int(row.get("page_top", 0)))
     bottom = min(owners.height, int(row.get("page_bottom", owners.height)))
     code = owners.row_code(row_index)
 
     start_x = None
     for x in range(left, right):
-        if any(owners.data[y * owners.width + x] == code for y in range(top, bottom)):
+        if any(
+            owners.data[y * owners.width + x] == code
+            for y in range(top, bottom)
+        ):
             start_x = x
             break
     if start_x is None:
