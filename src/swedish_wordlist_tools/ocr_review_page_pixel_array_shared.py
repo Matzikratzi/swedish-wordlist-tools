@@ -11,22 +11,22 @@ from time import perf_counter
 from . import ocr_probe_row_glyphs_grouped as grouped_probe
 from . import ocr_review_page_pixel_array_glyphs_html as page_editor
 from .ocr_disconnected_glyph_ownership import repair_lower_row_disconnected_glyphs
-from .ocr_page_cached_fast_path import (
-    bind_page_candidates,
-    page_cached_prioritized_fast_exact_cover,
-)
+from .ocr_page_cached_fast_path import bind_page_candidates
 from .ocr_priority_fast_path import (
     classify_row_start,
     observe_row_layout,
     set_row_priority_hint,
 )
 from .ocr_probe_merge_with_lower_row import apply_merge_down, probe_zero_match_merge_down
+from .ocr_traced_page_cached_fast_path import (
+    set_trace_row,
+    traced_page_cached_prioritized_fast_exact_cover,
+)
 
 
-# Restore the ordinary page-cached fast path.  The x-segmented and baseline-seed
-# experiments remain in the tree for later inspection but are deliberately not
-# active: page 9-10 benchmarks showed substantial regressions for both.
-grouped_probe.fast_exact_cover = page_cached_prioritized_fast_exact_cover
+# Keep the ordinary page-cached search semantics, but instrument slow recursive
+# calls. The tracing wrapper is search-order/result neutral.
+grouped_probe.fast_exact_cover = traced_page_cached_prioritized_fast_exact_cover
 
 _base_load_review_state_pixel_array = page_editor.load_review_state_pixel_array
 
@@ -44,6 +44,7 @@ def _base_load_with_priority(context, position, models):
     """Run the unchanged row analyser with a result-neutral candidate hint."""
     bind_page_candidates(context, models)
     set_row_priority_hint(classify_row_start(context, position))
+    set_trace_row(context.get("page_number"), position)
     state = _base_load_review_state_pixel_array(context, position, models)
     observe_row_layout(context, state)
     return state
