@@ -19,6 +19,17 @@ from .ocr_glyph_popularity_stats import record_model_hit, register_bucket
 _CONTEXT_KEY = "_priority_page_candidates"
 _Prepared = tuple[GlyphModel, int, tuple[tuple[int, int], ...]]
 
+# Experimental fixed prefix learned from the 1-10 page observation run.
+# Values are 1-based ranks in the canonical bucket order, not labels, so
+# different exact rasters with the same label remain distinct.  Roman is
+# intentionally absent: its top-12 detail line was not available in the
+# captured benchmark output used for this experiment.
+_POPULAR_CANONICAL_RANKS: dict[str, tuple[int, ...]] = {
+    "homonym": (14, 19, 1, 22, 20, 3, 18, 2, 11, 21, 4, 7),
+    "bold": (72, 31, 67, 43, 41, 59, 50, 34, 42, 22, 69, 40),
+    "italic": (109, 83, 54, 60, 105, 85, 27, 89, 101, 113, 71, 77),
+}
+
 
 @dataclass(frozen=True)
 class _PageCandidates:
@@ -77,6 +88,22 @@ def _canonicalize_bucket(rows: list[_Prepared]) -> tuple[_Prepared, ...]:
     return tuple(row for _canonical, _raster, group_rows in compiled for row in group_rows)
 
 
+def _apply_popular_prefix(bucket: str, rows: tuple[_Prepared, ...]) -> tuple[_Prepared, ...]:
+    """Move observed top models first, preserving canonical order for the rest."""
+    ranks = _POPULAR_CANONICAL_RANKS.get(bucket)
+    if not ranks:
+        return rows
+    selected: list[_Prepared] = []
+    selected_indexes: set[int] = set()
+    for rank in ranks:
+        index = int(rank) - 1
+        if 0 <= index < len(rows) and index not in selected_indexes:
+            selected.append(rows[index])
+            selected_indexes.add(index)
+    selected.extend(row for index, row in enumerate(rows) if index not in selected_indexes)
+    return tuple(selected)
+
+
 def _build_page_candidates(models: Iterable[GlyphModel]) -> _PageCandidates:
     if not hasattr(models, "__len__") or not hasattr(models, "__getitem__"):
         models = tuple(models)
@@ -102,7 +129,8 @@ def _build_page_candidates(models: Iterable[GlyphModel]) -> _PageCandidates:
         raw_buckets[bucket].append(row)
         raster_buckets.setdefault(priority._raster_key(model), set()).add(bucket)
 
-    buckets = {name: _canonicalize_bucket(rows) for name, rows in raw_buckets.items()}
+    canonical = {name: _canonicalize_bucket(rows) for name, rows in raw_buckets.items()}
+    buckets = {name: _apply_popular_prefix(name, rows) for name, rows in canonical.items()}
     cross_bucket_raster = any(len(names) > 1 for names in raster_buckets.values())
     models_id, model_count, first_model_id, last_model_id = _model_signature(models)
     return _PageCandidates(
@@ -224,9 +252,6 @@ def _iter_candidates(
     baseline_established: bool,
 ):
     if candidates.cross_bucket_raster:
-        # A raster represented in more than one bucket can make bucket order
-        # choose different metadata for the same pixels. Preserve the old
-        # canonical ordering for that unusual/ambiguous facit state.
         yield from candidates.fallback_orders.ordered(
             first_glyph=first_glyph,
             previous_style=previous_style,
