@@ -16,7 +16,6 @@ from .ocr_refine_known_glyph_ownership import refine_known_glyph_ownership
 fast = ultrafast.fast
 _current_pixel_context: dict | None = None
 _AUTO_ROW_MANHATTAN_GAP = 6
-_HORIZONTAL_CROP_SAFETY_MARGIN = 10
 _original_manual_two_row_candidates = review_delete.manual_two_row_candidates
 
 
@@ -210,77 +209,57 @@ def _effective_owned_row_box(context: dict, column: int, row_index: int, left: i
     core_top = int(row["page_top"])
     core_bottom = int(row["page_bottom"])
     if row_index > 0:
-        core_top = _effective_separator_page(
-            context,
-            column=column,
-            upper_row_index=row_index - 1,
-            left=left,
-            right=right,
-        )
+        core_top = _effective_separator_page(context,column=column,upper_row_index=row_index-1,left=left,right=right)
     if row_index + 1 < len(rows):
-        core_bottom = _effective_separator_page(
-            context,
-            column=column,
-            upper_row_index=row_index,
-            left=left,
-            right=right,
-        )
-    top = max(0, core_top - int(pad_y))
-    bottom = min(context["page"].height, core_bottom + int(pad_y))
+        core_bottom = _effective_separator_page(context,column=column,upper_row_index=row_index,left=left,right=right)
+    top = max(0, core_top - int(pad_y)); bottom = min(context["page"].height, core_bottom + int(pad_y))
     return (left, top, right, bottom), core_top, core_bottom
 
 
 def _load_owned_row_state(context: dict, position: tuple[int, int], models) -> dict:
-    column, row_index = position; page = context["page"]; row_map = context["row_map"]; threshold = context["threshold"]; owners = context["pixel_owners"]
-    column_entry = row_map["columns"][column]; physical_rows = column_entry.get("rows") or []
-    if not 0 <= row_index < len(physical_rows): raise ValueError(f"row {row_index} out of range; column {column} has {len(physical_rows)} rows")
-    row = physical_rows[row_index]; content_left = (context.get("column_content_lefts") or {}).get(column)
-    # Keep the established column crop, but add a fixed safety margin so no real
-    # glyph ink can sit directly on the analysis boundary.  In particular, the
-    # left margin remains deliberately small: this is only ten pixels beyond the
-    # value already selected by the column geometry.
-    base_left = int(content_left if content_left is not None else column_entry.get("crop_left", column_entry.get("left", 0)))
-    base_right = int(column_entry.get("crop_right", column_entry.get("right", page.width)))
-    left = max(0, base_left - _HORIZONTAL_CROP_SAFETY_MARGIN)
-    right = min(page.width, base_right + _HORIZONTAL_CROP_SAFETY_MARGIN)
-    box, effective_top, effective_bottom = _effective_owned_row_box(context, column, row_index, left, right, pad_y=2)
+    column,row_index=position;page=context["page"];row_map=context["row_map"];threshold=context["threshold"];owners=context["pixel_owners"]
+    column_entry=row_map["columns"][column];physical_rows=column_entry.get("rows") or []
+    if not 0<=row_index<len(physical_rows):raise ValueError(f"row {row_index} out of range; column {column} has {len(physical_rows)} rows")
+    row=physical_rows[row_index];content_left=(context.get("column_content_lefts") or {}).get(column)
+    left=max(0,int(content_left if content_left is not None else column_entry.get("crop_left",column_entry.get("left",0))))
+    right=min(page.width,int(column_entry.get("crop_right",column_entry.get("right",page.width))))
+    box,effective_top,effective_bottom=_effective_owned_row_box(context,column,row_index,left,right,pad_y=2)
     with context["known_glyph_ownership_lock"]:
-        owner_revision = int(context.get("pixel_owner_revision") or 0); owner_row_revision = _row_owner_revision(context, position); crop = owners.render_owner_crop(row_index=row_index, box=box)
-    result = fast.analyse_row_exact(crop, models, threshold=threshold); selected = result["selected"]
-    covered = set().union(*(m.pixels for m in selected)) if selected else set(); residuals = fast.residual_component_pixels(result["ink"] - covered)
-    items=[]; point_sets={}
-    for index, match in enumerate(selected):
-        item_id=f"M{index:02d}"; points=frozenset(match.pixels); point_sets[item_id]=points; items.append({"id":item_id,"kind":"match","label":match.label,"style":match.style,"pixels":len(points),"bbox":fast.legacy._bbox(set(points))})
-    for index, points in enumerate(residuals):
-        item_id=f"U{index:02d}"; point_sets[item_id]=points; items.append({"id":item_id,"kind":"residual","label":"?","style":"unknown","pixels":len(points),"bbox":fast.legacy._bbox(set(points))})
+        owner_revision=int(context.get("pixel_owner_revision") or 0);owner_row_revision=_row_owner_revision(context,position);crop=owners.render_owner_crop(row_index=row_index,box=box)
+    result=fast.analyse_row_exact(crop,models,threshold=threshold);selected=result["selected"]
+    covered=set().union(*(m.pixels for m in selected)) if selected else set();residuals=fast.residual_component_pixels(result["ink"]-covered)
+    items=[];point_sets={}
+    for index,match in enumerate(selected):
+        item_id=f"M{index:02d}";points=frozenset(match.pixels);point_sets[item_id]=points;items.append({"id":item_id,"kind":"match","label":match.label,"style":match.style,"pixels":len(points),"bbox":fast.legacy._bbox(set(points))})
+    for index,points in enumerate(residuals):
+        item_id=f"U{index:02d}";point_sets[item_id]=points;items.append({"id":item_id,"kind":"residual","label":"?","style":"unknown","pixels":len(points),"bbox":fast.legacy._bbox(set(points))})
     return {"source":context["source"],"page":context["page_number"],"column":column,"row":row_index,"row_page_top":int(row["page_top"]),"row_page_bottom":int(row["page_bottom"]),"effective_row_page_top":effective_top,"effective_row_page_bottom":effective_bottom,"crop_box":box,"crop_width":crop.width,"crop_height":crop.height,"image":fast.legacy._png_data_uri(crop),"baseline":result["baseline"],"covered_pixels":result["covered_pixels"],"source_pixels":result["source_pixels"],"source_ink_points":[[x,y] for x,y in sorted(result["ink"])],"removed_neighbor_pixels":0,"two_row_removed_pixels":0,"fully_exact":result["fully_exact"],"text":fast.render_exact_text(selected,source_ink=result["ink"]) if selected else "","markup":fast.render_exact_markup(selected,source_ink=result["ink"]) if selected else "","items":items,"point_sets":point_sets,"matches":selected,"pixel_owner_mode":"page-byte-array+known-glyphs","pixel_owner_code":PagePixelArray.row_code(row_index),"pixel_owner_revision":owner_revision,"pixel_owner_row_revision":owner_row_revision,"pixel_array_counts":owners.counts(),"ignored_black_rectangles":context.get("ignored_black_rectangles") or [],"known_glyph_ownership_refinements":context.get("known_glyph_ownership_refinements") or []}
 
 
-def load_review_state_pixel_array(context, position, models):
-    state=_load_owned_row_state(context,position,models)
-    auto_records=[]
+def load_review_state_pixel_array(context,position,models):
+    state=_load_owned_row_state(context,position,models);auto_records=[]
     if not state["fully_exact"]:
-        changed=_ensure_known_glyph_ownership(context,_neighbor_pairs(context,position),models); current=_row_owner_revision(context,position)
-        if changed or int(state.get("pixel_owner_row_revision") or 0)!=current: state=_load_owned_row_state(context,position,models)
+        changed=_ensure_known_glyph_ownership(context,_neighbor_pairs(context,position),models);current=_row_owner_revision(context,position)
+        if changed or int(state.get("pixel_owner_row_revision") or 0)!=current:state=_load_owned_row_state(context,position,models)
         if not state["fully_exact"]:
             auto_records=_auto_assign_isolated_descenders(context,state)
-            if auto_records: state=_load_owned_row_state(context,position,models); state["auto_two_row_ownership"]=auto_records
+            if auto_records:state=_load_owned_row_state(context,position,models);state["auto_two_row_ownership"]=auto_records
     return add_neighbor_row_raster(context,state,probe_y=8)
 
 
 _original_cache_get_many=fast.SynchronizedStateCache.get_many
 def _get_many_owner_revision_safe(self,positions):
-    states=_original_cache_get_many(self,positions); context=_current_pixel_context
+    states=_original_cache_get_many(self,positions);context=_current_pixel_context
     if context is None:return states
     out=[]
     for position,state in zip(positions,states):
-        current=_row_owner_revision(context,position); revision=int(state.get("pixel_owner_row_revision") or 0)
+        current=_row_owner_revision(context,position);revision=int(state.get("pixel_owner_row_revision") or 0)
         if revision!=current:self.invalidate(position);state=self.get(position)
         out.append(state)
     return out
 fast.SynchronizedStateCache.get_many=_get_many_owner_revision_safe
 
-_original_packet_positions=fast.ui.packet_positions; _original_defect_packet=fast.ui.defect_packet; _original_packet_render=fast.ui.render_five_row_html
+_original_packet_positions=fast.ui.packet_positions;_original_defect_packet=fast.ui.defect_packet;_original_packet_render=fast.ui.render_five_row_html
 def _three_forward_positions(positions,current,size=3):
     if current not in positions:raise ValueError(f"row {current} is not present on page")
     start=positions.index(current);return positions[start:start+3]
