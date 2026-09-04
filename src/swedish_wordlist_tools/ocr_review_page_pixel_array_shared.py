@@ -6,6 +6,8 @@ All automatic row-ownership repair belongs here so batch classification and
 interactive review see the same state.
 """
 
+from time import perf_counter
+
 from . import ocr_probe_row_glyphs_grouped as grouped_probe
 from . import ocr_review_page_pixel_array_glyphs_html as page_editor
 from .ocr_disconnected_glyph_ownership import repair_lower_row_disconnected_glyphs
@@ -47,7 +49,7 @@ def _base_load_with_priority(context, position, models):
     return state
 
 
-def _probe_merge_down_if_zero_match(context, position, state, models):
+def _probe_merge_down_if_zero_match(context, position, state, models, timings):
     """Probe the following row only for the narrow zero-match artefact case."""
     if int(state.get("source_pixels") or 0) <= 0 or state.get("matches"):
         return None
@@ -59,23 +61,39 @@ def _probe_merge_down_if_zero_match(context, position, state, models):
         return None
 
     lower_position = (column, row_index + 1)
+    started = perf_counter()
     lower_state = _base_load_with_priority(context, lower_position, models)
-    return probe_zero_match_merge_down(context, state, lower_state, models)
+    timings["merge_lower_base"] = perf_counter() - started
+    started = perf_counter()
+    proof = probe_zero_match_merge_down(context, state, lower_state, models)
+    timings["merge_probe"] = perf_counter() - started
+    return proof
+
+
+def _attach_timings(state: dict, timings: dict[str, float]) -> dict:
+    state["shared_stage_timings"] = dict(timings)
+    return state
 
 
 def load_review_state_pixel_array(context, position, models):
+    timings: dict[str, float] = {}
+
+    started = perf_counter()
     state = _base_load_with_priority(context, position, models)
+    timings["initial_base"] = perf_counter() - started
     if state.get("fully_exact"):
-        return state
+        return _attach_timings(state, timings)
 
     # Most rows stop here. Looking at the following row is allowed only for a
     # physical row that contains ink but has *zero* accepted glyph matches.
     # This keeps merge probing a rare fallback rather than normal OCR work.
     if int(state.get("source_pixels") or 0) > 0 and not state.get("matches"):
         context["analyse_row_exact"] = page_editor.fast.analyse_row_exact
-        proof = _probe_merge_down_if_zero_match(context, position, state, models)
+        proof = _probe_merge_down_if_zero_match(context, position, state, models, timings)
         if proof is not None:
+            started = perf_counter()
             moved = apply_merge_down(context, proof)
+            timings["merge_apply"] = perf_counter() - started
             if moved:
                 column, row_index = map(int, position)
                 if not context.get("quiet_successful_ownership"):
@@ -85,19 +103,25 @@ def load_review_state_pixel_array(context, position, models):
                         f"flyttade {moved} px nedåt, text={proof['labels']!r}",
                         flush=True,
                     )
+                started = perf_counter()
                 state = _base_load_with_priority(context, position, models)
+                timings["merge_reanalyse"] = perf_counter() - started
                 state = _mark_absorbed_empty(state, proof)
-                return state
+                return _attach_timings(state, timings)
 
     # Only unresolved rows reach the more expensive exact disconnected-glyph
     # ownership repair. This path scans facit geometry and must not run merely
     # as preparation for a merge probe.
+    started = perf_counter()
     records = repair_lower_row_disconnected_glyphs(context, state, models)
+    timings["disconnected_repair"] = perf_counter() - started
     if records:
+        started = perf_counter()
         state = _base_load_with_priority(context, position, models)
+        timings["disconnected_reanalyse"] = perf_counter() - started
         state["disconnected_glyph_ownership"] = records
 
-    return state
+    return _attach_timings(state, timings)
 
 
 build_page_context_pixel_array = page_editor.build_page_context_pixel_array
