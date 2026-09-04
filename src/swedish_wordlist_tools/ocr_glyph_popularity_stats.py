@@ -1,19 +1,17 @@
 from __future__ import annotations
 
-"""Measure which prepared glyph candidates actually win exact-cover searches.
+"""Observe and persist deterministic glyph-model popularity statistics."""
 
-This is deliberately observational: it never changes candidate ordering.  The
-batch scanner can therefore collect a few pages first and show how much a later
-popularity ordering could reduce the average position of successful candidates.
-"""
-
+import json
 from collections import Counter
 from dataclasses import dataclass
+from pathlib import Path
 from threading import local
 
 from .ocr_glyph_matcher import GlyphModel
 
 _tls = local()
+PROFILE_FORMAT = "saol14-glyph-popularity-v1"
 
 
 @dataclass(frozen=True)
@@ -24,6 +22,7 @@ class _ModelInfo:
     label: str
     typography: str
     sources: int
+    stable_key: str
 
 
 def reset_popularity_stats() -> None:
@@ -41,6 +40,12 @@ def _stores() -> tuple[Counter[int], dict[int, _ModelInfo]]:
     return hits, models
 
 
+def stable_model_key(model: GlyphModel, *, bucket: str, typography: str) -> str:
+    """Stable identity across processes; independent of sources/review metadata."""
+    raster = ";".join(f"{int(x)},{int(y)}" for x, y in sorted(model.pixels))
+    return f"{bucket}|{typography}|{model.label}|{raster}"
+
+
 def register_bucket(
     bucket: str,
     rows,
@@ -52,20 +57,65 @@ def register_bucket(
     size = len(rows)
     for rank, row in enumerate(rows, start=1):
         model = row[0]
+        typography = str(typography_of(model.style))
         key = id(model)
         models[key] = _ModelInfo(
             bucket=str(bucket),
             rank=rank,
             bucket_size=size,
             label=str(model.label),
-            typography=str(typography_of(model.style)),
+            typography=typography,
             sources=int(model.sources),
+            stable_key=stable_model_key(model, bucket=str(bucket), typography=typography),
         )
 
 
 def record_model_hit(model: GlyphModel) -> None:
     hits, _models = _stores()
     hits[id(model)] += 1
+
+
+def popularity_counts() -> dict[str, int]:
+    """Return full stable model->hit counts from the current observation run."""
+    hits, models = _stores()
+    out: Counter[str] = Counter()
+    for key, count in hits.items():
+        info = models.get(key)
+        if info is not None and count > 0:
+            out[info.stable_key] += int(count)
+    return dict(out)
+
+
+def save_popularity_profile(path: Path) -> int:
+    counts = popularity_counts()
+    payload = {
+        "format": PROFILE_FORMAT,
+        "counts": dict(sorted(counts.items())),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return len(counts)
+
+
+def load_popularity_profile(path: Path | None) -> int:
+    if path is None:
+        _tls.profile = {}
+        return 0
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("format") != PROFILE_FORMAT:
+        raise ValueError(f"unsupported popularity profile format: {payload.get('format')!r}")
+    raw = payload.get("counts") or {}
+    _tls.profile = {str(key): int(value) for key, value in raw.items() if int(value) > 0}
+    return len(_tls.profile)
+
+
+def clear_popularity_profile() -> None:
+    _tls.profile = {}
+
+
+def popularity_weight(model: GlyphModel, *, bucket: str, typography: str) -> int:
+    profile = getattr(_tls, "profile", None) or {}
+    return int(profile.get(stable_model_key(model, bucket=bucket, typography=typography), 0))
 
 
 def popularity_report(*, top_n: int = 12) -> list[dict]:
@@ -86,8 +136,13 @@ def popularity_report(*, top_n: int = 12) -> list[dict]:
         total_hits = sum(count for _key, _info, count in rows)
         current_cost = sum(info.rank * count for _key, info, count in rows)
         popularity_order = sorted(rows, key=lambda row: (-row[2], row[1].rank))
-        popularity_rank = {key: rank for rank, (key, _info, _count) in enumerate(popularity_order, start=1)}
-        popularity_cost = sum(popularity_rank[key] * count for key, _info, count in rows)
+        popularity_rank = {
+            key: rank
+            for rank, (key, _info, _count) in enumerate(popularity_order, start=1)
+        }
+        popularity_cost = sum(
+            popularity_rank[key] * count for key, _info, count in rows
+        )
         bucket_size = max(info.bucket_size for _key, info, _count in rows)
         top = [
             {
