@@ -24,6 +24,7 @@ def reset_priority_stats() -> None:
         "calls": 0,
         "successful_calls": 0,
         "placements_tested": 0,
+        "order_builds": 0,
         "headword_hints": 0,
         "homonym_hints": 0,
         "continuation_hints": 0,
@@ -130,69 +131,108 @@ def _priority_class(
     return priority
 
 
-def _ordered_prepared(
-    prepared: list[tuple[GlyphModel, int, tuple[tuple[int, int], ...]]],
-    *,
-    first_glyph: bool,
-    previous_style: str | None,
-    row_kind: str,
-    leading_homonym_seen: bool,
-    baseline_established: bool,
-) -> list[tuple[GlyphModel, int, tuple[tuple[int, int], ...]]]:
-    """Prioritize raster classes while keeping metadata choice stable.
+class _PreparedCandidateOrders:
+    """Compile raster groups once and cache the small set of candidate orders.
 
-    Ordinary headword/continuation/unknown rows keep the pre-priority canonical
-    order among models with identical pixels. A row already classified as a
-    homonym row is the deliberate exception: its x-position carries information
-    that pixels alone cannot encode, so within an identical raster we may prefer
-    a homonym digit at the first position and bold headword immediately after it.
-    This is still ordering only; no candidate is discarded.
+    The old implementation rebuilt the raster dictionary and re-sorted every
+    model at every recursive exact-cover state. A row can only visit a small,
+    finite set of ordering contexts (first/subsequent glyph, previous typography,
+    row kind, and homonym/baseline state), so we preserve the exact same ordering
+    semantics but construct each resulting order at most once per row.
     """
-    groups: dict[
-        tuple[tuple[int, int], ...],
-        list[tuple[GlyphModel, int, tuple[tuple[int, int], ...]]],
-    ] = {}
-    for row in prepared:
-        groups.setdefault(_raster_key(row[0]), []).append(row)
 
-    ordered_groups = []
-    for raster, rows in groups.items():
-        if row_kind == "homonym":
-            canonical_rows = sorted(
-                rows,
-                key=lambda row: (
-                    _priority_class(
-                        row[0],
-                        first_glyph=first_glyph,
-                        previous_style=previous_style,
-                        row_kind=row_kind,
-                        leading_homonym_seen=leading_homonym_seen,
-                        baseline_established=baseline_established,
-                    ),
-                    _canonical_model_key(row[0]),
-                ),
-            )
-        else:
-            canonical_rows = sorted(rows, key=lambda row: _canonical_model_key(row[0]))
+    def __init__(
+        self,
+        prepared: list[tuple[GlyphModel, int, tuple[tuple[int, int], ...]]],
+    ) -> None:
+        groups: dict[
+            tuple[tuple[int, int], ...],
+            list[tuple[GlyphModel, int, tuple[tuple[int, int], ...]]],
+        ] = {}
+        for row in prepared:
+            groups.setdefault(_raster_key(row[0]), []).append(row)
 
-        class_priority = min(
-            _priority_class(
-                row[0],
-                first_glyph=first_glyph,
-                previous_style=previous_style,
-                row_kind=row_kind,
-                leading_homonym_seen=leading_homonym_seen,
-                baseline_established=baseline_established,
+        compiled = []
+        for raster, rows in groups.items():
+            canonical_rows = tuple(sorted(rows, key=lambda row: _canonical_model_key(row[0])))
+            representative = canonical_rows[0][0]
+            compiled.append(
+                (
+                    _canonical_model_key(representative),
+                    raster,
+                    canonical_rows,
+                )
             )
+        self._groups = tuple(compiled)
+        self._cache: dict[
+            tuple[bool, str | None, str, bool, bool],
+            tuple[tuple[GlyphModel, int, tuple[tuple[int, int], ...]], ...],
+        ] = {}
+
+    def ordered(
+        self,
+        *,
+        first_glyph: bool,
+        previous_style: str | None,
+        row_kind: str,
+        leading_homonym_seen: bool,
+        baseline_established: bool,
+    ) -> tuple[tuple[GlyphModel, int, tuple[tuple[int, int], ...]], ...]:
+        key = (
+            bool(first_glyph),
+            previous_style,
+            row_kind,
+            bool(leading_homonym_seen),
+            bool(baseline_established),
+        )
+        cached = self._cache.get(key)
+        if cached is not None:
+            return cached
+
+        _stats()["order_builds"] += 1
+        ordered_groups = []
+        for canonical_key, raster, canonical_rows in self._groups:
+            if row_kind == "homonym":
+                rows = tuple(
+                    sorted(
+                        canonical_rows,
+                        key=lambda row: (
+                            _priority_class(
+                                row[0],
+                                first_glyph=first_glyph,
+                                previous_style=previous_style,
+                                row_kind=row_kind,
+                                leading_homonym_seen=leading_homonym_seen,
+                                baseline_established=baseline_established,
+                            ),
+                            _canonical_model_key(row[0]),
+                        ),
+                    )
+                )
+            else:
+                rows = canonical_rows
+
+            class_priority = min(
+                _priority_class(
+                    row[0],
+                    first_glyph=first_glyph,
+                    previous_style=previous_style,
+                    row_kind=row_kind,
+                    leading_homonym_seen=leading_homonym_seen,
+                    baseline_established=baseline_established,
+                )
+                for row in canonical_rows
+            )
+            ordered_groups.append((class_priority, canonical_key, raster, rows))
+
+        ordered_groups.sort(key=lambda item: (item[0], item[1], item[2]))
+        result = tuple(
+            row
+            for _priority, _canonical, _raster, rows in ordered_groups
             for row in rows
         )
-        representative = min(rows, key=lambda row: _canonical_model_key(row[0]))[0]
-        ordered_groups.append(
-            (class_priority, _canonical_model_key(representative), raster, canonical_rows)
-        )
-
-    ordered_groups.sort(key=lambda item: (item[0], item[1], item[2]))
-    return [row for _priority, _canonical, _raster, rows in ordered_groups for row in rows]
+        self._cache[key] = result
+        return result
 
 
 def prioritized_fast_exact_cover(
@@ -219,6 +259,7 @@ def prioritized_fast_exact_cover(
         min_x = min(x for x, _y in model.pixels)
         left_pixels = tuple(sorted((x, y) for x, y in model.pixels if x == min_x))
         prepared.append((model, min_x, left_pixels))
+    candidate_orders = _PreparedCandidateOrders(prepared)
 
     row_kind = str(getattr(_tls, "row_kind", "unknown"))
     stats = _stats()
@@ -249,8 +290,7 @@ def prioritized_fast_exact_cover(
         anchor_x = min(x for x, _y in remaining)
         anchor_y = min(y for x, y in remaining if x == anchor_x)
         first_glyph = len(remaining) == len(target)
-        ordered = _ordered_prepared(
-            prepared,
+        ordered = candidate_orders.ordered(
             first_glyph=first_glyph,
             previous_style=previous_style,
             row_kind=row_kind,
