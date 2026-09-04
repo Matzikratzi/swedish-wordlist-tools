@@ -16,6 +16,7 @@ from .ocr_refine_known_glyph_ownership import refine_known_glyph_ownership
 fast = ultrafast.fast
 _current_pixel_context: dict | None = None
 _AUTO_ROW_MANHATTAN_GAP = 6
+_HORIZONTAL_CROP_SAFETY_MARGIN = 10
 _original_manual_two_row_candidates = review_delete.manual_two_row_candidates
 
 
@@ -234,10 +235,14 @@ def _load_owned_row_state(context: dict, position: tuple[int, int], models) -> d
     column_entry = row_map["columns"][column]; physical_rows = column_entry.get("rows") or []
     if not 0 <= row_index < len(physical_rows): raise ValueError(f"row {row_index} out of range; column {column} has {len(physical_rows)} rows")
     row = physical_rows[row_index]; content_left = (context.get("column_content_lefts") or {}).get(column)
-    # All rows in a column use the same horizontal crop. Continuation rows therefore
-    # retain their indentation instead of being left-trimmed independently.
-    left = max(0, int(content_left if content_left is not None else column_entry.get("crop_left", column_entry.get("left", 0))))
-    right = min(page.width, int(column_entry.get("crop_right", column_entry.get("right", page.width))))
+    # Keep the established column crop, but add a fixed safety margin so no real
+    # glyph ink can sit directly on the analysis boundary.  In particular, the
+    # left margin remains deliberately small: this is only ten pixels beyond the
+    # value already selected by the column geometry.
+    base_left = int(content_left if content_left is not None else column_entry.get("crop_left", column_entry.get("left", 0)))
+    base_right = int(column_entry.get("crop_right", column_entry.get("right", page.width)))
+    left = max(0, base_left - _HORIZONTAL_CROP_SAFETY_MARGIN)
+    right = min(page.width, base_right + _HORIZONTAL_CROP_SAFETY_MARGIN)
     box, effective_top, effective_bottom = _effective_owned_row_box(context, column, row_index, left, right, pad_y=2)
     with context["known_glyph_ownership_lock"]:
         owner_revision = int(context.get("pixel_owner_revision") or 0); owner_row_revision = _row_owner_revision(context, position); crop = owners.render_owner_crop(row_index=row_index, box=box)
