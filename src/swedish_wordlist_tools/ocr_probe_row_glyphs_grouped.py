@@ -3,7 +3,6 @@ from __future__ import annotations
 from time import perf_counter
 
 from . import ocr_priority_fast_path as priority
-from .ocr_checkpoint_exact_cover import checkpoint_page_cached_exact_cover
 from .ocr_glyph_gap_matcher import (
     fast_exact_cover,
     max_internal_blank_run,
@@ -48,7 +47,7 @@ def _exact_result(ink, model_rows, baseline, selected, candidate_count, *, path:
 
 
 def analyse_row_exact_grouped(crop, models, *, threshold: int = 210) -> dict:
-    """Exact row analysis with bounded fast/checkpoint paths and safe fallback."""
+    """Exact row analysis with a bounded fast path and safe exhaustive fallback."""
     ink = row_ink(crop, threshold=threshold)
     model_rows = list(models)
 
@@ -69,35 +68,6 @@ def analyse_row_exact_grouped(crop, models, *, threshold: int = 210) -> dict:
             selected,
             placements_tested,
             path="ordinary-fast",
-        )
-
-    # Success-only damage limiter: 20 px exact progress creates a checkpoint;
-    # only the last 10 px (expanded to whole glyphs) may be reconsidered.  A
-    # failure here changes nothing and falls through to the authoritative old
-    # exhaustive path below.
-    started = perf_counter()
-    checkpoint = checkpoint_page_cached_exact_cover(
-        ink,
-        crop.width,
-        crop.height,
-        model_rows,
-        checkpoint_span=20,
-        backtrack_span=10,
-    )
-    _trace_stage(
-        "checkpoint_exact_cover",
-        perf_counter() - started,
-        success=int(checkpoint is not None),
-    )
-    if checkpoint is not None:
-        baseline, selected, placements_tested = checkpoint
-        return _exact_result(
-            ink,
-            model_rows,
-            baseline,
-            selected,
-            placements_tested,
-            path="checkpoint-20-10",
         )
 
     started = perf_counter()
@@ -130,4 +100,8 @@ def analyse_row_exact_grouped(crop, models, *, threshold: int = 210) -> dict:
         "safe_group_count": len(groups),
         "exact_fast_path": False,
         "exact_cover_path": "exhaustive-safe-groups",
+        # Private hand-off to the local-baseline fallback.  Generating these
+        # exact candidates dominates slow rows, so do not generate the exact
+        # same set a second time for the same unchanged ink/groups.
+        "_exact_candidates": candidates,
     }
