@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from . import ocr_review_page_pixel_array_glyphs_html as page_editor
+from .ocr_disconnected_glyph_ownership import repair_lower_row_disconnected_glyphs
 from .ocr_find_unreviewed_glyph_rows import QUEUE_FORMAT
 from .ocr_glyph_review_delete import load_facit_with_typography
 
@@ -125,6 +126,13 @@ def main() -> int:
             models = models_holder["models"]
         print(f"queue-review: analyserar {index + 1}/{len(rows)}: sida {page} c{column} r{row}", flush=True)
         state = page_editor.load_review_state_pixel_array(context, position, models)
+        if not state.get("fully_exact"):
+            records = repair_lower_row_disconnected_glyphs(context, state, models)
+            if records:
+                with cache_lock:
+                    states.pop((page, column, row - 1), None)
+                state = page_editor.load_review_state_pixel_array(context, position, models)
+                state["disconnected_glyph_ownership"] = records
         with cache_lock:
             states[key] = state
         return state
