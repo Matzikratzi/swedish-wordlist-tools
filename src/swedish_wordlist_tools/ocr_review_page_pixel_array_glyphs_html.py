@@ -180,9 +180,9 @@ def _auto_assign_isolated_descenders(context: dict, state: dict) -> list[dict]:
 
     Manhattan distance can prove that a split component is isolated from the
     lower row's other ink, but it cannot prove whether that component is an
-    upper-row descender or a lower-row superscript/ascender.  Exact facit
+    upper-row descender or a lower-row superscript/ascender. Exact facit
     ownership may decide the row; otherwise the existing manual two-row choice
-    must remain available.  In particular, never rewrite the page ownership
+    must remain available. In particular, never rewrite the page ownership
     array from Manhattan distance alone.
     """
     column = int(state["column"]); row_index = int(state["row"])
@@ -192,25 +192,86 @@ def _auto_assign_isolated_descenders(context: dict, state: dict) -> list[dict]:
         proof = _isolated_above_lower_row(context, column, candidate)
         if proof is None:
             continue
-        record = {
-            "column": column,
-            "upper_row": int(candidate["upper_row"]),
-            "lower_row": int(candidate["lower_row"]),
-            "pixels": int(candidate["pixels"]),
-            "decision": "ambiguous-manhattan-only",
-            **proof,
-        }
+        record = {"column": column, "upper_row": int(candidate["upper_row"]), "lower_row": int(candidate["lower_row"]), "pixels": int(candidate["pixels"]), "decision": "ambiguous-manhattan-only", **proof}
         bucket = context.setdefault("ambiguous_two_row_ownership", [])
         if record not in bucket:
             bucket.append(record)
             if _ownership_success_logging(context):
-                print(
-                    f"review: oklar radägare c{column} r{candidate['upper_row']}/{candidate['lower_row']}: "
-                    f"isolerad tvåradskomponent {candidate['pixels']} px, "
-                    f"Manhattan={proof['min_manhattan_distance']}; ingen automatisk flytt",
-                    flush=True,
-                )
+                print(f"review: oklar radägare c{column} r{candidate['upper_row']}/{candidate['lower_row']}: isolerad tvåradskomponent {candidate['pixels']} px, Manhattan={proof['min_manhattan_distance']}; ingen automatisk flytt", flush=True)
     return []
+
+
+def _matched_lower_extent_page(state: dict) -> int | None:
+    """Return first page y below the lowest pixel of an exact upper-row match."""
+    _crop_left, crop_top, _crop_right, _crop_bottom = map(int, state["crop_box"])
+    point_sets = state.get("point_sets") or {}
+    matched_points: set[tuple[int, int]] = set()
+    for item in state.get("items") or []:
+        if item.get("kind") != "match":
+            continue
+        matched_points.update((int(x), int(y)) for x, y in point_sets.get(str(item.get("id"))) or [])
+    if not matched_points:
+        return None
+    return crop_top + max(y for _x, y in matched_points) + 1
+
+
+def _assign_split_components_below_known_extent(context: dict, state: dict) -> list[dict]:
+    """Let the upper row's known glyph extent resolve a wholly lower component.
+
+    Only a source component that is genuinely split across the geometric row
+    separator is considered. If its *entire* connected source component starts
+    on or below the first raster line after the upper row's lowest exact-match
+    pixel, it cannot be a descender whose body belongs to the upper row. In that
+    case the whole component belongs to the lower row. A real upper-row
+    descender has connected body pixels above this secure boundary and is left
+    untouched for exact/manual ownership handling.
+    """
+    column = int(state["column"]); row_index = int(state["row"])
+    columns = context.get("row_map", {}).get("columns") or []
+    if not 0 <= column < len(columns):
+        return []
+    rows = columns[column].get("rows") or []
+    if row_index + 1 >= len(rows):
+        return []
+    secure_separator = _matched_lower_extent_page(state)
+    if secure_separator is None:
+        return []
+    owners = context["pixel_owners"]
+    records: list[dict] = []
+    candidates = _original_manual_two_row_candidates(context, state)
+    for candidate in candidates:
+        if int(candidate.get("upper_row", -1)) != row_index or int(candidate.get("lower_row", -1)) != row_index + 1:
+            continue
+        if int(candidate.get("upper_owned") or 0) <= 0 or int(candidate.get("lower_owned") or 0) <= 0:
+            continue
+        component = {(int(x), int(y)) for x, y in candidate.get("component_pixels") or []}
+        if not component:
+            continue
+        component_top = min(y for _x, y in component)
+        if component_top < secure_separator:
+            continue
+        lower_row = row_index + 1
+        lower_code = owners.row_code(lower_row)
+        changed = 0
+        with context["known_glyph_ownership_lock"]:
+            for x, y in component:
+                offset = y * owners.width + x
+                if owners.data[offset] != lower_code:
+                    owners.data[offset] = lower_code
+                    changed += 1
+            if changed:
+                context["pixel_owner_revision"] = int(context.get("pixel_owner_revision") or 0) + 1
+                revisions = context["pixel_owner_row_revisions"]
+                for position in ((column, row_index), (column, lower_row)):
+                    revisions[position] = int(revisions.get(position, 0)) + 1
+        if not changed:
+            continue
+        record = {"column": column, "upper_row": row_index, "lower_row": lower_row, "pixels": len(component), "changed": changed, "secure_separator_page_y": secure_separator, "component_top": component_top, "component_bottom": max(y for _x, y in component), "decision": "lower-from-known-upper-extent"}
+        records.append(record)
+        context.setdefault("known_extent_two_row_ownership", []).append(record)
+        if _ownership_success_logging(context):
+            print(f"review: säker radgräns c{column} r{row_index}/{lower_row}: kända övre glyphar slutar före y={secure_separator}; delad komponent börjar y={component_top} → rad {lower_row} ({changed} pixlar flyttade)", flush=True)
+    return records
 
 
 def _ambiguous_manual_two_row_candidates(context: dict, state: dict) -> list[dict]:
@@ -256,13 +317,16 @@ def _load_owned_row_state(context: dict, position: tuple[int, int], models) -> d
 
 
 def load_review_state_pixel_array(context,position,models):
-    state=_load_owned_row_state(context,position,models);auto_records=[]
+    state=_load_owned_row_state(context,position,models)
     if not state["fully_exact"]:
         changed=_ensure_known_glyph_ownership(context,_neighbor_pairs(context,position),models);current=_row_owner_revision(context,position)
         if changed or int(state.get("pixel_owner_row_revision") or 0)!=current:state=_load_owned_row_state(context,position,models)
         if not state["fully_exact"]:
-            auto_records=_auto_assign_isolated_descenders(context,state)
-            if auto_records:state=_load_owned_row_state(context,position,models);state["auto_two_row_ownership"]=auto_records
+            extent_records=_assign_split_components_below_known_extent(context,state)
+            if extent_records:
+                state=_load_owned_row_state(context,position,models);state["known_extent_two_row_ownership"]=extent_records
+        if not state["fully_exact"]:
+            _auto_assign_isolated_descenders(context,state)
     return add_neighbor_row_raster(context,state,probe_y=8)
 
 
@@ -333,6 +397,7 @@ def main()->int:
     print("review: glyphägande delas vid säkra vita x-gap och matchar bara grupper med gränsbrygga",flush=True)
     print("review: JSONL-sidkälla söks strömmande och starttider loggas per steg",flush=True)
     print("review: normal rad analyseras först; exakt rad triggar aldrig två-raders glyphägande",flush=True)
+    print("review: kända övre glyphars nederkant kan flytta en helt underliggande delad komponent till nästa rad",flush=True)
     print("review: Manhattan-avstånd används bara som varning; det får aldrig ensamt välja radägare",flush=True)
     print("review: pixelägande revisionsmärks per rad så andra cachade rader förblir giltiga",flush=True)
     print("review: Visa tre rader sparas i webbläsaren mellan radbyten",flush=True)
