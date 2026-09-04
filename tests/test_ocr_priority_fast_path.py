@@ -7,6 +7,7 @@ from swedish_wordlist_tools.ocr_priority_fast_path import (
     classify_row_start,
     observe_row_layout,
     prioritized_fast_exact_cover,
+    priority_stats,
     reset_priority_stats,
     set_row_priority_hint,
 )
@@ -54,6 +55,26 @@ class PriorityFastPathTests(unittest.TestCase):
         self.assertIsNotNone(result)
         _baseline, selected, _tested = result
         self.assertEqual([(m.label, m.style) for m in selected], [("a", "definition-roman")])
+
+    def test_candidate_order_is_built_once_per_context(self):
+        roman = GlyphModel(
+            label="a",
+            style="definition-roman",
+            pixels=frozenset({(0, 0)}),
+            sources=1,
+        )
+
+        reset_priority_stats()
+        set_row_priority_hint("continuation")
+        result = prioritized_fast_exact_cover(
+            {(0, 0), (2, 0), (4, 0)},
+            5,
+            1,
+            [roman],
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(priority_stats()["order_builds"], 2)
 
     def test_identical_rasters_keep_old_canonical_model_order(self):
         pixels = frozenset({(0, 0)})
