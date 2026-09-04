@@ -69,17 +69,25 @@ def analyse_row_exact_grouped_with_baseline_fallback(
         )
         return result
 
-    started = perf_counter()
-    candidates, bounds = exact_matches_by_safe_gaps(
-        result["ink"], crop.width, crop.height, model_rows
-    )
-    _trace_stage(
-        "local_baseline_candidates",
-        perf_counter() - started,
-        groups=len(bounds),
-        candidates=len(candidates),
-        baseline=main_baseline,
-    )
+    cached_candidates = result.pop("_exact_candidates", None)
+    if cached_candidates is not None:
+        candidates = list(cached_candidates)
+        bounds = groups
+        result["baseline_candidate_source"] = "reused-exhaustive-safe-groups"
+    else:
+        started = perf_counter()
+        candidates, bounds = exact_matches_by_safe_gaps(
+            result["ink"], crop.width, crop.height, model_rows
+        )
+        _trace_stage(
+            "local_baseline_candidates",
+            perf_counter() - started,
+            groups=len(bounds),
+            candidates=len(candidates),
+            baseline=main_baseline,
+        )
+        result["baseline_candidate_source"] = "regenerated"
+
     if bounds != groups:
         groups = bounds
 
