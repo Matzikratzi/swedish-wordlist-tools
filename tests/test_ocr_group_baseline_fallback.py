@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from PIL import Image
 
-from swedish_wordlist_tools.ocr_glyph_matcher import GlyphModel
+from swedish_wordlist_tools.ocr_glyph_matcher import GlyphModel, Match
 from swedish_wordlist_tools.ocr_group_baseline_fallback import (
     analyse_row_exact_grouped_with_baseline_fallback,
 )
@@ -113,6 +114,47 @@ class GroupBaselineFallbackTests(unittest.TestCase):
         self.assertEqual(len(result["selected"]), 1)
         self.assertEqual(result["selected"][0].label, "b")
         self.assertEqual(result["selected"][0].baseline, 6)
+
+    def test_reuses_exhaustive_candidates_for_local_baseline(self) -> None:
+        image = Image.new("L", (8, 10), 255)
+        ink = {(2, 5), (2, 6), (3, 6)}
+        candidate = Match(
+            label="b",
+            style="roman",
+            x=2,
+            baseline=6,
+            pixels=frozenset(ink),
+            model_pixels=3,
+            sources=2,
+        )
+        grouped_result = {
+            "baseline": 5,
+            "source_pixels": 3,
+            "covered_pixels": 0,
+            "unmatched_pixels": 3,
+            "unmatched_components": [],
+            "fully_exact": False,
+            "candidate_count": 1,
+            "selected": [],
+            "ink": set(ink),
+            "safe_groups": [(2, 4)],
+            "safe_group_count": 1,
+            "exact_fast_path": False,
+            "_exact_candidates": [candidate],
+        }
+
+        with patch(
+            "swedish_wordlist_tools.ocr_group_baseline_fallback.analyse_row_exact_grouped",
+            return_value=grouped_result,
+        ), patch(
+            "swedish_wordlist_tools.ocr_group_baseline_fallback.exact_matches_by_safe_gaps",
+            side_effect=AssertionError("candidate generation must not run twice"),
+        ):
+            result = analyse_row_exact_grouped_with_baseline_fallback(image, [])
+
+        self.assertTrue(result["fully_exact"])
+        self.assertEqual(result["baseline_candidate_source"], "reused-exhaustive-safe-groups")
+        self.assertEqual(result["selected"], [candidate])
 
 
 if __name__ == "__main__":
