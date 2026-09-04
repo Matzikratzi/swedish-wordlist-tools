@@ -1,0 +1,112 @@
+{
+  "label": "o",
+  "role": "definition-roman",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -5
+    ],
+    [
+      0,
+      -4
+    ],
+    [
+      0,
+      -3
+    ],
+    [
+      0,
+      -2
+    ],
+    [
+      1,
+      -6
+    ],
+    [
+      1,
+      -1
+    ],
+    [
+      2,
+      -7
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      -7
+    ],
+    [
+      3,
+      0
+    ],
+    [
+      4,
+      -7
+    ],
+    [
+      4,
+      0
+    ],
+    [
+      5,
+      -6
+    ],
+    [
+      5,
+      -1
+    ],
+    [
+      6,
+      -5
+    ],
+    [
+      6,
+      -4
+    ],
+    [
+      6,
+      -3
+    ],
+    [
+      6,
+      -2
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "abort",
+      "jsonl_word": "abort·er·ing",
+      "jsonl_similarity": 0.667,
+      "page": 1,
+      "subnr": "ocr-11-4-2-10",
+      "source_id": "page:1:ocr:11:4:2:10",
+      "page_word_bbox": [
+        479,
+        787,
+        39,
+        102
+      ],
+      "suggestion": "o{b}"
+    },
+    {
+      "expected_word": "abort",
+      "jsonl_word": "abort·er·ing",
+      "jsonl_similarity": 0.667,
+      "page": 1,
+      "subnr": "ocr-11-4-2-10",
+      "source_id": "page:1:ocr:11:4:2:10",
+      "page_word_bbox": [
+        479,
+        787,
+        39,
+        102
+      ],
+      "suggestion": ""
+    }
+  ],
+  "reviewed": true,
+  "model_id": "g000001"
+}

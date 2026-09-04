@@ -1,0 +1,14 @@
+{
+  "format": "saol14-manual-glyph-facit-v2",
+  "coordinate_system": "glyph x normalized to leftmost ink; y relative to support baseline",
+  "policy": "literal manually verified glyph rasters; semantic typography role is explicit; v1 style retained only as legacy provenance during migration",
+  "roles": {
+    "unknown": "verified raster, semantic typography role not yet re-verified",
+    "headword-bold": "dictionary headword typography",
+    "pos-roman": "part-of-speech marker typography",
+    "inflection-italic": "inflection suffix/form typography",
+    "context-italic": "context/example/reference italic typography",
+    "definition-roman": "definition/explanatory roman typography",
+    "inflection-label-roman": "small roman introductory/label text in inflection section"
+  }
+}

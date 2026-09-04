@@ -1,0 +1,278 @@
+{
+  "label": "t",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -6
+    ],
+    [
+      0,
+      -2
+    ],
+    [
+      0,
+      -1
+    ],
+    [
+      0,
+      0
+    ],
+    [
+      1,
+      -6
+    ],
+    [
+      1,
+      -5
+    ],
+    [
+      1,
+      -4
+    ],
+    [
+      1,
+      -3
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      -8
+    ],
+    [
+      2,
+      -7
+    ],
+    [
+      2,
+      -6
+    ],
+    [
+      2,
+      -1
+    ],
+    [
+      3,
+      -6
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "behållet",
+      "page": 93,
+      "subnr": "6369",
+      "source_id": "1",
+      "word_file": "words/w00001-italic-sub6369-p93-c1-behållet.png"
+    },
+    {
+      "expected_word": "beklämt",
+      "page": 93,
+      "subnr": "6427",
+      "source_id": "14",
+      "word_file": "words/w00014-italic-sub6427-p93-c3-beklämt.png"
+    },
+    {
+      "expected_word": "behärskat",
+      "page": 93,
+      "subnr": "6381",
+      "source_id": "6",
+      "word_file": "words/w00006-italic-sub6381-p93-c1-behärskat.png"
+    },
+    {
+      "expected_word": "behövt",
+      "page": 93,
+      "subnr": "6393",
+      "source_id": "8",
+      "word_file": "words/w00008-italic-sub6393-p93-c2-behövt.png"
+    },
+    {
+      "expected_word": "-värt",
+      "page": 93,
+      "subnr": "6418",
+      "source_id": "9",
+      "word_file": "words/w00009-italic-sub6418-p93-c3-u002dvärt.png"
+    },
+    {
+      "expected_word": "dängt",
+      "page": 234,
+      "subnr": "433849",
+      "source_id": "35",
+      "word_file": "words/w00035-italic-sub433849-p234-c1-dängt.png"
+    },
+    {
+      "expected_word": "dänkte",
+      "page": 234,
+      "subnr": "433855",
+      "source_id": "36",
+      "word_file": "words/w00036-italic-sub433855-p234-c1-dänkte.png"
+    },
+    {
+      "expected_word": "dänkt",
+      "page": 234,
+      "subnr": "433855",
+      "source_id": "37",
+      "word_file": "words/w00037-italic-sub433855-p234-c1-dänkt.png"
+    },
+    {
+      "expected_word": "-vattnet",
+      "page": 234,
+      "subnr": "433858",
+      "source_id": "38",
+      "word_file": "words/w00038-italic-sub433858-p234-c1-u002dvattnet.png"
+    },
+    {
+      "expected_word": "-står",
+      "page": 252,
+      "subnr": "16764",
+      "source_id": "40",
+      "word_file": "words/w00040-italic-sub16764-p252-c1-u002dstår.png"
+    },
+    {
+      "expected_word": "-tagen",
+      "page": 252,
+      "subnr": "16765",
+      "source_id": "41",
+      "word_file": "words/w00041-italic-sub16765-p252-c1-u002dtagen.png"
+    },
+    {
+      "expected_word": "fördrömt",
+      "page": 359,
+      "subnr": "24277",
+      "source_id": "55",
+      "word_file": "words/w00055-italic-sub24277-p359-c1-fördrömt.png"
+    },
+    {
+      "expected_word": "fördömt",
+      "page": 359,
+      "subnr": "24304",
+      "source_id": "61",
+      "word_file": "words/w00061-italic-sub24304-p359-c1-fördömt.png"
+    },
+    {
+      "expected_word": "fördömt",
+      "page": 359,
+      "subnr": "24305",
+      "source_id": "62",
+      "word_file": "words/w00062-italic-sub24305-p359-c1-fördömt.png"
+    },
+    {
+      "expected_word": "förnärmat",
+      "page": 372,
+      "subnr": "25209",
+      "source_id": "68",
+      "word_file": "words/w00068-italic-sub25209-p372-c1-förnärmat.png"
+    },
+    {
+      "expected_word": "förnöjt",
+      "page": 372,
+      "subnr": "25213",
+      "source_id": "70",
+      "word_file": "words/w00070-italic-sub25213-p372-c1-förnöjt.png"
+    },
+    {
+      "expected_word": "förnöjt",
+      "page": 372,
+      "subnr": "25214",
+      "source_id": "71",
+      "word_file": "words/w00071-italic-sub25214-p372-c1-förnöjt.png"
+    },
+    {
+      "expected_word": "förnötte",
+      "page": 372,
+      "subnr": "25218",
+      "source_id": "72",
+      "word_file": "words/w00072-italic-sub25218-p372-c1-förnötte.png"
+    },
+    {
+      "expected_word": "förnött",
+      "page": 372,
+      "subnr": "25218",
+      "source_id": "73",
+      "word_file": "words/w00073-italic-sub25218-p372-c1-förnött.png"
+    },
+    {
+      "expected_word": "-olyckats",
+      "page": 372,
+      "subnr": "25220",
+      "source_id": "75",
+      "word_file": "words/w00075-italic-sub25220-p372-c1-u002dolyckats.png"
+    },
+    {
+      "expected_word": "-beställde",
+      "page": 849,
+      "subnr": "59765",
+      "source_id": "100",
+      "word_file": "words/w00100-italic-sub59765-p849-c3-u002dbeställde.png"
+    },
+    {
+      "expected_word": "-beställt",
+      "page": 849,
+      "subnr": "59765",
+      "source_id": "101",
+      "word_file": "words/w00101-italic-sub59765-p849-c3-u002dbeställt.png"
+    },
+    {
+      "expected_word": "-strålar",
+      "page": 849,
+      "subnr": "59682",
+      "source_id": "92",
+      "word_file": "words/w00092-italic-sub59682-p849-c2-u002dstrålar.png"
+    },
+    {
+      "expected_word": "-aftnar",
+      "page": 849,
+      "subnr": "59753",
+      "source_id": "97",
+      "word_file": "words/w00097-italic-sub59753-p849-c2-u002daftnar.png"
+    },
+    {
+      "expected_word": "-stövarna",
+      "page": 1121,
+      "subnr": "79666",
+      "source_id": "117",
+      "word_file": "words/w00117-italic-sub79666-p1121-c1-u002dstövarna.png"
+    },
+    {
+      "expected_word": "titlar",
+      "page": 1374,
+      "subnr": "98469",
+      "source_id": "127",
+      "word_file": "words/w00127-italic-sub98469-p1374-c1-titlar.png"
+    },
+    {
+      "expected_word": "-ställt",
+      "page": 1424,
+      "subnr": "102055",
+      "source_id": "140",
+      "word_file": "words/w00140-italic-sub102055-p1424-c1-u002dställt.png"
+    },
+    {
+      "expected_word": "-buret",
+      "page": 1547,
+      "subnr": "111163",
+      "source_id": "155",
+      "word_file": "words/w00155-italic-sub111163-p1547-c1-u002dburet.png"
+    },
+    {
+      "expected_word": "z-format",
+      "page": 1558,
+      "subnr": "111630",
+      "source_id": "194",
+      "word_file": "words/w00194-italic-sub111630-p1558-c2-zu002dformat.png"
+    },
+    {
+      "expected_word": "-tecknen",
+      "page": 1558,
+      "subnr": "111664",
+      "source_id": "205",
+      "word_file": "words/w00205-italic-sub111664-p1558-c3-u002dtecknen.png"
+    }
+  ],
+  "role": "unknown",
+  "legacy_style": "italic",
+  "style": "italic",
+  "reviewed": true,
+  "model_id": "g000111"
+}

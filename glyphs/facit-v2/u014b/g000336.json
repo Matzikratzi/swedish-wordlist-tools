@@ -1,0 +1,109 @@
+{
+  "label": "ŋ",
+  "style": "roman",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -10
+    ],
+    [
+      0,
+      -5
+    ],
+    [
+      1,
+      -10
+    ],
+    [
+      1,
+      -9
+    ],
+    [
+      1,
+      -8
+    ],
+    [
+      1,
+      -7
+    ],
+    [
+      1,
+      -6
+    ],
+    [
+      1,
+      -5
+    ],
+    [
+      2,
+      -10
+    ],
+    [
+      2,
+      -5
+    ],
+    [
+      2,
+      -3
+    ],
+    [
+      3,
+      -10
+    ],
+    [
+      3,
+      -2
+    ],
+    [
+      4,
+      -10
+    ],
+    [
+      4,
+      -2
+    ],
+    [
+      5,
+      -9
+    ],
+    [
+      5,
+      -8
+    ],
+    [
+      5,
+      -7
+    ],
+    [
+      5,
+      -6
+    ],
+    [
+      5,
+      -5
+    ],
+    [
+      5,
+      -4
+    ],
+    [
+      5,
+      -3
+    ]
+  ],
+  "sources": [
+    {
+      "page": 18,
+      "column": 0,
+      "row": 15,
+      "review_selection": [
+        "U00"
+      ],
+      "review_pixel_count": 0,
+      "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00018.png"
+    }
+  ],
+  "role": "roman",
+  "reviewed": true,
+  "model_id": "g000336"
+}

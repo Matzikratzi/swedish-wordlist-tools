@@ -1,0 +1,125 @@
+{
+  "label": "v",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -5
+    ],
+    [
+      1,
+      -6
+    ],
+    [
+      1,
+      -2
+    ],
+    [
+      1,
+      -1
+    ],
+    [
+      2,
+      -6
+    ],
+    [
+      2,
+      -5
+    ],
+    [
+      2,
+      -4
+    ],
+    [
+      2,
+      -3
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      0
+    ],
+    [
+      4,
+      -1
+    ],
+    [
+      5,
+      -3
+    ],
+    [
+      5,
+      -2
+    ],
+    [
+      6,
+      -6
+    ],
+    [
+      6,
+      -5
+    ],
+    [
+      6,
+      -4
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "behövde",
+      "page": 93,
+      "subnr": "6393",
+      "source_id": "7",
+      "word_file": "words/w00007-italic-sub6393-p93-c2-behövde.png"
+    },
+    {
+      "expected_word": "behövt",
+      "page": 93,
+      "subnr": "6393",
+      "source_id": "8",
+      "word_file": "words/w00008-italic-sub6393-p93-c2-behövt.png"
+    },
+    {
+      "expected_word": "-värt",
+      "page": 93,
+      "subnr": "6418",
+      "source_id": "9",
+      "word_file": "words/w00009-italic-sub6418-p93-c3-u002dvärt.png"
+    },
+    {
+      "expected_word": "-vattnet",
+      "page": 234,
+      "subnr": "433858",
+      "source_id": "38",
+      "word_file": "words/w00038-italic-sub433858-p234-c1-u002dvattnet.png"
+    },
+    {
+      "expected_word": "-vingar",
+      "page": 347,
+      "subnr": "23423",
+      "source_id": "47",
+      "word_file": "words/w00047-italic-sub23423-p347-c3-u002dvingar.png"
+    },
+    {
+      "expected_word": "-stövarna",
+      "page": 1121,
+      "subnr": "79666",
+      "source_id": "117",
+      "word_file": "words/w00117-italic-sub79666-p1121-c1-u002dstövarna.png"
+    },
+    {
+      "expected_word": "vävde",
+      "page": 1547,
+      "subnr": "111178",
+      "source_id": "149",
+      "word_file": "words/w00149-italic-sub111178-p1547-c1-vävde.png"
+    }
+  ],
+  "role": "unknown",
+  "legacy_style": "italic",
+  "reviewed": true,
+  "style": "italic",
+  "model_id": "g000121"
+}

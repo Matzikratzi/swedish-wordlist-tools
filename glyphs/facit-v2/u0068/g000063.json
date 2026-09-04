@@ -1,0 +1,174 @@
+{
+  "label": "h",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      0
+    ],
+    [
+      1,
+      -5
+    ],
+    [
+      1,
+      -4
+    ],
+    [
+      1,
+      -3
+    ],
+    [
+      1,
+      -2
+    ],
+    [
+      1,
+      -1
+    ],
+    [
+      2,
+      -10
+    ],
+    [
+      2,
+      -8
+    ],
+    [
+      2,
+      -7
+    ],
+    [
+      2,
+      -6
+    ],
+    [
+      2,
+      -3
+    ],
+    [
+      3,
+      -10
+    ],
+    [
+      3,
+      -9
+    ],
+    [
+      3,
+      -4
+    ],
+    [
+      3,
+      0
+    ],
+    [
+      4,
+      -5
+    ],
+    [
+      4,
+      0
+    ],
+    [
+      5,
+      -6
+    ],
+    [
+      5,
+      -2
+    ],
+    [
+      5,
+      -1
+    ],
+    [
+      6,
+      -5
+    ],
+    [
+      6,
+      -4
+    ],
+    [
+      6,
+      -3
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "behållen",
+      "page": 93,
+      "subnr": "6369",
+      "source_id": "",
+      "word_file": "words/w00000-italic-sub6369-p93-c1-behållen.png"
+    },
+    {
+      "expected_word": "behållet",
+      "page": 93,
+      "subnr": "6369",
+      "source_id": "1",
+      "word_file": "words/w00001-italic-sub6369-p93-c1-behållet.png"
+    },
+    {
+      "expected_word": "-handlar",
+      "page": 93,
+      "subnr": "435248",
+      "source_id": "13",
+      "word_file": "words/w00013-italic-sub435248-p93-c3-u002dhandlar.png"
+    },
+    {
+      "expected_word": "behållarna",
+      "page": 93,
+      "subnr": "6370",
+      "source_id": "5",
+      "word_file": "words/w00005-italic-sub6370-p93-c1-behållarna.png"
+    },
+    {
+      "expected_word": "behärskat",
+      "page": 93,
+      "subnr": "6381",
+      "source_id": "6",
+      "word_file": "words/w00006-italic-sub6381-p93-c1-behärskat.png"
+    },
+    {
+      "expected_word": "behövde",
+      "page": 93,
+      "subnr": "6393",
+      "source_id": "7",
+      "word_file": "words/w00007-italic-sub6393-p93-c2-behövde.png"
+    },
+    {
+      "expected_word": "behövt",
+      "page": 93,
+      "subnr": "6393",
+      "source_id": "8",
+      "word_file": "words/w00008-italic-sub6393-p93-c2-behövt.png"
+    },
+    {
+      "expected_word": "schweizarna",
+      "page": 1121,
+      "subnr": "79695",
+      "source_id": "122",
+      "word_file": "words/w00122-italic-sub79695-p1121-c3-schweizarna.png"
+    },
+    {
+      "expected_word": "schweiziskor",
+      "page": 1121,
+      "subnr": "79699",
+      "source_id": "124",
+      "word_file": "words/w00124-italic-sub79699-p1121-c3-schweiziskor.png"
+    },
+    {
+      "expected_word": "schäfrar",
+      "page": 1121,
+      "subnr": "79706",
+      "source_id": "125",
+      "word_file": "words/w00125-italic-sub79706-p1121-c3-schäfrar.png"
+    }
+  ],
+  "role": "unknown",
+  "legacy_style": "italic",
+  "reviewed": true,
+  "style": "italic",
+  "model_id": "g000063"
+}

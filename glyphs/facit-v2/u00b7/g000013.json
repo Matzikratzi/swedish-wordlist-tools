@@ -1,0 +1,46 @@
+{
+  "label": "·",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -4
+    ],
+    [
+      0,
+      -3
+    ],
+    [
+      0,
+      -2
+    ],
+    [
+      0,
+      -1
+    ],
+    [
+      0,
+      0
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "quantum",
+      "page": 1030,
+      "subnr": "73065",
+      "source_id": "next20:3:1030:73065",
+      "word_file": "words-next/n03-p1030-sub73065-quantum.png"
+    },
+    {
+      "expected_word": "xantofyll",
+      "page": 1552,
+      "subnr": "370218",
+      "source_id": "next20:0:1552:370218",
+      "word_file": "words-next/n00-p1552-sub370218-xantofyll.png"
+    }
+  ],
+  "role": "unknown",
+  "legacy_style": "bold",
+  "style": "bold",
+  "reviewed": true,
+  "model_id": "g000013"
+}

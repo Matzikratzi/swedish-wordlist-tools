@@ -1,0 +1,123 @@
+{
+  "label": "v",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -5
+    ],
+    [
+      1,
+      -5
+    ],
+    [
+      1,
+      -4
+    ],
+    [
+      1,
+      -3
+    ],
+    [
+      2,
+      -5
+    ],
+    [
+      2,
+      -2
+    ],
+    [
+      2,
+      -1
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      -2
+    ],
+    [
+      4,
+      -5
+    ],
+    [
+      4,
+      -4
+    ],
+    [
+      4,
+      -3
+    ],
+    [
+      5,
+      -5
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "av:",
+      "jsonl_word": "a:na",
+      "jsonl_similarity": 0.4,
+      "page": 1,
+      "subnr": "ocr-4-1-10-6",
+      "source_id": "page:1:ocr:4:1:10:6",
+      "page_word_bbox": [
+        177,
+        259,
+        18,
+        17
+      ],
+      "suggestion": "n{r}"
+    },
+    {
+      "expected_word": "(vard)",
+      "jsonl_word": "-pinnar",
+      "jsonl_similarity": 0.4,
+      "page": 1,
+      "subnr": "ocr-11-2-4-2",
+      "source_id": "page:1:ocr:11:2:4:2",
+      "page_word_bbox": [
+        73,
+        698,
+        41,
+        23
+      ],
+      "suggestion": "n{r}"
+    },
+    {
+      "expected_word": "abonmerav.",
+      "jsonl_word": "abonn·era",
+      "jsonl_similarity": 0.824,
+      "page": 1,
+      "subnr": "ocr-4-1-28-6",
+      "source_id": "page:1:ocr:4:1:28:6",
+      "page_word_bbox": [
+        471,
+        574,
+        79,
+        21
+      ],
+      "suggestion": ""
+    },
+    {
+      "expected_word": "aborterav.",
+      "jsonl_word": "abort·era",
+      "jsonl_similarity": 0.941,
+      "page": 1,
+      "subnr": "ocr-11-3-4-10",
+      "source_id": "page:1:ocr:11:3:4:10",
+      "page_word_bbox": [
+        471,
+        787,
+        73,
+        21
+      ],
+      "suggestion": ""
+    }
+  ],
+  "role": "unknown",
+  "legacy_style": "roman",
+  "reviewed": true,
+  "model_id": "g000120"
+}

@@ -1,0 +1,50 @@
+{
+  "label": ":",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -6
+    ],
+    [
+      0,
+      -5
+    ],
+    [
+      0,
+      -1
+    ],
+    [
+      0,
+      0
+    ],
+    [
+      1,
+      -6
+    ],
+    [
+      1,
+      -1
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "av:",
+      "jsonl_word": "a:na",
+      "jsonl_similarity": 0.4,
+      "page": 1,
+      "subnr": "ocr-4-1-10-6",
+      "source_id": "page:1:ocr:4:1:10:6",
+      "page_word_bbox": [
+        177,
+        259,
+        18,
+        17
+      ],
+      "suggestion": "a{r}"
+    }
+  ],
+  "role": "unknown",
+  "legacy_style": "roman",
+  "reviewed": true,
+  "model_id": "g000012"
+}

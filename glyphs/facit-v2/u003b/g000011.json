@@ -1,0 +1,122 @@
+{
+  "label": ";",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -6
+    ],
+    [
+      0,
+      -5
+    ],
+    [
+      0,
+      -1
+    ],
+    [
+      0,
+      0
+    ],
+    [
+      0,
+      3
+    ],
+    [
+      1,
+      -6
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      1,
+      1
+    ],
+    [
+      1,
+      2
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "-et;",
+      "jsonl_word": "+et;",
+      "jsonl_similarity": 1,
+      "page": 1,
+      "subnr": "ocr-4-1-16-2",
+      "source_id": "page:1:ocr:4:1:16:2",
+      "page_word_bbox": [
+        136,
+        364,
+        23,
+        22
+      ],
+      "suggestion": ";{i}"
+    },
+    {
+      "expected_word": "-et;",
+      "jsonl_word": "+et;",
+      "jsonl_similarity": 1,
+      "page": 1,
+      "subnr": "ocr-4-1-23-3",
+      "source_id": "page:1:ocr:4:1:23:3",
+      "page_word_bbox": [
+        117,
+        488,
+        24,
+        22
+      ],
+      "suggestion": ";{i}"
+    },
+    {
+      "expected_word": "s.abe:et;",
+      "jsonl_word": "abc:et;",
+      "jsonl_similarity": 0.727,
+      "page": 1,
+      "subnr": "ocr-11-4-2-3",
+      "source_id": "page:1:ocr:11:4:2:3",
+      "page_word_bbox": [
+        141,
+        822,
+        53,
+        24
+      ],
+      "suggestion": ";{i}"
+    },
+    {
+      "expected_word": "et;",
+      "jsonl_word": "+et;",
+      "jsonl_similarity": 1,
+      "page": 1,
+      "subnr": "ocr-4-1-11-10",
+      "source_id": "page:1:ocr:4:1:11:10",
+      "page_word_bbox": [
+        630,
+        275,
+        24,
+        22
+      ],
+      "suggestion": ";{i}"
+    },
+    {
+      "expected_word": "-et;",
+      "jsonl_word": "+et;",
+      "jsonl_similarity": 1,
+      "page": 1,
+      "subnr": "ocr-4-1-19-14",
+      "source_id": "page:1:ocr:4:1:19:14",
+      "page_word_bbox": [
+        633,
+        417,
+        23,
+        22
+      ],
+      "suggestion": ";{i}"
+    }
+  ],
+  "role": "unknown",
+  "legacy_style": "italic",
+  "reviewed": true,
+  "model_id": "g000011"
+}

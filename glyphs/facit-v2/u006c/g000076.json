@@ -1,0 +1,219 @@
+{
+  "label": "l",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -1
+    ],
+    [
+      0,
+      0
+    ],
+    [
+      1,
+      -10
+    ],
+    [
+      1,
+      -5
+    ],
+    [
+      1,
+      -4
+    ],
+    [
+      1,
+      -3
+    ],
+    [
+      1,
+      -2
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      -10
+    ],
+    [
+      2,
+      -9
+    ],
+    [
+      2,
+      -8
+    ],
+    [
+      2,
+      -7
+    ],
+    [
+      2,
+      -6
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      -10
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "behållen",
+      "page": 93,
+      "subnr": "6369",
+      "source_id": "",
+      "word_file": "words/w00000-italic-sub6369-p93-c1-behållen.png"
+    },
+    {
+      "expected_word": "behållet",
+      "page": 93,
+      "subnr": "6369",
+      "source_id": "1",
+      "word_file": "words/w00001-italic-sub6369-p93-c1-behållet.png"
+    },
+    {
+      "expected_word": "bekläder",
+      "page": 93,
+      "subnr": "6422",
+      "source_id": "10",
+      "word_file": "words/w00010-italic-sub6422-p93-c3-bekläder.png"
+    },
+    {
+      "expected_word": "beklädd",
+      "page": 93,
+      "subnr": "6422",
+      "source_id": "11",
+      "word_file": "words/w00011-italic-sub6422-p93-c3-beklädd.png"
+    },
+    {
+      "expected_word": "-handlar",
+      "page": 93,
+      "subnr": "435248",
+      "source_id": "13",
+      "word_file": "words/w00013-italic-sub435248-p93-c3-u002dhandlar.png"
+    },
+    {
+      "expected_word": "beklämt",
+      "page": 93,
+      "subnr": "6427",
+      "source_id": "14",
+      "word_file": "words/w00014-italic-sub6427-p93-c3-beklämt.png"
+    },
+    {
+      "expected_word": "behållarna",
+      "page": 93,
+      "subnr": "6370",
+      "source_id": "5",
+      "word_file": "words/w00005-italic-sub6370-p93-c1-behållarna.png"
+    },
+    {
+      "expected_word": "fålar",
+      "page": 347,
+      "subnr": "23429",
+      "source_id": "50",
+      "word_file": "words/w00050-italic-sub23429-p347-c3-fålar.png"
+    },
+    {
+      "expected_word": "fållor",
+      "page": 347,
+      "subnr": "23434",
+      "source_id": "51",
+      "word_file": "words/w00051-italic-sub23434-p347-c3-fållor.png"
+    },
+    {
+      "expected_word": "fördold",
+      "page": 359,
+      "subnr": "24303",
+      "source_id": "57",
+      "word_file": "words/w00057-italic-sub24303-p359-c1-fördold.png"
+    },
+    {
+      "expected_word": "-olyckades",
+      "page": 372,
+      "subnr": "25220",
+      "source_id": "74",
+      "word_file": "words/w00074-italic-sub25220-p372-c1-u002dolyckades.png"
+    },
+    {
+      "expected_word": "-olyckats",
+      "page": 372,
+      "subnr": "25220",
+      "source_id": "75",
+      "word_file": "words/w00075-italic-sub25220-p372-c1-u002dolyckats.png"
+    },
+    {
+      "expected_word": "-beställde",
+      "page": 849,
+      "subnr": "59765",
+      "source_id": "100",
+      "word_file": "words/w00100-italic-sub59765-p849-c3-u002dbeställde.png"
+    },
+    {
+      "expected_word": "-beställt",
+      "page": 849,
+      "subnr": "59765",
+      "source_id": "101",
+      "word_file": "words/w00101-italic-sub59765-p849-c3-u002dbeställt.png"
+    },
+    {
+      "expected_word": "-strålar",
+      "page": 849,
+      "subnr": "59682",
+      "source_id": "92",
+      "word_file": "words/w00092-italic-sub59682-p849-c2-u002dstrålar.png"
+    },
+    {
+      "expected_word": "titlar",
+      "page": 1374,
+      "subnr": "98469",
+      "source_id": "127",
+      "word_file": "words/w00127-italic-sub98469-p1374-c1-titlar.png"
+    },
+    {
+      "expected_word": "-ställt",
+      "page": 1424,
+      "subnr": "102055",
+      "source_id": "140",
+      "word_file": "words/w00140-italic-sub102055-p1424-c1-u002dställt.png"
+    },
+    {
+      "expected_word": "-fåglar",
+      "page": 1547,
+      "subnr": "111180",
+      "source_id": "154",
+      "word_file": "words/w00154-italic-sub111180-p1547-c1-u002dfåglar.png"
+    },
+    {
+      "expected_word": "walesarna",
+      "page": 1550,
+      "subnr": "106875",
+      "source_id": "181",
+      "word_file": "words/w00181-italic-sub106875-p1550-c1-walesarna.png"
+    },
+    {
+      "expected_word": "walesiskor",
+      "page": 1550,
+      "subnr": "106877",
+      "source_id": "182",
+      "word_file": "words/w00182-italic-sub106877-p1550-c1-walesiskor.png"
+    },
+    {
+      "expected_word": "-baljor",
+      "page": 1558,
+      "subnr": "111645",
+      "source_id": "200",
+      "word_file": "words/w00200-italic-sub111645-p1558-c3-u002dbaljor.png"
+    }
+  ],
+  "role": "unknown",
+  "legacy_style": "italic",
+  "reviewed": true,
+  "style": "italic",
+  "model_id": "g000076"
+}

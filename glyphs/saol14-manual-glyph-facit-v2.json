@@ -121,7 +121,8 @@
           "suggestion": ""
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000001"
     },
     {
       "label": ":",
@@ -200,7 +201,8 @@
         }
       ],
       "style": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000002"
     },
     {
       "label": "d",
@@ -343,7 +345,8 @@
           "suggestion": ""
         }
       ],
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000003"
     },
     {
       "label": "t",
@@ -423,7 +426,8 @@
           "suggestion": ""
         }
       ],
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000004"
     },
     {
       "label": "l",
@@ -503,7 +507,8 @@
           "suggestion": ""
         }
       ],
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000005"
     },
     {
       "label": "p",
@@ -619,7 +624,8 @@
           "suggestion": "pl.{b}"
         }
       ],
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000006"
     },
     {
       "label": "v",
@@ -695,7 +701,8 @@
           "suggestion": ""
         }
       ],
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000007"
     },
     {
       "label": "-",
@@ -883,7 +890,8 @@
       "role": "unknown",
       "legacy_style": "italic",
       "reviewed": true,
-      "style": "italic"
+      "style": "italic",
+      "model_id": "g000008"
     },
     {
       "label": "-",
@@ -998,7 +1006,8 @@
           "suggestion": ""
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000009"
     },
     {
       "label": ",",
@@ -1039,7 +1048,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000010"
     },
     {
       "label": ";",
@@ -1160,7 +1170,8 @@
       ],
       "role": "unknown",
       "legacy_style": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000011"
     },
     {
       "label": ":",
@@ -1209,7 +1220,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000012"
     },
     {
       "label": "·",
@@ -1254,7 +1266,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "style": "bold",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000013"
     },
     {
       "label": ")",
@@ -1328,7 +1341,8 @@
       "role": "unknown",
       "legacy_style": "roman",
       "reviewed": true,
-      "style": "roman"
+      "style": "roman",
+      "model_id": "g000014"
     },
     {
       "label": "[",
@@ -1522,7 +1536,8 @@
           "suggestion": ""
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000015"
     },
     {
       "label": "]",
@@ -1701,7 +1716,8 @@
           "suggestion": ""
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000016"
     },
     {
       "label": "´",
@@ -1835,7 +1851,8 @@
           "suggestion": ""
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000017"
     },
     {
       "label": "+",
@@ -1880,7 +1897,8 @@
       ],
       "role": "unknown",
       "legacy_style": "italic",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000018"
     },
     {
       "label": "|",
@@ -1946,7 +1964,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "reviewed": true,
-      "style": "bold"
+      "style": "bold",
+      "model_id": "g000019"
     },
     {
       "label": "¤",
@@ -2017,7 +2036,8 @@
       ],
       "role": "unknown",
       "legacy_style": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000020"
     },
     {
       "label": "a",
@@ -2090,7 +2110,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000021"
     },
     {
       "label": "a",
@@ -2259,7 +2280,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "style": "bold",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000022"
     },
     {
       "label": "a",
@@ -2356,7 +2378,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000023"
     },
     {
       "label": "a",
@@ -2569,7 +2592,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000024"
     },
     {
       "label": "A",
@@ -2707,7 +2731,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "style": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000025"
     },
     {
       "label": "å",
@@ -2874,7 +2899,8 @@
       "role": "unknown",
       "legacy_style": "italic",
       "reviewed": true,
-      "style": "italic"
+      "style": "italic",
+      "model_id": "g000026"
     },
     {
       "label": "å",
@@ -3076,7 +3102,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "reviewed": true,
-      "style": "bold"
+      "style": "bold",
+      "model_id": "g000027"
     },
     {
       "label": "å",
@@ -3228,7 +3255,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000028"
     },
     {
       "label": "å",
@@ -3485,7 +3513,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000029"
     },
     {
       "label": "ä",
@@ -3746,7 +3775,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000030"
     },
     {
       "label": "ä",
@@ -3964,7 +3994,8 @@
       "role": "unknown",
       "legacy_style": "italic",
       "reviewed": true,
-      "style": "italic"
+      "style": "italic",
+      "model_id": "g000031"
     },
     {
       "label": "ä",
@@ -4154,7 +4185,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "reviewed": true,
-      "style": "bold"
+      "style": "bold",
+      "model_id": "g000032"
     },
     {
       "label": "b",
@@ -4352,7 +4384,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "style": "bold",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000033"
     },
     {
       "label": "b",
@@ -4477,7 +4510,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000034"
     },
     {
       "label": "b",
@@ -4726,7 +4760,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000035"
     },
     {
       "label": "b",
@@ -4954,7 +4989,8 @@
       "role": "unknown",
       "legacy_style": "italic",
       "reviewed": true,
-      "style": "italic"
+      "style": "italic",
+      "model_id": "g000036"
     },
     {
       "label": "b",
@@ -5084,7 +5120,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000037"
     },
     {
       "label": "c",
@@ -5185,7 +5222,8 @@
       "role": "unknown",
       "legacy_style": "italic",
       "reviewed": true,
-      "style": "italic"
+      "style": "italic",
+      "model_id": "g000038"
     },
     {
       "label": "c",
@@ -5299,7 +5337,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "reviewed": true,
-      "style": "bold"
+      "style": "bold",
+      "model_id": "g000039"
     },
     {
       "label": "c",
@@ -5448,7 +5487,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000040"
     },
     {
       "label": "d",
@@ -5666,7 +5706,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000041"
     },
     {
       "label": "d",
@@ -5921,7 +5962,8 @@
       "role": "unknown",
       "legacy_style": "italic",
       "reviewed": true,
-      "style": "italic"
+      "style": "italic",
+      "model_id": "g000042"
     },
     {
       "label": "d",
@@ -6077,7 +6119,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000043"
     },
     {
       "label": "d",
@@ -6259,7 +6302,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "style": "bold",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000044"
     },
     {
       "label": "d",
@@ -6508,7 +6552,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000045"
     },
     {
       "label": "e",
@@ -6618,7 +6663,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000046"
     },
     {
       "label": "e",
@@ -6707,7 +6753,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000047"
     },
     {
       "label": "e",
@@ -6853,7 +6900,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "style": "bold",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000048"
     },
     {
       "label": "e",
@@ -7074,7 +7122,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000049"
     },
     {
       "label": "é",
@@ -7252,7 +7301,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "reviewed": true,
-      "style": "bold"
+      "style": "bold",
+      "model_id": "g000050"
     },
     {
       "label": "f",
@@ -7398,7 +7448,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "reviewed": true,
-      "style": "bold"
+      "style": "bold",
+      "model_id": "g000051"
     },
     {
       "label": "f",
@@ -7503,7 +7554,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000052"
     },
     {
       "label": "f",
@@ -7705,7 +7757,8 @@
       "role": "unknown",
       "legacy_style": "italic",
       "reviewed": true,
-      "style": "italic"
+      "style": "italic",
+      "model_id": "g000053"
     },
     {
       "label": "fy",
@@ -8002,7 +8055,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000054"
     },
     {
       "label": "g",
@@ -8195,7 +8249,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000055"
     },
     {
       "label": "g",
@@ -8433,7 +8488,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "style": "bold",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000056"
     },
     {
       "label": "g",
@@ -8750,7 +8806,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000057"
     },
     {
       "label": "g",
@@ -8917,7 +8974,8 @@
       "role": "unknown",
       "legacy_style": "italic",
       "reviewed": true,
-      "style": "italic"
+      "style": "italic",
+      "model_id": "g000058"
     },
     {
       "label": "g:",
@@ -9067,7 +9125,8 @@
       "role": "unknown",
       "legacy_style": "italic",
       "reviewed": true,
-      "style": "italic"
+      "style": "italic",
+      "model_id": "g000059"
     },
     {
       "label": "gr",
@@ -9389,7 +9448,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "reviewed": true,
-      "style": "bold"
+      "style": "bold",
+      "model_id": "g000060"
     },
     {
       "label": "h",
@@ -9575,7 +9635,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "reviewed": true,
-      "style": "bold"
+      "style": "bold",
+      "model_id": "g000061"
     },
     {
       "label": "h",
@@ -9800,7 +9861,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000062"
     },
     {
       "label": "h",
@@ -9973,7 +10035,8 @@
       "role": "unknown",
       "legacy_style": "italic",
       "reviewed": true,
-      "style": "italic"
+      "style": "italic",
+      "model_id": "g000063"
     },
     {
       "label": "i",
@@ -10086,7 +10149,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "style": "bold",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000064"
     },
     {
       "label": "i",
@@ -10207,7 +10271,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000065"
     },
     {
       "label": "i",
@@ -10297,7 +10362,8 @@
       "role": "unknown",
       "legacy_style": "italic",
       "reviewed": true,
-      "style": "italic"
+      "style": "italic",
+      "model_id": "g000066"
     },
     {
       "label": "i",
@@ -10354,7 +10420,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000067"
     },
     {
       "label": "i",
@@ -10423,7 +10490,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000068"
     },
     {
       "label": "j",
@@ -10523,7 +10591,8 @@
       "role": "unknown",
       "legacy_style": "roman",
       "reviewed": true,
-      "style": "roman"
+      "style": "roman",
+      "model_id": "g000069"
     },
     {
       "label": "j",
@@ -10657,7 +10726,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "reviewed": true,
-      "style": "bold"
+      "style": "bold",
+      "model_id": "g000070"
     },
     {
       "label": "j",
@@ -10748,7 +10818,8 @@
       "role": "unknown",
       "legacy_style": "italic",
       "reviewed": true,
-      "style": "italic"
+      "style": "italic",
+      "model_id": "g000071"
     },
     {
       "label": "k",
@@ -10946,7 +11017,8 @@
       "role": "unknown",
       "legacy_style": "italic",
       "reviewed": true,
-      "style": "italic"
+      "style": "italic",
+      "model_id": "g000072"
     },
     {
       "label": "k",
@@ -11090,7 +11162,8 @@
           "suggestion": "k{b}"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000073"
     },
     {
       "label": "k",
@@ -11335,7 +11408,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000074"
     },
     {
       "label": "k",
@@ -11456,7 +11530,8 @@
       "role": "unknown",
       "legacy_style": "roman",
       "reviewed": true,
-      "style": "roman"
+      "style": "roman",
+      "model_id": "g000075"
     },
     {
       "label": "l",
@@ -11674,7 +11749,8 @@
       "role": "unknown",
       "legacy_style": "italic",
       "reviewed": true,
-      "style": "italic"
+      "style": "italic",
+      "model_id": "g000076"
     },
     {
       "label": "l",
@@ -11799,7 +11875,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "reviewed": true,
-      "style": "bold"
+      "style": "bold",
+      "model_id": "g000077"
     },
     {
       "label": "l",
@@ -11903,7 +11980,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000078"
     },
     {
       "label": "l",
@@ -12036,7 +12114,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000079"
     },
     {
       "label": "l",
@@ -12151,7 +12230,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000080"
     },
     {
       "label": "m",
@@ -12292,7 +12372,8 @@
       "role": "unknown",
       "legacy_style": "roman",
       "reviewed": true,
-      "style": "roman"
+      "style": "roman",
+      "model_id": "g000081"
     },
     {
       "label": "m",
@@ -12512,7 +12593,8 @@
       "role": "unknown",
       "legacy_style": "italic",
       "reviewed": true,
-      "style": "italic"
+      "style": "italic",
+      "model_id": "g000082"
     },
     {
       "label": "m",
@@ -12742,7 +12824,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "reviewed": true,
-      "style": "bold"
+      "style": "bold",
+      "model_id": "g000083"
     },
     {
       "label": "m",
@@ -12907,7 +12990,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000084"
     },
     {
       "label": "n",
@@ -13000,7 +13084,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000085"
     },
     {
       "label": "n",
@@ -13161,7 +13246,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "reviewed": true,
-      "style": "bold"
+      "style": "bold",
+      "model_id": "g000086"
     },
     {
       "label": "n",
@@ -13402,7 +13488,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000087"
     },
     {
       "label": "o",
@@ -13568,7 +13655,8 @@
       "role": "unknown",
       "legacy_style": "italic",
       "reviewed": true,
-      "style": "italic"
+      "style": "italic",
+      "model_id": "g000088"
     },
     {
       "label": "o",
@@ -13641,7 +13729,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000089"
     },
     {
       "label": "o",
@@ -13787,7 +13876,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "reviewed": true,
-      "style": "bold"
+      "style": "bold",
+      "model_id": "g000090"
     },
     {
       "label": "o",
@@ -13988,7 +14078,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000091"
     },
     {
       "label": "ö",
@@ -14169,7 +14260,8 @@
       "role": "unknown",
       "legacy_style": "italic",
       "reviewed": true,
-      "style": "italic"
+      "style": "italic",
+      "model_id": "g000092"
     },
     {
       "label": "ö",
@@ -14375,7 +14467,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "reviewed": true,
-      "style": "bold"
+      "style": "bold",
+      "model_id": "g000093"
     },
     {
       "label": "ö",
@@ -14624,7 +14717,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000094"
     },
     {
       "label": "p",
@@ -14733,7 +14827,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000095"
     },
     {
       "label": "p",
@@ -14898,7 +14993,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000096"
     },
     {
       "label": "p",
@@ -15092,7 +15188,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "reviewed": true,
-      "style": "bold"
+      "style": "bold",
+      "model_id": "g000097"
     },
     {
       "label": "p",
@@ -15325,7 +15422,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000098"
     },
     {
       "label": "p",
@@ -15443,7 +15541,8 @@
       "role": "unknown",
       "legacy_style": "italic",
       "reviewed": true,
-      "style": "italic"
+      "style": "italic",
+      "model_id": "g000099"
     },
     {
       "label": "q",
@@ -15632,7 +15731,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "reviewed": true,
-      "style": "bold"
+      "style": "bold",
+      "model_id": "g000100"
     },
     {
       "label": "r",
@@ -15714,7 +15814,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000101"
     },
     {
       "label": "r",
@@ -15833,7 +15934,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000102"
     },
     {
       "label": "r",
@@ -15927,7 +16029,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "style": "bold",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000103"
     },
     {
       "label": "r",
@@ -16040,7 +16143,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000104"
     },
     {
       "label": "rt",
@@ -16293,7 +16397,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000105"
     },
     {
       "label": "s",
@@ -16497,7 +16602,8 @@
       "role": "unknown",
       "legacy_style": "italic",
       "reviewed": true,
-      "style": "italic"
+      "style": "italic",
+      "model_id": "g000106"
     },
     {
       "label": "s",
@@ -16601,7 +16707,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000107"
     },
     {
       "label": "s",
@@ -16747,7 +16854,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "style": "bold",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000108"
     },
     {
       "label": "s",
@@ -16936,7 +17044,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000109"
     },
     {
       "label": "t",
@@ -17012,7 +17121,8 @@
       "role": "unknown",
       "legacy_style": "roman",
       "reviewed": true,
-      "style": "roman"
+      "style": "roman",
+      "model_id": "g000110"
     },
     {
       "label": "t",
@@ -17289,7 +17399,8 @@
       "role": "unknown",
       "legacy_style": "italic",
       "style": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000111"
     },
     {
       "label": "t",
@@ -17433,7 +17544,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "style": "bold",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000112"
     },
     {
       "label": "t",
@@ -17514,7 +17626,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000113"
     },
     {
       "label": "t",
@@ -17667,7 +17780,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000114"
     },
     {
       "label": "u",
@@ -17753,7 +17867,8 @@
       "role": "unknown",
       "legacy_style": "roman",
       "reviewed": true,
-      "style": "roman"
+      "style": "roman",
+      "model_id": "g000115"
     },
     {
       "label": "u",
@@ -17880,7 +17995,8 @@
       "role": "unknown",
       "legacy_style": "italic",
       "reviewed": true,
-      "style": "italic"
+      "style": "italic",
+      "model_id": "g000116"
     },
     {
       "label": "u",
@@ -18049,7 +18165,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "style": "bold",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000117"
     },
     {
       "label": "u",
@@ -18242,7 +18359,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000118"
     },
     {
       "label": "(",
@@ -18320,7 +18438,8 @@
       "role": "unknown",
       "legacy_style": "roman",
       "reviewed": true,
-      "style": "roman"
+      "style": "roman",
+      "model_id": "g000119"
     },
     {
       "label": "v",
@@ -18442,7 +18561,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000120"
     },
     {
       "label": "v",
@@ -18566,7 +18686,8 @@
       "role": "unknown",
       "legacy_style": "italic",
       "reviewed": true,
-      "style": "italic"
+      "style": "italic",
+      "model_id": "g000121"
     },
     {
       "label": "v",
@@ -18700,7 +18821,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "style": "bold",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000122"
     },
     {
       "label": "v",
@@ -18801,7 +18923,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000123"
     },
     {
       "label": "v",
@@ -18994,7 +19117,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000124"
     },
     {
       "label": "w",
@@ -19144,7 +19268,8 @@
       ],
       "role": "unknown",
       "legacy_style": "italic",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000125"
     },
     {
       "label": "w",
@@ -19366,7 +19491,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "reviewed": true,
-      "style": "bold"
+      "style": "bold",
+      "model_id": "g000126"
     },
     {
       "label": "w",
@@ -19516,7 +19642,8 @@
       "role": "unknown",
       "legacy_style": "roman",
       "reviewed": true,
-      "style": "roman"
+      "style": "roman",
+      "model_id": "g000127"
     },
     {
       "label": "W",
@@ -19857,7 +19984,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000128"
     },
     {
       "label": "x",
@@ -20027,7 +20155,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "reviewed": true,
-      "style": "bold"
+      "style": "bold",
+      "model_id": "g000129"
     },
     {
       "label": "y",
@@ -20124,7 +20253,8 @@
       "role": "unknown",
       "legacy_style": "italic",
       "reviewed": true,
-      "style": "italic"
+      "style": "italic",
+      "model_id": "g000130"
     },
     {
       "label": "y",
@@ -20298,7 +20428,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "reviewed": true,
-      "style": "bold"
+      "style": "bold",
+      "model_id": "g000131"
     },
     {
       "label": "z",
@@ -20452,7 +20583,8 @@
       "role": "unknown",
       "legacy_style": "bold",
       "reviewed": true,
-      "style": "bold"
+      "style": "bold",
+      "model_id": "g000132"
     },
     {
       "label": "z",
@@ -20544,7 +20676,8 @@
       "role": "unknown",
       "legacy_style": "italic",
       "reviewed": true,
-      "style": "italic"
+      "style": "italic",
+      "model_id": "g000133"
     },
     {
       "label": "Z",
@@ -20741,7 +20874,8 @@
       ],
       "role": "unknown",
       "legacy_style": "bold",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000134"
     },
     {
       "label": "Z",
@@ -20914,7 +21048,8 @@
       ],
       "role": "unknown",
       "legacy_style": "roman",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000135"
     },
     {
       "label": "Z",
@@ -21051,7 +21186,8 @@
       ],
       "role": "unknown",
       "legacy_style": "italic",
-      "reviewed": false
+      "reviewed": false,
+      "model_id": "g000136"
     },
     {
       "label": "¹",
@@ -21118,7 +21254,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000137"
     },
     {
       "label": "1",
@@ -21197,7 +21334,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000138"
     },
     {
       "label": "ö",
@@ -21302,7 +21440,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000139"
     },
     {
       "label": "å",
@@ -21393,7 +21532,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000140"
     },
     {
       "label": "f",
@@ -21478,7 +21618,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000141"
     },
     {
       "label": "o",
@@ -21569,7 +21710,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000142"
     },
     {
       "label": "c",
@@ -21640,7 +21782,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000143"
     },
     {
       "label": "h",
@@ -21759,7 +21902,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000144"
     },
     {
       "label": "O",
@@ -21898,7 +22042,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000145"
     },
     {
       "label": "2",
@@ -22033,7 +22178,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000146"
     },
     {
       "label": "²",
@@ -22132,7 +22278,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000147"
     },
     {
       "label": "a",
@@ -22221,7 +22368,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000148"
     },
     {
       "label": "d",
@@ -22334,7 +22482,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000149"
     },
     {
       "label": "o",
@@ -22409,7 +22558,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000150"
     },
     {
       "label": "t",
@@ -22480,7 +22630,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000151"
     },
     {
       "label": "s",
@@ -22539,7 +22690,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000152"
     },
     {
       "label": "d",
@@ -22648,7 +22800,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000153"
     },
     {
       "label": "à",
@@ -22840,7 +22993,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000154"
     },
     {
       "label": "å",
@@ -22964,7 +23118,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000155"
     },
     {
       "label": "b",
@@ -23093,7 +23248,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000156"
     },
     {
       "label": "i",
@@ -23157,7 +23313,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000157"
     },
     {
       "label": "l",
@@ -23240,7 +23397,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000158"
     },
     {
       "label": "j",
@@ -23312,7 +23470,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000159"
     },
     {
       "label": "5",
@@ -23403,7 +23562,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000160"
     },
     {
       "label": "0",
@@ -23518,7 +23678,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000161"
     },
     {
       "label": "r",
@@ -23585,7 +23746,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000162"
     },
     {
       "label": "e",
@@ -23660,7 +23822,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000163"
     },
     {
       "label": "t",
@@ -23739,7 +23902,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000164"
     },
     {
       "label": "à",
@@ -23851,7 +24015,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000165"
     },
     {
       "label": "k",
@@ -23974,7 +24139,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000166"
     },
     {
       "label": "n",
@@ -24085,7 +24251,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000167"
     },
     {
       "label": "h",
@@ -24220,7 +24387,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000168"
     },
     {
       "label": "ä",
@@ -24337,7 +24505,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000169"
     },
     {
       "label": "`",
@@ -24376,7 +24545,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000170"
     },
     {
       "label": "~",
@@ -24423,7 +24593,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000171"
     },
     {
       "label": "n",
@@ -24530,7 +24701,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000172"
     },
     {
       "label": "r",
@@ -24593,7 +24765,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000173"
     },
     {
       "label": "u",
@@ -24704,7 +24877,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000174"
     },
     {
       "label": "x",
@@ -24803,7 +24977,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000175"
     },
     {
       "label": "K",
@@ -24928,7 +25103,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000176"
     },
     {
       "label": "c",
@@ -24991,7 +25167,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000177"
     },
     {
       "label": "h",
@@ -25106,7 +25283,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000178"
     },
     {
       "label": "J",
@@ -25193,7 +25371,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000179"
     },
     {
       "label": "a",
@@ -25292,7 +25471,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000180"
     },
     {
       "label": "A",
@@ -25519,7 +25699,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000181"
     },
     {
       "label": "-",
@@ -25570,7 +25751,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000182"
     },
     {
       "label": "k",
@@ -25763,7 +25945,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000183"
     },
     {
       "label": "ŋ",
@@ -25870,7 +26053,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000184"
     },
     {
       "label": ",",
@@ -25921,7 +26105,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000185"
     },
     {
       "label": "ä",
@@ -26006,7 +26191,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000186"
     },
     {
       "label": "r",
@@ -26066,7 +26252,8 @@
           "review_pixel_count": 11,
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
-      ]
+      ],
+      "model_id": "g000187"
     },
     {
       "label": "f",
@@ -26147,7 +26334,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000188"
     },
     {
       "label": "p",
@@ -26278,7 +26466,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000189"
     },
     {
       "label": "b",
@@ -26381,7 +26570,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000190"
     },
     {
       "label": "i",
@@ -26442,7 +26632,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000191"
     },
     {
       "label": "f",
@@ -26589,7 +26780,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000192"
     },
     {
       "label": "c",
@@ -26675,7 +26867,8 @@
         }
       ],
       "reviewed": true,
-      "role": "roman"
+      "role": "roman",
+      "model_id": "g000193"
     },
     {
       "label": "ʃ",
@@ -26766,7 +26959,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000194"
     },
     {
       "label": "S",
@@ -26873,7 +27067,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000195"
     },
     {
       "label": "A",
@@ -27016,7 +27211,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000196"
     },
     {
       "label": "z",
@@ -27115,7 +27311,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000197"
     },
     {
       "label": "g",
@@ -27236,7 +27433,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000198"
     },
     {
       "label": ",",
@@ -27279,7 +27477,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000199"
     },
     {
       "label": "C",
@@ -27386,7 +27585,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000200"
     },
     {
       "label": "B",
@@ -27529,7 +27729,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000201"
     },
     {
       "label": "R",
@@ -27668,7 +27869,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000202"
     },
     {
       "label": "N",
@@ -27835,7 +28037,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000203"
     },
     {
       "label": ".",
@@ -27866,7 +28069,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000204"
     },
     {
       "label": "ä",
@@ -27983,7 +28187,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000205"
     },
     {
       "label": "d",
@@ -28112,7 +28317,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000206"
     },
     {
       "label": "v",
@@ -28195,7 +28401,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000207"
     },
     {
       "label": "m",
@@ -28346,7 +28553,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000208"
     },
     {
       "label": "g",
@@ -28465,7 +28673,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000209"
     },
     {
       "label": ".",
@@ -28496,7 +28705,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000210"
     },
     {
       "label": ";",
@@ -28556,7 +28766,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000211"
     },
     {
       "label": "j",
@@ -28636,7 +28847,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000212"
     },
     {
       "label": "E",
@@ -28823,7 +29035,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000213"
     },
     {
       "label": "y",
@@ -28910,7 +29123,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000214"
     },
     {
       "label": "(",
@@ -28977,7 +29191,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000215"
     },
     {
       "label": ")",
@@ -29044,7 +29259,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000216"
     },
     {
       "label": "F",
@@ -29159,7 +29375,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000217"
     },
     {
       "label": "y",
@@ -29274,7 +29491,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000218"
     },
     {
       "label": "1",
@@ -29353,7 +29571,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000219"
     },
     {
       "label": "8",
@@ -29460,7 +29679,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000220"
     },
     {
       "label": "0",
@@ -29559,7 +29779,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000221"
     },
     {
       "label": "-",
@@ -29590,7 +29811,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000222"
     },
     {
       "label": "ŋ",
@@ -29713,7 +29935,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000223"
     },
     {
       "label": "ft",
@@ -29968,7 +30191,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000224"
     },
     {
       "label": "u",
@@ -30081,7 +30305,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000225"
     },
     {
       "label": "p",
@@ -30208,7 +30433,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000226"
     },
     {
       "label": "d",
@@ -30333,7 +30559,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000227"
     },
     {
       "label": "f",
@@ -30426,7 +30653,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000228"
     },
     {
       "label": "ö",
@@ -30511,7 +30739,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000229"
     },
     {
       "label": "3",
@@ -30598,7 +30827,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000230"
     },
     {
       "label": ":",
@@ -30642,7 +30872,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00002.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000231"
     },
     {
       "label": "³",
@@ -30713,7 +30944,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00002.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000232"
     },
     {
       "label": "2",
@@ -30812,7 +31044,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00002.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000233"
     },
     {
       "label": "1",
@@ -30899,7 +31132,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00002.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000234"
     },
     {
       "label": "G",
@@ -31018,7 +31252,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00002.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000235"
     },
     {
       "label": "a",
@@ -31161,7 +31396,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00002.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000236"
     },
     {
       "label": "b",
@@ -31340,7 +31576,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00002.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000237"
     },
     {
       "label": "o",
@@ -31471,7 +31708,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00002.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000238"
     },
     {
       "label": "-",
@@ -31514,7 +31752,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00002.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000239"
     },
     {
       "label": "v",
@@ -31639,7 +31878,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00002.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000240"
     },
     {
       "label": "i",
@@ -31736,7 +31976,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00002.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000241"
     },
     {
       "label": "s",
@@ -31863,7 +32104,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00002.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000242"
     },
     {
       "label": "c",
@@ -31972,7 +32214,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00002.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000243"
     },
     {
       "label": "h",
@@ -32149,7 +32392,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00002.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000244"
     },
     {
       "label": "gg",
@@ -32500,7 +32744,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00002.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000245"
     },
     {
       "label": "x",
@@ -32619,7 +32864,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00002.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000246"
     },
     {
       "label": "¹",
@@ -32686,7 +32932,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00002.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000247"
     },
     {
       "label": "A",
@@ -32805,7 +33052,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00002.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000248"
     },
     {
       "label": "-",
@@ -32853,7 +33101,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00002.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000249"
     },
     {
       "label": "⁴",
@@ -32932,7 +33181,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00002.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000250"
     },
     {
       "label": "³",
@@ -33035,7 +33285,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00002.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000251"
     },
     {
       "label": "⁴",
@@ -33134,7 +33385,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00002.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000252"
     },
     {
       "label": "ö",
@@ -33243,7 +33495,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00002.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000253"
     },
     {
       "label": "y",
@@ -33394,7 +33647,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00002.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000254"
     },
     {
       "label": "p",
@@ -33577,7 +33831,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00002.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000255"
     },
     {
       "label": "²",
@@ -33676,7 +33931,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00003.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000256"
     },
     {
       "label": "¹",
@@ -33747,7 +34003,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00003.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000257"
     },
     {
       "label": "y",
@@ -33848,7 +34105,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00003.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000258"
     },
     {
       "label": "t",
@@ -33921,7 +34179,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00003.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000259"
     },
     {
       "label": "I",
@@ -33996,7 +34255,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00003.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000260"
     },
     {
       "label": "c",
@@ -34105,7 +34365,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00003.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000261"
     },
     {
       "label": "k",
@@ -34270,7 +34531,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00003.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000262"
     },
     {
       "label": "l",
@@ -34381,7 +34643,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00003.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000263"
     },
     {
       "label": "g",
@@ -34576,7 +34839,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00003.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000264"
     },
     {
       "label": "3",
@@ -34703,7 +34967,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00003.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000265"
     },
     {
       "label": "D",
@@ -34834,7 +35099,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00003.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000266"
     },
     {
       "label": "u",
@@ -34989,7 +35255,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00004.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000267"
     },
     {
       "label": "/",
@@ -35052,7 +35319,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00004.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000268"
     },
     {
       "label": ",",
@@ -35095,7 +35363,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00004.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000269"
     },
     {
       "label": "ru",
@@ -35242,7 +35511,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00004.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000270"
     },
     {
       "label": "4",
@@ -35353,7 +35623,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00004.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000271"
     },
     {
       "label": "(",
@@ -35432,7 +35703,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00004.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000272"
     },
     {
       "label": "+",
@@ -35507,7 +35779,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00004.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000273"
     },
     {
       "label": ")",
@@ -35586,7 +35859,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00004.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000274"
     },
     {
       "label": "R",
@@ -35753,7 +36027,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00005.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000275"
     },
     {
       "label": "³",
@@ -35824,7 +36099,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00005.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000276"
     },
     {
       "label": "D",
@@ -35987,7 +36263,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00005.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000277"
     },
     {
       "label": "N",
@@ -36202,7 +36479,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00005.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000278"
     },
     {
       "label": "y",
@@ -36301,7 +36579,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00005.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000279"
     },
     {
       "label": "(",
@@ -36376,7 +36655,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00006.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000280"
     },
     {
       "label": ")",
@@ -36451,7 +36731,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00006.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000281"
     },
     {
       "label": "J",
@@ -36546,7 +36827,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00006.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000282"
     },
     {
       "label": "S",
@@ -36653,7 +36935,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00006.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000283"
     },
     {
       "label": "m",
@@ -36784,7 +37067,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00006.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000284"
     },
     {
       "label": "D",
@@ -36935,7 +37219,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00006.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000285"
     },
     {
       "label": "e",
@@ -37004,7 +37289,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00006.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000286"
     },
     {
       "label": "n",
@@ -37103,7 +37389,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00006.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000287"
     },
     {
       "label": "D",
@@ -37338,7 +37625,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00006.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000288"
     },
     {
       "label": "ᵘ",
@@ -37425,7 +37713,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00006.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000289"
     },
     {
       "label": "4",
@@ -37560,7 +37849,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00007.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000290"
     },
     {
       "label": "5",
@@ -37683,7 +37973,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00007.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000291"
     },
     {
       "label": "9",
@@ -37786,7 +38077,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00008.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000292"
     },
     {
       "label": "ia",
@@ -37927,7 +38219,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00008.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000293"
     },
     {
       "label": "x",
@@ -38030,7 +38323,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00008.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000294"
     },
     {
       "label": "f",
@@ -38167,7 +38461,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00008.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000295"
     },
     {
       "label": "w",
@@ -38370,7 +38665,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00008.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000296"
     },
     {
       "label": "ᵒ",
@@ -38445,7 +38741,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00008.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000297"
     },
     {
       "label": "V",
@@ -38580,7 +38877,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00009.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000298"
     },
     {
       "label": "S",
@@ -38671,7 +38969,8 @@
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00009.png"
         }
       ],
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000299"
     },
     {
       "label": "³",
@@ -38775,7 +39074,8 @@
         }
       ],
       "reviewed": true,
-      "role": "bold"
+      "role": "bold",
+      "model_id": "g000300"
     },
     {
       "label": "⁴",
@@ -38875,7 +39175,8 @@
         }
       ],
       "role": "bold",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000301"
     },
     {
       "label": "³",
@@ -38979,7 +39280,8 @@
         }
       ],
       "role": "bold",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000302"
     },
     {
       "label": "²",
@@ -39055,7 +39357,8 @@
         }
       ],
       "role": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000303"
     },
     {
       "label": "P",
@@ -39165,7 +39468,8 @@
         }
       ],
       "role": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000304"
     },
     {
       "label": "à",
@@ -39322,7 +39626,8 @@
         }
       ],
       "role": "bold",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000305"
     },
     {
       "label": "j",
@@ -39439,7 +39744,8 @@
         }
       ],
       "role": "bold",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000306"
     },
     {
       "label": "ex",
@@ -39601,7 +39907,8 @@
         }
       ],
       "role": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000307"
     },
     {
       "label": "S",
@@ -39713,7 +40020,8 @@
         }
       ],
       "role": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000308"
     },
     {
       "label": "L",
@@ -39825,7 +40133,8 @@
         }
       ],
       "role": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000309"
     },
     {
       "label": "yt",
@@ -40109,7 +40418,8 @@
         }
       ],
       "role": "bold",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000310"
     },
     {
       "label": "8",
@@ -40221,7 +40531,8 @@
         }
       ],
       "role": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000311"
     },
     {
       "label": "b",
@@ -40317,7 +40628,8 @@
         }
       ],
       "role": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000312"
     },
     {
       "label": "rn",
@@ -40457,7 +40769,8 @@
         }
       ],
       "role": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000313"
     },
     {
       "label": "!",
@@ -40538,7 +40851,8 @@
         }
       ],
       "role": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000314"
     },
     {
       "label": "O",
@@ -40686,7 +41000,8 @@
         }
       ],
       "role": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000315"
     },
     {
       "label": "K",
@@ -40859,7 +41174,8 @@
         }
       ],
       "role": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000316"
     },
     {
       "label": "é",
@@ -40968,7 +41284,8 @@
         }
       ],
       "role": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000317"
     },
     {
       "label": "A",
@@ -41100,7 +41417,8 @@
         }
       ],
       "role": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000318"
     },
     {
       "label": "x",
@@ -41206,7 +41524,8 @@
         }
       ],
       "role": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000319"
     },
     {
       "label": "²",
@@ -41294,7 +41613,8 @@
         }
       ],
       "role": "bold",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000320"
     },
     {
       "label": "i",
@@ -41355,7 +41675,8 @@
         }
       ],
       "role": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000321"
     },
     {
       "label": "fl",
@@ -41503,7 +41824,8 @@
         }
       ],
       "role": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000322"
     },
     {
       "label": "B",
@@ -41651,7 +41973,8 @@
         }
       ],
       "role": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000323"
     },
     {
       "label": "P",
@@ -41771,7 +42094,8 @@
         }
       ],
       "role": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000324"
     },
     {
       "label": "L",
@@ -41883,7 +42207,8 @@
         }
       ],
       "role": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000325"
     },
     {
       "label": "z",
@@ -42031,7 +42356,8 @@
         }
       ],
       "role": "bold",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000326"
     },
     {
       "label": "ç",
@@ -42128,7 +42454,8 @@
         }
       ],
       "role": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000327"
     },
     {
       "label": "¹",
@@ -42200,7 +42527,8 @@
         }
       ],
       "role": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000328"
     },
     {
       "label": "s",
@@ -42264,7 +42592,8 @@
         }
       ],
       "role": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000329"
     },
     {
       "label": "al",
@@ -42404,7 +42733,8 @@
         }
       ],
       "role": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000330"
     },
     {
       "label": "i",
@@ -42466,7 +42796,8 @@
         }
       ],
       "role": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000331"
     },
     {
       "label": "g",
@@ -42578,7 +42909,8 @@
         }
       ],
       "role": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000332"
     },
     {
       "label": "ö",
@@ -42664,7 +42996,8 @@
         }
       ],
       "role": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000333"
     },
     {
       "label": "r",
@@ -42724,7 +43057,8 @@
         }
       ],
       "role": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000334"
     },
     {
       "label": "O",
@@ -42840,7 +43174,8 @@
         }
       ],
       "role": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000335"
     },
     {
       "label": "ŋ",
@@ -42948,7 +43283,8 @@
         }
       ],
       "role": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000336"
     },
     {
       "label": "G",
@@ -43092,7 +43428,8 @@
         }
       ],
       "role": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000337"
     },
     {
       "label": "?",
@@ -43181,7 +43518,8 @@
         }
       ],
       "role": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000338"
     },
     {
       "label": "?",
@@ -43278,7 +43616,8 @@
         }
       ],
       "role": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000339"
     },
     {
       "label": "6",
@@ -43394,7 +43733,8 @@
         }
       ],
       "role": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000340"
     },
     {
       "label": "0",
@@ -43518,7 +43858,8 @@
         }
       ],
       "role": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000341"
     },
     {
       "label": "Ö",
@@ -43676,7 +44017,8 @@
         }
       ],
       "role": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000342"
     },
     {
       "label": "L",
@@ -43812,7 +44154,8 @@
         }
       ],
       "role": "bold",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000343"
     },
     {
       "label": "S",
@@ -44008,7 +44351,8 @@
         }
       ],
       "role": "bold",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000344"
     },
     {
       "label": "Ö",
@@ -44132,7 +44476,8 @@
         }
       ],
       "role": "roman",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000345"
     },
     {
       "label": "z",
@@ -44216,7 +44561,8 @@
         }
       ],
       "role": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000346"
     },
     {
       "label": "A",
@@ -44408,7 +44754,8 @@
         }
       ],
       "role": "bold",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000347"
     },
     {
       "label": "5",
@@ -44488,7 +44835,8 @@
         }
       ],
       "role": "italic",
-      "reviewed": true
+      "reviewed": true,
+      "model_id": "g000348"
     },
     {
       "label": "U",
@@ -44637,6 +44985,1338 @@
           ],
           "review_pixel_count": 0,
           "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00021.png"
+        }
+      ],
+      "role": "roman",
+      "reviewed": true,
+      "model_id": "g000349"
+    },
+    {
+      "label": "U",
+      "style": "roman",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -9
+        ],
+        [
+          1,
+          -9
+        ],
+        [
+          1,
+          -8
+        ],
+        [
+          1,
+          -7
+        ],
+        [
+          1,
+          -6
+        ],
+        [
+          1,
+          -5
+        ],
+        [
+          1,
+          -4
+        ],
+        [
+          1,
+          -3
+        ],
+        [
+          1,
+          -2
+        ],
+        [
+          2,
+          -9
+        ],
+        [
+          2,
+          -1
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          4,
+          0
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          6,
+          -9
+        ],
+        [
+          6,
+          -1
+        ],
+        [
+          7,
+          -9
+        ],
+        [
+          7,
+          -8
+        ],
+        [
+          7,
+          -7
+        ],
+        [
+          7,
+          -6
+        ],
+        [
+          7,
+          -5
+        ],
+        [
+          7,
+          -4
+        ],
+        [
+          7,
+          -3
+        ],
+        [
+          7,
+          -2
+        ],
+        [
+          8,
+          -9
+        ]
+      ],
+      "sources": [
+        {
+          "page": 22,
+          "column": 0,
+          "row": 23,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00022.png"
+        }
+      ],
+      "role": "roman",
+      "reviewed": true,
+      "model_id": "g000350"
+    },
+    {
+      "label": "fl",
+      "style": "italic",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          2
+        ],
+        [
+          0,
+          3
+        ],
+        [
+          1,
+          -6
+        ],
+        [
+          1,
+          -2
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          2,
+          -6
+        ],
+        [
+          2,
+          -5
+        ],
+        [
+          2,
+          -4
+        ],
+        [
+          2,
+          -3
+        ],
+        [
+          3,
+          -8
+        ],
+        [
+          3,
+          -7
+        ],
+        [
+          3,
+          -6
+        ],
+        [
+          4,
+          -9
+        ],
+        [
+          4,
+          -6
+        ],
+        [
+          4,
+          -1
+        ],
+        [
+          4,
+          0
+        ],
+        [
+          5,
+          -10
+        ],
+        [
+          5,
+          -5
+        ],
+        [
+          5,
+          -4
+        ],
+        [
+          5,
+          -3
+        ],
+        [
+          5,
+          -2
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          6,
+          -10
+        ],
+        [
+          6,
+          -9
+        ],
+        [
+          6,
+          -8
+        ],
+        [
+          6,
+          -7
+        ],
+        [
+          6,
+          -6
+        ],
+        [
+          6,
+          0
+        ],
+        [
+          7,
+          -10
+        ]
+      ],
+      "sources": [
+        {
+          "page": 22,
+          "column": 1,
+          "row": 46,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00022.png"
+        }
+      ],
+      "role": "italic",
+      "reviewed": true,
+      "model_id": "g000351"
+    },
+    {
+      "label": "N",
+      "style": "italic",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          -10
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          2,
+          -10
+        ],
+        [
+          2,
+          -6
+        ],
+        [
+          2,
+          -5
+        ],
+        [
+          2,
+          -4
+        ],
+        [
+          2,
+          -3
+        ],
+        [
+          2,
+          -2
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          3,
+          -10
+        ],
+        [
+          3,
+          -9
+        ],
+        [
+          3,
+          -8
+        ],
+        [
+          3,
+          -7
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          4,
+          -8
+        ],
+        [
+          4,
+          -7
+        ],
+        [
+          5,
+          -7
+        ],
+        [
+          5,
+          -6
+        ],
+        [
+          6,
+          -5
+        ],
+        [
+          6,
+          -4
+        ],
+        [
+          7,
+          -4
+        ],
+        [
+          7,
+          -3
+        ],
+        [
+          8,
+          -2
+        ],
+        [
+          8,
+          -1
+        ],
+        [
+          9,
+          -10
+        ],
+        [
+          9,
+          -2
+        ],
+        [
+          9,
+          -1
+        ],
+        [
+          9,
+          0
+        ],
+        [
+          10,
+          -10
+        ],
+        [
+          10,
+          -8
+        ],
+        [
+          10,
+          -7
+        ],
+        [
+          10,
+          -6
+        ],
+        [
+          10,
+          -5
+        ],
+        [
+          10,
+          -4
+        ],
+        [
+          10,
+          -3
+        ],
+        [
+          10,
+          0
+        ],
+        [
+          11,
+          -10
+        ],
+        [
+          11,
+          -9
+        ],
+        [
+          12,
+          -10
+        ]
+      ],
+      "sources": [
+        {
+          "page": 23,
+          "column": 2,
+          "row": 11,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00023.png"
+        }
+      ],
+      "role": "italic",
+      "reviewed": true,
+      "model_id": "g000352"
+    },
+    {
+      "label": ":",
+      "style": "italic",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -1
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          -5
+        ],
+        [
+          1,
+          -4
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          2,
+          -5
+        ]
+      ],
+      "sources": [
+        {
+          "page": 23,
+          "column": 2,
+          "row": 11,
+          "review_selection": [],
+          "review_pixel_count": 6,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00023.png"
+        }
+      ],
+      "role": "italic",
+      "reviewed": true,
+      "model_id": "g000353"
+    },
+    {
+      "label": "²",
+      "style": "italic",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -5
+        ],
+        [
+          1,
+          -11
+        ],
+        [
+          1,
+          -6
+        ],
+        [
+          1,
+          -5
+        ],
+        [
+          2,
+          -12
+        ],
+        [
+          2,
+          -7
+        ],
+        [
+          2,
+          -5
+        ],
+        [
+          3,
+          -12
+        ],
+        [
+          3,
+          -8
+        ],
+        [
+          3,
+          -5
+        ],
+        [
+          4,
+          -11
+        ],
+        [
+          4,
+          -10
+        ],
+        [
+          4,
+          -9
+        ],
+        [
+          4,
+          -5
+        ]
+      ],
+      "sources": [
+        {
+          "page": 26,
+          "column": 0,
+          "row": 52,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00026.png"
+        }
+      ],
+      "role": "italic",
+      "reviewed": true
+    },
+    {
+      "label": "X",
+      "style": "roman",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -11
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          -11
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          2,
+          -11
+        ],
+        [
+          2,
+          -10
+        ],
+        [
+          2,
+          -1
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          3,
+          -11
+        ],
+        [
+          3,
+          -9
+        ],
+        [
+          3,
+          -8
+        ],
+        [
+          3,
+          -3
+        ],
+        [
+          3,
+          -2
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          4,
+          -11
+        ],
+        [
+          4,
+          -8
+        ],
+        [
+          4,
+          -7
+        ],
+        [
+          4,
+          -4
+        ],
+        [
+          5,
+          -7
+        ],
+        [
+          5,
+          -6
+        ],
+        [
+          5,
+          -5
+        ],
+        [
+          6,
+          -7
+        ],
+        [
+          6,
+          -5
+        ],
+        [
+          7,
+          -8
+        ],
+        [
+          7,
+          -4
+        ],
+        [
+          7,
+          -3
+        ],
+        [
+          8,
+          -11
+        ],
+        [
+          8,
+          -9
+        ],
+        [
+          8,
+          -3
+        ],
+        [
+          8,
+          -2
+        ],
+        [
+          8,
+          0
+        ],
+        [
+          9,
+          -11
+        ],
+        [
+          9,
+          -10
+        ],
+        [
+          9,
+          -1
+        ],
+        [
+          9,
+          0
+        ],
+        [
+          10,
+          -11
+        ],
+        [
+          10,
+          0
+        ],
+        [
+          11,
+          -11
+        ],
+        [
+          11,
+          0
+        ]
+      ],
+      "sources": [
+        {
+          "page": 26,
+          "column": 2,
+          "row": 38,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00026.png"
+        }
+      ],
+      "role": "roman",
+      "reviewed": true
+    },
+    {
+      "label": "ö",
+      "style": "bold",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -3
+        ]
+      ],
+      "sources": [
+        {
+          "page": 26,
+          "column": 2,
+          "row": 41,
+          "review_selection": [],
+          "review_pixel_count": 1,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00026.png"
+        }
+      ],
+      "role": "bold",
+      "reviewed": true
+    },
+    {
+      "label": "ö",
+      "style": "bold",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -3
+        ],
+        [
+          1,
+          -6
+        ],
+        [
+          1,
+          -5
+        ],
+        [
+          1,
+          -4
+        ],
+        [
+          1,
+          -3
+        ],
+        [
+          1,
+          -2
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          2,
+          -10
+        ],
+        [
+          2,
+          -9
+        ],
+        [
+          2,
+          -6
+        ],
+        [
+          2,
+          -5
+        ],
+        [
+          2,
+          -4
+        ],
+        [
+          2,
+          -3
+        ],
+        [
+          2,
+          -2
+        ],
+        [
+          2,
+          -1
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          3,
+          -9
+        ],
+        [
+          3,
+          -7
+        ],
+        [
+          3,
+          -6
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          4,
+          -6
+        ],
+        [
+          4,
+          -1
+        ],
+        [
+          4,
+          0
+        ],
+        [
+          5,
+          -10
+        ],
+        [
+          5,
+          -9
+        ],
+        [
+          5,
+          -8
+        ],
+        [
+          5,
+          -6
+        ],
+        [
+          5,
+          -5
+        ],
+        [
+          5,
+          -4
+        ],
+        [
+          5,
+          -3
+        ],
+        [
+          5,
+          -2
+        ],
+        [
+          5,
+          -1
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          6,
+          -5
+        ],
+        [
+          6,
+          -4
+        ],
+        [
+          6,
+          -3
+        ],
+        [
+          6,
+          -2
+        ],
+        [
+          6,
+          -1
+        ]
+      ],
+      "sources": [
+        {
+          "page": 26,
+          "column": 2,
+          "row": 41,
+          "review_selection": [
+            "U00",
+            "U01",
+            "U02"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00026.png"
+        }
+      ],
+      "role": "bold",
+      "reviewed": true
+    },
+    {
+      "label": "å",
+      "style": "bold",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -6
+        ],
+        [
+          0,
+          -5
+        ],
+        [
+          0,
+          -3
+        ],
+        [
+          0,
+          -2
+        ],
+        [
+          0,
+          -1
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          -9
+        ],
+        [
+          1,
+          -6
+        ],
+        [
+          1,
+          -3
+        ],
+        [
+          1,
+          -2
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          2,
+          -10
+        ],
+        [
+          2,
+          -8
+        ],
+        [
+          2,
+          -6
+        ],
+        [
+          2,
+          -4
+        ],
+        [
+          2,
+          -3
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          3,
+          -10
+        ],
+        [
+          3,
+          -9
+        ],
+        [
+          3,
+          -7
+        ],
+        [
+          3,
+          -6
+        ],
+        [
+          3,
+          -5
+        ],
+        [
+          3,
+          -4
+        ],
+        [
+          3,
+          -3
+        ],
+        [
+          3,
+          -1
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          4,
+          -6
+        ],
+        [
+          4,
+          -5
+        ],
+        [
+          4,
+          -4
+        ],
+        [
+          4,
+          -3
+        ],
+        [
+          4,
+          -2
+        ],
+        [
+          4,
+          -1
+        ],
+        [
+          4,
+          0
+        ],
+        [
+          5,
+          -1
+        ],
+        [
+          5,
+          0
+        ]
+      ],
+      "sources": [
+        {
+          "page": 26,
+          "column": 2,
+          "row": 46,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00026.png"
+        }
+      ],
+      "role": "bold",
+      "reviewed": true
+    },
+    {
+      "label": "²",
+      "style": "italic",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -5
+        ],
+        [
+          1,
+          -12
+        ],
+        [
+          1,
+          -6
+        ],
+        [
+          1,
+          -5
+        ],
+        [
+          2,
+          -13
+        ],
+        [
+          2,
+          -7
+        ],
+        [
+          2,
+          -5
+        ],
+        [
+          3,
+          -13
+        ],
+        [
+          3,
+          -9
+        ],
+        [
+          3,
+          -8
+        ],
+        [
+          3,
+          -5
+        ],
+        [
+          4,
+          -12
+        ],
+        [
+          4,
+          -11
+        ],
+        [
+          4,
+          -10
+        ],
+        [
+          4,
+          -5
+        ],
+        [
+          5,
+          -6
+        ]
+      ],
+      "sources": [
+        {
+          "page": 26,
+          "column": 1,
+          "row": 2,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00026.png"
+        }
+      ],
+      "role": "italic",
+      "reviewed": true
+    },
+    {
+      "label": "+",
+      "style": "roman",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -3
+        ],
+        [
+          1,
+          -3
+        ],
+        [
+          2,
+          -3
+        ],
+        [
+          3,
+          -6
+        ],
+        [
+          3,
+          -5
+        ],
+        [
+          3,
+          -4
+        ],
+        [
+          3,
+          -3
+        ],
+        [
+          3,
+          -2
+        ],
+        [
+          3,
+          -1
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          4,
+          -3
+        ],
+        [
+          5,
+          -3
+        ],
+        [
+          6,
+          -3
+        ]
+      ],
+      "sources": [
+        {
+          "page": 26,
+          "column": 1,
+          "row": 2,
+          "review_selection": [
+            "U00"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00026.png"
+        }
+      ],
+      "role": "roman",
+      "reviewed": true
+    },
+    {
+      "label": "=",
+      "style": "roman",
+      "pixels_relative_to_baseline": [
+        [
+          0,
+          -4
+        ],
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -4
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          2,
+          -4
+        ],
+        [
+          2,
+          -1
+        ],
+        [
+          3,
+          -4
+        ],
+        [
+          3,
+          -1
+        ],
+        [
+          4,
+          -4
+        ],
+        [
+          4,
+          -1
+        ],
+        [
+          5,
+          -4
+        ],
+        [
+          5,
+          -1
+        ]
+      ],
+      "sources": [
+        {
+          "page": 26,
+          "column": 1,
+          "row": 2,
+          "review_selection": [
+            "U00",
+            "U01"
+          ],
+          "review_pixel_count": 0,
+          "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00026.png"
         }
       ],
       "role": "roman",

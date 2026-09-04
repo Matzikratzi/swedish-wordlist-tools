@@ -1,0 +1,72 @@
+{
+  "label": "¤",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -3
+    ],
+    [
+      1,
+      -5
+    ],
+    [
+      1,
+      -4
+    ],
+    [
+      1,
+      -3
+    ],
+    [
+      1,
+      -2
+    ],
+    [
+      2,
+      -5
+    ],
+    [
+      2,
+      -4
+    ],
+    [
+      2,
+      -3
+    ],
+    [
+      2,
+      -2
+    ],
+    [
+      3,
+      -3
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "fålar",
+      "page": 347,
+      "subnr": "23429",
+      "source_id": "50",
+      "word_file": "words/w00050-italic-sub23429-p347-c3-fålar.png"
+    },
+    {
+      "expected_word": "gängor",
+      "page": 442,
+      "subnr": "30623",
+      "source_id": "76",
+      "word_file": "words/w00076-italic-sub30623-p442-c1-gängor.png"
+    },
+    {
+      "expected_word": "-aftnar",
+      "page": 849,
+      "subnr": "59753",
+      "source_id": "97",
+      "word_file": "words/w00097-italic-sub59753-p849-c2-u002daftnar.png"
+    }
+  ],
+  "role": "unknown",
+  "legacy_style": "italic",
+  "reviewed": true,
+  "model_id": "g000020"
+}

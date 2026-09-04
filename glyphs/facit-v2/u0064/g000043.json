@@ -1,0 +1,157 @@
+{
+  "label": "d",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -5
+    ],
+    [
+      0,
+      -4
+    ],
+    [
+      0,
+      -3
+    ],
+    [
+      0,
+      -2
+    ],
+    [
+      1,
+      -6
+    ],
+    [
+      1,
+      -1
+    ],
+    [
+      2,
+      -7
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      -7
+    ],
+    [
+      3,
+      0
+    ],
+    [
+      4,
+      -7
+    ],
+    [
+      4,
+      0
+    ],
+    [
+      5,
+      -11
+    ],
+    [
+      5,
+      -7
+    ],
+    [
+      5,
+      -1
+    ],
+    [
+      6,
+      -12
+    ],
+    [
+      6,
+      -11
+    ],
+    [
+      6,
+      -10
+    ],
+    [
+      6,
+      -9
+    ],
+    [
+      6,
+      -8
+    ],
+    [
+      6,
+      -7
+    ],
+    [
+      6,
+      -6
+    ],
+    [
+      6,
+      -5
+    ],
+    [
+      6,
+      -4
+    ],
+    [
+      6,
+      -3
+    ],
+    [
+      6,
+      -2
+    ],
+    [
+      6,
+      -1
+    ],
+    [
+      6,
+      0
+    ],
+    [
+      7,
+      0
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "det",
+      "jsonl_word": "a:et;",
+      "jsonl_similarity": 0.667,
+      "page": 1,
+      "subnr": "ocr-4-1-7-6",
+      "source_id": "page:1:ocr:4:1:7:6",
+      "page_word_bbox": [
+        201,
+        200,
+        23,
+        23
+      ],
+      "suggestion": "a:{r}"
+    },
+    {
+      "expected_word": "del",
+      "jsonl_word": "pl.",
+      "jsonl_similarity": 0.4,
+      "page": 1,
+      "subnr": "ocr-4-1-17-3",
+      "source_id": "page:1:ocr:4:1:17:3",
+      "page_word_bbox": [
+        144,
+        377,
+        21,
+        23
+      ],
+      "suggestion": "p{r}"
+    }
+  ],
+  "role": "unknown",
+  "legacy_style": "roman",
+  "reviewed": true,
+  "model_id": "g000043"
+}

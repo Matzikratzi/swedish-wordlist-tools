@@ -1,0 +1,80 @@
+{
+  "label": ":",
+  "role": "inflection-italic",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -1
+    ],
+    [
+      0,
+      0
+    ],
+    [
+      1,
+      -5
+    ],
+    [
+      1,
+      -4
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      -4
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "s.abe:et;",
+      "jsonl_word": "abc:et;",
+      "jsonl_similarity": 0.727,
+      "page": 1,
+      "subnr": "ocr-11-4-2-3",
+      "source_id": "page:1:ocr:11:4:2:3",
+      "page_word_bbox": [
+        141,
+        786,
+        53,
+        97
+      ],
+      "suggestion": ":{b}"
+    },
+    {
+      "expected_word": "abcn",
+      "jsonl_word": "abc:n",
+      "jsonl_similarity": 1,
+      "page": 1,
+      "subnr": "ocr-11-5-1-1",
+      "source_id": "page:1:ocr:11:5:1:1",
+      "page_word_bbox": [
+        64,
+        803,
+        36,
+        104
+      ],
+      "suggestion": ":{b}"
+    },
+    {
+      "expected_word": "abema",
+      "jsonl_word": "abc:na",
+      "jsonl_similarity": 0.6,
+      "page": 1,
+      "subnr": "ocr-11-5-1-6",
+      "source_id": "page:1:ocr:11:5:1:6",
+      "page_word_bbox": [
+        198,
+        803,
+        43,
+        104
+      ],
+      "suggestion": ":{b}"
+    }
+  ],
+  "style": "italic",
+  "reviewed": true,
+  "model_id": "g000002"
+}

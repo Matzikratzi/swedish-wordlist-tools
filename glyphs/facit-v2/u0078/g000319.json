@@ -1,0 +1,107 @@
+{
+  "label": "x",
+  "style": "italic",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      0
+    ],
+    [
+      1,
+      -1
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      -5
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      -6
+    ],
+    [
+      3,
+      -2
+    ],
+    [
+      3,
+      -1
+    ],
+    [
+      4,
+      -5
+    ],
+    [
+      4,
+      -4
+    ],
+    [
+      4,
+      -3
+    ],
+    [
+      4,
+      -2
+    ],
+    [
+      5,
+      -5
+    ],
+    [
+      5,
+      -1
+    ],
+    [
+      5,
+      0
+    ],
+    [
+      6,
+      -6
+    ],
+    [
+      6,
+      0
+    ],
+    [
+      7,
+      -6
+    ],
+    [
+      7,
+      -5
+    ],
+    [
+      7,
+      -1
+    ],
+    [
+      8,
+      -6
+    ]
+  ],
+  "sources": [
+    {
+      "page": 14,
+      "column": 1,
+      "row": 9,
+      "review_selection": [
+        "U00",
+        "M10",
+        "U01"
+      ],
+      "review_pixel_count": 0,
+      "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00014.png"
+    }
+  ],
+  "role": "italic",
+  "reviewed": true,
+  "model_id": "g000319"
+}

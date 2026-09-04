@@ -1,0 +1,111 @@
+{
+  "label": "e",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -3
+    ],
+    [
+      0,
+      -2
+    ],
+    [
+      0,
+      -1
+    ],
+    [
+      1,
+      -5
+    ],
+    [
+      1,
+      -4
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      -5
+    ],
+    [
+      2,
+      -4
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      -4
+    ],
+    [
+      3,
+      -1
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "pres.",
+      "page": 93,
+      "subnr": "6434",
+      "source_id": "15",
+      "word_file": "words/w00015-roman-sub6434-p93-c3-presu002e.png"
+    },
+    {
+      "expected_word": "best.",
+      "page": 93,
+      "subnr": "6370",
+      "source_id": "3",
+      "word_file": "words/w00003-roman-sub6370-p93-c1-bestu002e.png"
+    },
+    {
+      "expected_word": "best.",
+      "page": 234,
+      "subnr": "433817",
+      "source_id": "30",
+      "word_file": "words/w00030-roman-sub433817-p234-c1-bestu002e.png"
+    },
+    {
+      "expected_word": "best.",
+      "page": 234,
+      "subnr": "433832",
+      "source_id": "32",
+      "word_file": "words/w00032-roman-sub433832-p234-c1-bestu002e.png"
+    },
+    {
+      "expected_word": "pres.",
+      "page": 252,
+      "subnr": "16765",
+      "source_id": "42",
+      "word_file": "words/w00042-roman-sub16765-p252-c1-presu002e.png"
+    },
+    {
+      "expected_word": "pres.",
+      "page": 359,
+      "subnr": "24303",
+      "source_id": "59",
+      "word_file": "words/w00059-roman-sub24303-p359-c1-presu002e.png"
+    },
+    {
+      "expected_word": "superl.",
+      "page": 372,
+      "subnr": "25200",
+      "source_id": "67",
+      "word_file": "words/w00067-roman-sub25200-p372-c1-superlu002e.png"
+    },
+    {
+      "expected_word": "el.",
+      "page": 1558,
+      "subnr": "111658",
+      "source_id": "201",
+      "word_file": "words/w00201-roman-sub111658-p1558-c3-elu002e.png"
+    }
+  ],
+  "role": "unknown",
+  "legacy_style": "roman",
+  "reviewed": true,
+  "model_id": "g000046"
+}

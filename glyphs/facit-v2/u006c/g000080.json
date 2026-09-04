@@ -1,0 +1,116 @@
+{
+  "label": "l",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -9
+    ],
+    [
+      0,
+      0
+    ],
+    [
+      1,
+      -10
+    ],
+    [
+      1,
+      -9
+    ],
+    [
+      1,
+      -8
+    ],
+    [
+      1,
+      -7
+    ],
+    [
+      1,
+      -6
+    ],
+    [
+      1,
+      -5
+    ],
+    [
+      1,
+      -4
+    ],
+    [
+      1,
+      -3
+    ],
+    [
+      1,
+      -2
+    ],
+    [
+      1,
+      -1
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      0
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "pl.",
+      "page": 93,
+      "subnr": "6370",
+      "source_id": "2",
+      "word_file": "words/w00002-roman-sub6370-p93-c1-plu002e.png"
+    },
+    {
+      "expected_word": "pl.",
+      "page": 93,
+      "subnr": "6370",
+      "source_id": "4",
+      "word_file": "words/w00004-roman-sub6370-p93-c1-plu002e.png"
+    },
+    {
+      "expected_word": "best.",
+      "page": 234,
+      "subnr": "433817",
+      "source_id": "30",
+      "word_file": "words/w00030-roman-sub433817-p234-c1-bestu002e.png"
+    },
+    {
+      "expected_word": "best.",
+      "page": 234,
+      "subnr": "433832",
+      "source_id": "32",
+      "word_file": "words/w00032-roman-sub433832-p234-c1-bestu002e.png"
+    },
+    {
+      "expected_word": "superl.",
+      "page": 372,
+      "subnr": "25200",
+      "source_id": "67",
+      "word_file": "words/w00067-roman-sub25200-p372-c1-superlu002e.png"
+    },
+    {
+      "expected_word": "ibl.",
+      "page": 489,
+      "subnr": "497774",
+      "source_id": "89",
+      "word_file": "words/w00089-italic-sub497774-p489-c2-iblu002e.png"
+    },
+    {
+      "expected_word": "el.",
+      "page": 1558,
+      "subnr": "111658",
+      "source_id": "201",
+      "word_file": "words/w00201-roman-sub111658-p1558-c3-elu002e.png"
+    }
+  ],
+  "role": "unknown",
+  "legacy_style": "roman",
+  "reviewed": true,
+  "model_id": "g000080"
+}

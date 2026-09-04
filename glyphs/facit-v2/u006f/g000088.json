@@ -1,0 +1,167 @@
+{
+  "label": "o",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -4
+    ],
+    [
+      0,
+      -3
+    ],
+    [
+      0,
+      -2
+    ],
+    [
+      0,
+      -1
+    ],
+    [
+      1,
+      -5
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      -6
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      -6
+    ],
+    [
+      3,
+      0
+    ],
+    [
+      4,
+      -6
+    ],
+    [
+      4,
+      -1
+    ],
+    [
+      5,
+      -5
+    ],
+    [
+      5,
+      -4
+    ],
+    [
+      5,
+      -3
+    ],
+    [
+      5,
+      -2
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "bekommer",
+      "page": 93,
+      "subnr": "6434",
+      "source_id": "16",
+      "word_file": "words/w00016-italic-sub6434-p93-c3-bekommer.png"
+    },
+    {
+      "expected_word": "fållor",
+      "page": 347,
+      "subnr": "23434",
+      "source_id": "51",
+      "word_file": "words/w00051-italic-sub23434-p347-c3-fållor.png"
+    },
+    {
+      "expected_word": "fördold",
+      "page": 359,
+      "subnr": "24303",
+      "source_id": "57",
+      "word_file": "words/w00057-italic-sub24303-p359-c1-fördold.png"
+    },
+    {
+      "expected_word": "-olyckades",
+      "page": 372,
+      "subnr": "25220",
+      "source_id": "74",
+      "word_file": "words/w00074-italic-sub25220-p372-c1-u002dolyckades.png"
+    },
+    {
+      "expected_word": "-olyckats",
+      "page": 372,
+      "subnr": "25220",
+      "source_id": "75",
+      "word_file": "words/w00075-italic-sub25220-p372-c1-u002dolyckats.png"
+    },
+    {
+      "expected_word": "gängor",
+      "page": 442,
+      "subnr": "30623",
+      "source_id": "76",
+      "word_file": "words/w00076-italic-sub30623-p442-c1-gängor.png"
+    },
+    {
+      "expected_word": "schweiziskor",
+      "page": 1121,
+      "subnr": "79699",
+      "source_id": "124",
+      "word_file": "words/w00124-italic-sub79699-p1121-c3-schweiziskor.png"
+    },
+    {
+      "expected_word": "-summor",
+      "page": 1424,
+      "subnr": "102056",
+      "source_id": "141",
+      "word_file": "words/w00141-italic-sub102056-p1424-c1-u002dsummor.png"
+    },
+    {
+      "expected_word": "walesiskor",
+      "page": 1550,
+      "subnr": "106877",
+      "source_id": "182",
+      "word_file": "words/w00182-italic-sub106877-p1550-c1-walesiskor.png"
+    },
+    {
+      "expected_word": "zebror",
+      "page": 1558,
+      "subnr": "79754",
+      "source_id": "191",
+      "word_file": "words/w00191-italic-sub79754-p1558-c1-zebror.png"
+    },
+    {
+      "expected_word": "sebror",
+      "page": 1558,
+      "subnr": "79754",
+      "source_id": "192",
+      "word_file": "words/w00192-italic-sub79754-p1558-c1-sebror.png"
+    },
+    {
+      "expected_word": "z-format",
+      "page": 1558,
+      "subnr": "111630",
+      "source_id": "194",
+      "word_file": "words/w00194-italic-sub111630-p1558-c2-zu002dformat.png"
+    },
+    {
+      "expected_word": "-baljor",
+      "page": 1558,
+      "subnr": "111645",
+      "source_id": "200",
+      "word_file": "words/w00200-italic-sub111645-p1558-c3-u002dbaljor.png"
+    }
+  ],
+  "role": "unknown",
+  "legacy_style": "italic",
+  "reviewed": true,
+  "style": "italic",
+  "model_id": "g000088"
+}

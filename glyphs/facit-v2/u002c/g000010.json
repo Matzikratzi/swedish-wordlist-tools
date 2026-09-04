@@ -1,0 +1,42 @@
+{
+  "label": ",",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      2
+    ],
+    [
+      1,
+      -1
+    ],
+    [
+      1,
+      1
+    ],
+    [
+      2,
+      -1
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      2,
+      1
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "best.",
+      "page": 93,
+      "subnr": "6370",
+      "source_id": "3",
+      "word_file": "words/w00003-roman-sub6370-p93-c1-bestu002e.png"
+    }
+  ],
+  "role": "unknown",
+  "legacy_style": "roman",
+  "reviewed": true,
+  "model_id": "g000010"
+}

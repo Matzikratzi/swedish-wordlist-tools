@@ -1,0 +1,221 @@
+{
+  "label": "m",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -5
+    ],
+    [
+      0,
+      0
+    ],
+    [
+      1,
+      -6
+    ],
+    [
+      1,
+      -3
+    ],
+    [
+      1,
+      -2
+    ],
+    [
+      1,
+      -1
+    ],
+    [
+      2,
+      -6
+    ],
+    [
+      2,
+      -5
+    ],
+    [
+      2,
+      -4
+    ],
+    [
+      2,
+      -3
+    ],
+    [
+      3,
+      -4
+    ],
+    [
+      4,
+      -5
+    ],
+    [
+      4,
+      0
+    ],
+    [
+      5,
+      -6
+    ],
+    [
+      5,
+      -3
+    ],
+    [
+      5,
+      -2
+    ],
+    [
+      5,
+      -1
+    ],
+    [
+      6,
+      -6
+    ],
+    [
+      6,
+      -5
+    ],
+    [
+      6,
+      -4
+    ],
+    [
+      6,
+      -3
+    ],
+    [
+      7,
+      -4
+    ],
+    [
+      8,
+      -5
+    ],
+    [
+      8,
+      0
+    ],
+    [
+      9,
+      -6
+    ],
+    [
+      9,
+      -3
+    ],
+    [
+      9,
+      -2
+    ],
+    [
+      9,
+      -1
+    ],
+    [
+      9,
+      0
+    ],
+    [
+      10,
+      -6
+    ],
+    [
+      10,
+      -5
+    ],
+    [
+      10,
+      -4
+    ],
+    [
+      10,
+      -1
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "beklämt",
+      "page": 93,
+      "subnr": "6427",
+      "source_id": "14",
+      "word_file": "words/w00014-italic-sub6427-p93-c3-beklämt.png"
+    },
+    {
+      "expected_word": "bekommer",
+      "page": 93,
+      "subnr": "6434",
+      "source_id": "16",
+      "word_file": "words/w00016-italic-sub6434-p93-c3-bekommer.png"
+    },
+    {
+      "expected_word": "desamma",
+      "page": 199,
+      "subnr": "426042",
+      "source_id": "28",
+      "word_file": "words/w00028-italic-sub426042-p199-c3-desamma.png"
+    },
+    {
+      "expected_word": "dämparna",
+      "page": 234,
+      "subnr": "433832",
+      "source_id": "33",
+      "word_file": "words/w00033-italic-sub433832-p234-c1-dämparna.png"
+    },
+    {
+      "expected_word": "fördrömt",
+      "page": 359,
+      "subnr": "24277",
+      "source_id": "55",
+      "word_file": "words/w00055-italic-sub24277-p359-c1-fördrömt.png"
+    },
+    {
+      "expected_word": "fördömde",
+      "page": 359,
+      "subnr": "24304",
+      "source_id": "60",
+      "word_file": "words/w00060-italic-sub24304-p359-c1-fördömde.png"
+    },
+    {
+      "expected_word": "fördömt",
+      "page": 359,
+      "subnr": "24304",
+      "source_id": "61",
+      "word_file": "words/w00061-italic-sub24304-p359-c1-fördömt.png"
+    },
+    {
+      "expected_word": "fördömt",
+      "page": 359,
+      "subnr": "24305",
+      "source_id": "62",
+      "word_file": "words/w00062-italic-sub24305-p359-c1-fördömt.png"
+    },
+    {
+      "expected_word": "förnärmat",
+      "page": 372,
+      "subnr": "25209",
+      "source_id": "68",
+      "word_file": "words/w00068-italic-sub25209-p372-c1-förnärmat.png"
+    },
+    {
+      "expected_word": "-summor",
+      "page": 1424,
+      "subnr": "102056",
+      "source_id": "141",
+      "word_file": "words/w00141-italic-sub102056-p1424-c1-u002dsummor.png"
+    },
+    {
+      "expected_word": "z-format",
+      "page": 1558,
+      "subnr": "111630",
+      "source_id": "194",
+      "word_file": "words/w00194-italic-sub111630-p1558-c2-zu002dformat.png"
+    }
+  ],
+  "role": "unknown",
+  "legacy_style": "italic",
+  "reviewed": true,
+  "style": "italic",
+  "model_id": "g000082"
+}

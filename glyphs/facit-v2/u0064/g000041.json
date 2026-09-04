@@ -1,0 +1,219 @@
+{
+  "label": "d",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -3
+    ],
+    [
+      0,
+      -2
+    ],
+    [
+      0,
+      -1
+    ],
+    [
+      1,
+      -4
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      -5
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      -9
+    ],
+    [
+      3,
+      -5
+    ],
+    [
+      3,
+      0
+    ],
+    [
+      4,
+      -10
+    ],
+    [
+      4,
+      -9
+    ],
+    [
+      4,
+      -8
+    ],
+    [
+      4,
+      -7
+    ],
+    [
+      4,
+      -6
+    ],
+    [
+      4,
+      -5
+    ],
+    [
+      4,
+      -4
+    ],
+    [
+      4,
+      -3
+    ],
+    [
+      4,
+      -2
+    ],
+    [
+      4,
+      -1
+    ],
+    [
+      4,
+      0
+    ],
+    [
+      5,
+      0
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "(vard)",
+      "jsonl_word": "-pinnar",
+      "jsonl_similarity": 0.4,
+      "page": 1,
+      "subnr": "ocr-11-2-4-2",
+      "source_id": "page:1:ocr:11:2:4:2",
+      "page_word_bbox": [
+        73,
+        698,
+        41,
+        23
+      ],
+      "suggestion": ""
+    },
+    {
+      "expected_word": " abestridsmedlet;",
+      "jsonl_word": "abc-stridsmedlet;",
+      "jsonl_similarity": 0.933,
+      "page": 1,
+      "subnr": "ocr-4-1-5-4",
+      "source_id": "page:1:ocr:4:1:5:4",
+      "page_word_bbox": [
+        271,
+        167,
+        108,
+        24
+      ],
+      "suggestion": "ds{i}"
+    },
+    {
+      "expected_word": " abestridsmedlet;",
+      "jsonl_word": "abc-stridsmedlet;",
+      "jsonl_similarity": 0.933,
+      "page": 1,
+      "subnr": "ocr-4-1-5-4",
+      "source_id": "page:1:ocr:4:1:5:4",
+      "page_word_bbox": [
+        271,
+        167,
+        108,
+        24
+      ],
+      "suggestion": "dl{i}"
+    },
+    {
+      "expected_word": "abe-stridsmedlen",
+      "jsonl_word": "abc-stridsmedle",
+      "jsonl_similarity": 0.897,
+      "page": 1,
+      "subnr": "ocr-4-1-6-6",
+      "source_id": "page:1:ocr:4:1:6:6",
+      "page_word_bbox": [
+        290,
+        185,
+        108,
+        24
+      ],
+      "suggestion": "ds{i}"
+    },
+    {
+      "expected_word": "abe-stridsmedlen",
+      "jsonl_word": "abc-stridsmedle",
+      "jsonl_similarity": 0.897,
+      "page": 1,
+      "subnr": "ocr-4-1-6-6",
+      "source_id": "page:1:ocr:4:1:6:6",
+      "page_word_bbox": [
+        290,
+        185,
+        108,
+        24
+      ],
+      "suggestion": "dl{i}"
+    },
+    {
+      "expected_word": "adj.",
+      "jsonl_word": "+a",
+      "jsonl_similarity": 0.5,
+      "page": 1,
+      "subnr": "ocr-4-1-8-8",
+      "source_id": "page:1:ocr:4:1:8:8",
+      "page_word_bbox": [
+        381,
+        220,
+        21,
+        24
+      ],
+      "suggestion": ""
+    },
+    {
+      "expected_word": "adj.-+",
+      "jsonl_word": "+a",
+      "jsonl_similarity": 0.5,
+      "page": 1,
+      "subnr": "ocr-11-2-4-7",
+      "source_id": "page:1:ocr:11:2:4:7",
+      "page_word_bbox": [
+        414,
+        698,
+        38,
+        24
+      ],
+      "suggestion": ""
+    },
+    {
+      "expected_word": "abortframikalliande",
+      "jsonl_word": "abort|fram·kall·ande",
+      "jsonl_similarity": 0.944,
+      "page": 1,
+      "subnr": "ocr-11-5-2-11",
+      "source_id": "page:1:ocr:11:5:2:11",
+      "page_word_bbox": [
+        471,
+        857,
+        159,
+        25
+      ],
+      "suggestion": ""
+    }
+  ],
+  "role": "unknown",
+  "legacy_style": "roman",
+  "reviewed": true,
+  "model_id": "g000041"
+}

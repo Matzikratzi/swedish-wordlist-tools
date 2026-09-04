@@ -1,0 +1,203 @@
+{
+  "label": "f",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      2
+    ],
+    [
+      0,
+      3
+    ],
+    [
+      1,
+      -6
+    ],
+    [
+      1,
+      -2
+    ],
+    [
+      1,
+      -1
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      1,
+      1
+    ],
+    [
+      2,
+      -6
+    ],
+    [
+      2,
+      -5
+    ],
+    [
+      2,
+      -4
+    ],
+    [
+      2,
+      -3
+    ],
+    [
+      3,
+      -8
+    ],
+    [
+      3,
+      -7
+    ],
+    [
+      3,
+      -6
+    ],
+    [
+      4,
+      -9
+    ],
+    [
+      4,
+      -6
+    ],
+    [
+      5,
+      -10
+    ],
+    [
+      6,
+      -10
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "fålar",
+      "page": 347,
+      "subnr": "23429",
+      "source_id": "50",
+      "word_file": "words/w00050-italic-sub23429-p347-c3-fålar.png"
+    },
+    {
+      "expected_word": "fållor",
+      "page": 347,
+      "subnr": "23434",
+      "source_id": "51",
+      "word_file": "words/w00051-italic-sub23434-p347-c3-fållor.png"
+    },
+    {
+      "expected_word": "fördrömt",
+      "page": 359,
+      "subnr": "24277",
+      "source_id": "55",
+      "word_file": "words/w00055-italic-sub24277-p359-c1-fördrömt.png"
+    },
+    {
+      "expected_word": "fördold",
+      "page": 359,
+      "subnr": "24303",
+      "source_id": "57",
+      "word_file": "words/w00057-italic-sub24303-p359-c1-fördold.png"
+    },
+    {
+      "expected_word": "fördömde",
+      "page": 359,
+      "subnr": "24304",
+      "source_id": "60",
+      "word_file": "words/w00060-italic-sub24304-p359-c1-fördömde.png"
+    },
+    {
+      "expected_word": "fördömt",
+      "page": 359,
+      "subnr": "24304",
+      "source_id": "61",
+      "word_file": "words/w00061-italic-sub24304-p359-c1-fördömt.png"
+    },
+    {
+      "expected_word": "fördömt",
+      "page": 359,
+      "subnr": "24305",
+      "source_id": "62",
+      "word_file": "words/w00062-italic-sub24305-p359-c1-fördömt.png"
+    },
+    {
+      "expected_word": "förnärmat",
+      "page": 372,
+      "subnr": "25209",
+      "source_id": "68",
+      "word_file": "words/w00068-italic-sub25209-p372-c1-förnärmat.png"
+    },
+    {
+      "expected_word": "förnöjde",
+      "page": 372,
+      "subnr": "25213",
+      "source_id": "69",
+      "word_file": "words/w00069-italic-sub25213-p372-c1-förnöjde.png"
+    },
+    {
+      "expected_word": "förnöjt",
+      "page": 372,
+      "subnr": "25213",
+      "source_id": "70",
+      "word_file": "words/w00070-italic-sub25213-p372-c1-förnöjt.png"
+    },
+    {
+      "expected_word": "förnöjt",
+      "page": 372,
+      "subnr": "25214",
+      "source_id": "71",
+      "word_file": "words/w00071-italic-sub25214-p372-c1-förnöjt.png"
+    },
+    {
+      "expected_word": "förnötte",
+      "page": 372,
+      "subnr": "25218",
+      "source_id": "72",
+      "word_file": "words/w00072-italic-sub25218-p372-c1-förnötte.png"
+    },
+    {
+      "expected_word": "förnött",
+      "page": 372,
+      "subnr": "25218",
+      "source_id": "73",
+      "word_file": "words/w00073-italic-sub25218-p372-c1-förnött.png"
+    },
+    {
+      "expected_word": "-aftnar",
+      "page": 849,
+      "subnr": "59753",
+      "source_id": "97",
+      "word_file": "words/w00097-italic-sub59753-p849-c2-u002daftnar.png"
+    },
+    {
+      "expected_word": "schäfrar",
+      "page": 1121,
+      "subnr": "79706",
+      "source_id": "125",
+      "word_file": "words/w00125-italic-sub79706-p1121-c3-schäfrar.png"
+    },
+    {
+      "expected_word": "-fåglar",
+      "page": 1547,
+      "subnr": "111180",
+      "source_id": "154",
+      "word_file": "words/w00154-italic-sub111180-p1547-c1-u002dfåglar.png"
+    },
+    {
+      "expected_word": "z-format",
+      "page": 1558,
+      "subnr": "111630",
+      "source_id": "194",
+      "word_file": "words/w00194-italic-sub111630-p1558-c2-zu002dformat.png"
+    }
+  ],
+  "role": "unknown",
+  "legacy_style": "italic",
+  "reviewed": true,
+  "style": "italic",
+  "model_id": "g000053"
+}

@@ -1,0 +1,229 @@
+{
+  "label": "b",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -3
+    ],
+    [
+      0,
+      -2
+    ],
+    [
+      0,
+      -1
+    ],
+    [
+      1,
+      -10
+    ],
+    [
+      1,
+      -7
+    ],
+    [
+      1,
+      -6
+    ],
+    [
+      1,
+      -5
+    ],
+    [
+      1,
+      -4
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      -10
+    ],
+    [
+      2,
+      -9
+    ],
+    [
+      2,
+      -8
+    ],
+    [
+      2,
+      -5
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      -6
+    ],
+    [
+      3,
+      -1
+    ],
+    [
+      4,
+      -6
+    ],
+    [
+      4,
+      -2
+    ],
+    [
+      5,
+      -5
+    ],
+    [
+      5,
+      -4
+    ],
+    [
+      5,
+      -3
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "behållen",
+      "page": 93,
+      "subnr": "6369",
+      "source_id": "",
+      "word_file": "words/w00000-italic-sub6369-p93-c1-behållen.png"
+    },
+    {
+      "expected_word": "behållet",
+      "page": 93,
+      "subnr": "6369",
+      "source_id": "1",
+      "word_file": "words/w00001-italic-sub6369-p93-c1-behållet.png"
+    },
+    {
+      "expected_word": "bekläder",
+      "page": 93,
+      "subnr": "6422",
+      "source_id": "10",
+      "word_file": "words/w00010-italic-sub6422-p93-c3-bekläder.png"
+    },
+    {
+      "expected_word": "beklädd",
+      "page": 93,
+      "subnr": "6422",
+      "source_id": "11",
+      "word_file": "words/w00011-italic-sub6422-p93-c3-beklädd.png"
+    },
+    {
+      "expected_word": "beklämt",
+      "page": 93,
+      "subnr": "6427",
+      "source_id": "14",
+      "word_file": "words/w00014-italic-sub6427-p93-c3-beklämt.png"
+    },
+    {
+      "expected_word": "bekommer",
+      "page": 93,
+      "subnr": "6434",
+      "source_id": "16",
+      "word_file": "words/w00016-italic-sub6434-p93-c3-bekommer.png"
+    },
+    {
+      "expected_word": "behållarna",
+      "page": 93,
+      "subnr": "6370",
+      "source_id": "5",
+      "word_file": "words/w00005-italic-sub6370-p93-c1-behållarna.png"
+    },
+    {
+      "expected_word": "behärskat",
+      "page": 93,
+      "subnr": "6381",
+      "source_id": "6",
+      "word_file": "words/w00006-italic-sub6381-p93-c1-behärskat.png"
+    },
+    {
+      "expected_word": "behövde",
+      "page": 93,
+      "subnr": "6393",
+      "source_id": "7",
+      "word_file": "words/w00007-italic-sub6393-p93-c2-behövde.png"
+    },
+    {
+      "expected_word": "behövt",
+      "page": 93,
+      "subnr": "6393",
+      "source_id": "8",
+      "word_file": "words/w00008-italic-sub6393-p93-c2-behövt.png"
+    },
+    {
+      "expected_word": "-burgarna",
+      "page": 445,
+      "subnr": "30827",
+      "source_id": "88",
+      "word_file": "words/w00088-italic-sub30827-p445-c2-u002dburgarna.png"
+    },
+    {
+      "expected_word": "-beställde",
+      "page": 849,
+      "subnr": "59765",
+      "source_id": "100",
+      "word_file": "words/w00100-italic-sub59765-p849-c3-u002dbeställde.png"
+    },
+    {
+      "expected_word": "-beställt",
+      "page": 849,
+      "subnr": "59765",
+      "source_id": "101",
+      "word_file": "words/w00101-italic-sub59765-p849-c3-u002dbeställt.png"
+    },
+    {
+      "expected_word": "-buskar",
+      "page": 1121,
+      "subnr": "79659",
+      "source_id": "114",
+      "word_file": "words/w00114-italic-sub79659-p1121-c1-u002dbuskar.png"
+    },
+    {
+      "expected_word": "-buret",
+      "page": 1547,
+      "subnr": "111163",
+      "source_id": "155",
+      "word_file": "words/w00155-italic-sub111163-p1547-c1-u002dburet.png"
+    },
+    {
+      "expected_word": "-bergarna",
+      "page": 1550,
+      "subnr": "508076",
+      "source_id": "187",
+      "word_file": "words/w00187-italic-sub508076-p1550-c1-u002dbergarna.png"
+    },
+    {
+      "expected_word": "zebror",
+      "page": 1558,
+      "subnr": "79754",
+      "source_id": "191",
+      "word_file": "words/w00191-italic-sub79754-p1558-c1-zebror.png"
+    },
+    {
+      "expected_word": "sebror",
+      "page": 1558,
+      "subnr": "79754",
+      "source_id": "192",
+      "word_file": "words/w00192-italic-sub79754-p1558-c1-sebror.png"
+    },
+    {
+      "expected_word": "-baljor",
+      "page": 1558,
+      "subnr": "111645",
+      "source_id": "200",
+      "word_file": "words/w00200-italic-sub111645-p1558-c3-u002dbaljor.png"
+    }
+  ],
+  "role": "unknown",
+  "legacy_style": "italic",
+  "reviewed": true,
+  "style": "italic",
+  "model_id": "g000036"
+}

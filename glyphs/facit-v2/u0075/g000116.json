@@ -1,0 +1,128 @@
+{
+  "label": "u",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -6
+    ],
+    [
+      0,
+      0
+    ],
+    [
+      1,
+      -6
+    ],
+    [
+      1,
+      -4
+    ],
+    [
+      1,
+      -3
+    ],
+    [
+      1,
+      -2
+    ],
+    [
+      1,
+      -1
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      -6
+    ],
+    [
+      2,
+      -5
+    ],
+    [
+      2,
+      -1
+    ],
+    [
+      3,
+      -2
+    ],
+    [
+      4,
+      -3
+    ],
+    [
+      4,
+      -1
+    ],
+    [
+      4,
+      0
+    ],
+    [
+      5,
+      -5
+    ],
+    [
+      5,
+      -4
+    ],
+    [
+      5,
+      -3
+    ],
+    [
+      5,
+      -2
+    ],
+    [
+      5,
+      0
+    ],
+    [
+      6,
+      -6
+    ],
+    [
+      6,
+      0
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "-burgarna",
+      "page": 445,
+      "subnr": "30827",
+      "source_id": "88",
+      "word_file": "words/w00088-italic-sub30827-p445-c2-u002dburgarna.png"
+    },
+    {
+      "expected_word": "-buskar",
+      "page": 1121,
+      "subnr": "79659",
+      "source_id": "114",
+      "word_file": "words/w00114-italic-sub79659-p1121-c1-u002dbuskar.png"
+    },
+    {
+      "expected_word": "-summor",
+      "page": 1424,
+      "subnr": "102056",
+      "source_id": "141",
+      "word_file": "words/w00141-italic-sub102056-p1424-c1-u002dsummor.png"
+    },
+    {
+      "expected_word": "-buret",
+      "page": 1547,
+      "subnr": "111163",
+      "source_id": "155",
+      "word_file": "words/w00155-italic-sub111163-p1547-c1-u002dburet.png"
+    }
+  ],
+  "role": "unknown",
+  "legacy_style": "italic",
+  "reviewed": true,
+  "style": "italic",
+  "model_id": "g000116"
+}

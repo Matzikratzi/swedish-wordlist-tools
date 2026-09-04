@@ -1,0 +1,199 @@
+{
+  "label": "k",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -1
+    ],
+    [
+      0,
+      0
+    ],
+    [
+      1,
+      -10
+    ],
+    [
+      1,
+      -6
+    ],
+    [
+      1,
+      -5
+    ],
+    [
+      1,
+      -4
+    ],
+    [
+      1,
+      -3
+    ],
+    [
+      1,
+      -2
+    ],
+    [
+      2,
+      -10
+    ],
+    [
+      2,
+      -9
+    ],
+    [
+      2,
+      -8
+    ],
+    [
+      2,
+      -7
+    ],
+    [
+      2,
+      -5
+    ],
+    [
+      2,
+      -2
+    ],
+    [
+      3,
+      -10
+    ],
+    [
+      3,
+      -5
+    ],
+    [
+      3,
+      -3
+    ],
+    [
+      3,
+      -1
+    ],
+    [
+      4,
+      -6
+    ],
+    [
+      4,
+      -3
+    ],
+    [
+      4,
+      0
+    ],
+    [
+      5,
+      -5
+    ],
+    [
+      5,
+      -4
+    ],
+    [
+      5,
+      0
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "bekläder",
+      "page": 93,
+      "subnr": "6422",
+      "source_id": "10",
+      "word_file": "words/w00010-italic-sub6422-p93-c3-bekläder.png"
+    },
+    {
+      "expected_word": "beklädd",
+      "page": 93,
+      "subnr": "6422",
+      "source_id": "11",
+      "word_file": "words/w00011-italic-sub6422-p93-c3-beklädd.png"
+    },
+    {
+      "expected_word": "beklämt",
+      "page": 93,
+      "subnr": "6427",
+      "source_id": "14",
+      "word_file": "words/w00014-italic-sub6427-p93-c3-beklämt.png"
+    },
+    {
+      "expected_word": "bekommer",
+      "page": 93,
+      "subnr": "6434",
+      "source_id": "16",
+      "word_file": "words/w00016-italic-sub6434-p93-c3-bekommer.png"
+    },
+    {
+      "expected_word": "behärskat",
+      "page": 93,
+      "subnr": "6381",
+      "source_id": "6",
+      "word_file": "words/w00006-italic-sub6381-p93-c1-behärskat.png"
+    },
+    {
+      "expected_word": "dänkte",
+      "page": 234,
+      "subnr": "433855",
+      "source_id": "36",
+      "word_file": "words/w00036-italic-sub433855-p234-c1-dänkte.png"
+    },
+    {
+      "expected_word": "dänkt",
+      "page": 234,
+      "subnr": "433855",
+      "source_id": "37",
+      "word_file": "words/w00037-italic-sub433855-p234-c1-dänkt.png"
+    },
+    {
+      "expected_word": "-olyckades",
+      "page": 372,
+      "subnr": "25220",
+      "source_id": "74",
+      "word_file": "words/w00074-italic-sub25220-p372-c1-u002dolyckades.png"
+    },
+    {
+      "expected_word": "-olyckats",
+      "page": 372,
+      "subnr": "25220",
+      "source_id": "75",
+      "word_file": "words/w00075-italic-sub25220-p372-c1-u002dolyckats.png"
+    },
+    {
+      "expected_word": "-buskar",
+      "page": 1121,
+      "subnr": "79659",
+      "source_id": "114",
+      "word_file": "words/w00114-italic-sub79659-p1121-c1-u002dbuskar.png"
+    },
+    {
+      "expected_word": "schweiziskor",
+      "page": 1121,
+      "subnr": "79699",
+      "source_id": "124",
+      "word_file": "words/w00124-italic-sub79699-p1121-c3-schweiziskor.png"
+    },
+    {
+      "expected_word": "walesiskor",
+      "page": 1550,
+      "subnr": "106877",
+      "source_id": "182",
+      "word_file": "words/w00182-italic-sub106877-p1550-c1-walesiskor.png"
+    },
+    {
+      "expected_word": "-tecknen",
+      "page": 1558,
+      "subnr": "111664",
+      "source_id": "205",
+      "word_file": "words/w00205-italic-sub111664-p1558-c3-u002dtecknen.png"
+    }
+  ],
+  "role": "unknown",
+  "legacy_style": "italic",
+  "reviewed": true,
+  "style": "italic",
+  "model_id": "g000072"
+}
