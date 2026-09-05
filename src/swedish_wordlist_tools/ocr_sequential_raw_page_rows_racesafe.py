@@ -29,6 +29,86 @@ def _placed_if_subset(model, x0: int, baseline: int, raw):
     return {(x0 + mx, baseline + my) for mx, my in model.pixels}
 
 
+def _remember_matched_glyph(state, model, placed, x0: int) -> None:
+    """Keep cheap successful-placement history for post-race diagnostics only."""
+    sequence = getattr(state, "_matched_sequence", None)
+    if sequence is None:
+        sequence = []
+        state._matched_sequence = sequence
+    sequence.append((model, frozenset(placed), int(x0)))
+
+
+def _contact_geometry(a, b) -> tuple[int, int, int, int, int, str]:
+    """Describe the minimum separation/contact between two matched pixel sets."""
+    ax0 = min(x for x, _y in a)
+    ax1 = max(x for x, _y in a)
+    bx0 = min(x for x, _y in b)
+    bx1 = max(x for x, _y in b)
+    bbox_gap = max(0, bx0 - ax1 - 1, ax0 - bx1 - 1)
+
+    orth = 0
+    diag = 0
+    contact_rows = set()
+    for x, y in a:
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            if (x + dx, y + dy) in b:
+                orth += 1
+                contact_rows.add(y)
+        for dx, dy in ((1, 1), (1, -1), (-1, 1), (-1, -1)):
+            if (x + dx, y + dy) in b:
+                diag += 1
+                contact_rows.add(y)
+
+    if orth or diag:
+        cheb = 1
+        manhattan = 1 if orth else 2
+    else:
+        cheb = min(max(abs(ax - bx), abs(ay - by)) for ax, ay in a for bx, by in b)
+        manhattan = min(abs(ax - bx) + abs(ay - by) for ax, ay in a for bx, by in b)
+
+    rows = sorted(contact_rows)
+    segments = 0
+    previous = None
+    for y in rows:
+        if previous is None or y != previous + 1:
+            segments += 1
+        previous = y
+    contact_y = "-" if not rows else f"{rows[0]}..{rows[-1]}"
+    return bbox_gap, cheb, manhattan, orth, diag, segments, contact_y
+
+
+def _trace_neighbor_contacts(state) -> None:
+    sequence = getattr(state, "_matched_sequence", ())
+    for index, (left_item, right_item) in enumerate(zip(sequence, sequence[1:]), start=1):
+        left_model, left_pixels, left_x0 = left_item
+        right_model, right_pixels, right_x0 = right_item
+        bbox_gap, cheb, manhattan, orth, diag, segments, contact_y = _contact_geometry(
+            left_pixels, right_pixels
+        )
+        contact_rows = 0 if contact_y == "-" else len(
+            {
+                y
+                for x, y in left_pixels
+                if any(
+                    (x + dx, y + dy) in right_pixels
+                    for dx, dy in (
+                        (1, 0), (-1, 0), (0, 1), (0, -1),
+                        (1, 1), (1, -1), (-1, 1), (-1, -1),
+                    )
+                )
+            }
+        )
+        print(
+            "raw-page-glyph-neighbor: "
+            f"b={state.baseline} pair={index} "
+            f"left={left_model.label!r} left_id={getattr(left_model, 'model_id', None)!r} left_x0={left_x0} "
+            f"right={right_model.label!r} right_id={getattr(right_model, 'model_id', None)!r} right_x0={right_x0} "
+            f"bbox_gap={bbox_gap} cheb={cheb} manhattan={manhattan} "
+            f"orth={orth} diag={diag} contact_rows={contact_rows} "
+            f"segments={segments} contact_y={contact_y}"
+        )
+
+
 def _advance_one(
     state: _previous._RaceState,
     page_candidates,
@@ -75,6 +155,7 @@ def _advance_one(
 
         if chosen is not None:
             model, placed, x0 = chosen
+            _remember_matched_glyph(state, model, placed, x0)
             state.remaining.difference_update(placed)
             state.owned.update(placed)
             state.matched_glyphs += 1
@@ -175,6 +256,7 @@ def _race_baselines(
     for state in states:
         if state.matched_glyphs <= 0 or not state.owned or not state.baseline_verified:
             continue
+        _trace_neighbor_contacts(state)
         result = (
             state.matched_glyphs,
             set(state.owned),
