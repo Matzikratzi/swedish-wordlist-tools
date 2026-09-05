@@ -20,7 +20,7 @@ GRID_TOP_PAD = 40
 
 
 def _install_page1_raw_layout(context: dict, jsonl: Path, threshold: int) -> None:
-    """Install absolute raw-pixel column bounds and row-0 tops for page 1."""
+    """Install absolute raw-pixel column bounds and row-0 starts for page 1."""
     layout_page = _load_thresholded_page(jsonl, 1, threshold)
     layout = detect_page1_layout_details(layout_page)
     context["raw_page_column_layout"] = {
@@ -60,7 +60,7 @@ def _draw_snapshot(
     axis_x: int,
     axis_y: int,
 ) -> None:
-    """Draw absolute grid plus thin row top, baseline and half-open bottom lines."""
+    """Draw absolute grid plus baseline, border and a derived diagnostic top."""
     image = _render_grid(
         thresholded_page,
         cell=cell,
@@ -78,17 +78,17 @@ def _draw_snapshot(
     label_x = x1 + 4
 
     for entry in cache:
-        # Grid lines live between source pixels.  Keep overlays one display pixel
-        # wide so they mark coordinates without covering an entire source pixel.
-        top_y = GRID_TOP_PAD + entry.row_top * cell
+        # Baseline and border are scanner geometry.  debug_top is derived from
+        # the owned glyph pixels and is drawn only to make visual inspection easy.
+        top_y = GRID_TOP_PAD + entry.debug_top * cell
         baseline_y = GRID_TOP_PAD + entry.baseline * cell
-        bottom_y = GRID_TOP_PAD + entry.final_bottom * cell
+        border_y = GRID_TOP_PAD + entry.border * cell
         draw.line((x0, top_y, x1, top_y), fill=(255, 0, 0), width=1)
         draw.line((x0, baseline_y, x1, baseline_y), fill=(0, 80, 255), width=1)
-        draw.line((x0, bottom_y, x1, bottom_y), fill=(0, 170, 0), width=1)
-        draw.text((label_x, top_y - 5), f"r{entry.row} top={entry.row_top}", fill=(255, 0, 0))
+        draw.line((x0, border_y, x1, border_y), fill=(0, 170, 0), width=1)
+        draw.text((label_x, top_y - 5), f"r{entry.row} debug_top={entry.debug_top}", fill=(255, 0, 0))
         draw.text((label_x, baseline_y - 5), f"base={entry.baseline}", fill=(0, 80, 255))
-        draw.text((label_x, bottom_y - 5), f"bottom={entry.final_bottom}", fill=(0, 140, 0))
+        draw.text((label_x, border_y - 5), f"border={entry.border}", fill=(0, 140, 0))
 
     output.parent.mkdir(parents=True, exist_ok=True)
     image.save(output)
@@ -101,7 +101,7 @@ def _step_output(base: Path, row: int) -> Path:
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Walk a SAOL column from row 0, cache rows and draw boundaries as each row completes."
+        description="Walk a SAOL column from row 0, cache rows and draw baseline/border as each row completes."
     )
     ap.add_argument("jsonl", type=Path)
     ap.add_argument("--facit", type=Path, required=True)
@@ -138,7 +138,7 @@ def main() -> int:
         print(
             f"raw-page-layout: source={context['raw_page_layout_source']} "
             f"column={args.column} left={raw_column['left']} right={raw_column['right']} "
-            f"row0_top={raw_column['row0_top']}"
+            f"row0_hint={raw_column['row0_top']}"
         )
         print("raw-page-layout: page1-start-probe=bold:a,á,à,A,Á,À")
 
@@ -166,9 +166,8 @@ def main() -> int:
         completed = list(cache)
         marker = " <-- target" if entry.row == args.row else ""
         print(
-            f"raw-page-row: row={entry.row:03d} top={entry.row_top} "
-            f"start_x={entry.start_x} temp_bottom={entry.provisional_bottom} "
-            f"baseline={entry.baseline} final_bottom={entry.final_bottom} "
+            f"raw-page-row: row={entry.row:03d} debug_top={entry.debug_top} "
+            f"start_x={entry.start_x} baseline={entry.baseline} border={entry.border} "
             f"glyphs={entry.matched_glyphs} pixels={entry.matched_pixels} "
             f"right={entry.matched_right}{marker}"
         )
