@@ -198,6 +198,14 @@ def _discover_at_top(
     page_candidates = cached._bound_page_candidates(models)
     band_left, band_right = _start_band(left, None if previous is None else previous.start_x)
 
+    # Do not accept the first locally unique glyph fit. A tiny model can happen
+    # to fit a handful of pixels near the roof and produce a bogus baseline.
+    # Instead collect every distinct (start-x, baseline) hypothesis from the
+    # first few raster rows, walk each one across the row, and rank the complete
+    # walks globally.
+    candidate_walks: dict[
+        tuple[int, int], tuple[tuple[int, int, int], int, int, set[tuple[int, int]], int, int]
+    ] = {}
     candidate_rows = range(row_top, min(provisional_bottom, row_top + 12))
     for anchor_y in candidate_rows:
         xs = [x for x, y in raw if y == anchor_y and band_left <= x < band_right]
@@ -226,40 +234,60 @@ def _discover_at_top(
                     placed = {(x0 + mx, baseline + py) for mx, py in model.pixels}
                     if placed and placed.issubset(raw):
                         hypotheses.add(baseline)
-            if not hypotheses:
-                continue
 
-            walks = []
-            for baseline in sorted(hypotheses):
+            for baseline in hypotheses:
+                key = (anchor_x, baseline)
+                if key in candidate_walks:
+                    continue
                 glyphs, owned, matched_right = _walk_baseline(
                     raw, baseline, models, left, right, anchor_x
                 )
-                score = (matched_right, glyphs, len(owned))
-                walks.append((score, baseline, owned, glyphs, matched_right))
+                if glyphs <= 0 or not owned:
+                    continue
+                # Horizontal explained span is primary: the right baseline should
+                # keep matching real glyphs across the printed row. Glyph count and
+                # proved source pixels then break ties.
+                score = (matched_right - anchor_x, glyphs, len(owned))
+                candidate_walks[key] = (
+                    score,
+                    anchor_x,
+                    baseline,
+                    owned,
+                    glyphs,
+                    matched_right,
+                )
 
-            best_score = max(score for score, _baseline, _owned, _glyphs, _right in walks)
-            best = [item for item in walks if item[0] == best_score and item[3] > 0]
-            if len(best) != 1:
-                continue
+    if not candidate_walks:
+        raise RuntimeError(
+            f"sequential raw-page discovery stopped at column={column} row={row_index}: "
+            f"no starting glyph from left-edge top={row_top}"
+        )
 
-            _score, baseline, owned, glyphs, matched_right = best[0]
-            final_bottom = max(y for _x, y in owned) + 1
-            return CachedRowBoundary(
-                row=row_index,
-                row_top=row_top,
-                start_x=anchor_x,
-                provisional_bottom=provisional_bottom,
-                baseline=baseline,
-                final_bottom=final_bottom,
-                next_search_y=final_bottom,
-                matched_glyphs=glyphs,
-                matched_pixels=len(owned),
-                matched_right=matched_right,
-            )
+    best_score = max(item[0] for item in candidate_walks.values())
+    best = [item for item in candidate_walks.values() if item[0] == best_score]
+    if len(best) != 1:
+        alternatives = sorted(
+            (anchor_x, baseline, score)
+            for score, anchor_x, baseline, _owned, _glyphs, _right in best
+        )
+        raise RuntimeError(
+            f"sequential raw-page discovery stopped at column={column} row={row_index}: "
+            f"ambiguous global baseline from top={row_top}: {alternatives}"
+        )
 
-    raise RuntimeError(
-        f"sequential raw-page discovery stopped at column={column} row={row_index}: "
-        f"no unique starting glyph from left-edge top={row_top}"
+    _score, anchor_x, baseline, owned, glyphs, matched_right = best[0]
+    final_bottom = max(y for _x, y in owned) + 1
+    return CachedRowBoundary(
+        row=row_index,
+        row_top=row_top,
+        start_x=anchor_x,
+        provisional_bottom=provisional_bottom,
+        baseline=baseline,
+        final_bottom=final_bottom,
+        next_search_y=final_bottom,
+        matched_glyphs=glyphs,
+        matched_pixels=len(owned),
+        matched_right=matched_right,
     )
 
 
