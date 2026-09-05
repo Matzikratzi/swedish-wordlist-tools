@@ -2,11 +2,12 @@ from __future__ import annotations
 
 """Hybrid correctness probe for the sequential raw-page scanner.
 
-Baseline hypotheses now race incrementally from left to right.  Every candidate
+Baseline hypotheses race incrementally from left to right.  Every candidate
 keeps its own walker state; no candidate is restarted just because another
-baseline is still alive.  The final full-row result is also cached so the main
-scanner can reuse the proved walk instead of immediately walking the same row a
-second time.
+baseline is still alive.  A cheap verification phase now stops once candidates
+have either matched a substantial glyph or died.  If that leaves one verified
+baseline, only that state continues through the rest of the row.  Ambiguous
+verified baselines still use the original full race.
 
 The leftmost ink may still be a superscript homonym and is therefore allowed to
 propose baseline y without being the first baseline-aligned text glyph.
@@ -21,10 +22,6 @@ _ORIGINAL_PAGE1_BASELINE_PROBE_WALKS = _scanner._page1_baseline_probe_walks
 _ORIGINAL_WALK_BASELINE = _scanner._walk_baseline
 _WALK_CACHE: dict[int, tuple[set[tuple[int, int]], dict[tuple, tuple]]] = {}
 
-# A row may genuinely begin with a few tiny marks (for example ``~``).  They
-# are therefore allowed to lead a baseline hypothesis, but they must soon be
-# followed by something geometrically stronger.  The false b=215 hypothesis
-# on page 1 row 2 consists entirely of 3--5-pixel fragments.
 _SMALL_GLYPH_MAX_PIXELS = 5
 _MAX_LEADING_SMALL_GLYPHS = 3
 
@@ -191,10 +188,6 @@ def _advance_one(
                 and is_small
                 and state.leading_small_glyphs >= _MAX_LEADING_SMALL_GLYPHS
             ):
-                # Three tiny leading glyphs are allowed.  If the next actual
-                # match is tiny as well, do not let the hypothesis hop past it
-                # and keep scavenging punctuation farther right.  A stronger
-                # candidate at this same x may still rescue the baseline.
                 if blocked_small is None:
                     blocked_small = (model, placed, x0)
                 continue
@@ -246,6 +239,42 @@ def _advance_one(
     return False
 
 
+def _run_states_to_completion(states, page_candidates, *, left: int, right: int) -> int:
+    """Finish the supplied states and return the number of lockstep rounds."""
+    active = [state for state in states if not state.exhausted]
+    rounds = 0
+    while active:
+        rounds += 1
+        next_active = []
+        for state in active:
+            if _advance_one(state, page_candidates, left=left, right=right):
+                next_active.append(state)
+        active = next_active
+    return rounds
+
+
+def _verification_phase(states, page_candidates, *, left: int, right: int) -> tuple[list[_RaceState], int]:
+    """Advance candidates only until they verify a baseline or exhaust.
+
+    A baseline is verified by the first glyph containing more than five pixels.
+    Tiny leading marks are still handled exactly as before.  This phase does not
+    select among multiple verified states; it merely avoids walking clearly
+    losing, unverified baselines through the entire row.
+    """
+    pending = [state for state in states if not state.exhausted and not state.baseline_verified]
+    rounds = 0
+    while pending:
+        rounds += 1
+        next_pending = []
+        for state in pending:
+            advanced = _advance_one(state, page_candidates, left=left, right=right)
+            if advanced and not state.baseline_verified:
+                next_pending.append(state)
+        pending = next_pending
+    verified = [state for state in states if state.baseline_verified and not state.exhausted]
+    return verified, rounds
+
+
 def _race_baselines(
     raw: set[tuple[int, int]],
     baselines,
@@ -256,12 +285,13 @@ def _race_baselines(
     *,
     first_candidates_by_baseline=None,
 ):
-    """Walk all baseline candidates left-to-right in lockstep until exhausted.
+    """Race baseline candidates, pruning losers after substantial-glyph proof.
 
-    This is deliberately exact rather than heuristic: a candidate is discarded
-    only when its walker has genuinely reached the end without another glyph.
-    All final scores therefore remain comparable with the previous full-row
-    implementation, but no candidate is ever restarted from the left.
+    Every candidate first gets only enough work to either prove its baseline via
+    a substantial glyph or exhaust.  When exactly one baseline verifies, only
+    that state is allowed to consume the rest of the row.  If several baselines
+    verify, all verified states continue in the old lockstep race, preserving
+    the previous score comparison for genuinely ambiguous geometry.
     """
     page_candidates = _scanner.cached._bound_page_candidates(models)
     states: list[_RaceState] = []
@@ -281,16 +311,28 @@ def _race_baselines(
             )
         )
 
-    active = list(states)
-    rounds = 0
-    while active:
-        rounds += 1
-        next_active = []
-        for state in active:
-            if _advance_one(state, page_candidates, left=left, right=right):
-                next_active.append(state)
-        active = next_active
+    verified, verification_rounds = _verification_phase(
+        states, page_candidates, left=left, right=right
+    )
 
+    if len(verified) == 1:
+        continuation = verified
+        pruned = len(states) - 1
+    else:
+        continuation = verified
+        pruned = len(states) - len(verified)
+
+    continuation_rounds = _run_states_to_completion(
+        continuation, page_candidates, left=left, right=right
+    )
+    rounds = verification_rounds + continuation_rounds
+
+    print(
+        "raw-page-baseline-prune: "
+        f"x={anchor_x} initial={len(states)} verified={len(verified)} "
+        f"pruned={pruned} verification_rounds={verification_rounds} "
+        f"continuation_rounds={continuation_rounds}"
+    )
     print(
         "raw-page-baseline-race: "
         f"x={anchor_x} rounds={rounds} "
@@ -301,12 +343,8 @@ def _race_baselines(
     )
 
     results = {}
-    for state in states:
-        if (
-            state.matched_glyphs <= 0
-            or not state.owned
-            or not state.baseline_verified
-        ):
+    for state in continuation:
+        if state.matched_glyphs <= 0 or not state.owned or not state.baseline_verified:
             continue
         result = (
             state.matched_glyphs,
@@ -349,7 +387,6 @@ def _homonym_baseline_seeds(
     left: int,
     right: int,
 ) -> dict[int, set[tuple[int, int]]]:
-    """Return exact homonym-derived baseline candidates and their proved pixels."""
     page_candidates = _scanner.cached._bound_page_candidates(models)
     _describe_homonym_models(page_candidates)
     probe_right = min(right, left + _scanner.HOMONYM_PROBE_WIDTH)
@@ -391,7 +428,6 @@ def _local_xfirst_baseline_walks(
     left: int,
     right: int,
 ):
-    """Generate baseline y at the true x-first ink, then race left-to-right."""
     anchor_x = _scanner._x_first_ink_x(
         raw,
         search_from=search_from,
@@ -471,7 +507,6 @@ def _page1_text_walks_on_proved_baselines(
     right: int,
     first_ink_x: int,
 ):
-    """Locate the real first headword glyph after x-first proves baseline y."""
     page_candidates = _scanner.cached._bound_page_candidates(models)
     first_candidates = tuple(
         _scanner._bold_candidates(page_candidates, _scanner.PAGE1_EXACT_LABELS)
@@ -522,25 +557,15 @@ def _page1_text_walks_on_proved_baselines(
                 if glyphs <= 0 or not owned:
                     continue
                 score = (matched_right - text_start_x, glyphs, len(owned))
-                key = (text_start_x, baseline)
-                value = (
+                walks[(text_start_x, baseline)] = (
                     score,
-                    model,
+                    candidate[0],
                     x0,
                     owned,
                     glyphs,
                     matched_right,
                 )
-                old = walks.get(key)
-                if old is None or score > old[0]:
-                    walks[key] = value
 
-    if walks:
-        diagnostics = ", ".join(
-            f"x={text_x} b={baseline}:score={item[0]}"
-            for (text_x, baseline), item in sorted(walks.items())
-        )
-        print(f"raw-page-local-xfirst-text-candidates: {diagnostics}")
     return walks
 
 
@@ -553,176 +578,35 @@ def _page1_baseline_probe_walks(
     right: int,
     first_ink_x: int,
 ):
-    """Use leftmost ink to prove baseline y, then find a real headword glyph x."""
-    local_walks = _local_xfirst_baseline_walks(
-        raw,
-        search_from,
-        search_limit,
-        models,
-        left,
-        right,
-    )
-    if local_walks:
-        text_walks = _page1_text_walks_on_proved_baselines(
-            raw,
-            local_walks,
-            models,
-            left,
-            right,
-            first_ink_x,
-        )
-        if text_walks:
-            probe_x = next(iter(local_walks))[0]
-            text_xs = sorted({text_x for text_x, _baseline in text_walks})
-            print(
-                "raw-page-local-xfirst-baseline-handoff: "
-                f"probe_x={probe_x} exact_text_x={text_xs}"
-            )
-            return text_walks
-        print(
-            "raw-page-local-xfirst-baseline-handoff: "
-            f"probe_x={next(iter(local_walks))[0]} no exact headword glyph"
-        )
-
-    page_candidates = _scanner.cached._bound_page_candidates(models)
-    first_candidates = tuple(
-        _scanner._bold_candidates(page_candidates, _scanner.PAGE1_EXACT_LABELS)
-    )
     seeds = _homonym_baseline_seeds(
-        raw,
-        search_from,
-        search_limit,
-        models,
-        left,
-        right,
+        raw, search_from, search_limit, models, left, right
     )
+    if seeds:
+        raced = _race_baselines(raw, seeds, models, left, right, first_ink_x)
+        walks = {}
+        for baseline, (glyphs, owned, matched_right) in raced.items():
+            score = (matched_right - first_ink_x, glyphs, len(owned))
+            walks[(first_ink_x, baseline)] = (
+                score, None, first_ink_x, owned, glyphs, matched_right
+            )
+        if walks:
+            return walks
 
-    walks = {}
-    for baseline, homonym_owned in sorted(seeds.items()):
-        exact_first = _scanner._exact_first_candidates(
-            raw,
-            baseline,
-            first_candidates,
-            first_ink_x,
-            left,
-            right,
-        )
-        if not exact_first:
-            continue
-        glyphs, owned, matched_right = _scanner._walk_baseline(
-            raw,
-            baseline,
-            models,
-            left,
-            right,
-            first_ink_x,
-            first_candidates=exact_first,
-        )
-        if glyphs <= 0 or not owned:
-            continue
-        total_owned = set(owned)
-        total_owned.update(homonym_owned)
-        score = (matched_right - first_ink_x, glyphs + 1, len(total_owned))
-        walks[(first_ink_x, baseline)] = (
-            score,
-            None,
-            first_ink_x,
-            total_owned,
-            glyphs + 1,
-            matched_right,
-        )
-
-    if walks:
-        baselines = ",".join(str(b) for _x, b in sorted(walks))
-        print(f"raw-page-homonym-baseline-seed: baselines={baselines}")
-        return walks
-
-    print("raw-page-homonym-baseline-seed: no exact seed; using ordinary page1 probe")
-    return _ORIGINAL_PAGE1_BASELINE_PROBE_WALKS(
-        raw,
-        search_from,
-        search_limit,
-        models,
-        left,
-        right,
-        first_ink_x,
+    local_walks = _local_xfirst_baseline_walks(
+        raw, search_from, search_limit, models, left, right
     )
-
-
-def _ordinary_baseline_probe_walks(
-    raw: set[tuple[int, int]],
-    search_from: int,
-    search_limit: int,
-    models,
-    left: int,
-    right: int,
-    anchor_x: int,
-    first_candidates,
-):
-    """Generate exact baseline hypotheses, then race them left-to-right."""
-    hypotheses: set[int] = set()
-    anchor_bottom = min(search_limit, search_from + _scanner.START_SEARCH_HEIGHT)
-    for anchor_y in range(search_from, anchor_bottom):
-        if (anchor_x, anchor_y) not in raw:
-            continue
-        for model, min_x, left_pixels in first_candidates:
-            x0 = anchor_x - min_x
-            if x0 < left or x0 + model.width > right:
-                continue
-            for _mx, my in left_pixels:
-                baseline = anchor_y - my
-                if baseline < search_from or baseline >= search_limit:
-                    continue
-                placed = {(x0 + mx, baseline + py) for mx, py in model.pixels}
-                if placed and placed.issubset(raw):
-                    hypotheses.add(baseline)
-
-    exact_by_baseline = {}
-    for baseline in sorted(hypotheses):
-        exact_first = _scanner._exact_first_candidates(
-            raw,
-            baseline,
-            first_candidates,
-            anchor_x,
-            left,
-            right,
-        )
-        if exact_first:
-            exact_by_baseline[baseline] = exact_first
-
-    raced = _race_baselines(
-        raw,
-        exact_by_baseline,
-        models,
-        left,
-        right,
-        anchor_x,
-        first_candidates_by_baseline=exact_by_baseline,
+    if not local_walks:
+        return {}
+    text_walks = _page1_text_walks_on_proved_baselines(
+        raw, local_walks, models, left, right, first_ink_x
     )
-    walks = {}
-    for baseline, (glyphs, owned, matched_right) in raced.items():
-        score = (matched_right - anchor_x, glyphs, len(owned))
-        walks[(anchor_x, baseline)] = (
-            score,
-            None,
-            anchor_x,
-            owned,
-            glyphs,
-            matched_right,
-        )
-
-    if walks:
-        diagnostics = ", ".join(
-            f"b={baseline}:score={item[0]}"
-            for (_x, baseline), item in sorted(walks.items())
-        )
-        print(f"raw-page-full-row-baseline-candidates: {diagnostics}")
-    return walks
+    if text_walks:
+        return text_walks
+    return local_walks
 
 
-_scanner._walk_baseline = _cached_walk_baseline
 _scanner._page1_baseline_probe_walks = _page1_baseline_probe_walks
-_scanner._ordinary_baseline_probe_walks = _ordinary_baseline_probe_walks
+_scanner._walk_baseline = _cached_walk_baseline
 
 CachedRowBoundary = _scanner.CachedRowBoundary
 FIRST_TEXT_SEARCH_WIDTH = _scanner.FIRST_TEXT_SEARCH_WIDTH
