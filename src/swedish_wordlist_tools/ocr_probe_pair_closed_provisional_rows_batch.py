@@ -10,7 +10,7 @@ from .ocr_review_page_pixel_array_shared import build_page_context_pixel_array
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Strict pair-closed provisional row-boundary probe.")
+    ap = argparse.ArgumentParser(description="Pair-closed provisional row-boundary probe.")
     ap.add_argument("jsonl", type=Path)
     ap.add_argument("--facit", type=Path, required=True)
     ap.add_argument("--threshold", type=int, default=210)
@@ -31,6 +31,7 @@ def main() -> int:
     committed_pairs = 0
     committed_pixels = 0
     rejected_upper_exact = 0
+    rejected_unexplained_transfer = 0
 
     for page in pages:
         context = build_page_context_pixel_array(args.jsonl, page, args.threshold)
@@ -44,8 +45,14 @@ def main() -> int:
                 if result.committed:
                     committed_pairs += 1
                     committed_pixels += result.committed_pixels
-                elif result.proposed_pixels and result.upper_after_exact and result.lower_after_exact is False:
-                    rejected_upper_exact += 1
+                elif result.proposed_pixels and result.upper_after_exact:
+                    if (
+                        result.transferred_pixels_total is not None
+                        and result.transferred_pixels_explained != result.transferred_pixels_total
+                    ):
+                        rejected_unexplained_transfer += 1
+                    else:
+                        rejected_upper_exact += 1
 
                 interesting = (
                     result.proposed_pixels > 0
@@ -58,12 +65,17 @@ def main() -> int:
                 lower_ratio = "-"
                 if result.lower_after_source is not None:
                     lower_ratio = f"{result.lower_after_covered}/{result.lower_after_source}"
+                transfer_ratio = "-"
+                if result.transferred_pixels_total is not None:
+                    transfer_ratio = (
+                        f"{result.transferred_pixels_explained}/{result.transferred_pixels_total}"
+                    )
                 print(
                     f"pair-closure: page {page} column {result.upper[0]} row {result.upper[1]}/{lower} "
                     f"proposed={result.proposed_pixels} committed={result.committed_pixels} "
                     f"upper={result.upper_before_covered}/{result.upper_before_source}->"
                     f"{result.upper_after_covered}/{result.upper_after_source} "
-                    f"lower={lower_ratio} "
+                    f"lower={lower_ratio} transfer_match={transfer_ratio} "
                     f"exact={int(result.upper_before_exact)}->{int(result.upper_after_exact)} "
                     f"lower_exact={'-' if result.lower_after_exact is None else int(result.lower_after_exact)} "
                     f"commit={int(result.committed)} secure_bottom={result.secure_bottom_page_y} "
@@ -73,7 +85,8 @@ def main() -> int:
 
     print(
         f"pair-closure: rows={rows_total} proposals={proposals} committed_pairs={committed_pairs} "
-        f"committed_pixels={committed_pixels} rejected_upper_exact={rejected_upper_exact}",
+        f"committed_pixels={committed_pixels} rejected_upper_exact={rejected_upper_exact} "
+        f"rejected_unexplained_transfer={rejected_unexplained_transfer}",
         flush=True,
     )
     return 0
