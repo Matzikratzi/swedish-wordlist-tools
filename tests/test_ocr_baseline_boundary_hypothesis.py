@@ -15,7 +15,7 @@ class BaselineBoundaryHypothesisTest(unittest.TestCase):
             sources=1,
         )
         # Perfect descender below the baseline, but the body above the baseline
-        # is missing.  Lower ink must never be allowed to invent the glyph.
+        # is missing. Lower ink must never be allowed to invent the glyph.
         ink = {(4, 6), (4, 7), (5, 7)}
         result = baseline_boundary_hypothesis(
             ink, width=10, height=10, models=[model], baseline=5, probe_depth=3
@@ -51,7 +51,7 @@ class BaselineBoundaryHypothesisTest(unittest.TestCase):
         )
         baseline = 4
         # Body is valid and a deep pixel happens to exist, but y=baseline+2 is
-        # missing.  We must stop inside the three-row probe and not claim the
+        # missing. We must stop inside the three-row probe and not claim the
         # deeper pixel as part of the glyph.
         ink = {(2, 3), (2, 4), (2, 5), (2, 8)}
         result = baseline_boundary_hypothesis(
@@ -77,6 +77,31 @@ class BaselineBoundaryHypothesisTest(unittest.TestCase):
         )
         self.assertEqual(result.proven_bottom, 6)
         self.assertEqual(result.boundary, 7)
+
+    def test_proof_can_cross_where_legacy_separator_would_have_been(self):
+        """There is deliberately no separator input to the hypothesis engine.
+
+        Pretend the old separator was raster y=7. The learned g continues to
+        y=9. Raw source pixels plus the trusted baseline must therefore prove a
+        boundary at y=10; an old cut at y=7 cannot truncate the proof.
+        """
+        model = GlyphModel(
+            label="g",
+            style="roman",
+            pixels=frozenset({(0, -2), (1, -2), (0, -1), (1, -1), (1, 0),
+                              (1, 1), (1, 2), (2, 3), (2, 4)}),
+            sources=2,
+        )
+        baseline = 5
+        legacy_separator = 7
+        x0 = 3
+        raw_page_ink = {(x0 + x, baseline + y) for x, y in model.pixels}
+        result = baseline_boundary_hypothesis(
+            raw_page_ink, width=12, height=12, models=[model], baseline=baseline,
+            probe_depth=3,
+        )
+        self.assertGreater(result.boundary, legacy_separator)
+        self.assertEqual(result.boundary, 10)
 
 
 if __name__ == "__main__":
