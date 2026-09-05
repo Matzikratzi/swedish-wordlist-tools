@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -14,6 +15,8 @@ from . import ocr_raw_page_baseline_debug as debug
 
 _SLOW_ROW_SECONDS = 0.30
 _PROGRESS_EVERY = 10
+_RACE_RE = re.compile(r"raw-page-baseline-race: .*?rounds=(\d+)\s*(.*)$")
+_HEADWORD_RE = re.compile(r"raw-page-headword-leftedge-probe: models=(\d+) proposals=(\d+) full_tests=(\d+)")
 
 
 def _write(handle, event: dict) -> None:
@@ -31,13 +34,63 @@ def _is_natural_end(exc: RuntimeError) -> bool:
     return "no start ink in y=" in str(exc)
 
 
-def _print_progress(*, column: int, row: int, row_seconds: float, total_rows: int, entry, slow: bool) -> None:
+def _cost_profile(diagnostics: list[str]) -> dict[str, int]:
+    """Compress verbose scanner diagnostics into cheap per-row counters."""
+    races = 0
+    race_rounds = 0
+    race_rounds_max = 0
+    race_candidates = 0
+    cache_hits = 0
+    headword_models = 0
+    headword_proposals = 0
+    headword_full_tests = 0
+    small_run_rejects = 0
+
+    for line in diagnostics:
+        match = _RACE_RE.match(line)
+        if match:
+            rounds = int(match.group(1))
+            tail = match.group(2)
+            races += 1
+            race_rounds += rounds
+            race_rounds_max = max(race_rounds_max, rounds)
+            race_candidates += tail.count("b=")
+            continue
+        match = _HEADWORD_RE.match(line)
+        if match:
+            headword_models += int(match.group(1))
+            headword_proposals += int(match.group(2))
+            headword_full_tests += int(match.group(3))
+            continue
+        if line.startswith("raw-page-walk-cache-hit:"):
+            cache_hits += 1
+        elif line.startswith("raw-page-baseline-reject-small-run:"):
+            small_run_rejects += 1
+
+    return {
+        "races": races,
+        "race_rounds": race_rounds,
+        "race_rounds_max": race_rounds_max,
+        "race_candidates": race_candidates,
+        "cache_hits": cache_hits,
+        "headword_models": headword_models,
+        "headword_proposals": headword_proposals,
+        "headword_full_tests": headword_full_tests,
+        "small_run_rejects": small_run_rejects,
+    }
+
+
+def _print_progress(*, column: int, row: int, row_seconds: float, total_rows: int, entry, slow: bool, profile: dict[str, int]) -> None:
     kind = "slow" if slow else "progress"
     print(
         f"raw-page-{kind}: column={column} row={row:03d} "
         f"time={row_seconds:.3f}s total_rows={total_rows} "
         f"baseline={entry.baseline} border={entry.border} "
-        f"glyphs={entry.matched_glyphs} pixels={entry.matched_pixels}"
+        f"glyphs={entry.matched_glyphs} pixels={entry.matched_pixels} "
+        f"races={profile['races']} candidates={profile['race_candidates']} "
+        f"rounds={profile['race_rounds']} max_rounds={profile['race_rounds_max']} "
+        f"cache_hits={profile['cache_hits']} headword_tests={profile['headword_full_tests']} "
+        f"small_rejects={profile['small_run_rejects']}"
     )
 
 
@@ -86,7 +139,8 @@ def main() -> int:
     if raw_layout:
         columns = sorted(int(c) for c in raw_layout)
     else:
-        columns = sorted(int(c) for c in context["row_map"]["columns"])
+        columns_data = context["row_map"]["columns"]
+        columns = list(range(1, len(columns_data) + 1)) if isinstance(columns_data, list) else sorted(int(c) for c in columns_data)
 
     trace_output = args.trace_output or Path(f"/tmp/saol14-page{args.page}-raw-baselines.jsonl")
     trace_output.parent.mkdir(parents=True, exist_ok=True)
@@ -96,7 +150,7 @@ def main() -> int:
 
     with trace_output.open("w", encoding="utf-8") as trace:
         _write(trace, {
-            "type": "meta", "version": 4, "mode": "all", "page": args.page,
+            "type": "meta", "version": 5, "mode": "all", "page": args.page,
             "source_jsonl": str(args.jsonl.resolve()), "facit": str(args.facit.resolve()),
             "threshold": args.threshold, "columns": columns,
             "progress_every": _PROGRESS_EVERY, "slow_row_seconds": _SLOW_ROW_SECONDS,
@@ -117,9 +171,6 @@ def main() -> int:
             })
             row = 0
             while True:
-                # Once the proven previous border has reached the known text-column
-                # bottom there cannot be another row; do not perform another ink or
-                # baseline search merely to discover that fact.
                 cache_now = (context.get("raw_page_row_boundary_cache") or {}).get(column) or []
                 if column_bottom is not None and cache_now and cache_now[-1].border >= column_bottom:
                     _write(trace, {
@@ -152,6 +203,7 @@ def main() -> int:
                     break
                 row_seconds = perf_counter() - row_started
                 ocr_time += row_seconds
+                profile = _cost_profile(diagnostics)
                 for text in diagnostics:
                     _write(trace, {"type": "diagnostic", "phase": "row-discovery", "column": column, "row": row, "text": text})
 
@@ -162,6 +214,7 @@ def main() -> int:
                 _write(trace, {
                     "type": "row", "column": column, "row": entry.row,
                     "seconds": row_seconds,
+                    "cost": profile,
                     "initial_border": int(initial_border), "upper_border": int(upper_border),
                     "debug_top": entry.debug_top, "start_x": entry.start_x,
                     "baseline": entry.baseline, "border": entry.border,
@@ -184,6 +237,7 @@ def main() -> int:
                         total_rows=total_rows,
                         entry=entry,
                         slow=slow,
+                        profile=profile,
                     )
 
             if failed is not None:
