@@ -2,23 +2,276 @@ from __future__ import annotations
 
 """Hybrid correctness probe for the sequential raw-page scanner.
 
-This wrapper deliberately leaves the main scanner untouched while restoring two
-principles from historical commit 81b9667:
+Baseline hypotheses now race incrementally from left to right.  Every candidate
+keeps its own walker state; no candidate is restarted just because another
+baseline is still alive.  The final full-row result is also cached so the main
+scanner can reuse the proved walk instead of immediately walking the same row a
+second time.
 
-* the true leftmost row-start ink may seed local baseline hypotheses even when
-  that ink is not itself a correctly matched glyph;
-* competing baseline hypotheses are verified by walking the whole row, with
-  explained horizontal span ranked before glyph/pixel count.
-
-Unlike the previous diagnostic wrapper there is no hard-coded vertical crop and
-no x +/- 1 homonym placement heuristic. The search stays local to the x-first
-start coordinate rather than restoring the old expensive global x/y scan.
+The leftmost ink may still be a superscript homonym and is therefore allowed to
+propose baseline y without being the first baseline-aligned text glyph.
 """
+
+from dataclasses import dataclass
 
 from . import ocr_sequential_raw_page_rows as _scanner
 
 
 _ORIGINAL_PAGE1_BASELINE_PROBE_WALKS = _scanner._page1_baseline_probe_walks
+_ORIGINAL_WALK_BASELINE = _scanner._walk_baseline
+_WALK_CACHE: dict[int, tuple[set[tuple[int, int]], dict[tuple, tuple]]] = {}
+
+
+def _candidate_key(candidates) -> tuple | None:
+    if candidates is None:
+        return None
+    return tuple((id(candidate[0]), int(candidate[1])) for candidate in candidates)
+
+
+def _walk_key(
+    baseline: int,
+    left: int,
+    right: int,
+    anchor_x: int,
+    first_candidates,
+    max_glyphs: int | None,
+) -> tuple:
+    return (
+        int(baseline),
+        int(left),
+        int(right),
+        int(anchor_x),
+        _candidate_key(first_candidates),
+        max_glyphs,
+    )
+
+
+def _remember_walk(
+    raw: set[tuple[int, int]],
+    baseline: int,
+    left: int,
+    right: int,
+    anchor_x: int,
+    first_candidates,
+    max_glyphs: int | None,
+    result,
+) -> None:
+    raw_id = id(raw)
+    entry = _WALK_CACHE.get(raw_id)
+    if entry is None or entry[0] is not raw:
+        entry = (raw, {})
+        _WALK_CACHE[raw_id] = entry
+    entry[1][
+        _walk_key(
+            baseline,
+            left,
+            right,
+            anchor_x,
+            first_candidates,
+            max_glyphs,
+        )
+    ] = result
+
+
+def _cached_walk_baseline(
+    raw: set[tuple[int, int]],
+    baseline: int,
+    models,
+    left: int,
+    right: int,
+    anchor_x: int,
+    *,
+    first_candidates=None,
+    max_glyphs: int | None = None,
+):
+    raw_id = id(raw)
+    entry = _WALK_CACHE.get(raw_id)
+    key = _walk_key(
+        baseline,
+        left,
+        right,
+        anchor_x,
+        first_candidates,
+        max_glyphs,
+    )
+    if entry is not None and entry[0] is raw and key in entry[1]:
+        result = entry[1][key]
+        print(
+            "raw-page-walk-cache-hit: "
+            f"x={anchor_x} baseline={baseline} glyphs={result[0]}"
+        )
+        return result
+
+    result = _ORIGINAL_WALK_BASELINE(
+        raw,
+        baseline,
+        models,
+        left,
+        right,
+        anchor_x,
+        first_candidates=first_candidates,
+        max_glyphs=max_glyphs,
+    )
+    _remember_walk(
+        raw,
+        baseline,
+        left,
+        right,
+        anchor_x,
+        first_candidates,
+        max_glyphs,
+        result,
+    )
+    return result
+
+
+@dataclass
+class _RaceState:
+    baseline: int
+    cursor: int
+    matched_right: int
+    remaining: set[tuple[int, int]]
+    first_candidates: tuple | list | None = None
+    owned: set[tuple[int, int]] | None = None
+    previous_style: str | None = None
+    matched_glyphs: int = 0
+    exhausted: bool = False
+
+    def __post_init__(self) -> None:
+        if self.owned is None:
+            self.owned = set()
+
+
+def _advance_one(
+    state: _RaceState,
+    page_candidates,
+    *,
+    left: int,
+    right: int,
+) -> bool:
+    """Advance one candidate by exactly one matched glyph, never restarting it."""
+    while state.cursor < right:
+        if state.matched_glyphs == 0 and state.first_candidates is not None:
+            candidates = state.first_candidates
+        else:
+            candidates = _scanner.cached._iter_candidates(
+                page_candidates,
+                first_glyph=state.matched_glyphs == 0,
+                previous_style=state.previous_style,
+                row_kind="unknown",
+                leading_homonym_seen=False,
+                baseline_established=True,
+            )
+
+        chosen = None
+        for model, min_x, _left_pixels in candidates:
+            x0 = state.cursor - min_x
+            if x0 < left or x0 + model.width > right:
+                continue
+            placed = {
+                (x0 + mx, state.baseline + my)
+                for mx, my in model.pixels
+            }
+            if placed and placed.issubset(state.remaining):
+                chosen = (model, placed)
+                break
+
+        if chosen is not None:
+            model, placed = chosen
+            state.remaining.difference_update(placed)
+            state.owned.update(placed)
+            state.matched_glyphs += 1
+            state.previous_style = _scanner.priority._typographic_style(model.style)
+            glyph_right = max(px for px, _py in placed) + 1
+            state.matched_right = max(state.matched_right, glyph_right)
+            state.cursor = max(state.cursor + 1, glyph_right)
+            return True
+
+        later_x = [x for x, _y in state.remaining if x > state.cursor]
+        if not later_x:
+            state.exhausted = True
+            return False
+        state.cursor = min(later_x)
+
+    state.exhausted = True
+    return False
+
+
+def _race_baselines(
+    raw: set[tuple[int, int]],
+    baselines,
+    models,
+    left: int,
+    right: int,
+    anchor_x: int,
+    *,
+    first_candidates_by_baseline=None,
+):
+    """Walk all baseline candidates left-to-right in lockstep until exhausted.
+
+    This is deliberately exact rather than heuristic: a candidate is discarded
+    only when its walker has genuinely reached the end without another glyph.
+    All final scores therefore remain comparable with the previous full-row
+    implementation, but no candidate is ever restarted from the left.
+    """
+    page_candidates = _scanner.cached._bound_page_candidates(models)
+    states: list[_RaceState] = []
+    for baseline in sorted(set(int(b) for b in baselines)):
+        first_candidates = None
+        if first_candidates_by_baseline is not None:
+            first_candidates = first_candidates_by_baseline.get(baseline)
+            if not first_candidates:
+                continue
+        states.append(
+            _RaceState(
+                baseline=baseline,
+                cursor=int(anchor_x),
+                matched_right=int(anchor_x),
+                remaining=set(raw),
+                first_candidates=first_candidates,
+            )
+        )
+
+    active = list(states)
+    rounds = 0
+    while active:
+        rounds += 1
+        next_active = []
+        for state in active:
+            if _advance_one(state, page_candidates, left=left, right=right):
+                next_active.append(state)
+        active = next_active
+
+    print(
+        "raw-page-baseline-race: "
+        f"x={anchor_x} rounds={rounds} "
+        + ", ".join(
+            f"b={state.baseline}:glyphs={state.matched_glyphs}:right={state.matched_right}"
+            for state in states
+        )
+    )
+
+    results = {}
+    for state in states:
+        if state.matched_glyphs <= 0 or not state.owned:
+            continue
+        result = (
+            state.matched_glyphs,
+            set(state.owned),
+            state.matched_right,
+        )
+        _remember_walk(
+            raw,
+            state.baseline,
+            left,
+            right,
+            anchor_x,
+            state.first_candidates,
+            None,
+            result,
+        )
+        results[state.baseline] = result
+    return results
 
 
 def _describe_homonym_models(page_candidates) -> None:
@@ -85,13 +338,7 @@ def _local_xfirst_baseline_walks(
     left: int,
     right: int,
 ):
-    """Reproduce the useful part of 81b9667 at one x-first start only.
-
-    The leftmost ink x is fixed first. Exact glyph fits touching pixels at that
-    x are used only to propose baseline y values. The proposing glyph need not
-    become the first glyph in the row walk. Every proposed baseline is instead
-    judged by how much of the complete row the ordinary walker can explain.
-    """
+    """Generate baseline y at the true x-first ink, then race left-to-right."""
     anchor_x = _scanner._x_first_ink_x(
         raw,
         search_from=search_from,
@@ -129,18 +376,16 @@ def _local_xfirst_baseline_walks(
                 if placed and placed.issubset(raw):
                     hypotheses.add(baseline)
 
+    raced = _race_baselines(
+        raw,
+        hypotheses,
+        models,
+        left,
+        right,
+        anchor_x,
+    )
     walks = {}
-    for baseline in sorted(hypotheses):
-        glyphs, owned, matched_right = _scanner._walk_baseline(
-            raw,
-            baseline,
-            models,
-            left,
-            right,
-            anchor_x,
-        )
-        if glyphs <= 0 or not owned:
-            continue
+    for baseline, (glyphs, owned, matched_right) in raced.items():
         score = (matched_right - anchor_x, glyphs, len(owned))
         walks[(anchor_x, baseline)] = (
             score,
@@ -161,9 +406,7 @@ def _local_xfirst_baseline_walks(
             f"{diagnostics}"
         )
     else:
-        print(
-            f"raw-page-local-xfirst-baseline-candidates: x={anchor_x} NONE"
-        )
+        print(f"raw-page-local-xfirst-baseline-candidates: x={anchor_x} NONE")
     return walks
 
 
@@ -175,14 +418,21 @@ def _page1_text_walks_on_proved_baselines(
     right: int,
     first_ink_x: int,
 ):
-    """Locate the actual first headword glyph after x-first proved baseline y."""
+    """Locate the real first headword glyph after x-first proves baseline y."""
     page_candidates = _scanner.cached._bound_page_candidates(models)
     first_candidates = tuple(
         _scanner._bold_candidates(page_candidates, _scanner.PAGE1_EXACT_LABELS)
     )
     walks = {}
 
-    for (_probe_x, baseline), _local_item in sorted(local_walks.items()):
+    best_local_score = max(item[0] for item in local_walks.values())
+    proved_baselines = sorted(
+        baseline
+        for (_probe_x, baseline), item in local_walks.items()
+        if item[0] == best_local_score
+    )
+
+    for baseline in proved_baselines:
         for candidate in first_candidates:
             model, min_x, _left_pixels = candidate
             x0_lo = max(left, first_ink_x - _scanner.PAGE1_X_LEFT_SLACK)
@@ -356,13 +606,7 @@ def _ordinary_baseline_probe_walks(
     anchor_x: int,
     first_candidates,
 ):
-    """Verify every baseline hypothesis with a full row walk.
-
-    This keeps the current x-first anchor and current border geometry. Only the
-    choice between baseline hypotheses changes: a candidate must compete on the
-    amount of the real row it can explain instead of being judged after only
-    three glyphs.
-    """
+    """Generate exact baseline hypotheses, then race them left-to-right."""
     hypotheses: set[int] = set()
     anchor_bottom = min(search_limit, search_from + _scanner.START_SEARCH_HEIGHT)
     for anchor_y in range(search_from, anchor_bottom):
@@ -380,7 +624,7 @@ def _ordinary_baseline_probe_walks(
                 if placed and placed.issubset(raw):
                     hypotheses.add(baseline)
 
-    walks = {}
+    exact_by_baseline = {}
     for baseline in sorted(hypotheses):
         exact_first = _scanner._exact_first_candidates(
             raw,
@@ -390,19 +634,20 @@ def _ordinary_baseline_probe_walks(
             left,
             right,
         )
-        if not exact_first:
-            continue
-        glyphs, owned, matched_right = _scanner._walk_baseline(
-            raw,
-            baseline,
-            models,
-            left,
-            right,
-            anchor_x,
-            first_candidates=exact_first,
-        )
-        if glyphs <= 0 or not owned:
-            continue
+        if exact_first:
+            exact_by_baseline[baseline] = exact_first
+
+    raced = _race_baselines(
+        raw,
+        exact_by_baseline,
+        models,
+        left,
+        right,
+        anchor_x,
+        first_candidates_by_baseline=exact_by_baseline,
+    )
+    walks = {}
+    for baseline, (glyphs, owned, matched_right) in raced.items():
         score = (matched_right - anchor_x, glyphs, len(owned))
         walks[(anchor_x, baseline)] = (
             score,
@@ -422,6 +667,7 @@ def _ordinary_baseline_probe_walks(
     return walks
 
 
+_scanner._walk_baseline = _cached_walk_baseline
 _scanner._page1_baseline_probe_walks = _page1_baseline_probe_walks
 _scanner._ordinary_baseline_probe_walks = _ordinary_baseline_probe_walks
 
