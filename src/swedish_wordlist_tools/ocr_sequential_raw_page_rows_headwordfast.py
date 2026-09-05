@@ -27,6 +27,81 @@ _FALLBACK_PAGE1_BASELINE_PROBE_WALKS = _scanner._page1_baseline_probe_walks
 _ORIGINAL_RACE_ADVANCE_ONE = _previous._advance_one
 
 
+def _adjacent_glyph_geometry(previous, current):
+    """Describe raster clearance/contact between two already matched glyphs.
+
+    This is diagnostics only.  Distances are between black pixels, so a
+    Chebyshev distance of 1 means that the glyphs touch orthogonally or at a
+    corner; distance 2 means one raster-pixel layer can lie between them.
+    """
+    if not previous or not current:
+        return None
+
+    previous = set(previous)
+    current = set(current)
+    prev_max_x = max(x for x, _y in previous)
+    curr_min_x = min(x for x, _y in current)
+    bbox_gap = curr_min_x - prev_max_x - 1
+
+    orthogonal_pairs = 0
+    diagonal_pairs = 0
+    contact_y = set()
+    for x, y in previous:
+        for q in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+            if q in current:
+                orthogonal_pairs += 1
+                contact_y.add(y)
+                contact_y.add(q[1])
+        for q in (
+            (x - 1, y - 1),
+            (x - 1, y + 1),
+            (x + 1, y - 1),
+            (x + 1, y + 1),
+        ):
+            if q in current:
+                diagonal_pairs += 1
+                contact_y.add(y)
+                contact_y.add(q[1])
+
+    min_chebyshev = None
+    min_manhattan = None
+    # Glyphs are small.  This O(n*m) diagnostic runs only after a successful
+    # match and is intentionally kept out of the OCR decision path.
+    for px, py in previous:
+        for cx, cy in current:
+            dx = abs(cx - px)
+            dy = abs(cy - py)
+            cheb = max(dx, dy)
+            manhattan = dx + dy
+            if min_chebyshev is None or cheb < min_chebyshev:
+                min_chebyshev = cheb
+            if min_manhattan is None or manhattan < min_manhattan:
+                min_manhattan = manhattan
+            if min_chebyshev == 1 and min_manhattan == 1:
+                break
+        if min_chebyshev == 1 and min_manhattan == 1:
+            break
+
+    segments = 0
+    previous_y = None
+    for y in sorted(contact_y):
+        if previous_y is None or y != previous_y + 1:
+            segments += 1
+        previous_y = y
+
+    return {
+        "bbox_gap": bbox_gap,
+        "min_chebyshev": min_chebyshev,
+        "min_manhattan": min_manhattan,
+        "orthogonal_pairs": orthogonal_pairs,
+        "diagonal_pairs": diagonal_pairs,
+        "contact_rows": len(contact_y),
+        "contact_segments": segments,
+        "contact_y0": min(contact_y) if contact_y else None,
+        "contact_y1": max(contact_y) if contact_y else None,
+    }
+
+
 def _trace_race_advance_one(state, page_candidates, *, left: int, right: int) -> bool:
     """Show exactly which facit glyph keeps each baseline candidate alive."""
     before_n = state.matched_glyphs
@@ -58,7 +133,7 @@ def _trace_race_advance_one(state, page_candidates, *, left: int, right: int) ->
                 model, x0, state.baseline, remaining
             )
             if placed is not None:
-                predicted = (cursor, x0, model, len(placed))
+                predicted = (cursor, x0, model, placed)
                 break
         if predicted is not None:
             break
@@ -77,13 +152,33 @@ def _trace_race_advance_one(state, page_candidates, *, left: int, right: int) ->
                 f"b={state.baseline} n={state.matched_glyphs} from_x={before_cursor} UNKNOWN"
             )
         else:
-            match_x, x0, model, pixels = predicted
+            match_x, x0, model, placed = predicted
             print(
                 "raw-page-race-glyph: "
                 f"b={state.baseline} n={state.matched_glyphs} x={match_x} x0={x0} "
                 f"label={model.label!r} id={getattr(model, 'model_id', None)!r} "
-                f"style={getattr(model, 'style', None)!r} pixels={pixels}"
+                f"style={getattr(model, 'style', None)!r} pixels={len(placed)}"
             )
+
+            previous_match = getattr(state, "_contact_previous_match", None)
+            if previous_match is not None:
+                previous_model, previous_placed = previous_match
+                geometry = _adjacent_glyph_geometry(previous_placed, placed)
+                if geometry is not None:
+                    print(
+                        "raw-page-glyph-neighbor: "
+                        f"b={state.baseline} n={state.matched_glyphs - 1}->{state.matched_glyphs} "
+                        f"labels={previous_model.label!r}->{model.label!r} "
+                        f"bbox_gap={geometry['bbox_gap']} "
+                        f"cheb={geometry['min_chebyshev']} "
+                        f"manhattan={geometry['min_manhattan']} "
+                        f"orth={geometry['orthogonal_pairs']} "
+                        f"diag={geometry['diagonal_pairs']} "
+                        f"contact_rows={geometry['contact_rows']} "
+                        f"segments={geometry['contact_segments']} "
+                        f"contact_y={geometry['contact_y0']}..{geometry['contact_y1']}"
+                    )
+            state._contact_previous_match = (model, set(placed))
     return advanced
 
 
