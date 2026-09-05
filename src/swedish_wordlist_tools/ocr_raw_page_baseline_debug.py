@@ -9,7 +9,7 @@ from PIL import ImageDraw
 
 from . import ocr_page_cached_fast_path as cached
 from . import ocr_review_page_pixel_array_glyphs_html as page_editor
-from . import ocr_sequential_raw_page_rows as sequential
+from . import ocr_sequential_raw_page_rows_homonymfix as sequential
 from .ocr_column_edge_debug import _render_grid
 from .ocr_glyph_review_delete import load_facit_with_typography
 from .ocr_page1_layout_debug import _load_thresholded_page, detect_page1_layout_details
@@ -179,6 +179,7 @@ def main() -> int:
     print("raw-page-layout: geometry=initial-border-then-previous-border")
     print("raw-page-layout: row-start=x-first upper-boundary..+14")
     print("raw-page-layout: start-probe-marker=red-vertical-10px")
+    print("raw-page-layout: homonym=same-baseline-allow-x-overlap")
 
     completed = []
     stopped_row: int | None = None
