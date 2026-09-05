@@ -19,6 +19,7 @@ GRID_TOP_PAD = 40
 def _read_trace(path: Path) -> tuple[dict, list[dict], dict | None]:
     meta: dict | None = None
     rows: list[dict] = []
+    columns: dict[int, dict] = {}
     summary: dict | None = None
     with path.open("r", encoding="utf-8") as handle:
         for lineno, line in enumerate(handle, 1):
@@ -31,14 +32,29 @@ def _read_trace(path: Path) -> tuple[dict, list[dict], dict | None]:
                 if meta is not None:
                     raise RuntimeError(f"multiple meta events in {path}")
                 meta = event
+            elif kind == "column":
+                columns[int(event["column"])] = event
             elif kind == "row":
                 rows.append(event)
             elif kind == "summary":
                 summary = event
     if meta is None:
         raise RuntimeError(f"no meta event in {path}")
-    rows.sort(key=lambda row: int(row["row"]))
+    if columns:
+        meta = dict(meta)
+        meta["column_geometry"] = columns
+    rows.sort(key=lambda row: (int(row.get("column", 0)), int(row["row"])))
     return meta, rows, summary
+
+
+def _column_bounds(meta: dict, entry: dict) -> tuple[int, int]:
+    if "left" in meta and "right" in meta:
+        return int(meta["left"]), int(meta["right"])
+    column = int(entry.get("column", 0))
+    geometry = meta.get("column_geometry", {}).get(column)
+    if geometry is None:
+        raise RuntimeError(f"trace has no geometry for column {column}")
+    return int(geometry["left"]), int(geometry["right"])
 
 
 def _draw_snapshot(
@@ -64,33 +80,37 @@ def _draw_snapshot(
         columns=None,
     )
     draw = ImageDraw.Draw(image)
-    left = int(meta["left"])
-    right = int(meta["right"])
-    x0 = GRID_LEFT_PAD + left * cell
-    x1 = GRID_LEFT_PAD + right * cell
-    label_x = x1 + 4
 
-    if rows:
-        initial_border = rows[0].get("initial_border")
-        if initial_border is not None:
-            y = GRID_TOP_PAD + int(initial_border) * cell
-            draw.line((x0, y, x1, y), fill=(120, 120, 120), width=1)
-            draw.text(
-                (label_x, y - 5),
-                f"initial_border={initial_border}",
-                fill=(90, 90, 90),
-            )
-
+    seen_initial: set[int] = set()
     for entry in rows:
+        column = int(entry.get("column", 0))
+        left, right = _column_bounds(meta, entry)
+        x0 = GRID_LEFT_PAD + left * cell
+        x1 = GRID_LEFT_PAD + right * cell
+        label_x = x1 + 4
+
+        if column not in seen_initial:
+            initial_border = entry.get("initial_border")
+            if initial_border is not None:
+                y = GRID_TOP_PAD + int(initial_border) * cell
+                draw.line((x0, y, x1, y), fill=(120, 120, 120), width=1)
+                draw.text(
+                    (label_x, y - 5),
+                    f"c{column} initial_border={initial_border}",
+                    fill=(90, 90, 90),
+                )
+            seen_initial.add(column)
+
         top_y = GRID_TOP_PAD + int(entry["debug_top"]) * cell
         baseline_y = GRID_TOP_PAD + int(entry["baseline"]) * cell
         border_y = GRID_TOP_PAD + int(entry["border"]) * cell
         draw.line((x0, top_y, x1, top_y), fill=(255, 0, 0), width=1)
         draw.line((x0, baseline_y, x1, baseline_y), fill=(0, 80, 255), width=1)
         draw.line((x0, border_y, x1, border_y), fill=(0, 170, 0), width=1)
+        prefix = f"c{column}r{int(entry['row'])}" if meta.get("mode") == "all" else f"r{int(entry['row'])}"
         draw.text(
             (label_x, top_y - 5),
-            f"r{int(entry['row'])} debug_top={entry['debug_top']}",
+            f"{prefix} debug_top={entry['debug_top']}",
             fill=(255, 0, 0),
         )
         draw.text(
@@ -116,8 +136,11 @@ def _draw_snapshot(
     image.save(output)
 
 
-def _step_output(base: Path, row: int) -> Path:
+def _step_output(base: Path, entry: dict) -> Path:
     suffix = base.suffix or ".png"
+    row = int(entry["row"])
+    if "column" in entry:
+        return base.with_name(f"{base.stem}-c{int(entry['column'])}-row{row:03d}{suffix}")
     return base.with_name(f"{base.stem}-row{row:03d}{suffix}")
 
 
@@ -157,7 +180,7 @@ def main() -> int:
 
     if args.steps:
         for index, entry in enumerate(rows):
-            step_path = _step_output(output, int(entry["row"]))
+            step_path = _step_output(output, entry)
             _draw_snapshot(
                 thresholded_page,
                 meta,
@@ -169,13 +192,20 @@ def main() -> int:
                 axis_x=args.axis_x,
                 axis_y=args.axis_y,
             )
-            print(f"raw-page-render-step: row={int(entry['row']):03d} output={step_path}")
+            print(
+                f"raw-page-render-step: column={entry.get('column')} "
+                f"row={int(entry['row']):03d} output={step_path}"
+            )
 
-    if summary is not None and summary.get("stopped_row") is not None:
-        print(
-            f"raw-page-render-trace-stop: row={summary['stopped_row']} "
-            f"reason={summary.get('stopped_reason')}"
-        )
+    if summary is not None:
+        stopped_row = summary.get("stopped_row", summary.get("failed_row"))
+        stopped_reason = summary.get("stopped_reason", summary.get("failed_reason"))
+        stopped_column = summary.get("failed_column")
+        if stopped_row is not None:
+            print(
+                f"raw-page-render-trace-stop: column={stopped_column} row={stopped_row} "
+                f"reason={stopped_reason}"
+            )
     return 0
 
 
