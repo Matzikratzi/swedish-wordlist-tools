@@ -47,6 +47,29 @@ def _column_bounds_for_debug(context: dict, column: int) -> tuple[int, int]:
     )
 
 
+def _row_start_probe_pixel(context: dict, column: int, cache, row: int) -> tuple[int, int] | None:
+    """Reproduce the scanner's x-first start probe and return its source pixel."""
+    initial_border = (context.get("raw_page_initial_border_cache") or {}).get(column)
+    if initial_border is None:
+        return None
+
+    if row == 0:
+        search_from = int(initial_border) + 1
+    else:
+        search_from = int(cache[row - 1].border)
+
+    owners = context["pixel_owners"]
+    left, right = _column_bounds_for_debug(context, column)
+    x1 = min(right, left + sequential.FIRST_TEXT_SEARCH_WIDTH)
+    y1 = min(owners.height, search_from + sequential.START_SEARCH_HEIGHT)
+    data = owners.data
+    for x in range(left, x1):
+        for y in range(search_from, y1):
+            if data[y * owners.width + x] != 0:
+                return x, y
+    return None
+
+
 def _draw_snapshot(
     thresholded_page,
     context: dict,
@@ -60,7 +83,7 @@ def _draw_snapshot(
     axis_x: int,
     axis_y: int,
 ) -> None:
-    """Draw absolute grid plus baseline, border and a derived diagnostic top."""
+    """Draw absolute grid plus baseline, borders, diagnostic top and start probes."""
     image = _render_grid(
         thresholded_page,
         cell=cell,
@@ -93,6 +116,14 @@ def _draw_snapshot(
         draw.text((label_x, top_y - 5), f"r{entry.row} debug_top={entry.debug_top}", fill=(255, 0, 0))
         draw.text((label_x, baseline_y - 5), f"base={entry.baseline}", fill=(0, 80, 255))
         draw.text((label_x, border_y - 5), f"border={entry.border}", fill=(0, 140, 0))
+
+        probe = _row_start_probe_pixel(context, column, cache, entry.row)
+        if probe is not None:
+            probe_x, probe_y = probe
+            px = GRID_LEFT_PAD + probe_x * cell + cell // 2
+            py0 = GRID_TOP_PAD + probe_y * cell
+            py1 = GRID_TOP_PAD + (probe_y + 10) * cell
+            draw.line((px, py0, px, py1), fill=(255, 0, 0), width=2)
 
     output.parent.mkdir(parents=True, exist_ok=True)
     image.save(output)
@@ -147,6 +178,7 @@ def main() -> int:
         print("raw-page-layout: page1-start-probe=bold:a,á,à,A,Á,À")
     print("raw-page-layout: geometry=initial-border-then-previous-border")
     print("raw-page-layout: row-start=x-first upper-boundary..+14")
+    print("raw-page-layout: start-probe-marker=red-vertical-10px")
 
     completed = []
     stopped_row: int | None = None
@@ -173,12 +205,14 @@ def main() -> int:
         if row_index == 0:
             initial_border = context["raw_page_initial_border_cache"][args.column]
             print(f"raw-page-initial-border: column={args.column} border={initial_border}")
+        probe = _row_start_probe_pixel(context, args.column, cache, row_index)
+        probe_text = f" probe={probe}" if probe is not None else ""
         marker = " <-- target" if entry.row == args.row else ""
         print(
             f"raw-page-row: row={entry.row:03d} debug_top={entry.debug_top} "
             f"start_x={entry.start_x} baseline={entry.baseline} border={entry.border} "
             f"glyphs={entry.matched_glyphs} pixels={entry.matched_pixels} "
-            f"right={entry.matched_right}{marker}"
+            f"right={entry.matched_right}{probe_text}{marker}"
         )
         step_path = _step_output(output, row_index)
         _draw_snapshot(
