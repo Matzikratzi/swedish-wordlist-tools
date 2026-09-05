@@ -3,8 +3,9 @@ from __future__ import annotations
 """Render the full raw SAOL facsimile page as an absolute-coordinate grid.
 
 Coordinates are always source-PNG coordinates. The fixed debug rulers remain at
-absolute x=45 and y=50. On page 1 we also run the raw-pixel layout detector and
-overlay its discovered row-0 top and three column bounds in blue.
+absolute x=45 and y=50. On page 1 we also run the raw-pixel layout detector on a
+copy of the page and overlay its discovered row-0 top and three column bounds in
+blue, while rendering the untouched source pixels including the page header.
 """
 
 import argparse
@@ -111,7 +112,6 @@ def _render_grid(
             draw.rectangle((px - text_w // 2 - 2, py - 31, px + text_w // 2 + 2, py - 7), fill="white")
             draw.text((px - text_w // 2, py - 31), label, fill="black", font=axis_font)
 
-    # Page-layout result: blue source-coordinate lines, drawn last so they are visible.
     blue = (0, 90, 255)
     if row0_top is not None:
         py = gy + row0_top * cell
@@ -145,10 +145,11 @@ def main() -> int:
     row0_top = None
     columns: list[ColumnRange] = []
     if args.page == 1:
-        # detect_page1_layout intentionally blanks y<60 in-place before detection;
-        # render that same page state so the diagnostic image shows exactly what
-        # the detector used.
-        row0_top, columns = detect_page1_layout(page)
+        # The detector is intentionally destructive: it whites out y<60.
+        # Run it on a copy so the rendered diagnostic still shows every
+        # original source pixel, including the page header at the very top.
+        layout_page = page.copy()
+        row0_top, columns = detect_page1_layout(layout_page)
 
     image = _render_grid(
         page,
