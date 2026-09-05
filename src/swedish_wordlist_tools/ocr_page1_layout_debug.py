@@ -44,9 +44,14 @@ class BlotchRange:
 @dataclass(frozen=True)
 class Page1Layout:
     initial_top: int
-    row0_top: int
+    row0_tops: tuple[int, int, int]
     columns: list[ColumnRange]
     blotch: BlotchRange | None
+
+    @property
+    def row0_top(self) -> int:
+        """Compatibility alias for the left column's row-0 top."""
+        return self.row0_tops[0]
 
 
 def _load_thresholded_page(jsonl: Path, page_number: int, threshold: int) -> Image.Image:
@@ -83,6 +88,18 @@ def _first_ink_row(page: Image.Image, start_y: int) -> int:
             if pix[x, y] == 0:
                 return y
     raise RuntimeError(f"no black pixel found at or below y={start_y}")
+
+
+def _first_ink_row_in_range(page: Image.Image, start_y: int, left: int, right: int) -> int:
+    """First absolute y with ink in half-open source x range [left,right)."""
+    pix = page.load()
+    x0 = max(0, left)
+    x1 = min(page.width, right)
+    for y in range(max(0, start_y), page.height):
+        for x in range(x0, x1):
+            if pix[x, y] == 0:
+                return y
+    raise RuntimeError(f"no black pixel found in x={x0}..{x1 - 1} at or below y={start_y}")
 
 
 def _first_ink_x_on_row(page: Image.Image, y: int, start_x: int = 0) -> int | None:
@@ -232,13 +249,18 @@ def detect_page1_layout_details(page: Image.Image) -> Page1Layout:
     if len(columns) != 3:
         raise RuntimeError(f"expected 3 columns, found {len(columns)}")
 
-    blotch = _detect_left_blotch(page, initial_top, columns[0])
-    row0_top = blotch.bottom + 1 if blotch is not None else initial_top
-    return Page1Layout(initial_top=initial_top, row0_top=row0_top, columns=columns, blotch=blotch)
+    natural_tops = tuple(
+        _first_ink_row_in_range(page, PAGE1_IGNORE_ABOVE_Y, column.left, column.right)
+        for column in columns
+    )
+    blotch = _detect_left_blotch(page, natural_tops[0], columns[0])
+    left_row0_top = blotch.bottom + 1 if blotch is not None else natural_tops[0]
+    row0_tops = (left_row0_top, natural_tops[1], natural_tops[2])
+    return Page1Layout(initial_top=initial_top, row0_tops=row0_tops, columns=columns, blotch=blotch)
 
 
 def detect_page1_layout(page: Image.Image) -> tuple[int, list[ColumnRange]]:
-    """Compatibility wrapper returning the effective row top and columns."""
+    """Compatibility wrapper returning the left-column row top and columns."""
     layout = detect_page1_layout_details(page)
     return layout.row0_top, layout.columns
 
@@ -268,7 +290,7 @@ def main() -> int:
     print(
         f"page1-layout: page=1 threshold={args.threshold} "
         f"blanked_y=0..{PAGE1_IGNORE_ABOVE_Y - 1} blanked_x=0..{PAGE1_IGNORE_THROUGH_X} "
-        f"initial_top={layout.initial_top} row0_top={layout.row0_top}"
+        f"initial_top={layout.initial_top} row0_tops={','.join(str(y) for y in layout.row0_tops)}"
     )
     if layout.blotch is None:
         print(f"page1-layout: blotch=none min_black_run={MIN_BLOTCH_RUN_WIDTH}")
@@ -276,12 +298,12 @@ def main() -> int:
         b = layout.blotch
         print(
             f"page1-layout: blotch top={b.top} left={b.left} run_right={b.run_right} "
-            f"run_width={b.run_right - b.left} bottom={b.bottom} row0_top={layout.row0_top}"
+            f"run_width={b.run_right - b.left} bottom={b.bottom} left_row0_top={layout.row0_tops[0]}"
         )
-    for column in layout.columns:
+    for column, row0_top in zip(layout.columns, layout.row0_tops):
         print(
             f"page1-layout: column={column.index + 1} left={column.left} right={column.right} "
-            f"gutter={column.gutter_left}..{column.gutter_right}"
+            f"gutter={column.gutter_left}..{column.gutter_right} row0_top={row0_top}"
         )
     return 0
 
