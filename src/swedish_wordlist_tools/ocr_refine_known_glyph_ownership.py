@@ -6,17 +6,7 @@ from PIL import Image
 
 from .ocr_glyph_gap_matcher import max_internal_blank_run, safe_ink_groups
 from .ocr_glyph_matcher import exact_matches, select_best_disjoint_exact_for_ink
-from .ocr_page_cached_fast_path import (
-    bind_page_candidates,
-    page_cached_prioritized_fast_exact_cover,
-)
 from .ocr_page_pixel_array import PagePixelArray
-from .ocr_pair_separator import (
-    apply_cut_bidirectional,
-    candidate_separator_tiers,
-    restore_changed_ownership,
-)
-from .ocr_priority_fast_path import set_row_priority_hint
 from .ocr_probe_row_glyphs import row_ink
 from .ocr_probe_row_glyphs_grouped import analyse_row_exact_grouped
 
@@ -41,7 +31,7 @@ def _row_baseline_page(
         return None
     crop = owners.render_owner_crop(row_index=row_index, box=(left, top, right, bottom))
     # Baseline discovery itself must use the same safe-white-gap partitioning as
-    # normal row review. The old whole-column matcher made the rare boundary
+    # normal row review.  The old whole-column matcher made the rare boundary
     # fallback unexpectedly expensive.
     result = analyse_row_exact_grouped(crop, models, threshold=threshold)
     baseline = result["baseline"]
@@ -69,128 +59,6 @@ def _boundary_bridge_xs(
                 xs.add(x)
                 xs.add(nx)
     return xs
-
-
-def _fast_owner_exact(
-    owners: PagePixelArray,
-    row_index: int,
-    row: dict,
-    *,
-    left: int,
-    right: int,
-    models,
-    threshold: int,
-    radius: int,
-) -> bool:
-    """Prove one current ownership row using only the bounded page-cached path."""
-    top = max(0, int(row["page_top"]) - radius - 2)
-    bottom = min(owners.height, int(row["page_bottom"]) + radius + 2)
-    if bottom <= top:
-        return False
-    crop = owners.render_owner_crop(row_index=row_index, box=(left, top, right, bottom))
-    ink = row_ink(crop, threshold=threshold)
-    if not ink:
-        return True
-    set_row_priority_hint("unknown")
-    result = page_cached_prioritized_fast_exact_cover(
-        ink,
-        crop.width,
-        crop.height,
-        models,
-    )
-    return result is not None
-
-
-def _try_fast_horizontal_separator(
-    owners: PagePixelArray,
-    rows: list[dict],
-    *,
-    column_index: int,
-    row_index: int,
-    left: int,
-    right: int,
-    models,
-    threshold: int,
-    radius: int,
-    bridge_xs: set[int],
-) -> dict | None:
-    """Try cheap horizontal cuts and commit only an exact/exact row pair."""
-    upper = rows[row_index]
-    lower = rows[row_index + 1]
-    boundary = int(upper["page_bottom"])
-    upper_code = PagePixelArray.row_code(row_index)
-    lower_code = PagePixelArray.row_code(row_index + 1)
-
-    for strategy, cuts in candidate_separator_tiers(
-        owners,
-        upper_code=upper_code,
-        lower_code=lower_code,
-        boundary=boundary,
-        left=left,
-        right=right,
-        radius=radius,
-    ):
-        for cut_y in cuts:
-            changed = apply_cut_bidirectional(
-                owners,
-                upper_code=upper_code,
-                lower_code=lower_code,
-                cut_y=cut_y,
-                boundary=boundary,
-                left=left,
-                right=right,
-                radius=radius,
-            )
-            if not changed:
-                continue
-
-            upper_exact = _fast_owner_exact(
-                owners,
-                row_index,
-                upper,
-                left=left,
-                right=right,
-                models=models,
-                threshold=threshold,
-                radius=radius,
-            )
-            lower_exact = False
-            if upper_exact:
-                lower_exact = _fast_owner_exact(
-                    owners,
-                    row_index + 1,
-                    lower,
-                    left=left,
-                    right=right,
-                    models=models,
-                    threshold=threshold,
-                    radius=radius,
-                )
-
-            if upper_exact and lower_exact:
-                moved_to_upper = sum(1 for _offset, old in changed if old == lower_code)
-                moved_to_lower = sum(1 for _offset, old in changed if old == upper_code)
-                return {
-                    "column": column_index,
-                    "upper_row": row_index,
-                    "lower_row": row_index + 1,
-                    "boundary": boundary,
-                    "separator_cut_y": cut_y,
-                    "separator_strategy": strategy,
-                    "upper_baseline": None,
-                    "lower_baseline": None,
-                    "upper_labels": "",
-                    "lower_labels": "",
-                    "moved_to_upper": moved_to_upper,
-                    "moved_to_lower": moved_to_lower,
-                    "conflict_pixels": 0,
-                    "bridge_x_pixels": len(bridge_xs),
-                    "evidence_mode": "fast-horizontal-separator",
-                }
-
-            restore_changed_ownership(owners, changed)
-
-    return None
 
 
 def _baseline_matches(
@@ -264,22 +132,22 @@ def refine_known_glyph_ownership(
     radius: int = 6,
     pairs: set[tuple[int, int]] | None = None,
 ) -> list[dict]:
-    """Resolve touching row ownership cheaply before exact glyph fallback.
+    """Let exact glyphs override a touching single row separator.
 
-    A source bridge at the nominal separator first gets the bounded horizontal
-    separator search. A cut is committed only if the page-cached fast matcher
-    proves both complete adjacent rows exact. If no such cut exists, the old
-    baseline/glyph ownership analysis runs unchanged. This preserves real
-    touching/overlapping cases such as descenders and raised glyphs while making
-    ordinary wrong horizontal boundaries cheap.
+    The cheap byte-array bridge test runs before any glyph work. Only a
+    separator where source ink is actually 8-connected across y-1/y reaches the
+    exact matcher. Matching is then restricted horizontally to provably
+    independent safe-whitespace groups containing those bridge pixels.
+
+    An exact facit glyph is itself sufficient ownership evidence: if a glyph
+    matched on one row's baseline actually needs pixels across the provisional
+    separator, those pixels belong to that row. Manhattan distance is reserved
+    for the later unknown-glyph fallback and is not consulted here.
     """
     changes: list[dict] = []
     gray: Image.Image | None = None
     model_rows = list(models)
     internal_gap = max_internal_blank_run(model_rows)
-
-    # Bind candidate geometry once for every cheap pair proof in this call.
-    bind_page_candidates({}, model_rows)
 
     for column_index, column in enumerate(row_map.get("columns") or []):
         rows = column.get("rows") or []
@@ -297,22 +165,6 @@ def refine_known_glyph_ownership(
 
             bridge_xs = _boundary_bridge_xs(owners, boundary, left=left, right=right)
             if not bridge_xs:
-                continue
-
-            cheap = _try_fast_horizontal_separator(
-                owners,
-                rows,
-                column_index=column_index,
-                row_index=row_index,
-                left=left,
-                right=right,
-                models=model_rows,
-                threshold=threshold,
-                radius=radius,
-                bridge_xs=bridge_xs,
-            )
-            if cheap is not None:
-                changes.append(cheap)
                 continue
 
             if gray is None:
