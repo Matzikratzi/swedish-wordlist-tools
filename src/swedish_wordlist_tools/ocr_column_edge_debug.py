@@ -43,15 +43,15 @@ def _render_grid(page: Image.Image, *, source_left: int, source_width: int, cell
     cell = max(2, cell)
     tick = max(1, tick)
 
-    ruler_w = 72
-    top_pad = 24
-    right_pad = 12
+    ruler_w = 120
+    top_pad = 40
+    right_pad = 72  # previous 12 px plus requested 60 px
     bottom_pad = 12
     grid_w = width * cell
     grid_h = height * cell
     out = Image.new("RGB", (ruler_w + grid_w + right_pad, top_pad + grid_h + bottom_pad), "white")
     draw = ImageDraw.Draw(out)
-    font = _font(12)
+    axis_font = _font(24)
     gx = ruler_w
     gy = top_pad
     pix = page.load()
@@ -79,18 +79,19 @@ def _render_grid(page: Image.Image, *, source_left: int, source_width: int, cell
         py = gy + source_y * cell
         draw.line((axis_x - 7, py, axis_x, py), fill="black", width=1)
         label = str(source_y)
-        box = draw.textbbox((0, 0), label, font=font)
-        draw.text((axis_x - 11 - (box[2] - box[0]), py - 7), label, fill="black", font=font)
+        box = draw.textbbox((0, 0), label, font=axis_font)
+        text_h = box[3] - box[1]
+        draw.text((axis_x - 14 - (box[2] - box[0]), py - text_h // 2), label, fill="black", font=axis_font)
 
-    # x labels also retain absolute source coordinates. Label every 20 pixels
-    # and always label the exact left edge so cropped views remain unambiguous.
+    # x labels retain absolute source coordinates. Label every 20 pixels and
+    # always label the exact left edge so cropped views remain unambiguous.
     label_xs = {left}
     first_multiple = ((left + tick - 1) // tick) * tick
     label_xs.update(range(first_multiple, right, tick))
     for source_x in sorted(label_xs):
         px = gx + (source_x - left) * cell
-        draw.line((px, gy - 5, px, gy), fill="black", width=1)
-        draw.text((px + 2, 3), str(source_x), fill="black", font=font)
+        draw.line((px, gy - 7, px, gy), fill="black", width=1)
+        draw.text((px + 3, 3), str(source_x), fill="black", font=axis_font)
 
     return out
 
