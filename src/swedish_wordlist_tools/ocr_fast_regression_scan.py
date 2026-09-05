@@ -2,11 +2,11 @@ from __future__ import annotations
 
 """Fast regression scan for already-known facsimile pages.
 
-This path is intentionally bounded.  It runs the page-cached exact-cover fast
-path first.  On a miss it may try a small fixed number of horizontal row-boundary
-repairs, each verified only with the same fast exact path.  It never enters the
-exhaustive safe-group fallback.  A row that still cannot be proved exact is
-reported as unresolved/regression and the scan continues.
+This path is intentionally bounded. It runs the page-cached exact-cover fast
+path first, then a provably safe horizontal-group fast path. On a miss it may
+try a small fixed number of horizontal row-boundary repairs, each verified only
+with the same bounded exact paths. It never enters the exhaustive safe-group
+fallback. A row that still cannot be proved exact is reported as unresolved.
 """
 
 import argparse
@@ -17,6 +17,7 @@ from time import perf_counter
 
 from . import ocr_review_page_pixel_array_glyphs_html as page_editor
 from .ocr_fast_boundary_repair import try_fast_boundary_repair
+from .ocr_fast_grouped_exact import fast_grouped_exact_cover
 from .ocr_find_unreviewed_glyph_rows import _available_pages, _selected_pages
 from .ocr_glyph_review_delete import load_facit_with_typography
 from .ocr_page_cached_fast_path import (
@@ -37,11 +38,49 @@ class FastRegressionRow:
     covered_pixels: int
     elapsed: float
     text: str
+    exact_path: str = ""
     repaired: bool = False
     moved_pixels: int = 0
     repair_attempts: int = 0
     repair_elapsed: float = 0.0
     cut_y: int | None = None
+
+
+def _miss_result(ink, *, path: str) -> dict:
+    return {
+        "baseline": None,
+        "source_pixels": len(ink),
+        "covered_pixels": 0,
+        "unmatched_pixels": len(ink),
+        "unmatched_components": [],
+        "fully_exact": False,
+        "candidate_count": 0,
+        "selected": [],
+        "ink": ink,
+        "safe_groups": [],
+        "safe_group_count": 0,
+        "exact_fast_path": True,
+        "exact_cover_path": path,
+    }
+
+
+def _success_result(ink, baseline, selected, placements_tested, *, path: str, group_count: int = 0) -> dict:
+    covered = set().union(*(match.pixels for match in selected)) if selected else set()
+    return {
+        "baseline": baseline,
+        "source_pixels": len(ink),
+        "covered_pixels": len(covered),
+        "unmatched_pixels": len(ink - covered),
+        "unmatched_components": [],
+        "fully_exact": covered == ink,
+        "candidate_count": placements_tested,
+        "selected": selected,
+        "ink": ink,
+        "safe_groups": [],
+        "safe_group_count": group_count,
+        "exact_fast_path": True,
+        "exact_cover_path": path,
+    }
 
 
 def analyse_row_fast_only(crop, models, *, threshold: int = 210) -> dict:
@@ -67,40 +106,27 @@ def analyse_row_fast_only(crop, models, *, threshold: int = 210) -> dict:
     result = page_cached_prioritized_fast_exact_cover(
         ink, crop.width, crop.height, models
     )
-    if result is None:
-        return {
-            "baseline": None,
-            "source_pixels": len(ink),
-            "covered_pixels": 0,
-            "unmatched_pixels": len(ink),
-            "unmatched_components": [],
-            "fully_exact": False,
-            "candidate_count": 0,
-            "selected": [],
-            "ink": ink,
-            "safe_groups": [],
-            "safe_group_count": 0,
-            "exact_fast_path": True,
-            "exact_cover_path": "fast-regression-miss",
-        }
+    if result is not None:
+        baseline, selected, placements_tested = result
+        return _success_result(
+            ink, baseline, selected, placements_tested, path="fast-regression"
+        )
 
-    baseline, selected, placements_tested = result
-    covered = set().union(*(match.pixels for match in selected)) if selected else set()
-    return {
-        "baseline": baseline,
-        "source_pixels": len(ink),
-        "covered_pixels": len(covered),
-        "unmatched_pixels": len(ink - covered),
-        "unmatched_components": [],
-        "fully_exact": covered == ink,
-        "candidate_count": placements_tested,
-        "selected": selected,
-        "ink": ink,
-        "safe_groups": [],
-        "safe_group_count": 0,
-        "exact_fast_path": True,
-        "exact_cover_path": "fast-regression",
-    }
+    grouped = fast_grouped_exact_cover(
+        ink, crop.width, crop.height, models, baseline_slop=1
+    )
+    if grouped is not None:
+        baseline, selected, placements_tested, group_count = grouped
+        return _success_result(
+            ink,
+            baseline,
+            selected,
+            placements_tested,
+            path="fast-regression-grouped",
+            group_count=group_count,
+        )
+
+    return _miss_result(ink, path="fast-regression-miss")
 
 
 @contextmanager
@@ -143,6 +169,7 @@ def scan_page_fast(context: dict, models, *, boundary_radius: int = 6) -> list[F
                     covered_pixels=int(state.get("covered_pixels") or 0),
                     elapsed=initial_elapsed + repair_elapsed,
                     text=str(state.get("text") or ""),
+                    exact_path=str(state.get("exact_cover_path") or ""),
                     repaired=bool(repair and repair.repaired),
                     moved_pixels=int(repair.moved_pixels if repair else 0),
                     repair_attempts=int(repair.attempts if repair else 0),
@@ -155,7 +182,7 @@ def scan_page_fast(context: dict, models, *, boundary_radius: int = 6) -> list[F
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Fast bounded regression scan: exact, cheap boundary repair, or unresolved; never exhaustive."
+        description="Fast bounded regression scan: exact, grouped exact, cheap boundary repair, or unresolved; never exhaustive."
     )
     ap.add_argument("jsonl", type=Path)
     ap.add_argument("--facit", type=Path, required=True)
@@ -191,6 +218,7 @@ def main() -> int:
     total_started = perf_counter()
     row_count = 0
     exact_count = 0
+    grouped_count = 0
     repaired_count = 0
     repaired_pixels = 0
     unresolved: list[FastRegressionRow] = []
@@ -201,16 +229,18 @@ def main() -> int:
         context["quiet_successful_ownership"] = True
         results = scan_page_fast(context, models, boundary_radius=args.boundary_radius)
         page_exact = sum(result.exact for result in results)
+        page_grouped = sum(result.exact_path == "fast-regression-grouped" for result in results)
         page_repaired = sum(result.repaired for result in results)
         page_unresolved = [result for result in results if not result.exact]
         row_count += len(results)
         exact_count += page_exact
+        grouped_count += page_grouped
         repaired_count += page_repaired
         repaired_pixels += sum(result.moved_pixels for result in results)
         unresolved.extend(page_unresolved)
         print(
             f"fast-regression: page {page}: exact={page_exact}/{len(results)} "
-            f"repaired={page_repaired} unresolved={len(page_unresolved)} "
+            f"grouped={page_grouped} repaired={page_repaired} unresolved={len(page_unresolved)} "
             f"wall={perf_counter()-page_started:.3f}s",
             flush=True,
         )
@@ -235,7 +265,7 @@ def main() -> int:
     wall = perf_counter() - total_started
     print(
         f"fast-regression: pages={len(pages)} rows={row_count} exact={exact_count}/{row_count} "
-        f"repaired={repaired_count} repaired_pixels={repaired_pixels} "
+        f"grouped={grouped_count} repaired={repaired_count} repaired_pixels={repaired_pixels} "
         f"unresolved={len(unresolved)} wall={wall:.3f}s",
         flush=True,
     )
