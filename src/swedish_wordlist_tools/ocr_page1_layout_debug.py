@@ -25,6 +25,9 @@ MIN_COLUMN_PROBE_WIDTH = 20
 class ColumnRange:
     index: int
     left: int
+    # Absolute x boundary immediately to the right of the column text area.
+    # In other words, this is the first white x column of the detected gutter,
+    # not the last possible black x coordinate inside the column.
     right: int
     gutter_left: int
     gutter_right: int
@@ -57,6 +60,17 @@ def _first_ink_row(page: Image.Image, start_y: int) -> int:
             if pix[x, y] == 0:
                 return y
     raise RuntimeError(f"no black pixel found at or below y={start_y}")
+
+
+def _first_ink_x_on_row(page: Image.Image, y: int, start_x: int = 0) -> int | None:
+    """Return first absolute x containing ink on exactly source row y."""
+    pix = page.load()
+    if not (0 <= y < page.height):
+        return None
+    for x in range(max(0, start_x), page.width):
+        if pix[x, y] == 0:
+            return x
+    return None
 
 
 def _vertical_occupancy(page: Image.Image, top: int) -> list[bool]:
@@ -101,10 +115,21 @@ def detect_page1_layout(page: Image.Image) -> tuple[int, list[ColumnRange]]:
     row0_top = _first_ink_row(page, PAGE1_IGNORE_ABOVE_Y)
     occupied = _vertical_occupancy(page, row0_top)
 
+    # Important: the first column starts where the first actual row starts.
+    # Looking for the first vertically occupied x column over the whole page can
+    # be fooled by an isolated mark much farther down (page 1 has such material
+    # near the far left). The row0-top pixel is the evidence we just established.
+    first_left = _first_ink_x_on_row(page, row0_top)
+    if first_left is None:
+        raise RuntimeError(f"row0_top={row0_top} unexpectedly contains no black pixel")
+
     columns: list[ColumnRange] = []
-    search_x = 0
+    search_x = first_left
     for index in range(3):
-        left = _next_black_column(occupied, search_x)
+        if index == 0:
+            left = first_left
+        else:
+            left = _next_black_column(occupied, search_x)
         if left is None:
             raise RuntimeError(f"could not find start of column {index + 1} after x={search_x}")
 
@@ -117,7 +142,13 @@ def detect_page1_layout(page: Image.Image) -> tuple[int, list[ColumnRange]]:
             if index != 2:
                 raise RuntimeError(f"could not find >= {MIN_GUTTER_WIDTH}px white gutter after column {index + 1}")
             columns.append(
-                ColumnRange(index=index, left=left, right=len(occupied) - 1, gutter_left=len(occupied), gutter_right=len(occupied))
+                ColumnRange(
+                    index=index,
+                    left=left,
+                    right=len(occupied),
+                    gutter_left=len(occupied),
+                    gutter_right=len(occupied),
+                )
             )
             break
 
@@ -126,7 +157,10 @@ def detect_page1_layout(page: Image.Image) -> tuple[int, list[ColumnRange]]:
             ColumnRange(
                 index=index,
                 left=left,
-                right=gutter_left - 1,
+                # The right boundary is the first white x of the gutter. Keeping
+                # the boundary outside the text means a glyph may use every pixel
+                # through x=gutter_left-1 without the blue boundary covering it.
+                right=gutter_left,
                 gutter_left=gutter_left,
                 gutter_right=gutter_right - 1,
             )
