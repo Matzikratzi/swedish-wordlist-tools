@@ -14,7 +14,14 @@ from time import perf_counter
 from . import ocr_raw_page_baseline_debug as debug
 
 
-def _wrap(namespace, name: str, label: str) -> None:
+_TOTALS = {
+    "setup": 0.0,
+    "ocr": 0.0,
+    "render": 0.0,
+}
+
+
+def _wrap(namespace, name: str, label: str, *, bucket: str | None = None) -> None:
     original = getattr(namespace, name)
 
     @wraps(original)
@@ -24,6 +31,8 @@ def _wrap(namespace, name: str, label: str) -> None:
             return original(*args, **kwargs)
         finally:
             elapsed = perf_counter() - started
+            if bucket is not None:
+                _TOTALS[bucket] += elapsed
             print(f"raw-page-timing: {label}={elapsed:.6f}s")
 
     setattr(namespace, name, timed)
@@ -31,15 +40,31 @@ def _wrap(namespace, name: str, label: str) -> None:
 
 def _install_timers() -> None:
     # One-time setup phases.
-    _wrap(debug, "load_facit_with_typography", "load-facit")
+    _wrap(debug, "load_facit_with_typography", "load-facit", bucket="setup")
     _wrap(
         debug.page_editor,
         "build_page_context_pixel_array",
         "build-page-context",
+        bucket="setup",
     )
-    _wrap(debug.cached, "bind_page_candidates", "bind-page-candidates")
-    _wrap(debug, "_load_thresholded_page", "load-thresholded-page")
-    _wrap(debug, "_install_page1_raw_layout", "install-page1-layout")
+    _wrap(
+        debug.cached,
+        "bind_page_candidates",
+        "bind-page-candidates",
+        bucket="setup",
+    )
+    _wrap(
+        debug,
+        "_load_thresholded_page",
+        "load-thresholded-page",
+        bucket="setup",
+    )
+    _wrap(
+        debug,
+        "_install_page1_raw_layout",
+        "install-page1-layout",
+        bucket="setup",
+    )
 
     # Sequential OCR.  main() calls ensure_row_cached once for every target row;
     # after row 0 each call only discovers the newly requested row because the
@@ -53,6 +78,7 @@ def _install_timers() -> None:
             return original_ensure(context, column, target_row, models)
         finally:
             elapsed = perf_counter() - started
+            _TOTALS["ocr"] += elapsed
             print(
                 "raw-page-timing: "
                 f"ensure-row row={target_row:03d}={elapsed:.6f}s"
@@ -75,6 +101,7 @@ def _install_timers() -> None:
             return original_draw(*args, **kwargs)
         finally:
             elapsed = perf_counter() - started
+            _TOTALS["render"] += elapsed
             print(
                 "raw-page-timing: "
                 f"draw-snapshot={elapsed:.6f}s output={output}"
@@ -84,13 +111,26 @@ def _install_timers() -> None:
 
 
 def main() -> int:
+    for key in _TOTALS:
+        _TOTALS[key] = 0.0
+
     _install_timers()
     started = perf_counter()
     try:
         return debug.main()
     finally:
         elapsed = perf_counter() - started
+        accounted = _TOTALS["setup"] + _TOTALS["ocr"] + _TOTALS["render"]
+        other = max(0.0, elapsed - accounted)
         print(f"raw-page-timing: debug-main-total={elapsed:.6f}s")
+        print(
+            "raw-page-timing-summary: "
+            f"ocr={_TOTALS['ocr']:.6f}s "
+            f"render={_TOTALS['render']:.6f}s "
+            f"setup={_TOTALS['setup']:.6f}s "
+            f"other={other:.6f}s "
+            f"total={elapsed:.6f}s"
+        )
 
 
 if __name__ == "__main__":
