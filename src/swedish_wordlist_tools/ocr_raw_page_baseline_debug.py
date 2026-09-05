@@ -36,8 +36,9 @@ def main() -> int:
     for entry in cache:
         marker = " <-- target" if entry.row == args.row else ""
         print(
-            f"  row={entry.row:03d} baseline={entry.baseline} "
-            f"content_bottom={entry.content_bottom} next_search_y={entry.next_search_y}{marker}"
+            f"  row={entry.row:03d} top={entry.row_top} "
+            f"temp_bottom={entry.provisional_bottom} baseline={entry.baseline} "
+            f"final_bottom={entry.final_bottom} next_search_y={entry.next_search_y}{marker}"
         )
     return 0
 
