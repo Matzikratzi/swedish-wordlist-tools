@@ -2,10 +2,13 @@ from __future__ import annotations
 
 """Sequential baseline discovery with cached row boundaries.
 
-Rows are discovered from the top of a column. Legacy row top/bottom values are
-not used to jump to a requested row. Several baseline hypotheses may survive
-the first glyph; they are scored by how many complete glyph models they can
-explain on that baseline before a baseline is cached.
+Each row has three vertical limits:
+- row_top: stable start of the row work area,
+- provisional_bottom: temporary generous search limit while solving the row,
+- final_bottom: tightened to the lowest pixel proven by matched glyph models.
+
+Only final_bottom is used to advance to the next row. Legacy per-row bottoms are
+never used as OCR limits.
 """
 
 from dataclasses import dataclass
@@ -17,8 +20,10 @@ from .ocr_raw_page_baseline_row import _raw_ink
 @dataclass(frozen=True)
 class CachedRowBoundary:
     row: int
+    row_top: int
+    provisional_bottom: int
     baseline: int
-    content_bottom: int | None
+    final_bottom: int
     next_search_y: int
 
 
@@ -32,19 +37,25 @@ def _column_bounds(context: dict, column: int) -> tuple[int, int, int, int]:
     left = int(entry.get("crop_left", entry.get("left", 0)))
     right = int(entry.get("crop_right", entry.get("right", owners.width)))
     rows = entry.get("rows") or []
-    # Column top/bottom are page/column geometry, not per-row boundaries.
     top = max(0, min((int(r["page_top"]) for r in rows), default=0) - 12)
     bottom = min(owners.height, max((int(r["page_bottom"]) for r in rows), default=owners.height) + 12)
     return left, top, right, bottom
 
 
+def _provisional_height(models) -> int:
+    """Generous work height derived from glyph models, not row geometry."""
+    heights = [int(getattr(model, "height", 0) or 0) for model in models]
+    tallest = max(heights, default=16)
+    # Enough room for ascenders/descenders plus whitespace while still keeping
+    # the working raster local. It is temporary and carries no ownership.
+    return max(24, tallest + 12)
+
+
 def _baseline_score(raw: set[tuple[int, int]], baseline: int, models, left: int, right: int) -> tuple[int, int | None]:
-    """Count model placements explained by raw pixels on one baseline."""
+    """Count complete glyph placements explained by pixels on one baseline."""
     page_candidates = cached._bound_page_candidates(models)
     count = 0
     bottom = None
-    # Score complete glyphs anywhere on this baseline. This is only used to
-    # disambiguate baseline hypotheses; actual row text decoding comes later.
     for x in sorted({x for x, _y in raw}):
         for model, min_x, _left_pixels in cached._iter_candidates(
             page_candidates, first_glyph=False, previous_style=None,
@@ -57,23 +68,23 @@ def _baseline_score(raw: set[tuple[int, int]], baseline: int, models, left: int,
             placed = {(x0 + mx, baseline + my) for mx, my in model.pixels}
             if placed and placed.issubset(raw):
                 count += 1
-                model_bottom = max(py for _px, py in placed)
+                model_bottom = max(py for _px, py in placed) + 1
                 bottom = model_bottom if bottom is None else max(bottom, model_bottom)
                 break
     return count, bottom
 
 
-def _discover_next(context: dict, column: int, row_index: int, search_y: int, models) -> CachedRowBoundary:
+def _discover_next(context: dict, column: int, row_index: int, row_top: int, models) -> CachedRowBoundary:
     left, column_top, right, column_bottom = _column_bounds(context, column)
-    start_y = max(column_top, search_y)
-    raw = _raw_ink(context, left=left, right=right, top=start_y, bottom=column_bottom)
+    row_top = max(column_top, int(row_top))
+    provisional_bottom = min(column_bottom, row_top + _provisional_height(models))
+    raw = _raw_ink(context, left=left, right=right, top=row_top, bottom=provisional_bottom)
     page_candidates = cached._bound_page_candidates(models)
 
-    # Scan downwards. At each y, only ink near the column's lexical left edge
-    # may propose a row. A proposal may yield several baselines; following
-    # glyph evidence chooses among them rather than a geometric heuristic.
+    # A new row can only be established from ink close to a lexical left start.
+    # The provisional bottom merely limits the work area; it is not a boundary.
     start_slack = 40
-    for anchor_y in range(start_y, column_bottom):
+    for anchor_y in range(row_top, provisional_bottom):
         xs = sorted(x for x, y in raw if y == anchor_y and x <= left + start_slack)
         for anchor_x in xs:
             hypotheses: set[int] = set()
@@ -87,26 +98,37 @@ def _discover_next(context: dict, column: int, row_index: int, search_y: int, mo
                     continue
                 for _mx, my in left_pixels:
                     baseline = anchor_y - my
-                    if baseline < start_y:
+                    if baseline < row_top or baseline >= provisional_bottom:
                         continue
                     placed = {(x0 + mx, baseline + py) for mx, py in model.pixels}
                     if placed and placed.issubset(raw):
                         hypotheses.add(baseline)
             if not hypotheses:
                 continue
+
             scored = []
             for baseline in sorted(hypotheses):
-                score, bottom = _baseline_score(raw, baseline, models, left, right)
-                scored.append((score, baseline, bottom))
+                score, proven_bottom = _baseline_score(raw, baseline, models, left, right)
+                scored.append((score, baseline, proven_bottom))
             best_score = max(score for score, _baseline, _bottom in scored)
-            best = [(baseline, bottom) for score, baseline, bottom in scored if score == best_score]
+            best = [(baseline, proven_bottom) for score, baseline, proven_bottom in scored if score == best_score]
             if best_score > 0 and len(best) == 1:
-                baseline, bottom = best[0]
-                next_search_y = max(baseline + 1, (bottom + 1) if bottom is not None else 0)
-                return CachedRowBoundary(row_index, baseline, bottom, next_search_y)
+                baseline, proven_bottom = best[0]
+                # Tighten aggressively when the row is done: final_bottom is
+                # exactly one pixel below the lowest proven glyph pixel.
+                final_bottom = max(baseline + 1, int(proven_bottom or (baseline + 1)))
+                return CachedRowBoundary(
+                    row=row_index,
+                    row_top=row_top,
+                    provisional_bottom=provisional_bottom,
+                    baseline=baseline,
+                    final_bottom=final_bottom,
+                    next_search_y=final_bottom,
+                )
+
     raise RuntimeError(
         f"sequential raw-page discovery stopped at column={column} row={row_index}: "
-        f"no unique baseline from y={start_y}"
+        f"no unique baseline in work area y={row_top}..{provisional_bottom}"
     )
 
 
@@ -117,8 +139,8 @@ def ensure_row_cached(context: dict, column: int, target_row: int, models) -> li
     _left, column_top, _right, _bottom = _column_bounds(context, column)
     while len(cache) <= target_row:
         row_index = len(cache)
-        search_y = column_top if not cache else cache[-1].next_search_y
-        cache.append(_discover_next(context, column, row_index, search_y, models))
+        row_top = column_top if not cache else cache[-1].final_bottom
+        cache.append(_discover_next(context, column, row_index, row_top, models))
     return cache
 
 
