@@ -2,15 +2,11 @@ from __future__ import annotations
 
 """Sequential baseline discovery directly from the page pixel array.
 
-The first row may be seeded from raw-page layout geometry: absolute column
-left/right plus the independently discovered row-0 top. Later rows are found
-from the previous row's vertical start and horizontal start coordinate: the
-probe first has to leave the previous row, cross a real white gap, and then
-enter new ink near the left edge. Only then may a glyph establish a new
-baseline.
-
-A row still has a generous provisional bottom while it is solved. Its final
-bottom is tightened only after the complete fixed-baseline row walk.
+Rows are discovered from raw thresholded page pixels.  A row top is found first;
+then the first bold text glyph establishes the baseline.  On page 1 the first
+headword glyph is known to be an a/A variant, so we use only bold a/A body
+shapes as a cheap baseline probe and resolve accents only after the baseline is
+verified by following glyphs.
 """
 
 from dataclasses import dataclass
@@ -22,9 +18,11 @@ from .ocr_raw_page_baseline_row import _raw_ink
 
 HOMONYM_PROBE_WIDTH = 12
 FIRST_TEXT_SEARCH_WIDTH = 40
-BASELINE_PROBE_GLYPHS = 4
+BASELINE_PROBE_GLYPHS = 3
 PAGE1_BASE_LABELS = frozenset({"a", "A"})
 PAGE1_EXACT_LABELS = frozenset({"a", "á", "à", "A", "Á", "À"})
+PAGE1_BODY_X_SLACK = 8
+PAGE1_IGNORE_TOP_MODEL_ROWS = 2
 
 
 @dataclass(frozen=True)
@@ -61,7 +59,10 @@ def _column_bounds(context: dict, column: int) -> tuple[int, int, int, int]:
     right = int(entry.get("crop_right", entry.get("right", owners.width)))
     rows = entry.get("rows") or []
     top = max(0, min((int(r["page_top"]) for r in rows), default=0) - 12)
-    bottom = min(owners.height, max((int(r["page_bottom"]) for r in rows), default=owners.height) + 12)
+    bottom = min(
+        owners.height,
+        max((int(r["page_bottom"]) for r in rows), default=owners.height) + 12,
+    )
     return left, top, right, bottom
 
 
@@ -94,7 +95,9 @@ def _find_next_row_top(
     left: int,
     previous: CachedRowBoundary | None,
 ) -> int:
-    band_left, band_right = _start_band(left, None if previous is None else previous.start_x)
+    band_left, band_right = _start_band(
+        left, None if previous is None else previous.start_x
+    )
     if previous is None:
         if context.get("raw_page_column_layout"):
             return column_top
@@ -130,7 +133,7 @@ def _walk_baseline(
     first_candidates=None,
     max_glyphs: int | None = None,
 ) -> tuple[int, set[tuple[int, int]], int]:
-    """Consume one printed row left-to-right on one fixed baseline."""
+    """Consume printed glyphs left-to-right on one fixed baseline."""
     page_candidates = cached._bound_page_candidates(models)
     remaining = set(raw)
     owned: set[tuple[int, int]] = set()
@@ -142,7 +145,7 @@ def _walk_baseline(
     while cursor < right:
         if max_glyphs is not None and matched_glyphs >= max_glyphs:
             break
-        chosen = None
+
         if matched_glyphs == 0 and first_candidates is not None:
             candidates = first_candidates
         else:
@@ -154,17 +157,19 @@ def _walk_baseline(
                 leading_homonym_seen=False,
                 baseline_established=True,
             )
+
+        chosen = None
         for model, min_x, _left_pixels in candidates:
             x0 = cursor - min_x
             if x0 < left or x0 + model.width > right:
                 continue
             placed = {(x0 + mx, baseline + my) for mx, my in model.pixels}
             if placed and placed.issubset(remaining):
-                chosen = (model, x0, placed)
+                chosen = (model, placed)
                 break
 
         if chosen is not None:
-            model, x0, placed = chosen
+            model, placed = chosen
             remaining.difference_update(placed)
             owned.update(placed)
             matched_glyphs += 1
@@ -182,7 +187,7 @@ def _walk_baseline(
     return matched_glyphs, owned, matched_right
 
 
-def _first_text_start_x(
+def _first_text_ink_x(
     raw: set[tuple[int, int]],
     *,
     row_top: int,
@@ -190,10 +195,19 @@ def _first_text_start_x(
     left: int,
     right: int,
 ) -> int | None:
+    """Return first raw ink x after the homonym strip.
+
+    On page 1 this may be an accent pixel rather than the base letter's left
+    edge.  It is therefore only a lower bound for the relaxed a/A body probe.
+    """
     text_left = min(right, left + HOMONYM_PROBE_WIDTH)
     text_right = min(right, left + FIRST_TEXT_SEARCH_WIDTH)
     y_limit = min(provisional_bottom, row_top + 12)
-    xs = [x for x, y in raw if text_left <= x < text_right and row_top <= y < y_limit]
+    xs = [
+        x
+        for x, y in raw
+        if text_left <= x < text_right and row_top <= y < y_limit
+    ]
     return min(xs) if xs else None
 
 
@@ -205,7 +219,76 @@ def _bold_candidates(page_candidates, allowed_labels: frozenset[str] | None = No
     ]
 
 
-def _baseline_probe_walks(
+def _model_body_pixels(model) -> frozenset[tuple[int, int]]:
+    """Return a conservative lower-body fingerprint for a page-1 a/A probe."""
+    ys = sorted({y for _x, y in model.pixels})
+    if not ys:
+        return frozenset()
+    cutoff_index = min(PAGE1_IGNORE_TOP_MODEL_ROWS, len(ys) - 1)
+    cutoff = ys[cutoff_index]
+    body = frozenset((x, y) for x, y in model.pixels if y >= cutoff)
+    return body or model.pixels
+
+
+def _page1_baseline_probe_walks(
+    raw: set[tuple[int, int]],
+    row_top: int,
+    provisional_bottom: int,
+    models,
+    left: int,
+    right: int,
+    first_ink_x: int,
+):
+    """Probe page-1 baseline from a/A body, ignoring accent position and pixels.
+
+    ``first_ink_x`` may belong to an acute/grave accent.  We therefore test only
+    a handful of possible base-letter starts immediately to its right.  A body
+    match produces a baseline hypothesis; that hypothesis is then verified by
+    matching up to three following glyphs before any full-row walk is attempted.
+    """
+    page_candidates = cached._bound_page_candidates(models)
+    first_candidates = _bold_candidates(page_candidates, PAGE1_BASE_LABELS)
+    walks = {}
+
+    max_base_x = min(right - 1, first_ink_x + PAGE1_BODY_X_SLACK)
+    for base_x in range(first_ink_x, max_base_x + 1):
+        for model, min_x, _left_pixels in first_candidates:
+            x0 = base_x - min_x
+            if x0 < left or x0 + model.width > right:
+                continue
+            body = _model_body_pixels(model)
+            if not body:
+                continue
+
+            for baseline in range(row_top, provisional_bottom):
+                placed_body = {(x0 + mx, baseline + my) for mx, my in body}
+                if not placed_body or not placed_body.issubset(raw):
+                    continue
+
+                follow_x = x0 + model.width
+                glyphs, owned, matched_right = _walk_baseline(
+                    raw,
+                    baseline,
+                    models,
+                    left,
+                    right,
+                    follow_x,
+                    max_glyphs=BASELINE_PROBE_GLYPHS,
+                )
+                if glyphs <= 0:
+                    continue
+
+                score = (
+                    glyphs,
+                    matched_right - base_x,
+                    len(owned) + len(placed_body),
+                )
+                key = (base_x, baseline)
+                walks[key] = (score, model, x0, placed_body, glyphs, matched_right)
+    return walks
+
+
+def _ordinary_baseline_probe_walks(
     raw: set[tuple[int, int]],
     row_top: int,
     provisional_bottom: int,
@@ -213,21 +296,13 @@ def _baseline_probe_walks(
     left: int,
     right: int,
     anchor_x: int,
-    *,
-    allowed_labels: frozenset[str] | None,
-) -> dict[int, tuple[tuple[int, int, int], int, set[tuple[int, int]], int]]:
-    """Probe baseline cheaply from one bold start and only a few glyphs.
-
-    On page 1 the start probe uses only unaccented a/A models. Those model
-    pixels may be a subset of an accented glyph in the source; accent pixels are
-    deliberately ignored until the baseline has been verified to the right.
-    """
+):
+    """For non-page1 rows, prove baseline from an exact bold first glyph."""
     page_candidates = cached._bound_page_candidates(models)
-    first_candidates = _bold_candidates(page_candidates, allowed_labels)
-    candidate_rows = range(row_top, min(provisional_bottom, row_top + 12))
+    first_candidates = _bold_candidates(page_candidates)
     hypotheses: set[int] = set()
 
-    for anchor_y in candidate_rows:
+    for anchor_y in range(row_top, min(provisional_bottom, row_top + 12)):
         if (anchor_x, anchor_y) not in raw:
             continue
         for model, min_x, left_pixels in first_candidates:
@@ -257,12 +332,27 @@ def _baseline_probe_walks(
         if glyphs <= 0 or not owned:
             continue
         score = (glyphs, matched_right - anchor_x, len(owned))
-        walks[baseline] = (score, glyphs, owned, matched_right)
+        walks[(anchor_x, baseline)] = (
+            score,
+            None,
+            anchor_x,
+            owned,
+            glyphs,
+            matched_right,
+        )
     return walks
 
 
-def _exact_first_candidates(raw, baseline, page_candidates, anchor_x, left, right, allowed_labels):
-    """Resolve the first glyph exactly after baseline has been proved."""
+def _exact_first_candidates(
+    raw,
+    baseline,
+    page_candidates,
+    anchor_x,
+    left,
+    right,
+    allowed_labels,
+):
+    """Resolve the complete first glyph exactly after baseline is proved."""
     exact = []
     for candidate in _bold_candidates(page_candidates, allowed_labels):
         model, min_x, _left_pixels = candidate
@@ -312,48 +402,64 @@ def _discover_at_top(
 ) -> CachedRowBoundary:
     left, _column_top, right, column_bottom = _column_bounds(context, column)
     provisional_bottom = min(column_bottom, row_top + _provisional_height(models))
-    raw = _raw_ink(context, left=left, right=right, top=row_top, bottom=provisional_bottom)
-    text_start_x = _first_text_start_x(
+    raw = _raw_ink(
+        context,
+        left=left,
+        right=right,
+        top=row_top,
+        bottom=provisional_bottom,
+    )
+    first_ink_x = _first_text_ink_x(
         raw,
         row_top=row_top,
         provisional_bottom=provisional_bottom,
         left=left,
         right=right,
     )
-    if text_start_x is None:
+    if first_ink_x is None:
         raise RuntimeError(
             f"sequential raw-page discovery stopped at column={column} row={row_index}: "
-            f"no ordinary text start from top={row_top}"
+            f"no ordinary text ink from top={row_top}"
         )
 
     page1 = context.get("raw_page_layout_source") == "page1-raw-pixels"
-    probe_labels = PAGE1_BASE_LABELS if page1 else None
-    probe_walks = _baseline_probe_walks(
-        raw,
-        row_top,
-        provisional_bottom,
-        models,
-        left,
-        right,
-        text_start_x,
-        allowed_labels=probe_labels,
-    )
+    if page1:
+        probe_walks = _page1_baseline_probe_walks(
+            raw,
+            row_top,
+            provisional_bottom,
+            models,
+            left,
+            right,
+            first_ink_x,
+        )
+    else:
+        probe_walks = _ordinary_baseline_probe_walks(
+            raw,
+            row_top,
+            provisional_bottom,
+            models,
+            left,
+            right,
+            first_ink_x,
+        )
+
     if not probe_walks:
         raise RuntimeError(
             f"sequential raw-page discovery stopped at column={column} row={row_index}: "
-            f"no bold baseline probe at x={text_start_x} top={row_top}"
+            f"no bold baseline probe near x={first_ink_x} top={row_top}"
         )
 
     best_score = max(item[0] for item in probe_walks.values())
-    best_baselines = [baseline for baseline, item in probe_walks.items() if item[0] == best_score]
-    if len(best_baselines) != 1:
-        alternatives = sorted((baseline, probe_walks[baseline][0]) for baseline in best_baselines)
+    best_keys = [key for key, item in probe_walks.items() if item[0] == best_score]
+    if len(best_keys) != 1:
+        alternatives = sorted((key, probe_walks[key][0]) for key in best_keys)
         raise RuntimeError(
             f"sequential raw-page discovery stopped at column={column} row={row_index}: "
-            f"ambiguous baseline probe at x={text_start_x}: {alternatives}"
+            f"ambiguous baseline probe near x={first_ink_x}: {alternatives}"
         )
-    baseline = best_baselines[0]
 
+    text_start_x, baseline = best_keys[0]
     page_candidates = cached._bound_page_candidates(models)
     exact_labels = PAGE1_EXACT_LABELS if page1 else None
     first_candidates = _exact_first_candidates(
@@ -386,7 +492,9 @@ def _discover_at_top(
             f"baseline={baseline} proved but full row walk failed"
         )
 
-    homonym_owned = _match_homonym_on_baseline(raw, baseline, models, left, text_start_x)
+    homonym_owned = _match_homonym_on_baseline(
+        raw, baseline, models, left, text_start_x
+    )
     if homonym_owned:
         owned = set(owned)
         owned.update(homonym_owned)
@@ -407,7 +515,9 @@ def _discover_at_top(
     )
 
 
-def ensure_row_cached(context: dict, column: int, target_row: int, models) -> list[CachedRowBoundary]:
+def ensure_row_cached(
+    context: dict, column: int, target_row: int, models
+) -> list[CachedRowBoundary]:
     if target_row < 0:
         raise ValueError("target_row must be >= 0")
     cache = _cache(context).setdefault(column, [])
@@ -422,7 +532,11 @@ def ensure_row_cached(context: dict, column: int, target_row: int, models) -> li
             left=left,
             previous=previous,
         )
-        cache.append(_discover_at_top(context, column, row_index, row_top, previous, models))
+        cache.append(
+            _discover_at_top(
+                context, column, row_index, row_top, previous, models
+            )
+        )
     return cache
 
 
