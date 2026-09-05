@@ -12,9 +12,53 @@ previous wider x search remains as fallback, so this cannot remove an exact
 match that used to be possible. If no exact match exists we print the best
 same-baseline partial overlap, which tells us whether x anchoring or the facit
 raster/y offset is the likely problem.
+
+There is also one deliberately hard-coded diagnostic crop for page 1, column 1,
+row 0: when the first raw-page read starts at y=170 in the left column, only
+source pixels with 169 <= y <= 187 are exposed to the scanner. This is strictly
+a temporary experiment to test whether the old-style tight vertical crop makes
+the known homonym/headword row solvable again.
 """
 
 from . import ocr_sequential_raw_page_rows as _scanner
+
+
+_ORIGINAL_RAW_INK = _scanner._raw_ink
+
+
+def _debug_cropped_raw_ink(
+    context: dict,
+    *,
+    left: int,
+    right: int,
+    top: int,
+    bottom: int,
+) -> set[tuple[int, int]]:
+    raw = _ORIGINAL_RAW_INK(
+        context,
+        left=left,
+        right=right,
+        top=top,
+        bottom=bottom,
+    )
+
+    # Deliberately hard-coded experiment: page 1, column 1, row 0.
+    # Current raw layout for that column is x=50..246 and the scanner begins
+    # row 0 at y=170 after the proven initial border y=169.
+    if (
+        context.get("raw_page_layout_source") == "page1-raw-pixels"
+        and left == 50
+        and right == 246
+        and top == 170
+    ):
+        masked = {(x, y) for x, y in raw if 169 <= y <= 187}
+        print(
+            "raw-page-debug-crop: "
+            f"column=1 row=0 y=169..187 raw_pixels={len(raw)} masked_pixels={len(masked)}"
+        )
+        return masked
+
+    return raw
 
 
 def _ordered_x0_candidates(
@@ -116,6 +160,7 @@ def _match_homonym_on_baseline(
     return best
 
 
+_scanner._raw_ink = _debug_cropped_raw_ink
 _scanner._match_homonym_on_baseline = _match_homonym_on_baseline
 
 CachedRowBoundary = _scanner.CachedRowBoundary
