@@ -2,11 +2,12 @@ from __future__ import annotations
 
 """Sequential baseline discovery directly from the page pixel array.
 
-The first row is found by lowering a narrow left-edge probe from the top of the
-column until it reaches text. Later rows are found from the previous row's
-vertical start and horizontal start coordinate: the probe first has to leave
-the previous row, cross a real white gap, and then enter new ink near the left
-edge. Only then may a glyph establish a new baseline.
+The first row may be seeded from raw-page layout geometry: absolute column
+left/right plus the independently discovered row-0 top. Later rows are found
+from the previous row's vertical start and horizontal start coordinate: the
+probe first has to leave the previous row, cross a real white gap, and then
+enter new ink near the left edge. Only then may a glyph establish a new
+baseline.
 
 A row still has a generous provisional bottom while it is solved. Its final
 bottom is tightened only after the complete fixed-baseline row walk.
@@ -38,13 +39,29 @@ def _cache(context: dict) -> dict[int, list[CachedRowBoundary]]:
 
 
 def _column_bounds(context: dict, column: int) -> tuple[int, int, int, int]:
-    entry = context["row_map"]["columns"][column]
+    """Return absolute raw-page bounds (left, top, right, bottom).
+
+    A caller may provide ``raw_page_column_layout`` discovered directly from the
+    source pixels. That is authoritative and avoids all legacy row geometry.
+    The old row-map fallback remains temporarily for pages whose raw layout has
+    not yet been wired in.
+    """
     owners = context["pixel_owners"]
+    raw_layout = context.get("raw_page_column_layout") or {}
+    raw_column = raw_layout.get(column)
+    if raw_column is not None:
+        left = max(0, int(raw_column["left"]))
+        right = min(owners.width, int(raw_column["right"]))
+        top = max(0, int(raw_column["row0_top"]))
+        bottom = min(owners.height, int(raw_column.get("bottom", owners.height)))
+        return left, top, right, bottom
+
+    entry = context["row_map"]["columns"][column]
     left = int(entry.get("crop_left", entry.get("left", 0)))
     right = int(entry.get("crop_right", entry.get("right", owners.width)))
     rows = entry.get("rows") or []
-    # Transitional only: old row geometry supplies the outer column extent,
-    # never an individual row boundary or jump target.
+    # Transitional fallback only: old row geometry supplies the outer column
+    # extent, never an individual row boundary or jump target.
     top = max(0, min((int(r["page_top"]) for r in rows), default=0) - 12)
     bottom = min(owners.height, max((int(r["page_bottom"]) for r in rows), default=owners.height) + 12)
     return left, top, right, bottom
@@ -58,12 +75,7 @@ def _provisional_height(models) -> int:
 
 
 def _start_band(left: int, previous_start_x: int | None) -> tuple[int, int]:
-    """Return the narrow lexical-start band used only for row discovery.
-
-    The whole established SAOL left-start region remains legal, so a row may
-    switch between homonym/headword/continuation indentation. The previous
-    start coordinate is used to order candidates, not to forbid those switches.
-    """
+    """Return the narrow lexical-start band used only for row discovery."""
     return left, left + 40
 
 
@@ -88,20 +100,20 @@ def _find_next_row_top(
 ) -> int:
     """Lower the left-edge probe until it enters a new printed row.
 
-    For row zero the first ink wins. For later rows we begin at the previous
-    row top, require a small completely white vertical gap in the lexical-start
-    band, and only then accept the next ink row. This prevents descenders or a
-    second glyph on the same printed line from becoming a new row.
+    If raw page layout supplied row zero, ``column_top`` is already the proven
+    first ink row and is returned unchanged. For later rows we begin at the
+    previous row top, require a small completely white vertical gap in the
+    lexical-start band, and only then accept the next ink row.
     """
     band_left, band_right = _start_band(left, None if previous is None else previous.start_x)
     if previous is None:
+        if context.get("raw_page_column_layout"):
+            return column_top
         for y in range(column_top, column_bottom):
             if _row_has_start_ink(context, y, band_left, band_right):
                 return y
         raise RuntimeError("no start ink found in column")
 
-    # Two fully white pixel rows are enough to prove that we have left the
-    # previous digital glyph raster. This is separation evidence, not a pitch.
     blank_run = 0
     saw_previous_ink = False
     for y in range(previous.row_top, column_bottom):
@@ -164,7 +176,6 @@ def _walk_baseline(
             cursor = max(cursor + 1, glyph_right)
             continue
 
-        # A space moves only the horizontal cursor. It can never alter baseline.
         later_x = [x for x, _y in remaining if x > cursor]
         if not later_x:
             break
@@ -187,9 +198,6 @@ def _discover_at_top(
     page_candidates = cached._bound_page_candidates(models)
     band_left, band_right = _start_band(left, None if previous is None else previous.start_x)
 
-    # The top was established by left-edge re-entry. Search only the few raster
-    # rows immediately below that top for a complete starting glyph. Accents and
-    # curved glyphs need not have their leftmost model pixel on the very first y.
     candidate_rows = range(row_top, min(provisional_bottom, row_top + 12))
     for anchor_y in candidate_rows:
         xs = [x for x, y in raw if y == anchor_y and band_left <= x < band_right]
