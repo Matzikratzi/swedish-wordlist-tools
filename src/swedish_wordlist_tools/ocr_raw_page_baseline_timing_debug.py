@@ -11,6 +11,7 @@ import sys
 from time import perf_counter
 
 from . import ocr_raw_page_baseline_debug as debug
+from . import ocr_sequential_raw_page_rows_exactmatch as _exactmatch  # noqa: F401
 
 
 _TOTALS = {"setup": 0.0, "ocr": 0.0}
