@@ -21,6 +21,13 @@ _ORIGINAL_PAGE1_BASELINE_PROBE_WALKS = _scanner._page1_baseline_probe_walks
 _ORIGINAL_WALK_BASELINE = _scanner._walk_baseline
 _WALK_CACHE: dict[int, tuple[set[tuple[int, int]], dict[tuple, tuple]]] = {}
 
+# A row may genuinely begin with a few tiny marks (for example ``~``).  They
+# are therefore allowed to lead a baseline hypothesis, but they must soon be
+# followed by something geometrically stronger.  The false b=215 hypothesis
+# on page 1 row 2 consists entirely of 3--5-pixel fragments.
+_SMALL_GLYPH_MAX_PIXELS = 5
+_MAX_LEADING_SMALL_GLYPHS = 3
+
 
 def _candidate_key(candidates) -> tuple | None:
     if candidates is None:
@@ -135,6 +142,8 @@ class _RaceState:
     owned: set[tuple[int, int]] | None = None
     previous_style: str | None = None
     matched_glyphs: int = 0
+    leading_small_glyphs: int = 0
+    baseline_verified: bool = False
     exhausted: bool = False
 
     def __post_init__(self) -> None:
@@ -164,6 +173,7 @@ def _advance_one(
             )
 
         chosen = None
+        blocked_small = None
         for model, min_x, _left_pixels in candidates:
             x0 = state.cursor - min_x
             if x0 < left or x0 + model.width > right:
@@ -172,20 +182,59 @@ def _advance_one(
                 (x0 + mx, state.baseline + my)
                 for mx, my in model.pixels
             }
-            if placed and placed.issubset(state.remaining):
-                chosen = (model, placed)
-                break
+            if not placed or not placed.issubset(state.remaining):
+                continue
+
+            is_small = len(placed) <= _SMALL_GLYPH_MAX_PIXELS
+            if (
+                not state.baseline_verified
+                and is_small
+                and state.leading_small_glyphs >= _MAX_LEADING_SMALL_GLYPHS
+            ):
+                # Three tiny leading glyphs are allowed.  If the next actual
+                # match is tiny as well, do not let the hypothesis hop past it
+                # and keep scavenging punctuation farther right.  A stronger
+                # candidate at this same x may still rescue the baseline.
+                if blocked_small is None:
+                    blocked_small = (model, placed, x0)
+                continue
+
+            chosen = (model, placed, x0)
+            break
 
         if chosen is not None:
-            model, placed = chosen
+            model, placed, x0 = chosen
             state.remaining.difference_update(placed)
             state.owned.update(placed)
             state.matched_glyphs += 1
+            if not state.baseline_verified:
+                if len(placed) <= _SMALL_GLYPH_MAX_PIXELS:
+                    state.leading_small_glyphs += 1
+                else:
+                    state.baseline_verified = True
             state.previous_style = _scanner.priority._typographic_style(model.style)
             glyph_right = max(px for px, _py in placed) + 1
             state.matched_right = max(state.matched_right, glyph_right)
             state.cursor = max(state.cursor + 1, glyph_right)
+            print(
+                "raw-page-race-glyph: "
+                f"b={state.baseline} n={state.matched_glyphs} x={state.cursor if False else x0 + min(px for px, _py in placed) - x0} "
+                f"x0={x0} label={model.label!r} "
+                f"id={getattr(model, 'model_id', None)!r} style={model.style!r} "
+                f"pixels={len(placed)} verified={state.baseline_verified} "
+                f"leading_small={state.leading_small_glyphs}"
+            )
             return True
+
+        if blocked_small is not None:
+            model, placed, x0 = blocked_small
+            print(
+                "raw-page-baseline-reject-small-run: "
+                f"b={state.baseline} after={state.leading_small_glyphs} "
+                f"x0={x0} label={model.label!r} pixels={len(placed)}"
+            )
+            state.exhausted = True
+            return False
 
         later_x = [x for x, _y in state.remaining if x > state.cursor]
         if not later_x:
@@ -246,14 +295,18 @@ def _race_baselines(
         "raw-page-baseline-race: "
         f"x={anchor_x} rounds={rounds} "
         + ", ".join(
-            f"b={state.baseline}:glyphs={state.matched_glyphs}:right={state.matched_right}"
+            f"b={state.baseline}:glyphs={state.matched_glyphs}:right={state.matched_right}:verified={state.baseline_verified}"
             for state in states
         )
     )
 
     results = {}
     for state in states:
-        if state.matched_glyphs <= 0 or not state.owned:
+        if (
+            state.matched_glyphs <= 0
+            or not state.owned
+            or not state.baseline_verified
+        ):
             continue
         result = (
             state.matched_glyphs,
