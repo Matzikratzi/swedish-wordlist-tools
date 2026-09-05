@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-"""Render an absolute-x strip of raw SAOL facsimile page pixels as a grid.
+"""Render raw SAOL facsimile page pixels as an absolute-coordinate grid.
 
 Coordinates are always source-PNG coordinates. No row/column geometry,
-ownership, header removal, or rectangle masking is used. This makes debug
-images directly comparable with later OCR diagnostics.
+ownership, header removal, or rectangle masking is used. The view starts at an
+absolute source x and extends to the page's right edge so every source pixel to
+the right remains visible and directly comparable with OCR diagnostics.
 """
 
 import argparse
@@ -35,17 +36,18 @@ def _load_thresholded_page(jsonl: Path, page_number: int, threshold: int) -> Ima
     return gray.point(lambda value: 0 if value < threshold else 255, mode="1").convert("L")
 
 
-def _render_grid(page: Image.Image, *, source_left: int, source_width: int, cell: int, tick: int) -> Image.Image:
+def _render_grid(page: Image.Image, *, source_left: int, cell: int, y_tick: int, x_tick: int) -> Image.Image:
     left = max(0, min(int(source_left), page.width - 1))
-    right = min(page.width, left + max(1, int(source_width)))
+    right = page.width
     width = right - left
     height = page.height
     cell = max(2, cell)
-    tick = max(1, tick)
+    y_tick = max(1, y_tick)
+    x_tick = max(1, x_tick)
 
     ruler_w = 120
     top_pad = 40
-    right_pad = 72  # previous 12 px plus requested 60 px
+    right_pad = 72
     bottom_pad = 12
     grid_w = width * cell
     grid_h = height * cell
@@ -72,10 +74,10 @@ def _render_grid(page: Image.Image, *, source_left: int, source_width: int, cell
         py = gy + y * cell
         draw.line((gx, py, gx + grid_w, py), fill=grid_color, width=1)
 
-    # y labels are absolute source-PNG coordinates.
+    # Absolute y ruler on the left.
     axis_x = gx - 8
     draw.line((axis_x, gy, axis_x, gy + grid_h), fill="black", width=1)
-    for source_y in range(0, height + 1, tick):
+    for source_y in range(0, height + 1, y_tick):
         py = gy + source_y * cell
         draw.line((axis_x - 7, py, axis_x, py), fill="black", width=1)
         label = str(source_y)
@@ -83,42 +85,59 @@ def _render_grid(page: Image.Image, *, source_left: int, source_width: int, cell
         text_h = box[3] - box[1]
         draw.text((axis_x - 14 - (box[2] - box[0]), py - text_h // 2), label, fill="black", font=axis_font)
 
-    # x labels retain absolute source coordinates. Label every 20 pixels and
-    # always label the exact left edge so cropped views remain unambiguous.
-    label_xs = {left}
-    first_multiple = ((left + tick - 1) // tick) * tick
-    label_xs.update(range(first_multiple, right, tick))
-    for source_x in sorted(label_xs):
-        px = gx + (source_x - left) * cell
-        draw.line((px, gy - 7, px, gy), fill="black", width=1)
-        draw.text((px + 3, 3), str(source_x), fill="black", font=axis_font)
+    # Horizontal x rulers at every 10th absolute source-y position.
+    # At y=50 the ruler is numbered; the other rulers only have tick marks.
+    first_x_tick = ((left + x_tick - 1) // x_tick) * x_tick
+    x_positions = list(range(first_x_tick, right, x_tick))
+    if left not in x_positions:
+        x_positions.insert(0, left)
+
+    for source_y in range(0, height, 10):
+        py = gy + source_y * cell
+        draw.line((gx, py, gx + grid_w, py), fill="black", width=1)
+        for source_x in x_positions:
+            px = gx + (source_x - left) * cell
+            draw.line((px, py - 7, px, py + 7), fill="black", width=1)
+
+    numbered_y = 50
+    if 0 <= numbered_y < height:
+        py = gy + numbered_y * cell
+        for source_x in x_positions:
+            px = gx + (source_x - left) * cell
+            label = str(source_x)
+            box = draw.textbbox((0, 0), label, font=axis_font)
+            text_w = box[2] - box[0]
+            draw.rectangle((px - text_w // 2 - 2, py - 31, px + text_w // 2 + 2, py - 7), fill="white")
+            draw.text((px - text_w // 2, py - 31), label, fill="black", font=axis_font)
 
     return out
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Render raw page pixels using absolute source-PNG x/y coordinates."
+        description="Render raw page pixels from an absolute source x through the page's right edge."
     )
     ap.add_argument("jsonl", type=Path)
     ap.add_argument("--page", type=int, required=True)
-    ap.add_argument("--left", type=int, default=40, help="absolute source x of first displayed pixel; default 40")
-    ap.add_argument("--width", type=int, default=60, help="number of source pixels to render; default 60 (x=40..99)")
+    ap.add_argument("--left", type=int, default=45, help="absolute source x of first displayed pixel; default 45")
+    # Retained for compatibility with older commands; full right side is now always shown.
+    ap.add_argument("--width", type=int, default=None, help=argparse.SUPPRESS)
     ap.add_argument("--cell", type=int, default=5, help="display pixels per source-pixel cell")
-    ap.add_argument("--tick", type=int, default=20, help="absolute coordinate label spacing")
+    ap.add_argument("--tick", type=int, default=20, help="absolute y-coordinate label spacing")
+    ap.add_argument("--x-tick", type=int, default=10, help="absolute x tick spacing on horizontal rulers")
     ap.add_argument("--threshold", type=int, default=210)
     ap.add_argument("--output", type=Path, required=True)
     args = ap.parse_args()
 
     page = _load_thresholded_page(args.jsonl, args.page, args.threshold)
     left = max(0, min(args.left, page.width - 1))
-    right = min(page.width, left + max(1, args.width))
-    image = _render_grid(page, source_left=left, source_width=args.width, cell=args.cell, tick=args.tick)
+    image = _render_grid(page, source_left=left, cell=args.cell, y_tick=args.tick, x_tick=args.x_tick)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     image.save(args.output)
     print(
         f"wrote {args.output}: page={args.page} raw_source_size={page.width}x{page.height} "
-        f"shown_absolute_x={left}..{right - 1} absolute_y=0..{page.height - 1} threshold={args.threshold}"
+        f"shown_absolute_x={left}..{page.width - 1} absolute_y=0..{page.height - 1} "
+        f"numbered_x_axis_y=50 x_tick={args.x_tick} threshold={args.threshold}"
     )
     return 0
 
