@@ -176,7 +176,14 @@ def _page1_baseline_probe_walks(
     right: int,
     first_ink_x: int,
 ):
-    """Prefer a local x-first whole-row baseline search on the first page row."""
+    """Use leftmost ink to prove y, then hand the row walk back to text x.
+
+    The local x-first probe may be anchored in a superscript homonym. Its x is
+    therefore evidence for the baseline search only, not necessarily the x of
+    the first baseline-aligned text glyph. Once a winning baseline has been
+    found, return it keyed by ``first_ink_x`` so the main scanner verifies and
+    consumes the row from the ordinary text start.
+    """
     local_walks = _local_xfirst_baseline_walks(
         raw,
         search_from,
@@ -186,7 +193,14 @@ def _page1_baseline_probe_walks(
         right,
     )
     if local_walks:
-        return local_walks
+        remapped = {}
+        for (_anchor_x, baseline), item in local_walks.items():
+            remapped[(first_ink_x, baseline)] = item
+        print(
+            f"raw-page-local-xfirst-baseline-handoff: "
+            f"probe_x={next(iter(local_walks))[0]} text_x={first_ink_x}"
+        )
+        return remapped
 
     page_candidates = _scanner.cached._bound_page_candidates(models)
     first_candidates = tuple(
