@@ -167,6 +167,80 @@ def _local_xfirst_baseline_walks(
     return walks
 
 
+def _page1_text_walks_on_proved_baselines(
+    raw: set[tuple[int, int]],
+    local_walks,
+    models,
+    left: int,
+    right: int,
+    first_ink_x: int,
+):
+    """Locate the actual first headword glyph after x-first proved baseline y."""
+    page_candidates = _scanner.cached._bound_page_candidates(models)
+    first_candidates = tuple(
+        _scanner._bold_candidates(page_candidates, _scanner.PAGE1_EXACT_LABELS)
+    )
+    walks = {}
+
+    for (_probe_x, baseline), _local_item in sorted(local_walks.items()):
+        for candidate in first_candidates:
+            model, min_x, _left_pixels = candidate
+            x0_lo = max(left, first_ink_x - _scanner.PAGE1_X_LEFT_SLACK)
+            x0_hi = min(
+                right - model.width,
+                first_ink_x + _scanner.PAGE1_X_RIGHT_SLACK,
+            )
+            if x0_hi < x0_lo:
+                continue
+            for x0 in range(x0_lo, x0_hi + 1):
+                placed = {(x0 + mx, baseline + py) for mx, py in model.pixels}
+                if not placed or not placed.issubset(raw):
+                    continue
+                text_start_x = x0 + min_x
+                exact_first = _scanner._exact_first_candidates(
+                    raw,
+                    baseline,
+                    first_candidates,
+                    text_start_x,
+                    left,
+                    right,
+                )
+                if not exact_first:
+                    continue
+                glyphs, owned, matched_right = _scanner._walk_baseline(
+                    raw,
+                    baseline,
+                    models,
+                    left,
+                    right,
+                    text_start_x,
+                    first_candidates=exact_first,
+                )
+                if glyphs <= 0 or not owned:
+                    continue
+                score = (matched_right - text_start_x, glyphs, len(owned))
+                key = (text_start_x, baseline)
+                value = (
+                    score,
+                    model,
+                    x0,
+                    owned,
+                    glyphs,
+                    matched_right,
+                )
+                old = walks.get(key)
+                if old is None or score > old[0]:
+                    walks[key] = value
+
+    if walks:
+        diagnostics = ", ".join(
+            f"x={text_x} b={baseline}:score={item[0]}"
+            for (text_x, baseline), item in sorted(walks.items())
+        )
+        print(f"raw-page-local-xfirst-text-candidates: {diagnostics}")
+    return walks
+
+
 def _page1_baseline_probe_walks(
     raw: set[tuple[int, int]],
     search_from: int,
@@ -176,14 +250,7 @@ def _page1_baseline_probe_walks(
     right: int,
     first_ink_x: int,
 ):
-    """Use leftmost ink to prove y, then hand the row walk back to text x.
-
-    The local x-first probe may be anchored in a superscript homonym. Its x is
-    therefore evidence for the baseline search only, not necessarily the x of
-    the first baseline-aligned text glyph. Once a winning baseline has been
-    found, return it keyed by ``first_ink_x`` so the main scanner verifies and
-    consumes the row from the ordinary text start.
-    """
+    """Use leftmost ink to prove baseline y, then find a real headword glyph x."""
     local_walks = _local_xfirst_baseline_walks(
         raw,
         search_from,
@@ -193,14 +260,26 @@ def _page1_baseline_probe_walks(
         right,
     )
     if local_walks:
-        remapped = {}
-        for (_anchor_x, baseline), item in local_walks.items():
-            remapped[(first_ink_x, baseline)] = item
-        print(
-            f"raw-page-local-xfirst-baseline-handoff: "
-            f"probe_x={next(iter(local_walks))[0]} text_x={first_ink_x}"
+        text_walks = _page1_text_walks_on_proved_baselines(
+            raw,
+            local_walks,
+            models,
+            left,
+            right,
+            first_ink_x,
         )
-        return remapped
+        if text_walks:
+            probe_x = next(iter(local_walks))[0]
+            text_xs = sorted({text_x for text_x, _baseline in text_walks})
+            print(
+                "raw-page-local-xfirst-baseline-handoff: "
+                f"probe_x={probe_x} exact_text_x={text_xs}"
+            )
+            return text_walks
+        print(
+            "raw-page-local-xfirst-baseline-handoff: "
+            f"probe_x={next(iter(local_walks))[0]} no exact headword glyph"
+        )
 
     page_candidates = _scanner.cached._bound_page_candidates(models)
     first_candidates = tuple(
