@@ -44,6 +44,7 @@ def _render(states: list[dict], *, pages: list[int], search_gap_count: int) -> s
                 "width": int(state.get("neighbor_raster_width") or 0),
                 "height": int(state.get("neighbor_raster_height") or 0),
                 "boundaries": list(state.get("neighbor_row_boundaries") or []),
+                "support_lines": list(state.get("neighbor_support_lines") or []),
                 "core_top": int(state.get("neighbor_core_top") or 0),
                 "core_bottom": int(state.get("neighbor_core_bottom") or 0),
                 "source_pixels": int(state.get("source_pixels") or 0),
@@ -89,7 +90,7 @@ for(const S of STATES) {{
   const wrap=make('div','canvas-wrap');
   const canvas=document.createElement('canvas');
   wrap.appendChild(canvas); card.appendChild(wrap);
-  card.appendChild(make('div','legend','Röda linjer = radgränser. Rutnät = en källpixel per ruta. Målrad är mittenraden.'));
+  card.appendChild(make('div','legend','Heldraget rött = radgräns. Streckat blått = stödlinje. Rutnät = en källpixel per ruta. Målrad är mittenraden.'));
   root.appendChild(card);
 
   const ctx=canvas.getContext('2d');
@@ -106,11 +107,25 @@ for(const S of STATES) {{
     for(let y=0;y<=S.height;y++){{const yy=TOP+y*SCALE+.5;ctx.beginPath();ctx.moveTo(0,yy);ctx.lineTo(S.width*SCALE,yy);ctx.stroke();}}
     ctx.restore();
 
-    ctx.save();ctx.strokeStyle='rgba(190,25,25,.95)';ctx.lineWidth=2;
+    // Draw row boundaries first. Older neighbor-raster states may also carry
+    // support lines in this compatibility list, so explicitly skip them here.
+    ctx.save();ctx.strokeStyle='rgba(190,25,25,.95)';ctx.lineWidth=2;ctx.setLineDash([]);
     for(const entry of S.boundaries){{
-      const yy=entry[0], label=entry[1]; const y=TOP+yy*SCALE+.5;
+      const label=String(entry[1] || '');
+      if(label.startsWith('STÖDLINJE ')) continue;
+      const yy=entry[0]; const y=TOP+yy*SCALE+.5;
       ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(canvas.width,y);ctx.stroke();
       ctx.fillStyle='rgba(190,25,25,.95)';ctx.font='11px monospace';ctx.fillText(label,4,Math.max(11,y-2));
+    }}
+    ctx.restore();
+
+    // Support lines are deliberately drawn after boundaries so they remain
+    // visible where the two overlays coincide.
+    ctx.save();ctx.strokeStyle='rgba(25,90,200,.95)';ctx.fillStyle='rgba(25,90,200,.95)';ctx.lineWidth=2;ctx.setLineDash([8,5]);
+    for(const entry of (S.support_lines || [])){{
+      const yy=entry[0], label=entry[1]; const y=TOP+yy*SCALE+.5;
+      ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(canvas.width,y);ctx.stroke();
+      ctx.font='11px monospace';ctx.fillText(`STÖDLINJE ${{label}}`,4,Math.max(11,y-2));
     }}
     ctx.restore();
   }};
