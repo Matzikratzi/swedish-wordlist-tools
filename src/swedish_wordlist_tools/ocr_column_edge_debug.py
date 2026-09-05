@@ -4,16 +4,15 @@ from __future__ import annotations
 
 The diagnostic deliberately ignores legacy column/row geometry:
 1. threshold the full facsimile through the existing page pixel array,
-2. remove the first (header) ink band at the top of the page,
+2. remove only the small connected components belonging to the top header,
 3. descend to the first remaining horizontal scanline containing ink,
 4. find that scanline's leftmost black pixel,
 5. move 20 source pixels left and render 40 source pixels to the right,
-6. show the complete page height as a nearest-neighbour pixel grid.
-
-This is meant to make the page's real left-edge row structure inspectable.
+6. show the complete page height as a source-pixel grid.
 """
 
 import argparse
+from collections import deque
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -49,39 +48,80 @@ def _first_ink_y(rows: list[bytearray], start: int = 0) -> int | None:
     return None
 
 
-def _header_band_bottom(rows: list[bytearray], *, blank_run: int = 6) -> tuple[int, int]:
-    """Return [top,bottom) for the first page-wide ink band.
+def _components(rows: list[bytearray]) -> list[tuple[set[tuple[int, int]], tuple[int, int, int, int]]]:
+    """Return 8-connected black components and half-open bounding boxes."""
+    if not rows:
+        return []
+    height = len(rows)
+    width = len(rows[0])
+    seen: set[tuple[int, int]] = set()
+    result = []
+    for y in range(height):
+        for x in range(width):
+            if not rows[y][x] or (x, y) in seen:
+                continue
+            q = deque([(x, y)])
+            seen.add((x, y))
+            pixels: set[tuple[int, int]] = set()
+            min_x = max_x = x
+            min_y = max_y = y
+            while q:
+                px, py = q.popleft()
+                pixels.add((px, py))
+                min_x = min(min_x, px); max_x = max(max_x, px)
+                min_y = min(min_y, py); max_y = max(max_y, py)
+                for dy in (-1, 0, 1):
+                    for dx in (-1, 0, 1):
+                        if dx == 0 and dy == 0:
+                            continue
+                        nx, ny = px + dx, py + dy
+                        if not (0 <= nx < width and 0 <= ny < height):
+                            continue
+                        if not rows[ny][nx] or (nx, ny) in seen:
+                            continue
+                        seen.add((nx, ny))
+                        q.append((nx, ny))
+            result.append((pixels, (min_x, min_y, max_x + 1, max_y + 1)))
+    return result
 
-    Glyphs can contain blank internal scanlines, so the band only ends after a
-    small run of completely white page rows. This intentionally treats the
-    little left glyph and the glyphs at the same height on the far right as one
-    header band without knowing what they say.
+
+def _remove_top_header_components(
+    rows: list[bytearray], *, top_slack: int = 14, max_height: int = 24
+) -> tuple[int, int, int]:
+    """Whiten only small components sharing the page's very first y-band.
+
+    This matches the actual SAOL header shape: a small glyph at the left and a
+    handful of glyphs at roughly the same height on the far right. Unlike the
+    previous page-row-band heuristic, dense dictionary text below cannot cause
+    the header removal to grow down through the page.
     """
-    top = _first_ink_y(rows)
-    if top is None:
+    first_y = _first_ink_y(rows)
+    if first_y is None:
         raise RuntimeError("page contains no thresholded ink")
 
-    blanks = 0
-    for y in range(top, len(rows)):
-        if _row_has_ink(rows[y]):
-            blanks = 0
-        else:
-            blanks += 1
-            if blanks >= blank_run:
-                return top, y - blank_run + 1
-    return top, len(rows)
+    selected = []
+    for pixels, bbox in _components(rows):
+        _left, top, _right, bottom = bbox
+        height = bottom - top
+        if top <= first_y + top_slack and height <= max_height:
+            selected.append((pixels, bbox))
 
+    if not selected:
+        raise RuntimeError(f"no small top components found near y={first_y}")
 
-def _whiten_band(rows: list[bytearray], top: int, bottom: int) -> None:
-    for y in range(max(0, top), min(len(rows), bottom)):
-        rows[y][:] = b"\x00" * len(rows[y])
+    bottom = first_y
+    for pixels, bbox in selected:
+        bottom = max(bottom, bbox[3])
+        for x, y in pixels:
+            rows[y][x] = 0
+    return first_y, bottom, len(selected)
 
 
 def _first_text_scanline(rows: list[bytearray], start_y: int) -> tuple[int, int]:
     """Find first remaining horizontal scanline and its leftmost ink x."""
     y = _first_ink_y(rows, start_y)
     if y is None:
-        raise RuntimeError("no ink remains below the removed header")
+        raise RuntimeError("no ink remains below the removed top components")
     row = rows[y]
     for x, value in enumerate(row):
         if value:
@@ -98,6 +138,7 @@ def _render_grid(
     tick: int,
     header_top: int,
     header_bottom: int,
+    header_components: int,
     first_text_y: int,
     first_text_x: int,
 ) -> Image.Image:
@@ -119,7 +160,6 @@ def _render_grid(
     gx = ruler
     gy = top_pad
 
-    # Pixel cells: black/white source first, then thin grid lines over them.
     for y in range(height):
         for sx, x in enumerate(range(source_left, source_right)):
             if rows[y][x]:
@@ -127,8 +167,6 @@ def _render_grid(
                 y0 = gy + y * cell
                 draw.rectangle((x0, y0, x0 + cell - 1, y0 + cell - 1), fill="black")
 
-    # A real grid is useful at this narrow width; horizontal every source pixel,
-    # vertical every source pixel. Keep the lines light so ink remains obvious.
     grid_color = (210, 210, 210)
     for sx in range(source_width + 1):
         px = gx + sx * cell
@@ -137,7 +175,6 @@ def _render_grid(
         py = gy + y * cell
         draw.line((gx, py, gx + grid_w, py), fill=grid_color, width=1)
 
-    # Strong y-axis every 20 source pixels (configurable).
     axis_x = gx - 8
     draw.line((axis_x, gy, axis_x, gy + grid_h), fill="black", width=1)
     for y in range(0, height + 1, max(1, tick)):
@@ -150,7 +187,7 @@ def _render_grid(
     draw.text((gx, 3), f"x={source_left}..{source_right - 1}  ({source_width} px)", fill="black", font=font)
     draw.text(
         (gx, 16),
-        f"header y={header_top}..{header_bottom - 1} whitened; first remaining ink=({first_text_x},{first_text_y})",
+        f"top components={header_components}, y={header_top}..{header_bottom - 1}; first remaining ink=({first_text_x},{first_text_y})",
         fill="black",
         font=small,
     )
@@ -159,17 +196,17 @@ def _render_grid(
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Find the first text reentry from the full page and render a 40-pixel full-height grid."
+        description="Remove the top header components, then render a 40-pixel full-height page grid."
     )
     ap.add_argument("jsonl", type=Path)
     ap.add_argument("--page", type=int, required=True)
-    # Retained only so old command lines do not fail; it is intentionally ignored.
     ap.add_argument("--column", type=int, default=None, help=argparse.SUPPRESS)
     ap.add_argument("--width", type=int, default=40, help="source width to render; default 40")
     ap.add_argument("--left-pad", type=int, default=20, help="move this many source pixels left from first ink")
     ap.add_argument("--cell", type=int, default=6, help="display pixels per source-pixel cell")
     ap.add_argument("--tick", type=int, default=20, help="y-axis label spacing in source pixels")
-    ap.add_argument("--header-blank-run", type=int, default=6, help="white page rows ending the header band")
+    ap.add_argument("--header-top-slack", type=int, default=14, help="max component top offset from first page ink")
+    ap.add_argument("--header-max-height", type=int, default=24, help="largest component height considered header")
     ap.add_argument("--threshold", type=int, default=210)
     ap.add_argument("--output", type=Path, required=True)
     args = ap.parse_args()
@@ -177,8 +214,11 @@ def main() -> int:
     context = page_editor.build_page_context_pixel_array(args.jsonl, args.page, args.threshold)
     rows = _page_ink(context)
 
-    header_top, header_bottom = _header_band_bottom(rows, blank_run=max(1, args.header_blank_run))
-    _whiten_band(rows, header_top, header_bottom)
+    header_top, header_bottom, header_components = _remove_top_header_components(
+        rows,
+        top_slack=max(0, args.header_top_slack),
+        max_height=max(1, args.header_max_height),
+    )
     first_text_y, first_text_x = _first_text_scanline(rows, header_bottom)
     source_left = max(0, first_text_x - max(0, args.left_pad))
 
@@ -190,14 +230,15 @@ def main() -> int:
         tick=max(1, args.tick),
         header_top=header_top,
         header_bottom=header_bottom,
+        header_components=header_components,
         first_text_y=first_text_y,
         first_text_x=first_text_x,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     image.save(args.output)
     print(
-        f"wrote {args.output}: page={args.page} header={header_top}..{header_bottom - 1} "
-        f"first_remaining_ink=({first_text_x},{first_text_y}) "
+        f"wrote {args.output}: page={args.page} removed_top_components={header_components} "
+        f"header_y={header_top}..{header_bottom - 1} first_remaining_ink=({first_text_x},{first_text_y}) "
         f"source_x={source_left}..{source_left + max(1, args.width) - 1}"
     )
     return 0
