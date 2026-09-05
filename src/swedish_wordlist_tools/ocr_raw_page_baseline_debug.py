@@ -24,6 +24,20 @@ from .ocr_glyph_review_delete import load_facit_with_typography
 from .ocr_page1_layout_debug import _load_thresholded_page, detect_page1_layout_details
 
 
+def _known_column_bottom(context: dict, column: int) -> int:
+    """Return the known lower edge of the text column from page geometry.
+
+    This geometry is used only as an outer page/column bound.  It is never used
+    to determine a row baseline or row border.
+    """
+    owners = context["pixel_owners"]
+    entry = (context.get("row_map") or {}).get("columns", {}).get(column) or {}
+    rows = entry.get("rows") or []
+    if not rows:
+        return owners.height
+    return min(owners.height, max(int(row["page_bottom"]) for row in rows) + 1)
+
+
 def _install_page1_raw_layout(context: dict, jsonl: Path, threshold: int) -> None:
     """Install absolute raw-pixel column bounds and row-0 search starts for page 1."""
     layout_page = _load_thresholded_page(jsonl, 1, threshold)
@@ -33,7 +47,7 @@ def _install_page1_raw_layout(context: dict, jsonl: Path, threshold: int) -> Non
             "left": column.left,
             "right": column.right,
             "row0_top": row0_top,
-            "bottom": context["pixel_owners"].height,
+            "bottom": _known_column_bottom(context, column.index + 1),
         }
         for column, row0_top in zip(layout.columns, layout.row0_tops)
     }
@@ -191,6 +205,7 @@ def main() -> int:
                     "column": args.column,
                     "left": raw_column["left"],
                     "right": raw_column["right"],
+                    "bottom": raw_column["bottom"],
                     "row0_search_from": raw_column["row0_top"],
                     "page1_start_probe": "bold:a,á,à,A,Á,À",
                     "geometry": "initial-border-then-previous-border",
