@@ -2,11 +2,11 @@ from __future__ import annotations
 
 """Sequential baseline discovery directly from the page pixel array.
 
-Rows are discovered from raw thresholded page pixels.  A row top is found first;
-then the first bold text glyph establishes the baseline.  On page 1 the first
-headword glyph is known to be an a/A variant, so we use only bold a/A body
-shapes as a cheap baseline probe and resolve accents only after the baseline is
-verified by following glyphs.
+Rows are discovered from raw thresholded page pixels. A row top is found first;
+then the first bold text glyph establishes the baseline. On page 1 the initial
+headword glyph is known to be an a/A variant, so only the six bold variants
+``a á à A Á À`` are tried in a very small absolute-x window. The winning
+baseline is verified with a few following glyphs before one full row walk.
 """
 
 from dataclasses import dataclass
@@ -19,10 +19,9 @@ from .ocr_raw_page_baseline_row import _raw_ink
 HOMONYM_PROBE_WIDTH = 12
 FIRST_TEXT_SEARCH_WIDTH = 40
 BASELINE_PROBE_GLYPHS = 3
-PAGE1_BASE_LABELS = frozenset({"a", "A"})
 PAGE1_EXACT_LABELS = frozenset({"a", "á", "à", "A", "Á", "À"})
-PAGE1_BODY_X_SLACK = 8
-PAGE1_IGNORE_TOP_MODEL_ROWS = 2
+PAGE1_X_LEFT_SLACK = 4
+PAGE1_X_RIGHT_SLACK = 10
 
 
 @dataclass(frozen=True)
@@ -195,11 +194,7 @@ def _first_text_ink_x(
     left: int,
     right: int,
 ) -> int | None:
-    """Return first raw ink x after the homonym strip.
-
-    On page 1 this may be an accent pixel rather than the base letter's left
-    edge.  It is therefore only a lower bound for the relaxed a/A body probe.
-    """
+    """First raw ink x after the homonym strip; not necessarily glyph x0."""
     text_left = min(right, left + HOMONYM_PROBE_WIDTH)
     text_right = min(right, left + FIRST_TEXT_SEARCH_WIDTH)
     y_limit = min(provisional_bottom, row_top + 12)
@@ -219,17 +214,6 @@ def _bold_candidates(page_candidates, allowed_labels: frozenset[str] | None = No
     ]
 
 
-def _model_body_pixels(model) -> frozenset[tuple[int, int]]:
-    """Return a conservative lower-body fingerprint for a page-1 a/A probe."""
-    ys = sorted({y for _x, y in model.pixels})
-    if not ys:
-        return frozenset()
-    cutoff_index = min(PAGE1_IGNORE_TOP_MODEL_ROWS, len(ys) - 1)
-    cutoff = ys[cutoff_index]
-    body = frozenset((x, y) for x, y in model.pixels if y >= cutoff)
-    return body or model.pixels
-
-
 def _page1_baseline_probe_walks(
     raw: set[tuple[int, int]],
     row_top: int,
@@ -239,33 +223,30 @@ def _page1_baseline_probe_walks(
     right: int,
     first_ink_x: int,
 ):
-    """Probe page-1 baseline from a/A body, ignoring accent position and pixels.
+    """Try exact bold a variants in a tiny absolute placement window.
 
-    ``first_ink_x`` may belong to an acute/grave accent.  We therefore test only
-    a handful of possible base-letter starts immediately to its right.  A body
-    match produces a baseline hypothesis; that hypothesis is then verified by
-    matching up to three following glyphs before any full-row walk is attempted.
+    ``first_ink_x`` can be either an accent pixel or a body pixel. We therefore
+    do not use it as a glyph anchor. Instead we try a few possible model origins
+    around it. A complete initial glyph placement supplies a baseline, which is
+    then checked by at most ``BASELINE_PROBE_GLYPHS`` following glyphs.
     """
     page_candidates = cached._bound_page_candidates(models)
-    first_candidates = _bold_candidates(page_candidates, PAGE1_BASE_LABELS)
+    initial_candidates = _bold_candidates(page_candidates, PAGE1_EXACT_LABELS)
     walks = {}
 
-    max_base_x = min(right - 1, first_ink_x + PAGE1_BODY_X_SLACK)
-    for base_x in range(first_ink_x, max_base_x + 1):
-        for model, min_x, _left_pixels in first_candidates:
-            x0 = base_x - min_x
-            if x0 < left or x0 + model.width > right:
-                continue
-            body = _model_body_pixels(model)
-            if not body:
-                continue
-
+    for model, min_x, _left_pixels in initial_candidates:
+        x0_lo = max(left, first_ink_x - PAGE1_X_LEFT_SLACK)
+        x0_hi = min(right - model.width, first_ink_x + PAGE1_X_RIGHT_SLACK)
+        if x0_hi < x0_lo:
+            continue
+        for x0 in range(x0_lo, x0_hi + 1):
             for baseline in range(row_top, provisional_bottom):
-                placed_body = {(x0 + mx, baseline + my) for mx, my in body}
-                if not placed_body or not placed_body.issubset(raw):
+                placed = {(x0 + mx, baseline + my) for mx, my in model.pixels}
+                if not placed or not placed.issubset(raw):
                     continue
 
-                follow_x = x0 + model.width
+                anchor_x = x0 + min_x
+                follow_x = max(x for x, _y in placed) + 1
                 glyphs, owned, matched_right = _walk_baseline(
                     raw,
                     baseline,
@@ -280,11 +261,14 @@ def _page1_baseline_probe_walks(
 
                 score = (
                     glyphs,
-                    matched_right - base_x,
-                    len(owned) + len(placed_body),
+                    matched_right - anchor_x,
+                    len(owned) + len(placed),
                 )
-                key = (base_x, baseline)
-                walks[key] = (score, model, x0, placed_body, glyphs, matched_right)
+                key = (anchor_x, baseline)
+                previous = walks.get(key)
+                value = (score, model, x0, placed, glyphs, matched_right)
+                if previous is None or score > previous[0]:
+                    walks[key] = value
     return walks
 
 
