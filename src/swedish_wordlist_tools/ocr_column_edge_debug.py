@@ -3,9 +3,9 @@ from __future__ import annotations
 """Render the full raw SAOL facsimile page as an absolute-coordinate grid.
 
 Coordinates are always source-PNG coordinates. The fixed debug rulers remain at
-absolute x=45 and y=50. On page 1 we also run the raw-pixel layout detector on a
-copy of the page and overlay its discovered row-0 top and three column bounds in
-blue, while rendering the untouched source pixels including the page header.
+absolute x=45 and y=50. On page 1 we run the raw-pixel layout detector on a copy
+of the page, draw column bounds in blue, and draw the detected left-column blotch
+and resulting row-0 top in red while rendering untouched source pixels.
 """
 
 import argparse
@@ -14,7 +14,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 from . import ocr_review_five_rows_glyphs_ultrafast_html as ultrafast
-from .ocr_page1_layout_debug import ColumnRange, detect_page1_layout
+from .ocr_page1_layout_debug import BlotchRange, ColumnRange, detect_page1_layout_details
 
 fast = ultrafast.fast
 
@@ -47,6 +47,7 @@ def _render_grid(
     numbered_y: int,
     row0_top: int | None = None,
     columns: list[ColumnRange] | None = None,
+    blotch: BlotchRange | None = None,
 ) -> Image.Image:
     width = page.width
     height = page.height
@@ -113,14 +114,29 @@ def _render_grid(
             draw.text((px - text_w // 2, py - 31), label, fill="black", font=axis_font)
 
     blue = (0, 90, 255)
-    if row0_top is not None:
-        py = gy + row0_top * cell
-        draw.line((gx, py, gx + grid_w, py), fill=blue, width=3)
-
     for column in columns or []:
         for source_x in (column.left, column.right):
             px = gx + source_x * cell
             draw.line((px, gy, px, gy + grid_h), fill=blue, width=3)
+
+    red = (220, 0, 0)
+    if blotch is not None:
+        x0 = gx + blotch.left * cell
+        x1 = gx + blotch.run_right * cell
+        y0 = gy + blotch.top * cell
+        y1 = gy + (blotch.bottom + 1) * cell
+        draw.rectangle((x0, y0, x1, y1), outline=red, width=3)
+        draw.line((x0, y0, x0, y1), fill=red, width=5)
+
+    if row0_top is not None:
+        py = gy + row0_top * cell
+        if columns:
+            x0 = gx + columns[0].left * cell
+            x1 = gx + columns[0].right * cell
+        else:
+            x0 = gx
+            x1 = gx + grid_w
+        draw.line((x0, py, x1, py), fill=red, width=4)
 
     return out
 
@@ -144,12 +160,13 @@ def main() -> int:
     page = _load_thresholded_page(args.jsonl, args.page, args.threshold)
     row0_top = None
     columns: list[ColumnRange] = []
+    blotch = None
     if args.page == 1:
-        # The detector is intentionally destructive: it whites out y<60.
-        # Run it on a copy so the rendered diagnostic still shows every
-        # original source pixel, including the page header at the very top.
         layout_page = page.copy()
-        row0_top, columns = detect_page1_layout(layout_page)
+        layout = detect_page1_layout_details(layout_page)
+        row0_top = layout.row0_top
+        columns = layout.columns
+        blotch = layout.blotch
 
     image = _render_grid(
         page,
@@ -160,6 +177,7 @@ def main() -> int:
         numbered_y=args.axis_y,
         row0_top=row0_top,
         columns=columns,
+        blotch=blotch,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     image.save(args.output)
@@ -171,6 +189,13 @@ def main() -> int:
     )
     if row0_top is not None:
         print(f"overlay: row0_top={row0_top}")
+        if blotch is None:
+            print("overlay: blotch=none")
+        else:
+            print(
+                f"overlay: blotch top={blotch.top} left={blotch.left} run_right={blotch.run_right} "
+                f"bottom={blotch.bottom}"
+            )
         for column in columns:
             print(
                 f"overlay: column={column.index + 1} left={column.left} right={column.right} "
