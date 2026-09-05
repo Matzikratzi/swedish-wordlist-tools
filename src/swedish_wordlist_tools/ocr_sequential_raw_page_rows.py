@@ -2,11 +2,15 @@ from __future__ import annotations
 
 """Sequential baseline discovery directly from the page pixel array.
 
-A solved row contributes two pieces of vertical geometry to the scanner:
-``baseline`` for glyph placement and ``border`` as the first y coordinate below
-all proven glyph pixels.  A top coordinate is derived only for diagnostics.
-Temporary search limits are local variables and are never cached as row
-geometry.
+The stable vertical geometry is deliberately small:
+
+* before row 0, derive one initial upper border from the first start-band ink;
+* for row N > 0, the previous row's proven ``border`` is the upper boundary;
+* search left-to-right through a short band below that boundary;
+* solve the row on one baseline and derive the next ``border`` from proven ink.
+
+There is no independently discovered row ``top`` or ``hint`` in this path.
+``debug_top`` is retained only as a diagnostic description of solved glyph ink.
 """
 
 from dataclasses import dataclass
@@ -18,6 +22,7 @@ from .ocr_raw_page_baseline_row import _raw_ink
 
 HOMONYM_PROBE_WIDTH = 12
 FIRST_TEXT_SEARCH_WIDTH = 40
+START_SEARCH_HEIGHT = 15
 BASELINE_PROBE_GLYPHS = 3
 PAGE1_EXACT_LABELS = frozenset({"a", "á", "à", "A", "Á", "À"})
 PAGE1_X_LEFT_SLACK = 4
@@ -69,50 +74,77 @@ def _provisional_height(models) -> int:
     return max(24, tallest + 12)
 
 
-def _start_band(left: int) -> tuple[int, int]:
-    return left, left + FIRST_TEXT_SEARCH_WIDTH
+def _start_band(left: int, right: int) -> tuple[int, int]:
+    return left, min(right, left + FIRST_TEXT_SEARCH_WIDTH)
 
 
-def _row_has_start_ink(context: dict, y: int, x0: int, x1: int) -> bool:
+def _first_ink_y(
+    context: dict,
+    *,
+    search_from: int,
+    search_to: int,
+    left: int,
+    right: int,
+) -> int | None:
+    """Find the first start-band ink row when entering a fresh column.
+
+    Row 0 is the only row for which the upper boundary cannot come from a
+    previous solved row.  On page 1 column 1 ``search_from`` is already below
+    the black letter blotch, as supplied by the raw page-1 layout detector.
+    """
     owners = context["pixel_owners"]
-    if y < 0 or y >= owners.height:
-        return False
-    x0 = max(0, x0)
-    x1 = min(owners.width, x1)
-    base = y * owners.width
-    data = owners.data
-    return any(data[base + x] != 0 for x in range(x0, x1))
+    x0, x1 = _start_band(left, right)
+    for y in range(max(0, search_from), min(owners.height, search_to)):
+        base = y * owners.width
+        if any(owners.data[base + x] != 0 for x in range(x0, x1)):
+            return y
+    return None
 
 
-def _find_next_row_hint(
+def _initial_border(
     context: dict,
     *,
     column_top: int,
     column_bottom: int,
     left: int,
-    previous: CachedRowBoundary | None,
+    right: int,
 ) -> int:
-    """Find a vertical cue; only ``border`` survives from the previous row."""
-    band_left, band_right = _start_band(left)
-    if previous is None:
-        if context.get("raw_page_column_layout"):
-            return column_top
-        for y in range(column_top, column_bottom):
-            if _row_has_start_ink(context, y, band_left, band_right):
-                return y
-        raise RuntimeError("no start ink found in column")
-
-    blank_run = 0
-    for y in range(previous.border, column_bottom):
-        if _row_has_start_ink(context, y, band_left, band_right):
-            if blank_run >= 2:
-                return y
-            blank_run = 0
-        else:
-            blank_run += 1
-    raise RuntimeError(
-        f"no next left-edge ink after row={previous.row} border={previous.border}"
+    first_y = _first_ink_y(
+        context,
+        search_from=column_top,
+        search_to=column_bottom,
+        left=left,
+        right=right,
     )
+    if first_y is None:
+        raise RuntimeError("no start ink found in column")
+    return first_y - 1
+
+
+def _x_first_ink_x(
+    raw: set[tuple[int, int]],
+    *,
+    search_from: int,
+    search_limit: int,
+    left: int,
+    right: int,
+    include_homonym: bool,
+) -> int | None:
+    """Return the leftmost ink x in the first 15 rows below the upper boundary.
+
+    x is deliberately the outer loop and y the inner loop.  With
+    ``include_homonym`` this is the true leftmost row-start ink.  The current
+    glyph walker still needs an ordinary-text anchor as well, so callers may
+    make a second pass excluding the homonym strip.
+    """
+    x0 = left if include_homonym else min(right, left + HOMONYM_PROBE_WIDTH)
+    x1 = min(right, left + FIRST_TEXT_SEARCH_WIDTH)
+    y1 = min(search_limit, search_from + START_SEARCH_HEIGHT)
+    for x in range(x0, x1):
+        for y in range(search_from, y1):
+            if (x, y) in raw:
+                return x
+    return None
 
 
 def _walk_baseline(
@@ -177,26 +209,6 @@ def _walk_baseline(
         cursor = min(later_x)
 
     return matched_glyphs, owned, matched_right
-
-
-def _first_text_ink_x(
-    raw: set[tuple[int, int]],
-    *,
-    search_from: int,
-    hint_y: int,
-    search_limit: int,
-    left: int,
-    right: int,
-) -> int | None:
-    text_left = min(right, left + HOMONYM_PROBE_WIDTH)
-    text_right = min(right, left + FIRST_TEXT_SEARCH_WIDTH)
-    y_limit = min(search_limit, hint_y + 12)
-    xs = [
-        x
-        for x, y in raw
-        if text_left <= x < text_right and search_from <= y < y_limit
-    ]
-    return min(xs) if xs else None
 
 
 def _bold_candidates(page_candidates, allowed_labels: frozenset[str] | None = None):
@@ -269,7 +281,6 @@ def _page1_baseline_probe_walks(
 def _ordinary_baseline_probe_walks(
     raw: set[tuple[int, int]],
     search_from: int,
-    hint_y: int,
     search_limit: int,
     models,
     left: int,
@@ -277,8 +288,13 @@ def _ordinary_baseline_probe_walks(
     anchor_x: int,
     first_candidates,
 ):
+    """Build baseline hypotheses from the same 15-row band used for x-first.
+
+    A baseline may lie below the band: only the anchor ink itself is restricted
+    to the band.  This removes the old independent ``hint_y + 12`` gate.
+    """
     hypotheses: set[int] = set()
-    anchor_bottom = min(search_limit, hint_y + 12)
+    anchor_bottom = min(search_limit, search_from + START_SEARCH_HEIGHT)
     for anchor_y in range(search_from, anchor_bottom):
         if (anchor_x, anchor_y) not in raw:
             continue
@@ -363,13 +379,13 @@ def _discover_row(
     context: dict,
     column: int,
     row_index: int,
-    hint_y: int,
+    upper_border: int,
     previous: CachedRowBoundary | None,
     models,
 ) -> CachedRowBoundary:
     left, _column_top, right, column_bottom = _column_bounds(context, column)
-    search_from = hint_y if previous is None else previous.border
-    search_limit = min(column_bottom, hint_y + _provisional_height(models))
+    search_from = upper_border + 1 if previous is None else upper_border
+    search_limit = min(column_bottom, search_from + _provisional_height(models))
     raw = _raw_ink(
         context,
         left=left,
@@ -377,18 +393,37 @@ def _discover_row(
         top=search_from,
         bottom=search_limit,
     )
-    first_ink_x = _first_text_ink_x(
+
+    # First preserve the true leftmost row-start evidence, including a homonym.
+    row_start_x = _x_first_ink_x(
         raw,
         search_from=search_from,
-        hint_y=hint_y,
         search_limit=search_limit,
         left=left,
         right=right,
+        include_homonym=True,
+    )
+    if row_start_x is None:
+        raise RuntimeError(
+            f"sequential raw-page discovery stopped at column={column} row={row_index}: "
+            f"no start ink in y={search_from}..{search_from + START_SEARCH_HEIGHT - 1}"
+        )
+
+    # The existing baseline walker still starts on ordinary text.  This second
+    # x-first pass is temporary until homonym/headword/continuation start classes
+    # each have their own matcher strategy.
+    first_ink_x = _x_first_ink_x(
+        raw,
+        search_from=search_from,
+        search_limit=search_limit,
+        left=left,
+        right=right,
+        include_homonym=False,
     )
     if first_ink_x is None:
         raise RuntimeError(
             f"sequential raw-page discovery stopped at column={column} row={row_index}: "
-            f"no ordinary text ink from border={search_from} hint_y={hint_y}"
+            f"row_start_x={row_start_x} but no ordinary text anchor"
         )
 
     page1 = context.get("raw_page_layout_source") == "page1-raw-pixels"
@@ -413,7 +448,6 @@ def _discover_row(
         probe_walks = _ordinary_baseline_probe_walks(
             raw,
             search_from,
-            hint_y,
             search_limit,
             models,
             left,
@@ -425,7 +459,8 @@ def _discover_row(
     if not probe_walks:
         raise RuntimeError(
             f"sequential raw-page discovery stopped at column={column} row={row_index}: "
-            f"no baseline probe near x={first_ink_x} border={search_from} hint_y={hint_y}"
+            f"no baseline probe near x={first_ink_x} upper_border={upper_border} "
+            f"row_start_x={row_start_x}"
         )
 
     best_score = max(item[0] for item in probe_walks.values())
@@ -490,19 +525,32 @@ def ensure_row_cached(
     if target_row < 0:
         raise ValueError("target_row must be >= 0")
     cache = _cache(context).setdefault(column, [])
-    left, column_top, _right, column_bottom = _column_bounds(context, column)
-    while len(cache) <= target_row:
-        row_index = len(cache)
-        previous = cache[-1] if cache else None
-        hint_y = _find_next_row_hint(
+    left, column_top, right, column_bottom = _column_bounds(context, column)
+
+    initial_border = context.setdefault("raw_page_initial_border_cache", {}).get(column)
+    if initial_border is None:
+        initial_border = _initial_border(
             context,
             column_top=column_top,
             column_bottom=column_bottom,
             left=left,
-            previous=previous,
+            right=right,
         )
+        context["raw_page_initial_border_cache"][column] = initial_border
+
+    while len(cache) <= target_row:
+        row_index = len(cache)
+        previous = cache[-1] if cache else None
+        upper_border = initial_border if previous is None else previous.border
         cache.append(
-            _discover_row(context, column, row_index, hint_y, previous, models)
+            _discover_row(
+                context,
+                column,
+                row_index,
+                upper_border,
+                previous,
+                models,
+            )
         )
     return cache
 
