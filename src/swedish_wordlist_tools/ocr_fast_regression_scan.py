@@ -16,6 +16,7 @@ from pathlib import Path
 from time import perf_counter
 
 from . import ocr_review_page_pixel_array_glyphs_html as page_editor
+from .ocr_baseline_boundary_hypothesis import baseline_boundary_hypothesis
 from .ocr_fast_boundary_repair import try_fast_boundary_repair
 from .ocr_find_unreviewed_glyph_rows import _available_pages, _selected_pages
 from .ocr_glyph_review_delete import load_facit_with_typography
@@ -43,6 +44,12 @@ class FastRegressionRow:
     repair_elapsed: float = 0.0
     cut_y: int | None = None
     repair_strategy: str | None = None
+    baseline_page_y: int | None = None
+    geometry_boundary_y: int | None = None
+    hypothesis_boundary_y: int | None = None
+    hypothesis_upper_candidates: int = 0
+    hypothesis_probe_candidates: int = 0
+    hypothesis_proofs: int = 0
 
 
 def analyse_row_fast_only(crop, models, *, threshold: int = 210) -> dict:
@@ -114,7 +121,45 @@ def _fast_only_analyser():
         page_editor.fast.analyse_row_exact = original
 
 
-def scan_page_fast(context: dict, models, *, boundary_radius: int = 6) -> list[FastRegressionRow]:
+def _probe_baseline_boundary(context: dict, state: dict, models, *, probe_depth: int):
+    """Inspect raw page ink below an already trusted row baseline.
+
+    The owned-row crop may end at the bad separator we are investigating, so
+    this probe deliberately reads the source page instead of the ownership
+    raster and extends far enough to contain the deepest learned glyph.
+    """
+    baseline = state.get("baseline")
+    if baseline is None:
+        return None
+    left, top, right, _bottom = map(int, state["crop_box"])
+    if right <= left:
+        return None
+    max_lower = max((int(model.max_y) for model in models if model.pixels), default=probe_depth)
+    page = context["page"]
+    extended_bottom = min(page.height, top + int(baseline) + max(max_lower, probe_depth) + 1)
+    if extended_bottom <= top:
+        return None
+    crop = page.crop((left, top, right, extended_bottom))
+    ink = row_ink(crop, threshold=int(context["threshold"]))
+    hypothesis = baseline_boundary_hypothesis(
+        ink,
+        width=crop.width,
+        height=crop.height,
+        models=models,
+        baseline=int(baseline),
+        probe_depth=probe_depth,
+    )
+    return hypothesis, top
+
+
+def scan_page_fast(
+    context: dict,
+    models,
+    *,
+    boundary_radius: int = 6,
+    baseline_boundary_probe: bool = False,
+    baseline_probe_depth: int = 3,
+) -> list[FastRegressionRow]:
     bind_page_candidates(context, models)
     rows: list[FastRegressionRow] = []
     with _fast_only_analyser():
@@ -133,6 +178,25 @@ def scan_page_fast(context: dict, models, *, boundary_radius: int = 6) -> list[F
                     set_row_priority_hint(classify_row_start(context, position))
                     state = page_editor._load_owned_row_state(context, position, models)
 
+            baseline_page_y = None
+            geometry_boundary_y = int(state.get("effective_row_page_bottom") or state.get("row_page_bottom") or 0)
+            hypothesis_boundary_y = None
+            hypothesis_upper_candidates = 0
+            hypothesis_probe_candidates = 0
+            hypothesis_proofs = 0
+            if baseline_boundary_probe and state.get("baseline") is not None:
+                probed = _probe_baseline_boundary(
+                    context, state, models, probe_depth=baseline_probe_depth
+                )
+                if probed is not None:
+                    hypothesis, crop_top = probed
+                    baseline_page_y = crop_top + int(hypothesis.baseline)
+                    hypothesis_upper_candidates = int(hypothesis.upper_candidates)
+                    hypothesis_probe_candidates = int(hypothesis.probe_candidates)
+                    hypothesis_proofs = len(hypothesis.proofs)
+                    if hypothesis.boundary is not None:
+                        hypothesis_boundary_y = crop_top + int(hypothesis.boundary)
+
             repair_elapsed = repair.elapsed if repair is not None else 0.0
             rows.append(
                 FastRegressionRow(
@@ -150,6 +214,12 @@ def scan_page_fast(context: dict, models, *, boundary_radius: int = 6) -> list[F
                     repair_elapsed=repair_elapsed,
                     cut_y=repair.cut_y if repair else None,
                     repair_strategy=repair.strategy if repair else None,
+                    baseline_page_y=baseline_page_y,
+                    geometry_boundary_y=geometry_boundary_y,
+                    hypothesis_boundary_y=hypothesis_boundary_y,
+                    hypothesis_upper_candidates=hypothesis_upper_candidates,
+                    hypothesis_probe_candidates=hypothesis_probe_candidates,
+                    hypothesis_proofs=hypothesis_proofs,
                 )
             )
     return rows
@@ -172,6 +242,18 @@ def main() -> int:
         help="fixed +/- raster lines tried around the geometric lower boundary; -1 disables repair",
     )
     ap.add_argument(
+        "--baseline-boundary-probe",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="measure experimental baseline-first descender boundary hypotheses; never changes ownership",
+    )
+    ap.add_argument(
+        "--baseline-probe-depth",
+        type=int,
+        default=3,
+        help="raster lines below the baseline that must agree before following a candidate deeper",
+    )
+    ap.add_argument(
         "--print-unresolved",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -179,6 +261,8 @@ def main() -> int:
     args = ap.parse_args()
     if args.boundary_radius < -1:
         raise ValueError("--boundary-radius must be >= -1")
+    if args.baseline_probe_depth < 1:
+        raise ValueError("--baseline-probe-depth must be >= 1")
 
     pages = _selected_pages(
         _available_pages(args.jsonl),
@@ -201,7 +285,13 @@ def main() -> int:
         page_started = perf_counter()
         context = page_editor.build_page_context_pixel_array(args.jsonl, page, args.threshold)
         context["quiet_successful_ownership"] = True
-        results = scan_page_fast(context, models, boundary_radius=args.boundary_radius)
+        results = scan_page_fast(
+            context,
+            models,
+            boundary_radius=args.boundary_radius,
+            baseline_boundary_probe=args.baseline_boundary_probe,
+            baseline_probe_depth=args.baseline_probe_depth,
+        )
         page_exact = sum(result.exact for result in results)
         page_repaired = sum(result.repaired for result in results)
         page_unresolved = [result for result in results if not result.exact]
@@ -223,6 +313,19 @@ def main() -> int:
                     f"strategy={result.repair_strategy} moved={result.moved_pixels} "
                     f"cut_y={result.cut_y} attempts={result.repair_attempts} "
                     f"repair_time={result.repair_elapsed:.3f}s",
+                    flush=True,
+                )
+            if args.baseline_boundary_probe and result.baseline_page_y is not None:
+                delta = None
+                if result.hypothesis_boundary_y is not None and result.geometry_boundary_y is not None:
+                    delta = result.hypothesis_boundary_y - result.geometry_boundary_y
+                print(
+                    f"baseline-boundary: page {result.page} column {result.column} row {result.row} "
+                    f"baseline={result.baseline_page_y} geometry={result.geometry_boundary_y} "
+                    f"hypothesis={result.hypothesis_boundary_y} delta={delta} "
+                    f"upper_candidates={result.hypothesis_upper_candidates} "
+                    f"probe3_candidates={result.hypothesis_probe_candidates} "
+                    f"proofs={result.hypothesis_proofs}",
                     flush=True,
                 )
         if args.print_unresolved:
