@@ -20,6 +20,9 @@ from . import ocr_priority_fast_path as priority
 from .ocr_raw_page_baseline_row import _raw_ink
 
 
+HOMONYM_PROBE_WIDTH = 12
+
+
 @dataclass(frozen=True)
 class CachedRowBoundary:
     row: int
@@ -184,6 +187,63 @@ def _walk_baseline(
     return matched_glyphs, owned, matched_right
 
 
+def _homonym_seed_walks(
+    raw: set[tuple[int, int]],
+    row_top: int,
+    provisional_bottom: int,
+    models,
+    left: int,
+    right: int,
+) -> dict[tuple[int, int], tuple[tuple[int, int, int], int, int, set[tuple[int, int]], int, int]]:
+    """Try the homonym coordinate first and use a matched digit as baseline seed.
+
+    We only inspect a narrow absolute x strip at the column's left edge and only
+    test models from the prepared homonym bucket. A complete homonym glyph match
+    gives one or more baseline candidates; those candidates are then verified by
+    walking the whole row on the same baseline.
+    """
+    page_candidates = cached._bound_page_candidates(models)
+    if not page_candidates.homonym:
+        return {}
+
+    probe_right = min(right, left + HOMONYM_PROBE_WIDTH)
+    candidate_rows = range(row_top, min(provisional_bottom, row_top + 12))
+    seeds: set[tuple[int, int]] = set()
+
+    for anchor_y in candidate_rows:
+        xs = sorted(x for x, y in raw if y == anchor_y and left <= x < probe_right)
+        for anchor_x in xs:
+            for model, min_x, left_pixels in page_candidates.homonym:
+                x0 = anchor_x - min_x
+                if x0 < left or x0 + model.width > probe_right:
+                    continue
+                for _mx, my in left_pixels:
+                    baseline = anchor_y - my
+                    if baseline < row_top or baseline >= provisional_bottom:
+                        continue
+                    placed = {(x0 + mx, baseline + py) for mx, py in model.pixels}
+                    if placed and placed.issubset(raw):
+                        seeds.add((anchor_x, baseline))
+
+    walks = {}
+    for anchor_x, baseline in sorted(seeds):
+        glyphs, owned, matched_right = _walk_baseline(
+            raw, baseline, models, left, right, anchor_x
+        )
+        if glyphs <= 0 or not owned:
+            continue
+        score = (matched_right - anchor_x, glyphs, len(owned))
+        walks[(anchor_x, baseline)] = (
+            score,
+            anchor_x,
+            baseline,
+            owned,
+            glyphs,
+            matched_right,
+        )
+    return walks
+
+
 def _discover_at_top(
     context: dict,
     column: int,
@@ -198,64 +258,70 @@ def _discover_at_top(
     page_candidates = cached._bound_page_candidates(models)
     band_left, band_right = _start_band(left, None if previous is None else previous.start_x)
 
-    # Do not accept the first locally unique glyph fit. A tiny model can happen
-    # to fit a handful of pixels near the roof and produce a bogus baseline.
-    # Instead collect every distinct (start-x, baseline) hypothesis from the
-    # first few raster rows, walk each one across the row, and rank the complete
-    # walks globally.
-    candidate_walks: dict[
-        tuple[int, int], tuple[tuple[int, int, int], int, int, set[tuple[int, int]], int, int]
-    ] = {}
-    candidate_rows = range(row_top, min(provisional_bottom, row_top + 12))
-    for anchor_y in candidate_rows:
-        xs = [x for x, y in raw if y == anchor_y and band_left <= x < band_right]
-        if previous is None:
-            xs.sort()
-        else:
-            xs.sort(key=lambda x: (abs(x - previous.start_x), x))
+    # If the row carries ink at the homonym coordinate, try only the known
+    # homonym models there first. A successful digit acts as a cheap baseline
+    # probe and lets us avoid the much larger generic first-glyph search.
+    candidate_walks = _homonym_seed_walks(
+        raw,
+        row_top,
+        provisional_bottom,
+        models,
+        left,
+        right,
+    )
 
-        for anchor_x in xs:
-            hypotheses: set[int] = set()
-            for model, min_x, left_pixels in cached._iter_candidates(
-                page_candidates,
-                first_glyph=True,
-                previous_style=None,
-                row_kind="unknown",
-                leading_homonym_seen=False,
-                baseline_established=False,
-            ):
-                x0 = anchor_x - min_x
-                if x0 < left or x0 + model.width > right:
-                    continue
-                for _mx, my in left_pixels:
-                    baseline = anchor_y - my
-                    if baseline < row_top or baseline >= provisional_bottom:
+    # Fall back to the global search only when no complete homonym seed could be
+    # verified. Do not accept the first locally unique glyph fit: tiny models can
+    # match accidental pixels near the roof.
+    if not candidate_walks:
+        candidate_walks = {}
+        candidate_rows = range(row_top, min(provisional_bottom, row_top + 12))
+        for anchor_y in candidate_rows:
+            xs = [x for x, y in raw if y == anchor_y and band_left <= x < band_right]
+            if previous is None:
+                xs.sort()
+            else:
+                xs.sort(key=lambda x: (abs(x - previous.start_x), x))
+
+            for anchor_x in xs:
+                hypotheses: set[int] = set()
+                for model, min_x, left_pixels in cached._iter_candidates(
+                    page_candidates,
+                    first_glyph=True,
+                    previous_style=None,
+                    row_kind="unknown",
+                    leading_homonym_seen=False,
+                    baseline_established=False,
+                ):
+                    x0 = anchor_x - min_x
+                    if x0 < left or x0 + model.width > right:
                         continue
-                    placed = {(x0 + mx, baseline + py) for mx, py in model.pixels}
-                    if placed and placed.issubset(raw):
-                        hypotheses.add(baseline)
+                    for _mx, my in left_pixels:
+                        baseline = anchor_y - my
+                        if baseline < row_top or baseline >= provisional_bottom:
+                            continue
+                        placed = {(x0 + mx, baseline + py) for mx, py in model.pixels}
+                        if placed and placed.issubset(raw):
+                            hypotheses.add(baseline)
 
-            for baseline in hypotheses:
-                key = (anchor_x, baseline)
-                if key in candidate_walks:
-                    continue
-                glyphs, owned, matched_right = _walk_baseline(
-                    raw, baseline, models, left, right, anchor_x
-                )
-                if glyphs <= 0 or not owned:
-                    continue
-                # Horizontal explained span is primary: the right baseline should
-                # keep matching real glyphs across the printed row. Glyph count and
-                # proved source pixels then break ties.
-                score = (matched_right - anchor_x, glyphs, len(owned))
-                candidate_walks[key] = (
-                    score,
-                    anchor_x,
-                    baseline,
-                    owned,
-                    glyphs,
-                    matched_right,
-                )
+                for baseline in hypotheses:
+                    key = (anchor_x, baseline)
+                    if key in candidate_walks:
+                        continue
+                    glyphs, owned, matched_right = _walk_baseline(
+                        raw, baseline, models, left, right, anchor_x
+                    )
+                    if glyphs <= 0 or not owned:
+                        continue
+                    score = (matched_right - anchor_x, glyphs, len(owned))
+                    candidate_walks[key] = (
+                        score,
+                        anchor_x,
+                        baseline,
+                        owned,
+                        glyphs,
+                        matched_right,
+                    )
 
     if not candidate_walks:
         raise RuntimeError(
