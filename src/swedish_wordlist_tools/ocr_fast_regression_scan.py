@@ -2,10 +2,11 @@ from __future__ import annotations
 
 """Fast regression scan for already-known facsimile pages.
 
-This path is intentionally bounded: it runs only the page-cached exact-cover
-fast path.  It never enters the exhaustive safe-group fallback.  A row that
-cannot be proved exact quickly is reported as unresolved/regression and the
-scan continues.
+This path is intentionally bounded.  It runs the page-cached exact-cover fast
+path first.  On a miss it may try a small fixed number of horizontal row-boundary
+repairs, each verified only with the same fast exact path.  It never enters the
+exhaustive safe-group fallback.  A row that still cannot be proved exact is
+reported as unresolved/regression and the scan continues.
 """
 
 import argparse
@@ -15,6 +16,7 @@ from pathlib import Path
 from time import perf_counter
 
 from . import ocr_review_page_pixel_array_glyphs_html as page_editor
+from .ocr_fast_boundary_repair import try_fast_boundary_repair
 from .ocr_find_unreviewed_glyph_rows import _available_pages, _selected_pages
 from .ocr_glyph_review_delete import load_facit_with_typography
 from .ocr_page_cached_fast_path import (
@@ -35,6 +37,11 @@ class FastRegressionRow:
     covered_pixels: int
     elapsed: float
     text: str
+    repaired: bool = False
+    moved_pixels: int = 0
+    repair_attempts: int = 0
+    repair_elapsed: float = 0.0
+    cut_y: int | None = None
 
 
 def analyse_row_fast_only(crop, models, *, threshold: int = 210) -> dict:
@@ -106,7 +113,7 @@ def _fast_only_analyser():
         page_editor.fast.analyse_row_exact = original
 
 
-def scan_page_fast(context: dict, models) -> list[FastRegressionRow]:
+def scan_page_fast(context: dict, models, *, boundary_radius: int = 6) -> list[FastRegressionRow]:
     bind_page_candidates(context, models)
     rows: list[FastRegressionRow] = []
     with _fast_only_analyser():
@@ -114,7 +121,18 @@ def scan_page_fast(context: dict, models) -> list[FastRegressionRow]:
             set_row_priority_hint(classify_row_start(context, position))
             started = perf_counter()
             state = page_editor._load_owned_row_state(context, position, models)
-            elapsed = perf_counter() - started
+            initial_elapsed = perf_counter() - started
+
+            repair = None
+            if not state.get("fully_exact") and boundary_radius >= 0:
+                repair = try_fast_boundary_repair(
+                    context, position, models, radius=boundary_radius
+                )
+                if repair.repaired:
+                    set_row_priority_hint(classify_row_start(context, position))
+                    state = page_editor._load_owned_row_state(context, position, models)
+
+            repair_elapsed = repair.elapsed if repair is not None else 0.0
             rows.append(
                 FastRegressionRow(
                     page=int(context["page_number"]),
@@ -123,8 +141,13 @@ def scan_page_fast(context: dict, models) -> list[FastRegressionRow]:
                     exact=bool(state.get("fully_exact")),
                     source_pixels=int(state.get("source_pixels") or 0),
                     covered_pixels=int(state.get("covered_pixels") or 0),
-                    elapsed=elapsed,
+                    elapsed=initial_elapsed + repair_elapsed,
                     text=str(state.get("text") or ""),
+                    repaired=bool(repair and repair.repaired),
+                    moved_pixels=int(repair.moved_pixels if repair else 0),
+                    repair_attempts=int(repair.attempts if repair else 0),
+                    repair_elapsed=repair_elapsed,
+                    cut_y=repair.cut_y if repair else None,
                 )
             )
     return rows
@@ -132,7 +155,7 @@ def scan_page_fast(context: dict, models) -> list[FastRegressionRow]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Fast-only regression scan: exact quickly or report unresolved; never exhaustive."
+        description="Fast bounded regression scan: exact, cheap boundary repair, or unresolved; never exhaustive."
     )
     ap.add_argument("jsonl", type=Path)
     ap.add_argument("--facit", type=Path, required=True)
@@ -141,11 +164,19 @@ def main() -> int:
     ap.add_argument("--start-page", type=int)
     ap.add_argument("--end-page", type=int)
     ap.add_argument(
+        "--boundary-radius",
+        type=int,
+        default=6,
+        help="fixed +/- raster lines tried around the geometric lower boundary; -1 disables repair",
+    )
+    ap.add_argument(
         "--print-unresolved",
         action=argparse.BooleanOptionalAction,
         default=True,
     )
     args = ap.parse_args()
+    if args.boundary_radius < -1:
+        raise ValueError("--boundary-radius must be >= -1")
 
     pages = _selected_pages(
         _available_pages(args.jsonl),
@@ -160,28 +191,43 @@ def main() -> int:
     total_started = perf_counter()
     row_count = 0
     exact_count = 0
+    repaired_count = 0
+    repaired_pixels = 0
     unresolved: list[FastRegressionRow] = []
 
     for page in pages:
         page_started = perf_counter()
         context = page_editor.build_page_context_pixel_array(args.jsonl, page, args.threshold)
         context["quiet_successful_ownership"] = True
-        results = scan_page_fast(context, models)
+        results = scan_page_fast(context, models, boundary_radius=args.boundary_radius)
         page_exact = sum(result.exact for result in results)
+        page_repaired = sum(result.repaired for result in results)
         page_unresolved = [result for result in results if not result.exact]
         row_count += len(results)
         exact_count += page_exact
+        repaired_count += page_repaired
+        repaired_pixels += sum(result.moved_pixels for result in results)
         unresolved.extend(page_unresolved)
         print(
             f"fast-regression: page {page}: exact={page_exact}/{len(results)} "
-            f"unresolved={len(page_unresolved)} wall={perf_counter()-page_started:.3f}s",
+            f"repaired={page_repaired} unresolved={len(page_unresolved)} "
+            f"wall={perf_counter()-page_started:.3f}s",
             flush=True,
         )
+        for result in results:
+            if result.repaired:
+                print(
+                    f"fast-regression: repaired page {result.page} column {result.column} row {result.row} "
+                    f"moved={result.moved_pixels} cut_y={result.cut_y} attempts={result.repair_attempts} "
+                    f"repair_time={result.repair_elapsed:.3f}s",
+                    flush=True,
+                )
         if args.print_unresolved:
             for result in page_unresolved:
                 print(
                     f"fast-regression: unresolved page {result.page} column {result.column} row {result.row} "
                     f"covered={result.covered_pixels}/{result.source_pixels} time={result.elapsed:.3f}s "
+                    f"repair_attempts={result.repair_attempts} repair_time={result.repair_elapsed:.3f}s "
                     f"text={result.text!r}",
                     flush=True,
                 )
@@ -189,6 +235,7 @@ def main() -> int:
     wall = perf_counter() - total_started
     print(
         f"fast-regression: pages={len(pages)} rows={row_count} exact={exact_count}/{row_count} "
+        f"repaired={repaired_count} repaired_pixels={repaired_pixels} "
         f"unresolved={len(unresolved)} wall={wall:.3f}s",
         flush=True,
     )
