@@ -9,7 +9,7 @@ from . import ocr_page_cached_fast_path as cached
 from . import ocr_review_page_pixel_array_glyphs_html as page_editor
 from .ocr_glyph_review_delete import load_facit_with_typography
 from .ocr_page1_layout_debug import _load_thresholded_page, detect_page1_layout_details
-from .ocr_sequential_raw_page_rows import ensure_row_cached
+from .ocr_sequential_raw_page_rows_seedtrace import ensure_row_cached
 
 
 def _install_page1_raw_layout(context: dict, jsonl: Path, threshold: int) -> None:
