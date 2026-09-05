@@ -9,7 +9,7 @@ from PIL import ImageDraw
 
 from . import ocr_page_cached_fast_path as cached
 from . import ocr_review_page_pixel_array_glyphs_html as page_editor
-from . import ocr_sequential_raw_page_rows as sequential
+from . import ocr_sequential_raw_page_rows_xfirst as sequential
 from .ocr_column_edge_debug import _render_grid
 from .ocr_glyph_review_delete import load_facit_with_typography
 from .ocr_page1_layout_debug import _load_thresholded_page, detect_page1_layout_details
@@ -78,8 +78,6 @@ def _draw_snapshot(
     label_x = x1 + 4
 
     for entry in cache:
-        # Baseline and border are scanner geometry.  debug_top is derived from
-        # the owned glyph pixels and is drawn only to make visual inspection easy.
         top_y = GRID_TOP_PAD + entry.debug_top * cell
         baseline_y = GRID_TOP_PAD + entry.baseline * cell
         border_y = GRID_TOP_PAD + entry.border * cell
@@ -141,6 +139,7 @@ def main() -> int:
             f"row0_hint={raw_column['row0_top']}"
         )
         print("raw-page-layout: page1-start-probe=bold:a,á,à,A,Á,À")
+        print("raw-page-layout: next-row-start=x-first border..border+14")
 
     completed = []
     stopped_row: int | None = None
