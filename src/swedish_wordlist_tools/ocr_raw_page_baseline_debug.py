@@ -9,7 +9,7 @@ from PIL import ImageDraw
 
 from . import ocr_page_cached_fast_path as cached
 from . import ocr_review_page_pixel_array_glyphs_html as page_editor
-from . import ocr_sequential_raw_page_rows_xfirst as sequential
+from . import ocr_sequential_raw_page_rows as sequential
 from .ocr_column_edge_debug import _render_grid
 from .ocr_glyph_review_delete import load_facit_with_typography
 from .ocr_page1_layout_debug import _load_thresholded_page, detect_page1_layout_details
@@ -20,7 +20,7 @@ GRID_TOP_PAD = 40
 
 
 def _install_page1_raw_layout(context: dict, jsonl: Path, threshold: int) -> None:
-    """Install absolute raw-pixel column bounds and row-0 starts for page 1."""
+    """Install absolute raw-pixel column bounds and row-0 search starts for page 1."""
     layout_page = _load_thresholded_page(jsonl, 1, threshold)
     layout = detect_page1_layout_details(layout_page)
     context["raw_page_column_layout"] = {
@@ -76,6 +76,12 @@ def _draw_snapshot(
     x0 = GRID_LEFT_PAD + left * cell
     x1 = GRID_LEFT_PAD + right * cell
     label_x = x1 + 4
+
+    initial_border = (context.get("raw_page_initial_border_cache") or {}).get(column)
+    if initial_border is not None:
+        y = GRID_TOP_PAD + initial_border * cell
+        draw.line((x0, y, x1, y), fill=(120, 120, 120), width=1)
+        draw.text((label_x, y - 5), f"initial_border={initial_border}", fill=(90, 90, 90))
 
     for entry in cache:
         top_y = GRID_TOP_PAD + entry.debug_top * cell
@@ -136,10 +142,11 @@ def main() -> int:
         print(
             f"raw-page-layout: source={context['raw_page_layout_source']} "
             f"column={args.column} left={raw_column['left']} right={raw_column['right']} "
-            f"row0_hint={raw_column['row0_top']}"
+            f"row0_search_from={raw_column['row0_top']}"
         )
         print("raw-page-layout: page1-start-probe=bold:a,á,à,A,Á,À")
-        print("raw-page-layout: next-row-start=x-first border..border+14")
+    print("raw-page-layout: geometry=initial-border-then-previous-border")
+    print("raw-page-layout: row-start=x-first upper-boundary..+14")
 
     completed = []
     stopped_row: int | None = None
@@ -163,6 +170,9 @@ def main() -> int:
 
         entry = cache[row_index]
         completed = list(cache)
+        if row_index == 0:
+            initial_border = context["raw_page_initial_border_cache"][args.column]
+            print(f"raw-page-initial-border: column={args.column} border={initial_border}")
         marker = " <-- target" if entry.row == args.row else ""
         print(
             f"raw-page-row: row={entry.row:03d} debug_top={entry.debug_top} "
