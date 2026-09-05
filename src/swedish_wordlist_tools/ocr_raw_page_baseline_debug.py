@@ -31,7 +31,15 @@ def _known_column_bottom(context: dict, column: int) -> int:
     to determine a row baseline or row border.
     """
     owners = context["pixel_owners"]
-    entry = (context.get("row_map") or {}).get("columns", {}).get(column) or {}
+    columns = (context.get("row_map") or {}).get("columns", {})
+    if isinstance(columns, dict):
+        entry = columns.get(column) or {}
+    elif isinstance(columns, list) and 0 <= column < len(columns):
+        # The existing row-map API is indexed directly by the 1-based OCR
+        # column number; keep exactly that convention here as well.
+        entry = columns[column] or {}
+    else:
+        entry = {}
     rows = entry.get("rows") or []
     if not rows:
         return owners.height
@@ -205,7 +213,6 @@ def main() -> int:
                     "column": args.column,
                     "left": raw_column["left"],
                     "right": raw_column["right"],
-                    "bottom": raw_column["bottom"],
                     "row0_search_from": raw_column["row0_top"],
                     "page1_start_probe": "bold:a,á,à,A,Á,À",
                     "geometry": "initial-border-then-previous-border",
