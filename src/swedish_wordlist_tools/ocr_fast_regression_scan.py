@@ -42,6 +42,7 @@ class FastRegressionRow:
     repair_attempts: int = 0
     repair_elapsed: float = 0.0
     cut_y: int | None = None
+    repair_strategy: str | None = None
 
 
 def analyse_row_fast_only(crop, models, *, threshold: int = 210) -> dict:
@@ -148,6 +149,7 @@ def scan_page_fast(context: dict, models, *, boundary_radius: int = 6) -> list[F
                     repair_attempts=int(repair.attempts if repair else 0),
                     repair_elapsed=repair_elapsed,
                     cut_y=repair.cut_y if repair else None,
+                    repair_strategy=repair.strategy if repair else None,
                 )
             )
     return rows
@@ -218,7 +220,8 @@ def main() -> int:
             if result.repaired:
                 print(
                     f"fast-regression: repaired page {result.page} column {result.column} row {result.row} "
-                    f"moved={result.moved_pixels} cut_y={result.cut_y} attempts={result.repair_attempts} "
+                    f"strategy={result.repair_strategy} moved={result.moved_pixels} "
+                    f"cut_y={result.cut_y} attempts={result.repair_attempts} "
                     f"repair_time={result.repair_elapsed:.3f}s",
                     flush=True,
                 )
