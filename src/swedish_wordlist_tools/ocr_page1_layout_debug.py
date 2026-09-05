@@ -20,6 +20,7 @@ PAGE1_IGNORE_ABOVE_Y = 60
 PAGE1_IGNORE_THROUGH_X = 3
 MIN_GUTTER_WIDTH = 3
 MIN_COLUMN_PROBE_WIDTH = 20
+MIN_BLOTCH_RUN_WIDTH = 30
 
 
 @dataclass(frozen=True)
@@ -27,11 +28,25 @@ class ColumnRange:
     index: int
     left: int
     # Absolute x boundary immediately to the right of the column text area.
-    # In other words, this is the first white x column of the detected gutter,
-    # not the last possible black x coordinate inside the column.
     right: int
     gutter_left: int
     gutter_right: int
+
+
+@dataclass(frozen=True)
+class BlotchRange:
+    top: int
+    left: int
+    run_right: int
+    bottom: int
+
+
+@dataclass(frozen=True)
+class Page1Layout:
+    initial_top: int
+    row0_top: int
+    columns: list[ColumnRange]
+    blotch: BlotchRange | None
 
 
 def _load_thresholded_page(jsonl: Path, page_number: int, threshold: int) -> Image.Image:
@@ -46,7 +61,6 @@ def _load_thresholded_page(jsonl: Path, page_number: int, threshold: int) -> Ima
 
 
 def _blank_above(page: Image.Image, y: int) -> None:
-    """Whiten all source pixels with absolute y < y, in-place."""
     pix = page.load()
     stop = max(0, min(int(y), page.height))
     for py in range(stop):
@@ -55,11 +69,6 @@ def _blank_above(page: Image.Image, y: int) -> None:
 
 
 def _blank_through_x(page: Image.Image, x: int) -> None:
-    """Whiten all source pixels with absolute x <= x, in-place.
-
-    This masks the facsimile's black left edge while preserving absolute source
-    coordinates: source x=4 remains x=4.
-    """
     pix = page.load()
     stop = max(0, min(int(x) + 1, page.width))
     for px in range(stop):
@@ -77,7 +86,6 @@ def _first_ink_row(page: Image.Image, start_y: int) -> int:
 
 
 def _first_ink_x_on_row(page: Image.Image, y: int, start_x: int = 0) -> int | None:
-    """Return first absolute x containing ink on exactly source row y."""
     pix = page.load()
     if not (0 <= y < page.height):
         return None
@@ -88,7 +96,6 @@ def _first_ink_x_on_row(page: Image.Image, y: int, start_x: int = 0) -> int | No
 
 
 def _first_ink_y_in_column(page: Image.Image, x: int, start_y: int) -> int | None:
-    """Return first absolute y containing ink in exactly source column x."""
     pix = page.load()
     if not (0 <= x < page.width):
         return None
@@ -99,7 +106,6 @@ def _first_ink_y_in_column(page: Image.Image, x: int, start_y: int) -> int | Non
 
 
 def _vertical_occupancy(page: Image.Image, top: int) -> list[bool]:
-    """True for source x columns containing any black pixel at y >= top."""
     pix = page.load()
     occupied = [False] * page.width
     for x in range(page.width):
@@ -120,7 +126,6 @@ def _next_black_column(occupied: list[bool], start_x: int) -> int | None:
 def _next_white_band(
     occupied: list[bool], start_x: int, *, min_width: int = MIN_GUTTER_WIDTH
 ) -> tuple[int, int] | None:
-    """Return the next half-open run [left,right) of >= min_width white columns."""
     x = max(0, start_x)
     width = len(occupied)
     while x < width:
@@ -135,27 +140,67 @@ def _next_white_band(
     return None
 
 
-def detect_page1_layout(page: Image.Image) -> tuple[int, list[ColumnRange]]:
+def _find_black_run_on_row(
+    page: Image.Image,
+    y: int,
+    left: int,
+    right: int,
+    *,
+    min_width: int,
+) -> tuple[int, int] | None:
+    """Return first half-open black run [left,right) of at least min_width."""
+    pix = page.load()
+    x = max(0, left)
+    stop = min(page.width, right)
+    while x < stop:
+        if pix[x, y] != 0:
+            x += 1
+            continue
+        run_left = x
+        while x < stop and pix[x, y] == 0:
+            x += 1
+        if x - run_left >= min_width:
+            return run_left, x
+    return None
+
+
+def _detect_left_blotch(
+    page: Image.Image,
+    top: int,
+    column: ColumnRange,
+) -> BlotchRange | None:
+    run = _find_black_run_on_row(
+        page,
+        top,
+        column.left,
+        column.right,
+        min_width=MIN_BLOTCH_RUN_WIDTH,
+    )
+    if run is None:
+        return None
+
+    run_left, run_right = run
+    pix = page.load()
+    y = top
+    while y < page.height and pix[run_left, y] == 0:
+        y += 1
+    return BlotchRange(top=top, left=run_left, run_right=run_right, bottom=y - 1)
+
+
+def detect_page1_layout_details(page: Image.Image) -> Page1Layout:
     _blank_above(page, PAGE1_IGNORE_ABOVE_Y)
     _blank_through_x(page, PAGE1_IGNORE_THROUGH_X)
-    row0_top = _first_ink_row(page, PAGE1_IGNORE_ABOVE_Y)
-    occupied = _vertical_occupancy(page, row0_top)
+    initial_top = _first_ink_row(page, PAGE1_IGNORE_ABOVE_Y)
+    occupied = _vertical_occupancy(page, initial_top)
 
-    # Important: the first column starts where the first actual row starts.
-    # Looking for the first vertically occupied x column over the whole page can
-    # be fooled by an isolated mark much farther down. The row0-top pixel is the
-    # evidence we just established. x=0..3 have already been masked as page edge.
-    first_left = _first_ink_x_on_row(page, row0_top, PAGE1_IGNORE_THROUGH_X + 1)
+    first_left = _first_ink_x_on_row(page, initial_top, PAGE1_IGNORE_THROUGH_X + 1)
     if first_left is None:
-        raise RuntimeError(f"row0_top={row0_top} unexpectedly contains no black pixel")
+        raise RuntimeError(f"initial_top={initial_top} unexpectedly contains no black pixel")
 
     columns: list[ColumnRange] = []
     search_x = first_left
     for index in range(3):
-        if index == 0:
-            left = first_left
-        else:
-            left = _next_black_column(occupied, search_x)
+        left = first_left if index == 0 else _next_black_column(occupied, search_x)
         if left is None:
             raise RuntimeError(f"could not find start of column {index + 1} after x={search_x}")
 
@@ -168,13 +213,7 @@ def detect_page1_layout(page: Image.Image) -> tuple[int, list[ColumnRange]]:
             if index != 2:
                 raise RuntimeError(f"could not find >= {MIN_GUTTER_WIDTH}px white gutter after column {index + 1}")
             columns.append(
-                ColumnRange(
-                    index=index,
-                    left=left,
-                    right=len(occupied),
-                    gutter_left=len(occupied),
-                    gutter_right=len(occupied),
-                )
+                ColumnRange(index=index, left=left, right=len(occupied), gutter_left=len(occupied), gutter_right=len(occupied))
             )
             break
 
@@ -192,7 +231,16 @@ def detect_page1_layout(page: Image.Image) -> tuple[int, list[ColumnRange]]:
 
     if len(columns) != 3:
         raise RuntimeError(f"expected 3 columns, found {len(columns)}")
-    return row0_top, columns
+
+    blotch = _detect_left_blotch(page, initial_top, columns[0])
+    row0_top = blotch.bottom + 1 if blotch is not None else initial_top
+    return Page1Layout(initial_top=initial_top, row0_top=row0_top, columns=columns, blotch=blotch)
+
+
+def detect_page1_layout(page: Image.Image) -> tuple[int, list[ColumnRange]]:
+    """Compatibility wrapper returning the effective row top and columns."""
+    layout = detect_page1_layout_details(page)
+    return layout.row0_top, layout.columns
 
 
 def main() -> int:
@@ -206,25 +254,31 @@ def main() -> int:
         raise ValueError("this detector is intentionally hard-coded for page 1")
 
     page = _load_thresholded_page(args.jsonl, args.page, args.threshold)
-    row0_top, columns = detect_page1_layout(page)
+    layout = detect_page1_layout_details(page)
 
-    # Reproduce the old vertical-start diagnostic after applying the masks used
-    # by the current detector. Absolute coordinates are preserved.
-    occupied = _vertical_occupancy(page, row0_top)
+    occupied = _vertical_occupancy(page, layout.initial_top)
     old_left = _next_black_column(occupied, PAGE1_IGNORE_THROUGH_X + 1)
     if old_left is not None:
-        old_y = _first_ink_y_in_column(page, old_left, row0_top)
+        old_y = _first_ink_y_in_column(page, old_left, layout.initial_top)
         print(
             f"page1-layout: old-vertical-first-pixel x={old_left} y={old_y} "
-            f"current-row0-first-x={columns[0].left}"
+            f"current-initial-first-x={layout.columns[0].left}"
         )
 
     print(
         f"page1-layout: page=1 threshold={args.threshold} "
         f"blanked_y=0..{PAGE1_IGNORE_ABOVE_Y - 1} blanked_x=0..{PAGE1_IGNORE_THROUGH_X} "
-        f"row0_top={row0_top}"
+        f"initial_top={layout.initial_top} row0_top={layout.row0_top}"
     )
-    for column in columns:
+    if layout.blotch is None:
+        print(f"page1-layout: blotch=none min_black_run={MIN_BLOTCH_RUN_WIDTH}")
+    else:
+        b = layout.blotch
+        print(
+            f"page1-layout: blotch top={b.top} left={b.left} run_right={b.run_right} "
+            f"run_width={b.run_right - b.left} bottom={b.bottom} row0_top={layout.row0_top}"
+        )
+    for column in layout.columns:
         print(
             f"page1-layout: column={column.index + 1} left={column.left} right={column.right} "
             f"gutter={column.gutter_left}..{column.gutter_right}"
