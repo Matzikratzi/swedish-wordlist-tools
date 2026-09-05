@@ -17,7 +17,6 @@ from . import ocr_priority_fast_path as priority
 from . import ocr_review_page_pixel_array_glyphs_html as page_editor
 from .ocr_fast_regression_scan import _fast_only_analyser
 from .ocr_glyph_review_delete import load_facit_with_typography
-from .ocr_probe_row_glyphs import row_ink
 
 
 def _first_anchor_baselines(ink, width: int, height: int, models) -> dict:
@@ -110,18 +109,14 @@ def main() -> int:
     with _fast_only_analyser():
         state = page_editor._load_owned_row_state(context, position, models)
 
-    # _load_owned_row_state intentionally returns the analyser summary rather
-    # than its private thresholded raster.  Recreate exactly the same ink from
-    # the returned owned crop; this is the same row_ink() operation used by
-    # analyse_row_fast_only, not a second OCR path.
-    crop = state["crop"]
-    ink = row_ink(crop, threshold=int(context["threshold"]))
-    diag = _first_anchor_baselines(
-        ink,
-        crop.width,
-        crop.height,
-        models,
-    )
+    # _load_owned_row_state already returns the exact thresholded source ink
+    # that its analyser saw.  Use those points directly: no re-rendering and no
+    # second threshold pass are needed, so this diagnostic cannot drift from
+    # the fast analyser's input.
+    ink = {(int(x), int(y)) for x, y in state.get("source_ink_points") or []}
+    width = int(state["crop_width"])
+    height = int(state["crop_height"])
+    diag = _first_anchor_baselines(ink, width, height, models)
 
     print(
         f"fast-baseline-debug: page={args.page} column={args.column} row={args.row} "
