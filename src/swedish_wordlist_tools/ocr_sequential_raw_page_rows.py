@@ -21,6 +21,7 @@ from .ocr_raw_page_baseline_row import _raw_ink
 
 
 HOMONYM_PROBE_WIDTH = 12
+FIRST_TEXT_SEARCH_WIDTH = 40
 
 
 @dataclass(frozen=True)
@@ -79,7 +80,7 @@ def _provisional_height(models) -> int:
 
 def _start_band(left: int, previous_start_x: int | None) -> tuple[int, int]:
     """Return the narrow lexical-start band used only for row discovery."""
-    return left, left + 40
+    return left, left + FIRST_TEXT_SEARCH_WIDTH
 
 
 def _row_has_start_ink(context: dict, y: int, x0: int, x1: int) -> bool:
@@ -187,35 +188,49 @@ def _walk_baseline(
     return matched_glyphs, owned, matched_right
 
 
-def _homonym_seed_walks(
+def _first_text_start_x(
+    raw: set[tuple[int, int]],
+    *,
+    row_top: int,
+    provisional_bottom: int,
+    left: int,
+    right: int,
+) -> int | None:
+    """Return the absolute x of the first non-homonym ink near the row start.
+
+    The leftmost HOMONYM_PROBE_WIDTH pixels are reserved for a possible homonym
+    digit. We deliberately skip them when establishing the baseline. The first
+    ordinary text pixel is therefore a single horizontal anchor; baseline
+    search may vary vertically, but no longer over many candidate x positions.
+    """
+    text_left = min(right, left + HOMONYM_PROBE_WIDTH)
+    text_right = min(right, left + FIRST_TEXT_SEARCH_WIDTH)
+    y_limit = min(provisional_bottom, row_top + 12)
+    xs = [x for x, y in raw if text_left <= x < text_right and row_top <= y < y_limit]
+    return min(xs) if xs else None
+
+
+def _first_text_seed_walks(
     raw: set[tuple[int, int]],
     row_top: int,
     provisional_bottom: int,
     models,
     left: int,
     right: int,
+    anchor_x: int,
 ) -> dict[tuple[int, int], tuple[tuple[int, int, int], int, int, set[tuple[int, int]], int, int]]:
-    """Try the homonym coordinate first and use a matched digit as baseline seed.
-
-    We only inspect a narrow absolute x strip at the column's left edge and only
-    test models from the prepared homonym bucket. A complete homonym glyph match
-    gives one or more baseline candidates; those candidates are then verified by
-    walking the whole row on the same baseline.
-    """
+    """Establish baseline from the first ordinary text glyph at one known x."""
     page_candidates = cached._bound_page_candidates(models)
-    if not page_candidates.homonym:
-        return {}
-
-    probe_right = min(right, left + HOMONYM_PROBE_WIDTH)
     candidate_rows = range(row_top, min(provisional_bottom, row_top + 12))
-    seeds: set[tuple[int, int]] = set()
+    hypotheses: set[int] = set()
 
     for anchor_y in candidate_rows:
-        xs = sorted(x for x, y in raw if y == anchor_y and left <= x < probe_right)
-        for anchor_x in xs:
-            for model, min_x, left_pixels in page_candidates.homonym:
+        if (anchor_x, anchor_y) not in raw:
+            continue
+        for bucket in (page_candidates.bold, page_candidates.roman, page_candidates.italic, page_candidates.other):
+            for model, min_x, left_pixels in bucket:
                 x0 = anchor_x - min_x
-                if x0 < left or x0 + model.width > probe_right:
+                if x0 < left or x0 + model.width > right:
                     continue
                 for _mx, my in left_pixels:
                     baseline = anchor_y - my
@@ -223,10 +238,10 @@ def _homonym_seed_walks(
                         continue
                     placed = {(x0 + mx, baseline + py) for mx, py in model.pixels}
                     if placed and placed.issubset(raw):
-                        seeds.add((anchor_x, baseline))
+                        hypotheses.add(baseline)
 
     walks = {}
-    for anchor_x, baseline in sorted(seeds):
+    for baseline in sorted(hypotheses):
         glyphs, owned, matched_right = _walk_baseline(
             raw, baseline, models, left, right, anchor_x
         )
@@ -244,6 +259,96 @@ def _homonym_seed_walks(
     return walks
 
 
+def _match_homonym_on_baseline(
+    raw: set[tuple[int, int]],
+    baseline: int,
+    models,
+    left: int,
+    text_start_x: int,
+) -> set[tuple[int, int]]:
+    """Read an optional homonym only after ordinary text proved the baseline."""
+    page_candidates = cached._bound_page_candidates(models)
+    probe_right = min(text_start_x, left + HOMONYM_PROBE_WIDTH)
+    if probe_right <= left:
+        return set()
+
+    best: set[tuple[int, int]] = set()
+    for model, min_x, _left_pixels in page_candidates.homonym:
+        for x0 in range(left - min_x, probe_right - min_x):
+            placed = {(x0 + mx, baseline + py) for mx, py in model.pixels}
+            if not placed:
+                continue
+            xs = [x for x, _y in placed]
+            if min(xs) < left or max(xs) >= text_start_x:
+                continue
+            if placed.issubset(raw) and len(placed) > len(best):
+                best = placed
+    return best
+
+
+def _generic_seed_walks(
+    raw: set[tuple[int, int]],
+    row_top: int,
+    provisional_bottom: int,
+    models,
+    left: int,
+    right: int,
+    previous: CachedRowBoundary | None,
+) -> dict[tuple[int, int], tuple[tuple[int, int, int], int, int, set[tuple[int, int]], int, int]]:
+    """Compatibility fallback for rows where the exact text-start probe fails."""
+    page_candidates = cached._bound_page_candidates(models)
+    band_left, band_right = _start_band(left, None if previous is None else previous.start_x)
+    candidate_walks = {}
+    candidate_rows = range(row_top, min(provisional_bottom, row_top + 12))
+    for anchor_y in candidate_rows:
+        xs = [x for x, y in raw if y == anchor_y and band_left <= x < band_right]
+        if previous is None:
+            xs.sort()
+        else:
+            xs.sort(key=lambda x: (abs(x - previous.start_x), x))
+
+        for anchor_x in xs:
+            hypotheses: set[int] = set()
+            for model, min_x, left_pixels in cached._iter_candidates(
+                page_candidates,
+                first_glyph=True,
+                previous_style=None,
+                row_kind="unknown",
+                leading_homonym_seen=False,
+                baseline_established=False,
+            ):
+                x0 = anchor_x - min_x
+                if x0 < left or x0 + model.width > right:
+                    continue
+                for _mx, my in left_pixels:
+                    baseline = anchor_y - my
+                    if baseline < row_top or baseline >= provisional_bottom:
+                        continue
+                    placed = {(x0 + mx, baseline + py) for mx, py in model.pixels}
+                    if placed and placed.issubset(raw):
+                        hypotheses.add(baseline)
+
+            for baseline in hypotheses:
+                key = (anchor_x, baseline)
+                if key in candidate_walks:
+                    continue
+                glyphs, owned, matched_right = _walk_baseline(
+                    raw, baseline, models, left, right, anchor_x
+                )
+                if glyphs <= 0 or not owned:
+                    continue
+                score = (matched_right - anchor_x, glyphs, len(owned))
+                candidate_walks[key] = (
+                    score,
+                    anchor_x,
+                    baseline,
+                    owned,
+                    glyphs,
+                    matched_right,
+                )
+    return candidate_walks
+
+
 def _discover_at_top(
     context: dict,
     column: int,
@@ -255,73 +360,40 @@ def _discover_at_top(
     left, _column_top, right, column_bottom = _column_bounds(context, column)
     provisional_bottom = min(column_bottom, row_top + _provisional_height(models))
     raw = _raw_ink(context, left=left, right=right, top=row_top, bottom=provisional_bottom)
-    page_candidates = cached._bound_page_candidates(models)
-    band_left, band_right = _start_band(left, None if previous is None else previous.start_x)
 
-    # If the row carries ink at the homonym coordinate, try only the known
-    # homonym models there first. A successful digit acts as a cheap baseline
-    # probe and lets us avoid the much larger generic first-glyph search.
-    candidate_walks = _homonym_seed_walks(
+    # Main path: ignore a possible homonym digit, find the first ordinary text
+    # pixel once, and let only glyphs anchored at that exact x establish the
+    # baseline. This removes the expensive anchor-x x baseline search.
+    text_start_x = _first_text_start_x(
         raw,
-        row_top,
-        provisional_bottom,
-        models,
-        left,
-        right,
+        row_top=row_top,
+        provisional_bottom=provisional_bottom,
+        left=left,
+        right=right,
     )
+    candidate_walks = {}
+    if text_start_x is not None:
+        candidate_walks = _first_text_seed_walks(
+            raw,
+            row_top,
+            provisional_bottom,
+            models,
+            left,
+            right,
+            text_start_x,
+        )
 
-    # Fall back to the global search only when no complete homonym seed could be
-    # verified. Do not accept the first locally unique glyph fit: tiny models can
-    # match accidental pixels near the roof.
+    # Transitional safety net while this simpler start rule is tested.
     if not candidate_walks:
-        candidate_walks = {}
-        candidate_rows = range(row_top, min(provisional_bottom, row_top + 12))
-        for anchor_y in candidate_rows:
-            xs = [x for x, y in raw if y == anchor_y and band_left <= x < band_right]
-            if previous is None:
-                xs.sort()
-            else:
-                xs.sort(key=lambda x: (abs(x - previous.start_x), x))
-
-            for anchor_x in xs:
-                hypotheses: set[int] = set()
-                for model, min_x, left_pixels in cached._iter_candidates(
-                    page_candidates,
-                    first_glyph=True,
-                    previous_style=None,
-                    row_kind="unknown",
-                    leading_homonym_seen=False,
-                    baseline_established=False,
-                ):
-                    x0 = anchor_x - min_x
-                    if x0 < left or x0 + model.width > right:
-                        continue
-                    for _mx, my in left_pixels:
-                        baseline = anchor_y - my
-                        if baseline < row_top or baseline >= provisional_bottom:
-                            continue
-                        placed = {(x0 + mx, baseline + py) for mx, py in model.pixels}
-                        if placed and placed.issubset(raw):
-                            hypotheses.add(baseline)
-
-                for baseline in hypotheses:
-                    key = (anchor_x, baseline)
-                    if key in candidate_walks:
-                        continue
-                    glyphs, owned, matched_right = _walk_baseline(
-                        raw, baseline, models, left, right, anchor_x
-                    )
-                    if glyphs <= 0 or not owned:
-                        continue
-                    score = (matched_right - anchor_x, glyphs, len(owned))
-                    candidate_walks[key] = (
-                        score,
-                        anchor_x,
-                        baseline,
-                        owned,
-                        glyphs,
-                        matched_right,
-                    )
+        candidate_walks = _generic_seed_walks(
+            raw,
+            row_top,
+            provisional_bottom,
+            models,
+            left,
+            right,
+            previous,
+        )
 
     if not candidate_walks:
         raise RuntimeError(
@@ -342,6 +414,16 @@ def _discover_at_top(
         )
 
     _score, anchor_x, baseline, owned, glyphs, matched_right = best[0]
+
+    # Once ordinary text has proved the baseline, look back into the narrow
+    # homonym strip and attach a matching digit without letting it influence the
+    # baseline choice.
+    homonym_owned = _match_homonym_on_baseline(raw, baseline, models, left, anchor_x)
+    if homonym_owned:
+        owned = set(owned)
+        owned.update(homonym_owned)
+        glyphs += 1
+
     final_bottom = max(y for _x, y in owned) + 1
     return CachedRowBoundary(
         row=row_index,
