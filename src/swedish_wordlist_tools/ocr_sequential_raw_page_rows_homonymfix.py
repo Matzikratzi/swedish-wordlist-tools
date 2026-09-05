@@ -20,6 +20,20 @@ from . import ocr_sequential_raw_page_rows as _scanner
 _ORIGINAL_PAGE1_BASELINE_PROBE_WALKS = _scanner._page1_baseline_probe_walks
 
 
+def _describe_homonym_models(page_candidates) -> None:
+    models = []
+    for model, min_x, left_pixels in page_candidates.homonym:
+        models.append(
+            f"label={model.label!r} id={getattr(model, 'model_id', None)!r} "
+            f"pixels={len(model.pixels)} x={min_x}..{min_x + model.width - 1} "
+            f"y={model.min_y}..{model.max_y} left_pixels={len(left_pixels)}"
+        )
+    print(
+        "raw-page-homonym-models: "
+        + ("; ".join(models) if models else "NONE")
+    )
+
+
 def _homonym_baseline_seeds(
     raw: set[tuple[int, int]],
     search_from: int,
@@ -30,6 +44,7 @@ def _homonym_baseline_seeds(
 ) -> dict[int, set[tuple[int, int]]]:
     """Return exact homonym-derived baseline candidates and their proved pixels."""
     page_candidates = _scanner.cached._bound_page_candidates(models)
+    _describe_homonym_models(page_candidates)
     probe_right = min(right, left + _scanner.HOMONYM_PROBE_WIDTH)
     anchor_bottom = min(search_limit, search_from + _scanner.START_SEARCH_HEIGHT)
     seeds: dict[int, set[tuple[int, int]]] = {}
@@ -48,6 +63,12 @@ def _homonym_baseline_seeds(
                     placed = {(x0 + mx, baseline + py) for mx, py in model.pixels}
                     if not placed or not placed.issubset(raw):
                         continue
+                    print(
+                        "raw-page-homonym-exact: "
+                        f"label={model.label!r} id={getattr(model, 'model_id', None)!r} "
+                        f"anchor=({anchor_x},{anchor_y}) x0={x0} baseline={baseline} "
+                        f"pixels={len(placed)}"
+                    )
                     old = seeds.get(baseline)
                     if old is None or len(placed) > len(old):
                         seeds[baseline] = placed
