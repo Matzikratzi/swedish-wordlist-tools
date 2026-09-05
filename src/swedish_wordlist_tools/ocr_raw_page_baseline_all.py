@@ -12,8 +12,6 @@ from time import perf_counter
 from . import ocr_raw_page_baseline_debug as debug
 
 
-# Keep normal progress sparse, but surface rows that are conspicuously slower
-# than the ~0.1--0.2 s rows seen in the current page-1 experiments.
 _SLOW_ROW_SECONDS = 0.30
 _PROGRESS_EVERY = 10
 
@@ -43,6 +41,20 @@ def _print_progress(*, column: int, row: int, row_seconds: float, total_rows: in
     )
 
 
+def _disable_duplicate_glyph_trace() -> None:
+    """Use the real race walker directly in full-page mode.
+
+    The headword-fast experiment normally wraps every race step with a second
+    candidate search solely to print which glyph will be chosen.  That is useful
+    in single-row diagnostics but wasteful when scanning a whole page.
+    """
+    sequential = debug.sequential
+    previous = getattr(sequential, "_previous", None)
+    original = getattr(sequential, "_ORIGINAL_RACE_ADVANCE_ONE", None)
+    if previous is not None and original is not None:
+        previous._advance_one = original
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="OCR every row in every column of one SAOL page.")
     ap.add_argument("jsonl", type=Path)
@@ -51,6 +63,8 @@ def main() -> int:
     ap.add_argument("--threshold", type=int, default=210)
     ap.add_argument("--trace-output", type=Path, default=None)
     args = ap.parse_args()
+
+    _disable_duplicate_glyph_trace()
 
     started = perf_counter()
     setup_started = perf_counter()
@@ -82,10 +96,11 @@ def main() -> int:
 
     with trace_output.open("w", encoding="utf-8") as trace:
         _write(trace, {
-            "type": "meta", "version": 3, "mode": "all", "page": args.page,
+            "type": "meta", "version": 4, "mode": "all", "page": args.page,
             "source_jsonl": str(args.jsonl.resolve()), "facit": str(args.facit.resolve()),
             "threshold": args.threshold, "columns": columns,
             "progress_every": _PROGRESS_EVERY, "slow_row_seconds": _SLOW_ROW_SECONDS,
+            "duplicate_glyph_trace": False,
         })
         for phase, lines in (("load-facit", load_diag), ("page-setup", setup_diag),
                              ("bind-candidates", bind_diag), ("layout", layout_diag)):
@@ -94,9 +109,26 @@ def main() -> int:
 
         for column in columns:
             left, right = debug._column_bounds_for_debug(context, column)
-            _write(trace, {"type": "column", "column": column, "left": left, "right": right})
+            raw_column = raw_layout.get(column) if raw_layout else None
+            column_bottom = int(raw_column["bottom"]) if raw_column is not None else None
+            _write(trace, {
+                "type": "column", "column": column, "left": left, "right": right,
+                "bottom": column_bottom,
+            })
             row = 0
             while True:
+                # Once the proven previous border has reached the known text-column
+                # bottom there cannot be another row; do not perform another ink or
+                # baseline search merely to discover that fact.
+                cache_now = (context.get("raw_page_row_boundary_cache") or {}).get(column) or []
+                if column_bottom is not None and cache_now and cache_now[-1].border >= column_bottom:
+                    _write(trace, {
+                        "type": "column_end", "column": column, "row": row,
+                        "reason": "known column bottom reached", "bottom": column_bottom,
+                    })
+                    print(f"raw-page-column: column={column} rows={row} complete bottom={column_bottom}")
+                    break
+
                 row_started = perf_counter()
                 try:
                     cache, diagnostics = _captured(
