@@ -254,7 +254,19 @@ def detect_page1_layout_details(page: Image.Image) -> Page1Layout:
         for column in columns
     )
     blotch = _detect_left_blotch(page, natural_tops[0], columns[0])
-    left_row0_top = blotch.bottom + 1 if blotch is not None else natural_tops[0]
+    if blotch is not None:
+        # A blotch only tells us that the first ink at the top of this column is
+        # not dictionary text. Once the blotch has ended, keep walking downward
+        # inside the same absolute x range until actual ink re-enters. That first
+        # black pixel row is row 0's roof.
+        left_row0_top = _first_ink_row_in_range(
+            page,
+            blotch.bottom + 1,
+            columns[0].left,
+            columns[0].right,
+        )
+    else:
+        left_row0_top = natural_tops[0]
     row0_tops = (left_row0_top, natural_tops[1], natural_tops[2])
     return Page1Layout(initial_top=initial_top, row0_tops=row0_tops, columns=columns, blotch=blotch)
 
