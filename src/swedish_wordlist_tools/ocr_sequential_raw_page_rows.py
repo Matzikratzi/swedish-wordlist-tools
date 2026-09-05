@@ -5,7 +5,7 @@ from __future__ import annotations
 Each row has three vertical limits:
 - row_top: stable start of the row work area,
 - provisional_bottom: temporary generous search limit while solving the row,
-- final_bottom: tightened to the lowest pixel proven by matched glyph models.
+- final_bottom: tightened to the lowest pixel proven by the completed row walk.
 
 Only final_bottom is used to advance to the next row. Legacy per-row bottoms are
 never used as OCR limits.
@@ -14,6 +14,7 @@ never used as OCR limits.
 from dataclasses import dataclass
 
 from . import ocr_page_cached_fast_path as cached
+from . import ocr_priority_fast_path as priority
 from .ocr_raw_page_baseline_row import _raw_ink
 
 
@@ -25,6 +26,9 @@ class CachedRowBoundary:
     baseline: int
     final_bottom: int
     next_search_y: int
+    matched_glyphs: int
+    matched_pixels: int
+    matched_right: int
 
 
 def _cache(context: dict) -> dict[int, list[CachedRowBoundary]]:
@@ -46,32 +50,69 @@ def _provisional_height(models) -> int:
     """Generous work height derived from glyph models, not row geometry."""
     heights = [int(getattr(model, "height", 0) or 0) for model in models]
     tallest = max(heights, default=16)
-    # Enough room for ascenders/descenders plus whitespace while still keeping
-    # the working raster local. It is temporary and carries no ownership.
     return max(24, tallest + 12)
 
 
-def _baseline_score(raw: set[tuple[int, int]], baseline: int, models, left: int, right: int) -> tuple[int, int | None]:
-    """Count complete glyph placements explained by pixels on one baseline."""
+def _walk_baseline(
+    raw: set[tuple[int, int]],
+    baseline: int,
+    models,
+    left: int,
+    right: int,
+    anchor_x: int,
+) -> tuple[int, set[tuple[int, int]], int]:
+    """Consume one row left-to-right on a fixed baseline.
+
+    Pixels from neighbouring rows may be present in the provisional work area,
+    but they cannot be consumed unless a complete glyph model fits them on this
+    exact baseline. Gaps are allowed: they move the cursor, not the baseline.
+    """
     page_candidates = cached._bound_page_candidates(models)
-    count = 0
-    bottom = None
-    for x in sorted({x for x, _y in raw}):
+    remaining = set(raw)
+    owned: set[tuple[int, int]] = set()
+    previous_style: str | None = None
+    cursor = int(anchor_x)
+    matched_glyphs = 0
+    matched_right = cursor
+
+    while cursor < right:
+        chosen = None
         for model, min_x, _left_pixels in cached._iter_candidates(
-            page_candidates, first_glyph=False, previous_style=None,
-            row_kind="unknown", leading_homonym_seen=False,
+            page_candidates,
+            first_glyph=matched_glyphs == 0,
+            previous_style=previous_style,
+            row_kind="unknown",
+            leading_homonym_seen=False,
             baseline_established=True,
         ):
-            x0 = x - min_x
+            x0 = cursor - min_x
             if x0 < left or x0 + model.width > right:
                 continue
             placed = {(x0 + mx, baseline + my) for mx, my in model.pixels}
-            if placed and placed.issubset(raw):
-                count += 1
-                model_bottom = max(py for _px, py in placed) + 1
-                bottom = model_bottom if bottom is None else max(bottom, model_bottom)
+            if placed and placed.issubset(remaining):
+                chosen = (model, x0, placed)
                 break
-    return count, bottom
+
+        if chosen is not None:
+            model, x0, placed = chosen
+            remaining.difference_update(placed)
+            owned.update(placed)
+            matched_glyphs += 1
+            previous_style = priority._typographic_style(model.style)
+            glyph_right = max(px for px, _py in placed) + 1
+            matched_right = max(matched_right, glyph_right)
+            cursor = max(cursor + 1, glyph_right)
+            continue
+
+        # Whitespace or a pixel belonging to another row: advance horizontally.
+        # We deliberately do not jump to an arbitrary lower pixel and therefore
+        # cannot create a new baseline while this row is being solved.
+        later_x = [x for x, _y in remaining if x > cursor]
+        if not later_x:
+            break
+        cursor = min(later_x)
+
+    return matched_glyphs, owned, matched_right
 
 
 def _discover_next(context: dict, column: int, row_index: int, row_top: int, models) -> CachedRowBoundary:
@@ -81,16 +122,19 @@ def _discover_next(context: dict, column: int, row_index: int, row_top: int, mod
     raw = _raw_ink(context, left=left, right=right, top=row_top, bottom=provisional_bottom)
     page_candidates = cached._bound_page_candidates(models)
 
-    # A new row can only be established from ink close to a lexical left start.
-    # The provisional bottom merely limits the work area; it is not a boundary.
+    # A new row can only be proposed from ink close to the lexical left edge.
+    # Once proposed, the complete row is walked before its bottom is tightened.
     start_slack = 40
     for anchor_y in range(row_top, provisional_bottom):
         xs = sorted(x for x, y in raw if y == anchor_y and x <= left + start_slack)
         for anchor_x in xs:
             hypotheses: set[int] = set()
             for model, min_x, left_pixels in cached._iter_candidates(
-                page_candidates, first_glyph=True, previous_style=None,
-                row_kind="unknown", leading_homonym_seen=False,
+                page_candidates,
+                first_glyph=True,
+                previous_style=None,
+                row_kind="unknown",
+                leading_homonym_seen=False,
                 baseline_established=False,
             ):
                 x0 = anchor_x - min_x
@@ -106,29 +150,41 @@ def _discover_next(context: dict, column: int, row_index: int, row_top: int, mod
             if not hypotheses:
                 continue
 
-            scored = []
+            walks = []
             for baseline in sorted(hypotheses):
-                score, proven_bottom = _baseline_score(raw, baseline, models, left, right)
-                scored.append((score, baseline, proven_bottom))
-            best_score = max(score for score, _baseline, _bottom in scored)
-            best = [(baseline, proven_bottom) for score, baseline, proven_bottom in scored if score == best_score]
-            if best_score > 0 and len(best) == 1:
-                baseline, proven_bottom = best[0]
-                # Tighten aggressively when the row is done: final_bottom is
-                # exactly one pixel below the lowest proven glyph pixel.
-                final_bottom = max(baseline + 1, int(proven_bottom or (baseline + 1)))
-                return CachedRowBoundary(
-                    row=row_index,
-                    row_top=row_top,
-                    provisional_bottom=provisional_bottom,
-                    baseline=baseline,
-                    final_bottom=final_bottom,
-                    next_search_y=final_bottom,
+                glyphs, owned, matched_right = _walk_baseline(
+                    raw, baseline, models, left, right, anchor_x
                 )
+                # Prefer the hypothesis that explains a coherent row furthest
+                # to the right, then the most glyphs/pixels. The first glyph is
+                # not enough by itself to establish the baseline.
+                score = (matched_right, glyphs, len(owned))
+                walks.append((score, baseline, owned, glyphs, matched_right))
+
+            best_score = max(score for score, _baseline, _owned, _glyphs, _right in walks)
+            best = [item for item in walks if item[0] == best_score and item[3] > 0]
+            if len(best) != 1:
+                continue
+
+            _score, baseline, owned, glyphs, matched_right = best[0]
+            # Tighten only after the row walker has finished. This is exactly
+            # one pixel below the lowest pixel proven to belong to this row.
+            final_bottom = max(y for _x, y in owned) + 1
+            return CachedRowBoundary(
+                row=row_index,
+                row_top=row_top,
+                provisional_bottom=provisional_bottom,
+                baseline=baseline,
+                final_bottom=final_bottom,
+                next_search_y=final_bottom,
+                matched_glyphs=glyphs,
+                matched_pixels=len(owned),
+                matched_right=matched_right,
+            )
 
     raise RuntimeError(
         f"sequential raw-page discovery stopped at column={column} row={row_index}: "
-        f"no unique baseline in work area y={row_top}..{provisional_bottom}"
+        f"no unique walked baseline in work area y={row_top}..{provisional_bottom}"
     )
 
 
