@@ -38,7 +38,9 @@ def main() -> int:
         print(
             f"  row={entry.row:03d} top={entry.row_top} "
             f"temp_bottom={entry.provisional_bottom} baseline={entry.baseline} "
-            f"final_bottom={entry.final_bottom} next_search_y={entry.next_search_y}{marker}"
+            f"final_bottom={entry.final_bottom} next_search_y={entry.next_search_y} "
+            f"glyphs={entry.matched_glyphs} pixels={entry.matched_pixels} "
+            f"right={entry.matched_right}{marker}"
         )
     return 0
 
