@@ -2,11 +2,11 @@ from __future__ import annotations
 
 """Sequential baseline discovery directly from the page pixel array.
 
-Rows are discovered strictly in order from raw thresholded page pixels. Row 0
-uses the page-layout roof. Later rows use a left-edge re-entry only as a vertical
-hint; their raw search window starts at the previous row's proven final bottom.
-A headword row may require a bold first glyph, while continuation rows normally
-start roman or italic and only sometimes bold.
+A solved row contributes two pieces of vertical geometry to the scanner:
+``baseline`` for glyph placement and ``border`` as the first y coordinate below
+all proven glyph pixels.  A top coordinate is derived only for diagnostics.
+Temporary search limits are local variables and are never cached as row
+geometry.
 """
 
 from dataclasses import dataclass
@@ -27,12 +27,10 @@ PAGE1_X_RIGHT_SLACK = 10
 @dataclass(frozen=True)
 class CachedRowBoundary:
     row: int
-    row_top: int
     start_x: int
-    provisional_bottom: int
     baseline: int
-    final_bottom: int
-    next_search_y: int
+    border: int
+    debug_top: int
     matched_glyphs: int
     matched_pixels: int
     matched_right: int
@@ -71,7 +69,7 @@ def _provisional_height(models) -> int:
     return max(24, tallest + 12)
 
 
-def _start_band(left: int, previous_start_x: int | None) -> tuple[int, int]:
+def _start_band(left: int) -> tuple[int, int]:
     return left, left + FIRST_TEXT_SEARCH_WIDTH
 
 
@@ -86,7 +84,7 @@ def _row_has_start_ink(context: dict, y: int, x0: int, x1: int) -> bool:
     return any(data[base + x] != 0 for x in range(x0, x1))
 
 
-def _find_next_row_top(
+def _find_next_row_hint(
     context: dict,
     *,
     column_top: int,
@@ -94,10 +92,8 @@ def _find_next_row_top(
     left: int,
     previous: CachedRowBoundary | None,
 ) -> int:
-    """Return row-0 roof or, later, a left-edge re-entry y used only as a hint."""
-    band_left, band_right = _start_band(
-        left, None if previous is None else previous.start_x
-    )
+    """Find a vertical cue; only ``border`` survives from the previous row."""
+    band_left, band_right = _start_band(left)
     if previous is None:
         if context.get("raw_page_column_layout"):
             return column_top
@@ -107,18 +103,15 @@ def _find_next_row_top(
         raise RuntimeError("no start ink found in column")
 
     blank_run = 0
-    saw_previous_ink = False
-    for y in range(previous.row_top, column_bottom):
-        has_ink = _row_has_start_ink(context, y, band_left, band_right)
-        if has_ink:
-            if saw_previous_ink and blank_run >= 2:
+    for y in range(previous.border, column_bottom):
+        if _row_has_start_ink(context, y, band_left, band_right):
+            if blank_run >= 2:
                 return y
-            saw_previous_ink = True
             blank_run = 0
-        elif saw_previous_ink:
+        else:
             blank_run += 1
     raise RuntimeError(
-        f"no next left-edge ink after row={previous.row} top={previous.row_top}"
+        f"no next left-edge ink after row={previous.row} border={previous.border}"
     )
 
 
@@ -145,7 +138,6 @@ def _walk_baseline(
     while cursor < right:
         if max_glyphs is not None and matched_glyphs >= max_glyphs:
             break
-
         if matched_glyphs == 0 and first_candidates is not None:
             candidates = first_candidates
         else:
@@ -190,20 +182,19 @@ def _walk_baseline(
 def _first_text_ink_x(
     raw: set[tuple[int, int]],
     *,
-    search_top: int,
+    search_from: int,
     hint_y: int,
-    provisional_bottom: int,
+    search_limit: int,
     left: int,
     right: int,
 ) -> int | None:
-    """First raw ink x after the homonym strip in the next-row search band."""
     text_left = min(right, left + HOMONYM_PROBE_WIDTH)
     text_right = min(right, left + FIRST_TEXT_SEARCH_WIDTH)
-    y_limit = min(provisional_bottom, hint_y + 12)
+    y_limit = min(search_limit, hint_y + 12)
     xs = [
         x
         for x, y in raw
-        if text_left <= x < text_right and search_top <= y < y_limit
+        if text_left <= x < text_right and search_from <= y < y_limit
     ]
     return min(xs) if xs else None
 
@@ -218,19 +209,23 @@ def _bold_candidates(page_candidates, allowed_labels: frozenset[str] | None = No
 
 def _continuation_candidates(page_candidates):
     """Continuation rows usually start roman/italic; bold remains possible."""
-    return tuple(page_candidates.roman) + tuple(page_candidates.italic) + tuple(page_candidates.bold) + tuple(page_candidates.other)
+    return (
+        tuple(page_candidates.roman)
+        + tuple(page_candidates.italic)
+        + tuple(page_candidates.bold)
+        + tuple(page_candidates.other)
+    )
 
 
 def _page1_baseline_probe_walks(
     raw: set[tuple[int, int]],
-    search_top: int,
-    provisional_bottom: int,
+    search_from: int,
+    search_limit: int,
     models,
     left: int,
     right: int,
     first_ink_x: int,
 ):
-    """Try exact bold a variants in a tiny absolute placement window for row 0."""
     page_candidates = cached._bound_page_candidates(models)
     initial_candidates = _bold_candidates(page_candidates, PAGE1_EXACT_LABELS)
     walks = {}
@@ -241,11 +236,10 @@ def _page1_baseline_probe_walks(
         if x0_hi < x0_lo:
             continue
         for x0 in range(x0_lo, x0_hi + 1):
-            for baseline in range(search_top, provisional_bottom):
+            for baseline in range(search_from, search_limit):
                 placed = {(x0 + mx, baseline + my) for mx, my in model.pixels}
                 if not placed or not placed.issubset(raw):
                     continue
-
                 anchor_x = x0 + min_x
                 follow_x = max(x for x, _y in placed) + 1
                 glyphs, owned, matched_right = _walk_baseline(
@@ -259,36 +253,33 @@ def _page1_baseline_probe_walks(
                 )
                 if glyphs <= 0:
                     continue
-
                 score = (
                     glyphs,
                     matched_right - anchor_x,
                     len(owned) + len(placed),
                 )
                 key = (anchor_x, baseline)
-                previous = walks.get(key)
                 value = (score, model, x0, placed, glyphs, matched_right)
-                if previous is None or score > previous[0]:
+                old = walks.get(key)
+                if old is None or score > old[0]:
                     walks[key] = value
     return walks
 
 
 def _ordinary_baseline_probe_walks(
     raw: set[tuple[int, int]],
-    search_top: int,
+    search_from: int,
     hint_y: int,
-    provisional_bottom: int,
+    search_limit: int,
     models,
     left: int,
     right: int,
     anchor_x: int,
     first_candidates,
 ):
-    """Prove a continuation baseline from roman/italic/bold candidate starts."""
     hypotheses: set[int] = set()
-    anchor_bottom = min(provisional_bottom, hint_y + 12)
-
-    for anchor_y in range(search_top, anchor_bottom):
+    anchor_bottom = min(search_limit, hint_y + 12)
+    for anchor_y in range(search_from, anchor_bottom):
         if (anchor_x, anchor_y) not in raw:
             continue
         for model, min_x, left_pixels in first_candidates:
@@ -297,7 +288,7 @@ def _ordinary_baseline_probe_walks(
                 continue
             for _mx, my in left_pixels:
                 baseline = anchor_y - my
-                if baseline < search_top or baseline >= provisional_bottom:
+                if baseline < search_from or baseline >= search_limit:
                     continue
                 placed = {(x0 + mx, baseline + py) for mx, py in model.pixels}
                 if placed and placed.issubset(raw):
@@ -329,15 +320,7 @@ def _ordinary_baseline_probe_walks(
     return walks
 
 
-def _exact_first_candidates(
-    raw,
-    baseline,
-    candidates,
-    anchor_x,
-    left,
-    right,
-):
-    """Resolve complete first glyphs exactly after baseline is proved."""
+def _exact_first_candidates(raw, baseline, candidates, anchor_x, left, right):
     exact = []
     for candidate in candidates:
         model, min_x, _left_pixels = candidate
@@ -362,7 +345,6 @@ def _match_homonym_on_baseline(
     probe_right = min(text_start_x, left + HOMONYM_PROBE_WIDTH)
     if probe_right <= left:
         return set()
-
     best: set[tuple[int, int]] = set()
     for model, min_x, _left_pixels in page_candidates.homonym:
         for x0 in range(left - min_x, probe_right - min_x):
@@ -377,7 +359,7 @@ def _match_homonym_on_baseline(
     return best
 
 
-def _discover_at_top(
+def _discover_row(
     context: dict,
     column: int,
     row_index: int,
@@ -386,27 +368,27 @@ def _discover_at_top(
     models,
 ) -> CachedRowBoundary:
     left, _column_top, right, column_bottom = _column_bounds(context, column)
-    search_top = hint_y if previous is None else previous.final_bottom
-    provisional_bottom = min(column_bottom, hint_y + _provisional_height(models))
+    search_from = hint_y if previous is None else previous.border
+    search_limit = min(column_bottom, hint_y + _provisional_height(models))
     raw = _raw_ink(
         context,
         left=left,
         right=right,
-        top=search_top,
-        bottom=provisional_bottom,
+        top=search_from,
+        bottom=search_limit,
     )
     first_ink_x = _first_text_ink_x(
         raw,
-        search_top=search_top,
+        search_from=search_from,
         hint_y=hint_y,
-        provisional_bottom=provisional_bottom,
+        search_limit=search_limit,
         left=left,
         right=right,
     )
     if first_ink_x is None:
         raise RuntimeError(
             f"sequential raw-page discovery stopped at column={column} row={row_index}: "
-            f"no ordinary text ink from search_top={search_top} hint_y={hint_y}"
+            f"no ordinary text ink from border={search_from} hint_y={hint_y}"
         )
 
     page1 = context.get("raw_page_layout_source") == "page1-raw-pixels"
@@ -414,11 +396,13 @@ def _discover_at_top(
     page1_headword_row0 = page1 and row_index == 0
 
     if page1_headword_row0:
-        probe_first_candidates = tuple(_bold_candidates(page_candidates, PAGE1_EXACT_LABELS))
+        probe_first_candidates = tuple(
+            _bold_candidates(page_candidates, PAGE1_EXACT_LABELS)
+        )
         probe_walks = _page1_baseline_probe_walks(
             raw,
-            search_top,
-            provisional_bottom,
+            search_from,
+            search_limit,
             models,
             left,
             right,
@@ -428,9 +412,9 @@ def _discover_at_top(
         probe_first_candidates = _continuation_candidates(page_candidates)
         probe_walks = _ordinary_baseline_probe_walks(
             raw,
-            search_top,
+            search_from,
             hint_y,
-            provisional_bottom,
+            search_limit,
             models,
             left,
             right,
@@ -441,7 +425,7 @@ def _discover_at_top(
     if not probe_walks:
         raise RuntimeError(
             f"sequential raw-page discovery stopped at column={column} row={row_index}: "
-            f"no baseline probe near x={first_ink_x} search_top={search_top} hint_y={hint_y}"
+            f"no baseline probe near x={first_ink_x} border={search_from} hint_y={hint_y}"
         )
 
     best_score = max(item[0] for item in probe_walks.values())
@@ -455,12 +439,7 @@ def _discover_at_top(
 
     text_start_x, baseline = best_keys[0]
     first_candidates = _exact_first_candidates(
-        raw,
-        baseline,
-        probe_first_candidates,
-        text_start_x,
-        left,
-        right,
+        raw, baseline, probe_first_candidates, text_start_x, left, right
     )
     if not first_candidates:
         raise RuntimeError(
@@ -491,16 +470,14 @@ def _discover_at_top(
         owned.update(homonym_owned)
         glyphs += 1
 
-    proved_row_top = min(y for _x, y in owned)
-    final_bottom = max(y for _x, y in owned) + 1
+    debug_top = min(y for _x, y in owned)
+    border = max(y for _x, y in owned) + 1
     return CachedRowBoundary(
         row=row_index,
-        row_top=proved_row_top,
         start_x=text_start_x,
-        provisional_bottom=provisional_bottom,
         baseline=baseline,
-        final_bottom=final_bottom,
-        next_search_y=final_bottom,
+        border=border,
+        debug_top=debug_top,
         matched_glyphs=glyphs,
         matched_pixels=len(owned),
         matched_right=matched_right,
@@ -517,7 +494,7 @@ def ensure_row_cached(
     while len(cache) <= target_row:
         row_index = len(cache)
         previous = cache[-1] if cache else None
-        hint_y = _find_next_row_top(
+        hint_y = _find_next_row_hint(
             context,
             column_top=column_top,
             column_bottom=column_bottom,
@@ -525,9 +502,7 @@ def ensure_row_cached(
             previous=previous,
         )
         cache.append(
-            _discover_at_top(
-                context, column, row_index, hint_y, previous, models
-            )
+            _discover_row(context, column, row_index, hint_y, previous, models)
         )
     return cache
 
