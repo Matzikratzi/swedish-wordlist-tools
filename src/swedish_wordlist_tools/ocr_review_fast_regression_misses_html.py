@@ -43,6 +43,8 @@ def _render(states: list[dict], *, pages: list[int], search_gap_count: int) -> s
                 "image": state.get("neighbor_raster_image"),
                 "width": int(state.get("neighbor_raster_width") or 0),
                 "height": int(state.get("neighbor_raster_height") or 0),
+                "page_top": int(state.get("neighbor_page_top") or 0),
+                "page_bottom": int(state.get("neighbor_page_bottom") or 0),
                 "boundaries": list(state.get("neighbor_row_boundaries") or []),
                 "support_lines": list(state.get("neighbor_support_lines") or []),
                 "core_top": int(state.get("neighbor_core_top") or 0),
@@ -51,6 +53,7 @@ def _render(states: list[dict], *, pages: list[int], search_gap_count: int) -> s
                 "covered_pixels": int(state.get("covered_pixels") or 0),
                 "fully_exact": bool(state.get("fully_exact")),
                 "text": str(state.get("text") or ""),
+                "raster_ascii": str(state.get("neighbor_raster_ascii") or ""),
             }
         )
 
@@ -69,6 +72,8 @@ h1 {{ margin:0 0 4px; font-size:22px; }}
 .card {{ background:#fff; border:1px solid #bbb; border-radius:8px; margin:0 0 22px; padding:12px; overflow:auto; }}
 .card h2 {{ font-size:16px; margin:0 0 4px; }}
 .meta {{ font:12px ui-monospace, SFMono-Regular, Menlo, monospace; color:#444; margin-bottom:8px; }}
+.controls {{ margin:0 0 8px; }}
+button {{ font:13px system-ui,sans-serif; padding:5px 9px; cursor:pointer; }}
 .canvas-wrap {{ display:inline-block; border:1px solid #aaa; background:#fff; padding:4px; }}
 canvas {{ display:block; image-rendering:pixelated; }}
 .legend {{ font-size:12px; margin:6px 0 0; color:#555; }}
@@ -83,10 +88,41 @@ const STATES={data};
 const SCALE=7, TOP=34;
 const root=document.getElementById('cards');
 function make(tag, cls, text) {{ const e=document.createElement(tag); if(cls)e.className=cls; if(text!==undefined)e.textContent=text; return e; }}
+function debugText(S) {{
+  const lines=[
+    'SAOL REGRESSION MISS DEBUG',
+    `page=${{S.page}} column=${{S.column}} row=${{S.row}}`,
+    `exhaustive_coverage=${{S.covered_pixels}}/${{S.source_pixels}} missing=${{S.source_pixels-S.covered_pixels}}`,
+    `three_row_size=${{S.width}}x${{S.height}} page_y=${{S.page_top}}..${{S.page_bottom}}`,
+    `target_core_y=${{S.core_top}}..${{S.core_bottom}}`,
+    `row_boundaries=${{JSON.stringify(S.boundaries)}}`,
+    `support_lines=${{JSON.stringify(S.support_lines)}}`,
+    `text=${{JSON.stringify(S.text)}}`,
+    'three_row_raster_ascii:',
+    S.raster_ascii || '(saknas)',
+  ];
+  return lines.join('\\n')+'\\n';
+}}
+async function copyDebug(S, button) {{
+  const text=debugText(S);
+  try {{
+    await navigator.clipboard.writeText(text);
+  }} catch(err) {{
+    const ta=document.createElement('textarea');
+    ta.value=text;ta.style.position='fixed';ta.style.left='-9999px';
+    document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();
+  }}
+  const old=button.textContent;button.textContent='Kopierat!';
+  setTimeout(()=>button.textContent=old,1200);
+}}
 for(const S of STATES) {{
   const card=make('section','card');
   card.appendChild(make('h2','',`Sida ${{S.page}} · kolumn ${{S.column}} · rad ${{S.row}}`));
   card.appendChild(make('div','meta',`exhaustive coverage=${{S.covered_pixels}}/${{S.source_pixels}} · saknas=${{S.source_pixels-S.covered_pixels}} pixlar`));
+  const controls=make('div','controls');
+  const copyButton=make('button','','Kopiera debug');
+  copyButton.type='button';copyButton.addEventListener('click',()=>copyDebug(S,copyButton));
+  controls.appendChild(copyButton);card.appendChild(controls);
   const wrap=make('div','canvas-wrap');
   const canvas=document.createElement('canvas');
   wrap.appendChild(canvas); card.appendChild(wrap);
