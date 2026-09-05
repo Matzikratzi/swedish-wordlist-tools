@@ -3,8 +3,8 @@ from __future__ import annotations
 """Detect page-1 text top and three column x-ranges from raw facsimile pixels.
 
 This deliberately uses only the thresholded source PNG and absolute source
-coordinates. For page 1 we hard-code that y < 60 is irrelevant and whiten it
-before any geometry is discovered.
+coordinates. For page 1 we hard-code that y < 60 and x=0..3 are irrelevant and
+whiten them before any geometry is discovered. Coordinates are never renumbered.
 """
 
 import argparse
@@ -17,6 +17,7 @@ from . import ocr_review_five_rows_glyphs_ultrafast_html as ultrafast
 
 fast = ultrafast.fast
 PAGE1_IGNORE_ABOVE_Y = 60
+PAGE1_IGNORE_THROUGH_X = 3
 MIN_GUTTER_WIDTH = 3
 MIN_COLUMN_PROBE_WIDTH = 20
 
@@ -50,6 +51,19 @@ def _blank_above(page: Image.Image, y: int) -> None:
     stop = max(0, min(int(y), page.height))
     for py in range(stop):
         for px in range(page.width):
+            pix[px, py] = 255
+
+
+def _blank_through_x(page: Image.Image, x: int) -> None:
+    """Whiten all source pixels with absolute x <= x, in-place.
+
+    This masks the facsimile's black left edge while preserving absolute source
+    coordinates: source x=4 remains x=4.
+    """
+    pix = page.load()
+    stop = max(0, min(int(x) + 1, page.width))
+    for px in range(stop):
+        for py in range(page.height):
             pix[px, py] = 255
 
 
@@ -123,14 +137,15 @@ def _next_white_band(
 
 def detect_page1_layout(page: Image.Image) -> tuple[int, list[ColumnRange]]:
     _blank_above(page, PAGE1_IGNORE_ABOVE_Y)
+    _blank_through_x(page, PAGE1_IGNORE_THROUGH_X)
     row0_top = _first_ink_row(page, PAGE1_IGNORE_ABOVE_Y)
     occupied = _vertical_occupancy(page, row0_top)
 
     # Important: the first column starts where the first actual row starts.
     # Looking for the first vertically occupied x column over the whole page can
-    # be fooled by an isolated mark much farther down (page 1 has such material
-    # near the far left). The row0-top pixel is the evidence we just established.
-    first_left = _first_ink_x_on_row(page, row0_top)
+    # be fooled by an isolated mark much farther down. The row0-top pixel is the
+    # evidence we just established. x=0..3 have already been masked as page edge.
+    first_left = _first_ink_x_on_row(page, row0_top, PAGE1_IGNORE_THROUGH_X + 1)
     if first_left is None:
         raise RuntimeError(f"row0_top={row0_top} unexpectedly contains no black pixel")
 
@@ -168,9 +183,6 @@ def detect_page1_layout(page: Image.Image) -> tuple[int, list[ColumnRange]]:
             ColumnRange(
                 index=index,
                 left=left,
-                # The right boundary is the first white x of the gutter. Keeping
-                # the boundary outside the text means a glyph may use every pixel
-                # through x=gutter_left-1 without the blue boundary covering it.
                 right=gutter_left,
                 gutter_left=gutter_left,
                 gutter_right=gutter_right - 1,
@@ -196,12 +208,10 @@ def main() -> int:
     page = _load_thresholded_page(args.jsonl, args.page, args.threshold)
     row0_top, columns = detect_page1_layout(page)
 
-    # Reproduce the old mistake explicitly for diagnostics: scan all y>=row0_top
-    # for the leftmost vertically occupied x and print the first actual pixel that
-    # made that x occupied. This tells us exactly where a bogus early column start
-    # such as x=19 came from.
+    # Reproduce the old vertical-start diagnostic after applying the masks used
+    # by the current detector. Absolute coordinates are preserved.
     occupied = _vertical_occupancy(page, row0_top)
-    old_left = _next_black_column(occupied, 0)
+    old_left = _next_black_column(occupied, PAGE1_IGNORE_THROUGH_X + 1)
     if old_left is not None:
         old_y = _first_ink_y_in_column(page, old_left, row0_top)
         print(
@@ -210,7 +220,8 @@ def main() -> int:
         )
 
     print(
-        f"page1-layout: page=1 threshold={args.threshold} blanked_y=0..{PAGE1_IGNORE_ABOVE_Y - 1} "
+        f"page1-layout: page=1 threshold={args.threshold} "
+        f"blanked_y=0..{PAGE1_IGNORE_ABOVE_Y - 1} blanked_x=0..{PAGE1_IGNORE_THROUGH_X} "
         f"row0_top={row0_top}"
     )
     for column in columns:
