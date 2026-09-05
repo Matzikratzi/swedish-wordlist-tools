@@ -112,33 +112,50 @@ def main() -> int:
         print("raw-page-layout: page1-start-probe=bold:a,á,à,A,Á,À")
 
     completed = []
-    try:
-        for row_index in range(args.row + 1):
-            cache = sequential.ensure_row_cached(context, args.column, row_index, models)
-            entry = cache[row_index]
-            completed = list(cache)
-            marker = " <-- target" if entry.row == args.row else ""
-            print(
-                f"raw-page-row: row={entry.row:03d} top={entry.row_top} "
-                f"start_x={entry.start_x} temp_bottom={entry.provisional_bottom} "
-                f"baseline={entry.baseline} final_bottom={entry.final_bottom} "
-                f"glyphs={entry.matched_glyphs} pixels={entry.matched_pixels} "
-                f"right={entry.matched_right}{marker}"
-            )
-            step_path = _step_output(output, row_index)
-            _draw_snapshot(thresholded_page, context, args.column, completed, step_path)
-            _draw_snapshot(thresholded_page, context, args.column, completed, output)
-            print(f"raw-page-debug-image: {step_path}")
-    except Exception:
-        if completed:
-            _draw_snapshot(thresholded_page, context, args.column, completed, output)
-            print(f"raw-page-debug-image: senaste färdiga rader sparade i {output}")
-        raise
+    stopped_row: int | None = None
+    stopped_reason: str | None = None
 
-    print(
-        f"raw-page-sequential: page={args.page} column={args.column} "
-        f"target_row={args.row} cached_rows={len(completed)} output={output}"
-    )
+    for row_index in range(args.row + 1):
+        try:
+            cache = sequential.ensure_row_cached(context, args.column, row_index, models)
+        except RuntimeError as exc:
+            stopped_row = row_index
+            stopped_reason = str(exc)
+            if completed:
+                _draw_snapshot(thresholded_page, context, args.column, completed, output)
+                print(f"raw-page-debug-image: senaste färdiga rader sparade i {output}")
+            print(f"raw-page-stop: row={row_index:03d} reason={exc}")
+            break
+
+        entry = cache[row_index]
+        completed = list(cache)
+        marker = " <-- target" if entry.row == args.row else ""
+        print(
+            f"raw-page-row: row={entry.row:03d} top={entry.row_top} "
+            f"start_x={entry.start_x} temp_bottom={entry.provisional_bottom} "
+            f"baseline={entry.baseline} final_bottom={entry.final_bottom} "
+            f"glyphs={entry.matched_glyphs} pixels={entry.matched_pixels} "
+            f"right={entry.matched_right}{marker}"
+        )
+        step_path = _step_output(output, row_index)
+        _draw_snapshot(thresholded_page, context, args.column, completed, step_path)
+        _draw_snapshot(thresholded_page, context, args.column, completed, output)
+        print(f"raw-page-debug-image: {step_path}")
+
+    if stopped_row is None:
+        print(
+            f"raw-page-sequential: page={args.page} column={args.column} "
+            f"target_row={args.row} cached_rows={len(completed)} output={output}"
+        )
+    else:
+        print(
+            f"raw-page-sequential: page={args.page} column={args.column} "
+            f"target_row={args.row} cached_rows={len(completed)} stopped_row={stopped_row} "
+            f"output={output}"
+        )
+        if stopped_reason:
+            print(f"raw-page-sequential-stop-reason: {stopped_reason}")
+
     return 0
 
 
