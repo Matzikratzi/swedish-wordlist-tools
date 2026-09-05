@@ -2,10 +2,9 @@ from __future__ import annotations
 
 """Render the full raw SAOL facsimile page as an absolute-coordinate grid.
 
-Coordinates are always source-PNG coordinates. No row/column geometry,
-ownership, header removal, or rectangle masking is used. The full page is shown,
-while the debug rulers remain at the same absolute source coordinates used by
-previous cropped views: vertical y ruler at x=45 and numbered x ruler at y=50.
+Coordinates are always source-PNG coordinates. The fixed debug rulers remain at
+absolute x=45 and y=50. On page 1 we also run the raw-pixel layout detector and
+overlay its discovered row-0 top and three column bounds in blue.
 """
 
 import argparse
@@ -14,6 +13,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 from . import ocr_review_five_rows_glyphs_ultrafast_html as ultrafast
+from .ocr_page1_layout_debug import ColumnRange, detect_page1_layout
 
 fast = ultrafast.fast
 
@@ -36,7 +36,17 @@ def _load_thresholded_page(jsonl: Path, page_number: int, threshold: int) -> Ima
     return gray.point(lambda value: 0 if value < threshold else 255, mode="1").convert("L")
 
 
-def _render_grid(page: Image.Image, *, cell: int, y_tick: int, x_tick: int, axis_x_source: int, numbered_y: int) -> Image.Image:
+def _render_grid(
+    page: Image.Image,
+    *,
+    cell: int,
+    y_tick: int,
+    x_tick: int,
+    axis_x_source: int,
+    numbered_y: int,
+    row0_top: int | None = None,
+    columns: list[ColumnRange] | None = None,
+) -> Image.Image:
     width = page.width
     height = page.height
     cell = max(2, cell)
@@ -72,7 +82,6 @@ def _render_grid(page: Image.Image, *, cell: int, y_tick: int, x_tick: int, axis
         py = gy + source_y * cell
         draw.line((gx, py, gx + grid_w, py), fill=grid_color, width=1)
 
-    # Vertical y-axis remains at absolute source x=45 (configurable only for debugging).
     axis_px = gx + axis_x_source * cell
     draw.line((axis_px, gy, axis_px, gy + grid_h), fill="black", width=1)
     for source_y in range(0, height + 1, y_tick):
@@ -84,7 +93,6 @@ def _render_grid(page: Image.Image, *, cell: int, y_tick: int, x_tick: int, axis
         draw.rectangle((axis_px - 20 - (box[2] - box[0]), py - text_h // 2 - 2, axis_px - 10, py + text_h // 2 + 2), fill="white")
         draw.text((axis_px - 14 - (box[2] - box[0]), py - text_h // 2), label, fill="black", font=axis_font)
 
-    # Horizontal x-rulers every 10 absolute y pixels, with x ticks every x_tick pixels.
     x_positions = list(range(0, width, x_tick))
     for source_y in range(0, height, 10):
         py = gy + source_y * cell
@@ -93,7 +101,6 @@ def _render_grid(page: Image.Image, *, cell: int, y_tick: int, x_tick: int, axis
             px = gx + source_x * cell
             draw.line((px, py - 7, px, py + 7), fill="black", width=1)
 
-    # The numbered x-axis remains at absolute source y=50.
     if 0 <= numbered_y < height:
         py = gy + numbered_y * cell
         for source_x in x_positions:
@@ -104,14 +111,24 @@ def _render_grid(page: Image.Image, *, cell: int, y_tick: int, x_tick: int, axis
             draw.rectangle((px - text_w // 2 - 2, py - 31, px + text_w // 2 + 2, py - 7), fill="white")
             draw.text((px - text_w // 2, py - 31), label, fill="black", font=axis_font)
 
+    # Page-layout result: blue source-coordinate lines, drawn last so they are visible.
+    blue = (0, 90, 255)
+    if row0_top is not None:
+        py = gy + row0_top * cell
+        draw.line((gx, py, gx + grid_w, py), fill=blue, width=3)
+
+    for column in columns or []:
+        for source_x in (column.left, column.right):
+            px = gx + source_x * cell
+            draw.line((px, gy, px, gy + grid_h), fill=blue, width=3)
+
     return out
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Render the full raw page with rulers at fixed absolute source coordinates.")
+    ap = argparse.ArgumentParser(description="Render the full raw page with fixed rulers and detected page-1 margins.")
     ap.add_argument("jsonl", type=Path)
     ap.add_argument("--page", type=int, required=True)
-    # Kept hidden for compatibility with earlier commands; the full page is always rendered now.
     ap.add_argument("--left", type=int, default=None, help=argparse.SUPPRESS)
     ap.add_argument("--right", type=int, default=None, help=argparse.SUPPRESS)
     ap.add_argument("--width", type=int, default=None, help=argparse.SUPPRESS)
@@ -125,6 +142,14 @@ def main() -> int:
     args = ap.parse_args()
 
     page = _load_thresholded_page(args.jsonl, args.page, args.threshold)
+    row0_top = None
+    columns: list[ColumnRange] = []
+    if args.page == 1:
+        # detect_page1_layout intentionally blanks y<60 in-place before detection;
+        # render that same page state so the diagnostic image shows exactly what
+        # the detector used.
+        row0_top, columns = detect_page1_layout(page)
+
     image = _render_grid(
         page,
         cell=args.cell,
@@ -132,14 +157,24 @@ def main() -> int:
         x_tick=args.x_tick,
         axis_x_source=args.axis_x,
         numbered_y=args.axis_y,
+        row0_top=row0_top,
+        columns=columns,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     image.save(args.output)
+
     print(
         f"wrote {args.output}: page={args.page} raw_source_size={page.width}x{page.height} "
         f"shown_absolute_x=0..{page.width - 1} absolute_y=0..{page.height - 1} "
         f"y_axis_x={args.axis_x} numbered_x_axis_y={args.axis_y} x_tick={args.x_tick} threshold={args.threshold}"
     )
+    if row0_top is not None:
+        print(f"overlay: row0_top={row0_top}")
+        for column in columns:
+            print(
+                f"overlay: column={column.index + 1} left={column.left} right={column.right} "
+                f"gutter={column.gutter_left}..{column.gutter_right}"
+            )
     return 0
 
 
