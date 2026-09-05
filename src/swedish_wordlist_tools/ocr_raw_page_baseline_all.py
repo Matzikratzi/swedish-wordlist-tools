@@ -12,6 +12,12 @@ from time import perf_counter
 from . import ocr_raw_page_baseline_debug as debug
 
 
+# Keep normal progress sparse, but surface rows that are conspicuously slower
+# than the ~0.1--0.2 s rows seen in the current page-1 experiments.
+_SLOW_ROW_SECONDS = 0.30
+_PROGRESS_EVERY = 10
+
+
 def _write(handle, event: dict) -> None:
     handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
 
@@ -25,6 +31,16 @@ def _captured(func, *args):
 
 def _is_natural_end(exc: RuntimeError) -> bool:
     return "no start ink in y=" in str(exc)
+
+
+def _print_progress(*, column: int, row: int, row_seconds: float, total_rows: int, entry, slow: bool) -> None:
+    kind = "slow" if slow else "progress"
+    print(
+        f"raw-page-{kind}: column={column} row={row:03d} "
+        f"time={row_seconds:.3f}s total_rows={total_rows} "
+        f"baseline={entry.baseline} border={entry.border} "
+        f"glyphs={entry.matched_glyphs} pixels={entry.matched_pixels}"
+    )
 
 
 def main() -> int:
@@ -69,6 +85,7 @@ def main() -> int:
             "type": "meta", "version": 3, "mode": "all", "page": args.page,
             "source_jsonl": str(args.jsonl.resolve()), "facit": str(args.facit.resolve()),
             "threshold": args.threshold, "columns": columns,
+            "progress_every": _PROGRESS_EVERY, "slow_row_seconds": _SLOW_ROW_SECONDS,
         })
         for phase, lines in (("load-facit", load_diag), ("page-setup", setup_diag),
                              ("bind-candidates", bind_diag), ("layout", layout_diag)):
@@ -86,20 +103,23 @@ def main() -> int:
                         debug.sequential.ensure_row_cached, context, column, row, models
                     )
                 except RuntimeError as exc:
-                    ocr_time += perf_counter() - row_started
+                    row_seconds = perf_counter() - row_started
+                    ocr_time += row_seconds
                     reason = str(exc)
                     natural = _is_natural_end(exc)
                     _write(trace, {
                         "type": "column_end" if natural else "stop",
                         "column": column, "row": row, "reason": reason,
+                        "seconds": row_seconds,
                     })
                     if natural:
                         print(f"raw-page-column: column={column} rows={row} complete")
                         break
                     failed = (column, row, reason)
-                    print(f"raw-page-stop: column={column} row={row:03d} reason={reason}")
+                    print(f"raw-page-stop: column={column} row={row:03d} time={row_seconds:.3f}s reason={reason}")
                     break
-                ocr_time += perf_counter() - row_started
+                row_seconds = perf_counter() - row_started
+                ocr_time += row_seconds
                 for text in diagnostics:
                     _write(trace, {"type": "diagnostic", "phase": "row-discovery", "column": column, "row": row, "text": text})
 
@@ -109,6 +129,7 @@ def main() -> int:
                 upper_border = initial_border if row == 0 else int(cache[row - 1].border)
                 _write(trace, {
                     "type": "row", "column": column, "row": entry.row,
+                    "seconds": row_seconds,
                     "initial_border": int(initial_border), "upper_border": int(upper_border),
                     "debug_top": entry.debug_top, "start_x": entry.start_x,
                     "baseline": entry.baseline, "border": entry.border,
@@ -120,6 +141,18 @@ def main() -> int:
                 })
                 row += 1
                 total_rows += 1
+
+                slow = row_seconds >= _SLOW_ROW_SECONDS
+                periodic = total_rows % _PROGRESS_EVERY == 0
+                if slow or periodic:
+                    _print_progress(
+                        column=column,
+                        row=entry.row,
+                        row_seconds=row_seconds,
+                        total_rows=total_rows,
+                        entry=entry,
+                        slow=slow,
+                    )
 
             if failed is not None:
                 break
