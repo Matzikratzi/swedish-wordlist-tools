@@ -5,9 +5,15 @@ from __future__ import annotations
 The OCR process deliberately does not render debug images.  It writes a small
 JSONL trace containing the geometry needed by ``ocr_raw_page_baseline_render``.
 That renderer can be run afterwards without repeating OCR.
+
+Verbose diagnostics produced by the experimental scanner are captured and
+stored in that trace as ``diagnostic`` events instead of flooding stdout.
+Timing lines remain visible when this module is run through the timing wrapper.
 """
 
 import argparse
+from contextlib import redirect_stdout
+from io import StringIO
 import json
 from pathlib import Path
 
@@ -75,6 +81,32 @@ def _write_event(handle, event: dict) -> None:
     handle.flush()
 
 
+def _captured_call(func, *args, **kwargs):
+    """Run a noisy helper and return its result plus captured output lines.
+
+    Timing lines are copied back to stdout so the timing wrapper stays useful;
+    every other line is intended for the JSONL trace.
+    """
+    buffer = StringIO()
+    with redirect_stdout(buffer):
+        result = func(*args, **kwargs)
+    diagnostics = []
+    for line in buffer.getvalue().splitlines():
+        if line.startswith("raw-page-timing:"):
+            print(line)
+        elif line:
+            diagnostics.append(line)
+    return result, diagnostics
+
+
+def _write_diagnostics(trace, diagnostics, *, phase: str, row: int | None = None) -> None:
+    for text in diagnostics:
+        event = {"type": "diagnostic", "phase": phase, "text": text}
+        if row is not None:
+            event["row"] = row
+        _write_event(trace, event)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
@@ -101,30 +133,28 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    models = load_facit_with_typography(args.facit)
-    context = page_editor.build_page_context_pixel_array(args.jsonl, args.page, args.threshold)
-    context["quiet_successful_ownership"] = True
-    cached.bind_page_candidates(context, models)
-
-    if args.page == 1:
-        _install_page1_raw_layout(context, args.jsonl, args.threshold)
-        raw_column = context["raw_page_column_layout"][args.column]
-        print(
-            f"raw-page-layout: source={context['raw_page_layout_source']} "
-            f"column={args.column} left={raw_column['left']} right={raw_column['right']} "
-            f"row0_search_from={raw_column['row0_top']}"
-        )
-        print("raw-page-layout: page1-start-probe=bold:a,á,à,A,Á,À")
-    print("raw-page-layout: geometry=initial-border-then-previous-border")
-    print("raw-page-layout: row-start=x-first upper-boundary..+14")
-    print("raw-page-layout: homonym=same-baseline-allow-x-overlap")
-
-    left, right = _column_bounds_for_debug(context, args.column)
     trace_output = args.trace_output or Path(
         f"/tmp/saol14-page{args.page}-c{args.column}-raw-baselines.jsonl"
     )
     trace_output.parent.mkdir(parents=True, exist_ok=True)
 
+    models, load_diagnostics = _captured_call(load_facit_with_typography, args.facit)
+    context, setup_diagnostics = _captured_call(
+        page_editor.build_page_context_pixel_array,
+        args.jsonl,
+        args.page,
+        args.threshold,
+    )
+    context["quiet_successful_ownership"] = True
+    _bound, bind_diagnostics = _captured_call(cached.bind_page_candidates, context, models)
+
+    layout_diagnostics = []
+    if args.page == 1:
+        _unused, layout_diagnostics = _captured_call(
+            _install_page1_raw_layout, context, args.jsonl, args.threshold
+        )
+
+    left, right = _column_bounds_for_debug(context, args.column)
     completed = []
     stopped_row: int | None = None
     stopped_reason: str | None = None
@@ -134,7 +164,7 @@ def main() -> int:
             trace,
             {
                 "type": "meta",
-                "version": 1,
+                "version": 2,
                 "source_jsonl": str(args.jsonl.resolve()),
                 "facit": str(args.facit.resolve()),
                 "page": args.page,
@@ -146,11 +176,40 @@ def main() -> int:
                 "layout_source": context.get("raw_page_layout_source"),
             },
         )
+        _write_diagnostics(trace, load_diagnostics, phase="load-facit")
+        _write_diagnostics(trace, setup_diagnostics, phase="page-setup")
+        _write_diagnostics(trace, bind_diagnostics, phase="bind-candidates")
+        _write_diagnostics(trace, layout_diagnostics, phase="layout")
+
+        if args.page == 1:
+            raw_column = context["raw_page_column_layout"][args.column]
+            _write_event(
+                trace,
+                {
+                    "type": "layout",
+                    "source": context["raw_page_layout_source"],
+                    "column": args.column,
+                    "left": raw_column["left"],
+                    "right": raw_column["right"],
+                    "row0_search_from": raw_column["row0_top"],
+                    "page1_start_probe": "bold:a,á,à,A,Á,À",
+                    "geometry": "initial-border-then-previous-border",
+                    "row_start": "x-first upper-boundary..+14",
+                    "homonym": "same-baseline-allow-x-overlap",
+                },
+            )
 
         for row_index in range(args.row + 1):
             try:
-                cache = sequential.ensure_row_cached(
-                    context, args.column, row_index, models
+                cache, row_diagnostics = _captured_call(
+                    sequential.ensure_row_cached,
+                    context,
+                    args.column,
+                    row_index,
+                    models,
+                )
+                _write_diagnostics(
+                    trace, row_diagnostics, phase="row-discovery", row=row_index
                 )
             except RuntimeError as exc:
                 stopped_row = row_index
@@ -169,12 +228,6 @@ def main() -> int:
             entry = cache[row_index]
             completed = list(cache)
             initial_border = context["raw_page_initial_border_cache"][args.column]
-            if row_index == 0:
-                print(
-                    f"raw-page-initial-border: column={args.column} "
-                    f"border={initial_border}"
-                )
-
             probe = _row_start_probe_pixel(context, args.column, cache, row_index)
             upper_border = (
                 initial_border if row_index == 0 else int(cache[row_index - 1].border)
@@ -196,15 +249,6 @@ def main() -> int:
             }
             _write_event(trace, event)
 
-            probe_text = f" probe={probe}" if probe is not None else ""
-            marker = " <-- target" if entry.row == args.row else ""
-            print(
-                f"raw-page-row: row={entry.row:03d} debug_top={entry.debug_top} "
-                f"start_x={entry.start_x} baseline={entry.baseline} border={entry.border} "
-                f"glyphs={entry.matched_glyphs} pixels={entry.matched_pixels} "
-                f"right={entry.matched_right}{probe_text}{marker}"
-            )
-
         _write_event(
             trace,
             {
@@ -219,13 +263,12 @@ def main() -> int:
     if stopped_row is None:
         print(
             f"raw-page-sequential: page={args.page} column={args.column} "
-            f"target_row={args.row} cached_rows={len(completed)} trace={trace_output}"
+            f"target_row={args.row} cached_rows={len(completed)}"
         )
     else:
         print(
             f"raw-page-sequential: page={args.page} column={args.column} "
-            f"target_row={args.row} cached_rows={len(completed)} stopped_row={stopped_row} "
-            f"trace={trace_output}"
+            f"target_row={args.row} cached_rows={len(completed)} stopped_row={stopped_row}"
         )
         if stopped_reason:
             print(f"raw-page-sequential-stop-reason: {stopped_reason}")
