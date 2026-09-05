@@ -10,8 +10,13 @@ from PIL import ImageDraw
 from . import ocr_page_cached_fast_path as cached
 from . import ocr_review_page_pixel_array_glyphs_html as page_editor
 from . import ocr_sequential_raw_page_rows as sequential
+from .ocr_column_edge_debug import _render_grid
 from .ocr_glyph_review_delete import load_facit_with_typography
 from .ocr_page1_layout_debug import _load_thresholded_page, detect_page1_layout_details
+
+
+GRID_LEFT_PAD = 120
+GRID_TOP_PAD = 40
 
 
 def _install_page1_raw_layout(context: dict, jsonl: Path, threshold: int) -> None:
@@ -48,21 +53,42 @@ def _draw_snapshot(
     column: int,
     cache,
     output: Path,
+    *,
+    cell: int,
+    y_tick: int,
+    x_tick: int,
+    axis_x: int,
+    axis_y: int,
 ) -> None:
-    """Draw absolute row top, support baseline and half-open bottom."""
-    image = thresholded_page.convert("RGB")
+    """Draw absolute grid plus thin row top, baseline and half-open bottom lines."""
+    image = _render_grid(
+        thresholded_page,
+        cell=cell,
+        y_tick=y_tick,
+        x_tick=x_tick,
+        axis_x_source=axis_x,
+        numbered_y=axis_y,
+        row0_tops=None,
+        columns=None,
+    )
     draw = ImageDraw.Draw(image)
     left, right = _column_bounds_for_debug(context, column)
-    label_x = min(image.width - 1, right + 4)
+    x0 = GRID_LEFT_PAD + left * cell
+    x1 = GRID_LEFT_PAD + right * cell
+    label_x = x1 + 4
 
     for entry in cache:
-        # top = red, support baseline = blue, final half-open bottom = green.
-        draw.line((left, entry.row_top, right - 1, entry.row_top), fill=(255, 0, 0), width=1)
-        draw.line((left, entry.baseline, right - 1, entry.baseline), fill=(0, 80, 255), width=1)
-        draw.line((left, entry.final_bottom, right - 1, entry.final_bottom), fill=(0, 170, 0), width=1)
-        draw.text((label_x, entry.row_top - 5), f"r{entry.row} top={entry.row_top}", fill=(255, 0, 0))
-        draw.text((label_x, entry.baseline - 5), f"base={entry.baseline}", fill=(0, 80, 255))
-        draw.text((label_x, entry.final_bottom - 5), f"bottom={entry.final_bottom}", fill=(0, 140, 0))
+        # Grid lines live between source pixels.  Keep overlays one display pixel
+        # wide so they mark coordinates without covering an entire source pixel.
+        top_y = GRID_TOP_PAD + entry.row_top * cell
+        baseline_y = GRID_TOP_PAD + entry.baseline * cell
+        bottom_y = GRID_TOP_PAD + entry.final_bottom * cell
+        draw.line((x0, top_y, x1, top_y), fill=(255, 0, 0), width=1)
+        draw.line((x0, baseline_y, x1, baseline_y), fill=(0, 80, 255), width=1)
+        draw.line((x0, bottom_y, x1, bottom_y), fill=(0, 170, 0), width=1)
+        draw.text((label_x, top_y - 5), f"r{entry.row} top={entry.row_top}", fill=(255, 0, 0))
+        draw.text((label_x, baseline_y - 5), f"base={entry.baseline}", fill=(0, 80, 255))
+        draw.text((label_x, bottom_y - 5), f"bottom={entry.final_bottom}", fill=(0, 140, 0))
 
     output.parent.mkdir(parents=True, exist_ok=True)
     image.save(output)
@@ -83,6 +109,11 @@ def main() -> int:
     ap.add_argument("--column", type=int, required=True)
     ap.add_argument("--row", type=int, required=True, help="target discovered row; rows 0..N are scanned sequentially")
     ap.add_argument("--threshold", type=int, default=210)
+    ap.add_argument("--cell", type=int, default=5, help="display pixels per source-pixel cell")
+    ap.add_argument("--tick", type=int, default=20, help="absolute y-coordinate label spacing")
+    ap.add_argument("--x-tick", type=int, default=10, help="absolute x tick spacing on horizontal rulers")
+    ap.add_argument("--axis-x", type=int, default=45, help="absolute source x of vertical y-axis")
+    ap.add_argument("--axis-y", type=int, default=50, help="absolute source y of numbered x-axis")
     ap.add_argument(
         "--output",
         type=Path,
@@ -122,7 +153,11 @@ def main() -> int:
             stopped_row = row_index
             stopped_reason = str(exc)
             if completed:
-                _draw_snapshot(thresholded_page, context, args.column, completed, output)
+                _draw_snapshot(
+                    thresholded_page, context, args.column, completed, output,
+                    cell=args.cell, y_tick=args.tick, x_tick=args.x_tick,
+                    axis_x=args.axis_x, axis_y=args.axis_y,
+                )
                 print(f"raw-page-debug-image: senaste färdiga rader sparade i {output}")
             print(f"raw-page-stop: row={row_index:03d} reason={exc}")
             break
@@ -138,8 +173,16 @@ def main() -> int:
             f"right={entry.matched_right}{marker}"
         )
         step_path = _step_output(output, row_index)
-        _draw_snapshot(thresholded_page, context, args.column, completed, step_path)
-        _draw_snapshot(thresholded_page, context, args.column, completed, output)
+        _draw_snapshot(
+            thresholded_page, context, args.column, completed, step_path,
+            cell=args.cell, y_tick=args.tick, x_tick=args.x_tick,
+            axis_x=args.axis_x, axis_y=args.axis_y,
+        )
+        _draw_snapshot(
+            thresholded_page, context, args.column, completed, output,
+            cell=args.cell, y_tick=args.tick, x_tick=args.x_tick,
+            axis_x=args.axis_x, axis_y=args.axis_y,
+        )
         print(f"raw-page-debug-image: {step_path}")
 
     if stopped_row is None:
