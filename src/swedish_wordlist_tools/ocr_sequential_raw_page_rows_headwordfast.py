@@ -15,7 +15,7 @@ left edge plus one of the facit's own left-edge pixels directly proposes
 
 from . import ocr_sequential_raw_page_rows_homonymfix as _previous
 from . import ocr_sequential_raw_page_rows as _scanner
-from . import ocr_sequential_raw_page_rows_racesafe as _racesafe  # noqa: F401
+from . import ocr_sequential_raw_page_rows_racesafe as _racesafe
 from . import ocr_column_first_ink_cache as _first_ink_cache
 
 
@@ -32,9 +32,9 @@ def _trace_race_advance_one(state, page_candidates, *, left: int, right: int) ->
     before_n = state.matched_glyphs
     before_cursor = state.cursor
 
-    # Predict the exact candidate the underlying walker will choose at its
-    # current cursor.  This duplicates only the chooser so diagnostics can name
-    # the model; the real state transition is still performed by the original.
+    # Predict the same candidate as the underlying walker, but reject a model
+    # immediately at its first absent required pixel. This keeps diagnostics
+    # decision-identical without rebuilding a full placement set for failures.
     cursor = state.cursor
     remaining = state.remaining
     predicted = None
@@ -54,8 +54,10 @@ def _trace_race_advance_one(state, page_candidates, *, left: int, right: int) ->
             x0 = cursor - min_x
             if x0 < left or x0 + model.width > right:
                 continue
-            placed = {(x0 + mx, state.baseline + my) for mx, my in model.pixels}
-            if placed and placed.issubset(remaining):
+            placed = _racesafe._placed_if_subset(
+                model, x0, state.baseline, remaining
+            )
+            if placed is not None:
                 predicted = (cursor, x0, model, len(placed))
                 break
         if predicted is not None:
@@ -65,7 +67,9 @@ def _trace_race_advance_one(state, page_candidates, *, left: int, right: int) ->
             break
         cursor = min(later_x)
 
-    advanced = _ORIGINAL_RACE_ADVANCE_ONE(state, page_candidates, left=left, right=right)
+    advanced = _ORIGINAL_RACE_ADVANCE_ONE(
+        state, page_candidates, left=left, right=right
+    )
     if advanced and state.matched_glyphs == before_n + 1:
         if predicted is None:
             print(
@@ -90,13 +94,25 @@ _previous._advance_one = _trace_race_advance_one
 
 
 def _source_left_edges(raw, *, x_lo, x_hi, y_lo, y_hi):
-    return tuple(sorted((x, y) for x, y in raw if x_lo <= x <= x_hi and y_lo <= y <= y_hi and (x - 1, y) not in raw))
+    return tuple(
+        sorted(
+            (x, y)
+            for x, y in raw
+            if x_lo <= x <= x_hi
+            and y_lo <= y <= y_hi
+            and (x - 1, y) not in raw
+        )
+    )
 
 
-def _page1_headword_subset_walks(raw, search_from, search_limit, models, left, right, first_ink_x):
+def _page1_headword_subset_walks(
+    raw, search_from, search_limit, models, left, right, first_ink_x
+):
     page_candidates = _scanner.cached._bound_page_candidates(models)
     stem_candidates = tuple(_scanner._bold_candidates(page_candidates, {"a"}))
-    full_first_candidates = tuple(_scanner._bold_candidates(page_candidates, _scanner.PAGE1_EXACT_LABELS))
+    full_first_candidates = tuple(
+        _scanner._bold_candidates(page_candidates, _scanner.PAGE1_EXACT_LABELS)
+    )
     if not stem_candidates or not full_first_candidates:
         print("raw-page-headword-subset-probe: no bold a facit")
         return {}
@@ -107,7 +123,9 @@ def _page1_headword_subset_walks(raw, search_from, search_limit, models, left, r
     for candidate in stem_candidates:
         model, min_x, left_pixels = candidate
         x0_lo = max(left, first_ink_x - _scanner.PAGE1_X_LEFT_SLACK)
-        x0_hi = min(right - model.width, first_ink_x + _scanner.PAGE1_X_RIGHT_SLACK)
+        x0_hi = min(
+            right - model.width, first_ink_x + _scanner.PAGE1_X_RIGHT_SLACK
+        )
         if x0_hi < x0_lo or not left_pixels:
             continue
         source_edges = _source_left_edges(
@@ -122,13 +140,16 @@ def _page1_headword_subset_walks(raw, search_from, search_limit, models, left, r
             for model_x, model_y in left_pixels:
                 x0 = source_x - model_x
                 baseline = source_y - model_y
-                if x0_lo <= x0 <= x0_hi and search_from <= baseline < search_limit:
+                if (
+                    x0_lo <= x0 <= x0_hi
+                    and search_from <= baseline < search_limit
+                ):
                     placements.add((x0, baseline))
         proposals += len(placements)
         for x0, baseline in sorted(placements):
             full_tests += 1
-            placed = {(x0 + mx, baseline + py) for mx, py in model.pixels}
-            if not placed or not placed.issubset(raw):
+            placed = _racesafe._placed_if_subset(model, x0, baseline, raw)
+            if placed is None:
                 continue
             text_start_x = x0 + min_x
             key = (text_start_x, baseline)
@@ -136,7 +157,10 @@ def _page1_headword_subset_walks(raw, search_from, search_limit, models, left, r
             if old is None or len(model.pixels) > len(old[0].pixels):
                 matches[key] = candidate
 
-    print(f"raw-page-headword-leftedge-probe: models={len(stem_candidates)} proposals={proposals} full_tests={full_tests}")
+    print(
+        f"raw-page-headword-leftedge-probe: models={len(stem_candidates)} "
+        f"proposals={proposals} full_tests={full_tests}"
+    )
     if matches:
         diagnostics = ", ".join(
             f"x={text_x} b={baseline} label={candidate[0].label!r} pixels={len(candidate[0].pixels)}"
@@ -147,28 +171,70 @@ def _page1_headword_subset_walks(raw, search_from, search_limit, models, left, r
         print("raw-page-headword-subset-probe: NONE")
         return {}
     if len(matches) != 1:
-        print(f"raw-page-headword-subset-fallback: ambiguous_matches={len(matches)}")
+        print(
+            f"raw-page-headword-subset-fallback: ambiguous_matches={len(matches)}"
+        )
         return {}
 
     (text_start_x, baseline), stem_candidate = next(iter(matches.items()))
-    exact_first = _scanner._exact_first_candidates(raw, baseline, full_first_candidates, text_start_x, left, right)
+    exact_first = _scanner._exact_first_candidates(
+        raw,
+        baseline,
+        full_first_candidates,
+        text_start_x,
+        left,
+        right,
+    )
     if not exact_first:
-        print(f"raw-page-headword-subset-fallback: stem matched at x={text_start_x} baseline={baseline} but ordinary first-candidate check failed")
+        print(
+            "raw-page-headword-subset-fallback: "
+            f"stem matched at x={text_start_x} baseline={baseline} "
+            "but ordinary first-candidate check failed"
+        )
         return {}
-    glyphs, owned, matched_right = _scanner._walk_baseline(raw, baseline, models, left, right, text_start_x, first_candidates=exact_first)
+    glyphs, owned, matched_right = _scanner._walk_baseline(
+        raw,
+        baseline,
+        models,
+        left,
+        right,
+        text_start_x,
+        first_candidates=exact_first,
+    )
     if glyphs <= 0 or not owned:
-        print(f"raw-page-headword-subset-fallback: x={text_start_x} baseline={baseline} row walk failed")
+        print(
+            "raw-page-headword-subset-fallback: "
+            f"x={text_start_x} baseline={baseline} row walk failed"
+        )
         return {}
     score = (matched_right - text_start_x, glyphs, len(owned))
-    print(f"raw-page-headword-subset-win: x={text_start_x} baseline={baseline} score={score}")
-    return {(text_start_x, baseline): (score, stem_candidate[0], text_start_x - stem_candidate[1], owned, glyphs, matched_right)}
+    print(
+        f"raw-page-headword-subset-win: x={text_start_x} "
+        f"baseline={baseline} score={score}"
+    )
+    return {
+        (text_start_x, baseline): (
+            score,
+            stem_candidate[0],
+            text_start_x - stem_candidate[1],
+            owned,
+            glyphs,
+            matched_right,
+        )
+    }
 
 
-def _page1_baseline_probe_walks(raw, search_from, search_limit, models, left, right, first_ink_x):
-    walks = _page1_headword_subset_walks(raw, search_from, search_limit, models, left, right, first_ink_x)
+def _page1_baseline_probe_walks(
+    raw, search_from, search_limit, models, left, right, first_ink_x
+):
+    walks = _page1_headword_subset_walks(
+        raw, search_from, search_limit, models, left, right, first_ink_x
+    )
     if walks:
         return walks
-    return _FALLBACK_PAGE1_BASELINE_PROBE_WALKS(raw, search_from, search_limit, models, left, right, first_ink_x)
+    return _FALLBACK_PAGE1_BASELINE_PROBE_WALKS(
+        raw, search_from, search_limit, models, left, right, first_ink_x
+    )
 
 
 _scanner._page1_baseline_probe_walks = _page1_baseline_probe_walks
