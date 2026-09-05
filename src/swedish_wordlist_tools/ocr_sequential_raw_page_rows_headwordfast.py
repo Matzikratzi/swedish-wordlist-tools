@@ -15,7 +15,13 @@ left edge plus one of the facit's own left-edge pixels directly proposes
 
 from . import ocr_sequential_raw_page_rows_homonymfix as _previous
 from . import ocr_sequential_raw_page_rows as _scanner
+from . import ocr_sequential_raw_page_rows_racesafe as _racesafe  # noqa: F401
+from . import ocr_column_first_ink_cache as _first_ink_cache
 
+
+# Keep the last known-correct conservative baseline race, and make initial
+# column-border discovery use the cheap per-y leftmost-ink table.
+_first_ink_cache.install_on_scanner(_scanner)
 
 _FALLBACK_PAGE1_BASELINE_PROBE_WALKS = _scanner._page1_baseline_probe_walks
 _ORIGINAL_RACE_ADVANCE_ONE = _previous._advance_one
