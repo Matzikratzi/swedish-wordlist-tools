@@ -1,167 +1,213 @@
 from __future__ import annotations
 
-"""Narrow homonym-placement correction for the sequential raw-page scanner.
+"""Hybrid correctness probe for the sequential raw-page scanner.
 
-Homonym digits use the row's already established support baseline. Their
-vertical offset therefore remains entirely encoded in the facit model's
-``pixels_relative_to_baseline``.
+This wrapper deliberately leaves the main scanner untouched while restoring two
+principles from historical commit 81b9667:
 
-For diagnosis we explicitly try x placements around the true leftmost homonym
-ink first: one pixel before it, exactly on it, and one pixel after it. The
-previous wider x search remains as fallback, so this cannot remove an exact
-match that used to be possible. If no exact match exists we print the best
-same-baseline partial overlap, which tells us whether x anchoring or the facit
-raster/y offset is the likely problem.
+* an exact homonym glyph at the left edge may propose the row baseline;
+* competing baseline hypotheses are verified by walking the whole row, with
+  explained horizontal span ranked before glyph/pixel count.
 
-There is also one deliberately hard-coded diagnostic crop for page 1, column 1,
-row 0: when the first raw-page read starts at y=170 in the left column, only
-source pixels with 169 <= y <= 187 are exposed to the scanner. This is strictly
-a temporary experiment to test whether the old-style tight vertical crop makes
-the known homonym/headword row solvable again.
+Unlike the previous diagnostic wrapper there is no hard-coded vertical crop and
+no x +/- 1 homonym placement heuristic.  The point of this experiment is to
+separate baseline-search correctness from facit correctness.
 """
 
 from . import ocr_sequential_raw_page_rows as _scanner
 
 
-_ORIGINAL_RAW_INK = _scanner._raw_ink
+_ORIGINAL_PAGE1_BASELINE_PROBE_WALKS = _scanner._page1_baseline_probe_walks
 
 
-def _debug_cropped_raw_ink(
-    context: dict,
-    *,
-    left: int,
-    right: int,
-    top: int,
-    bottom: int,
-) -> set[tuple[int, int]]:
-    raw = _ORIGINAL_RAW_INK(
-        context,
-        left=left,
-        right=right,
-        top=top,
-        bottom=bottom,
-    )
-
-    # Deliberately hard-coded experiment: page 1, column 1, row 0.
-    # Current raw layout for that column is x=50..246 and the scanner begins
-    # row 0 at y=170 after the proven initial border y=169.
-    if (
-        context.get("raw_page_layout_source") == "page1-raw-pixels"
-        and left == 50
-        and right == 246
-        and top == 170
-    ):
-        masked = {(x, y) for x, y in raw if 169 <= y <= 187}
-        print(
-            "raw-page-debug-crop: "
-            f"column=1 row=0 y=169..187 raw_pixels={len(raw)} masked_pixels={len(masked)}"
-        )
-        return masked
-
-    return raw
-
-
-def _ordered_x0_candidates(
+def _homonym_baseline_seeds(
     raw: set[tuple[int, int]],
-    *,
-    left: int,
-    probe_right: int,
-    text_start_x: int,
-    min_x: int,
-):
-    homonym_xs = [x for x, _y in raw if left <= x < text_start_x]
-    first_ink_x = min(homonym_xs) if homonym_xs else None
-
-    ordered: list[int] = []
-    if first_ink_x is not None:
-        for glyph_left_x in (first_ink_x - 1, first_ink_x, first_ink_x + 1):
-            x0 = glyph_left_x - min_x
-            if x0 not in ordered:
-                ordered.append(x0)
-
-    for x0 in range(left - min_x, probe_right - min_x):
-        if x0 not in ordered:
-            ordered.append(x0)
-    return first_ink_x, ordered
-
-
-def _match_homonym_on_baseline(
-    raw: set[tuple[int, int]],
-    baseline: int,
+    search_from: int,
+    search_limit: int,
     models,
     left: int,
-    text_start_x: int,
-) -> set[tuple[int, int]]:
+    right: int,
+) -> dict[int, set[tuple[int, int]]]:
+    """Return exact homonym-derived baseline candidates and their proved pixels."""
     page_candidates = _scanner.cached._bound_page_candidates(models)
-    probe_right = min(text_start_x, left + _scanner.HOMONYM_PROBE_WIDTH)
-    if probe_right <= left:
-        return set()
+    probe_right = min(right, left + _scanner.HOMONYM_PROBE_WIDTH)
+    anchor_bottom = min(search_limit, search_from + _scanner.START_SEARCH_HEIGHT)
+    seeds: dict[int, set[tuple[int, int]]] = {}
 
-    best: set[tuple[int, int]] = set()
-    best_model = None
-    best_x0: int | None = None
-    best_first_ink_x: int | None = None
+    for anchor_y in range(search_from, anchor_bottom):
+        xs = sorted(x for x, y in raw if y == anchor_y and left <= x < probe_right)
+        for anchor_x in xs:
+            for model, min_x, left_pixels in page_candidates.homonym:
+                x0 = anchor_x - min_x
+                if x0 < left or x0 + model.width > probe_right:
+                    continue
+                for _mx, my in left_pixels:
+                    baseline = anchor_y - my
+                    if baseline < search_from or baseline >= search_limit:
+                        continue
+                    placed = {(x0 + mx, baseline + py) for mx, py in model.pixels}
+                    if not placed or not placed.issubset(raw):
+                        continue
+                    old = seeds.get(baseline)
+                    if old is None or len(placed) > len(old):
+                        seeds[baseline] = placed
 
-    partial_model = None
-    partial_x0: int | None = None
-    partial_hits = -1
-    partial_total = 0
-    partial_first_ink_x: int | None = None
+    return seeds
 
-    for model, min_x, _left_pixels in page_candidates.homonym:
-        first_ink_x, x0_candidates = _ordered_x0_candidates(
+
+def _page1_baseline_probe_walks(
+    raw: set[tuple[int, int]],
+    search_from: int,
+    search_limit: int,
+    models,
+    left: int,
+    right: int,
+    first_ink_x: int,
+):
+    """Let an exact homonym seed the baseline, then verify ordinary headword text."""
+    page_candidates = _scanner.cached._bound_page_candidates(models)
+    first_candidates = tuple(
+        _scanner._bold_candidates(page_candidates, _scanner.PAGE1_EXACT_LABELS)
+    )
+    seeds = _homonym_baseline_seeds(
+        raw,
+        search_from,
+        search_limit,
+        models,
+        left,
+        right,
+    )
+
+    walks = {}
+    for baseline, homonym_owned in sorted(seeds.items()):
+        exact_first = _scanner._exact_first_candidates(
             raw,
-            left=left,
-            probe_right=probe_right,
-            text_start_x=text_start_x,
-            min_x=min_x,
+            baseline,
+            first_candidates,
+            first_ink_x,
+            left,
+            right,
         )
-        for x0 in x0_candidates:
-            placed = {(x0 + mx, baseline + py) for mx, py in model.pixels}
-            if not placed:
+        if not exact_first:
+            continue
+        glyphs, owned, matched_right = _scanner._walk_baseline(
+            raw,
+            baseline,
+            models,
+            left,
+            right,
+            first_ink_x,
+            first_candidates=exact_first,
+        )
+        if glyphs <= 0 or not owned:
+            continue
+        total_owned = set(owned)
+        total_owned.update(homonym_owned)
+        score = (matched_right - first_ink_x, glyphs + 1, len(total_owned))
+        walks[(first_ink_x, baseline)] = (
+            score,
+            None,
+            first_ink_x,
+            total_owned,
+            glyphs + 1,
+            matched_right,
+        )
+
+    if walks:
+        baselines = ",".join(str(b) for _x, b in sorted(walks))
+        print(f"raw-page-homonym-baseline-seed: baselines={baselines}")
+        return walks
+
+    print("raw-page-homonym-baseline-seed: no exact seed; using ordinary page1 probe")
+    return _ORIGINAL_PAGE1_BASELINE_PROBE_WALKS(
+        raw,
+        search_from,
+        search_limit,
+        models,
+        left,
+        right,
+        first_ink_x,
+    )
+
+
+def _ordinary_baseline_probe_walks(
+    raw: set[tuple[int, int]],
+    search_from: int,
+    search_limit: int,
+    models,
+    left: int,
+    right: int,
+    anchor_x: int,
+    first_candidates,
+):
+    """Verify every baseline hypothesis with a full row walk.
+
+    This keeps the current x-first anchor and current border geometry.  Only the
+    choice between baseline hypotheses changes: a candidate must compete on the
+    amount of the real row it can explain instead of being judged after only
+    three glyphs.
+    """
+    hypotheses: set[int] = set()
+    anchor_bottom = min(search_limit, search_from + _scanner.START_SEARCH_HEIGHT)
+    for anchor_y in range(search_from, anchor_bottom):
+        if (anchor_x, anchor_y) not in raw:
+            continue
+        for model, min_x, left_pixels in first_candidates:
+            x0 = anchor_x - min_x
+            if x0 < left or x0 + model.width > right:
                 continue
-            xs = [x for x, _y in placed]
-            if min(xs) < left or min(xs) >= text_start_x:
-                continue
+            for _mx, my in left_pixels:
+                baseline = anchor_y - my
+                if baseline < search_from or baseline >= search_limit:
+                    continue
+                placed = {(x0 + mx, baseline + py) for mx, py in model.pixels}
+                if placed and placed.issubset(raw):
+                    hypotheses.add(baseline)
 
-            hits = len(placed & raw)
-            if hits > partial_hits or (hits == partial_hits and len(placed) > partial_total):
-                partial_model = model
-                partial_x0 = x0
-                partial_hits = hits
-                partial_total = len(placed)
-                partial_first_ink_x = first_ink_x
-
-            if placed.issubset(raw) and len(placed) > len(best):
-                best = placed
-                best_model = model
-                best_x0 = x0
-                best_first_ink_x = first_ink_x
-
-    if best and best_model is not None:
-        ys = [y for _x, y in best]
-        print(
-            "raw-page-homonym: "
-            f"label={best_model.label!r} model_id={getattr(best_model, 'model_id', None)!r} "
-            f"baseline={baseline} model_y={best_model.min_y}..{best_model.max_y} "
-            f"first_ink_x={best_first_ink_x} x0={best_x0} "
-            f"pixels_y={min(ys)}..{max(ys)} pixels={len(best)}"
+    walks = {}
+    for baseline in sorted(hypotheses):
+        exact_first = _scanner._exact_first_candidates(
+            raw,
+            baseline,
+            first_candidates,
+            anchor_x,
+            left,
+            right,
         )
-    elif partial_model is not None:
-        print(
-            "raw-page-homonym-miss: "
-            f"best_label={partial_model.label!r} "
-            f"model_id={getattr(partial_model, 'model_id', None)!r} "
-            f"baseline={baseline} model_y={partial_model.min_y}..{partial_model.max_y} "
-            f"first_ink_x={partial_first_ink_x} x0={partial_x0} "
-            f"overlap={partial_hits}/{partial_total}"
+        if not exact_first:
+            continue
+        glyphs, owned, matched_right = _scanner._walk_baseline(
+            raw,
+            baseline,
+            models,
+            left,
+            right,
+            anchor_x,
+            first_candidates=exact_first,
+        )
+        if glyphs <= 0 or not owned:
+            continue
+        score = (matched_right - anchor_x, glyphs, len(owned))
+        walks[(anchor_x, baseline)] = (
+            score,
+            None,
+            anchor_x,
+            owned,
+            glyphs,
+            matched_right,
         )
 
-    return best
+    if walks:
+        diagnostics = ", ".join(
+            f"b={baseline}:score={item[0]}"
+            for (_x, baseline), item in sorted(walks.items())
+        )
+        print(f"raw-page-full-row-baseline-candidates: {diagnostics}")
+    return walks
 
 
-_scanner._raw_ink = _debug_cropped_raw_ink
-_scanner._match_homonym_on_baseline = _match_homonym_on_baseline
+_scanner._page1_baseline_probe_walks = _page1_baseline_probe_walks
+_scanner._ordinary_baseline_probe_walks = _ordinary_baseline_probe_walks
 
 CachedRowBoundary = _scanner.CachedRowBoundary
 FIRST_TEXT_SEARCH_WIDTH = _scanner.FIRST_TEXT_SEARCH_WIDTH
