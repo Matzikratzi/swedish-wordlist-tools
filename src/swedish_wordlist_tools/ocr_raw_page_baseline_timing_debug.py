@@ -2,10 +2,8 @@ from __future__ import annotations
 
 """Timing wrapper around ``ocr_raw_page_baseline_debug``.
 
-This deliberately does not change OCR behaviour.  It wraps the expensive
-high-level operations used by the existing debug CLI and prints wall-clock
-breakdowns so we can distinguish OCR work from page preparation and PNG
-rendering.
+The OCR debug CLI now writes JSONL only; image rendering is a separate process.
+This wrapper therefore reports OCR and setup time without any render bucket.
 """
 
 from functools import wraps
@@ -17,7 +15,6 @@ from . import ocr_raw_page_baseline_debug as debug
 _TOTALS = {
     "setup": 0.0,
     "ocr": 0.0,
-    "render": 0.0,
 }
 
 
@@ -39,7 +36,6 @@ def _wrap(namespace, name: str, label: str, *, bucket: str | None = None) -> Non
 
 
 def _install_timers() -> None:
-    # One-time setup phases.
     _wrap(debug, "load_facit_with_typography", "load-facit", bucket="setup")
     _wrap(
         debug.page_editor,
@@ -66,9 +62,6 @@ def _install_timers() -> None:
         bucket="setup",
     )
 
-    # Sequential OCR.  main() calls ensure_row_cached once for every target row;
-    # after row 0 each call only discovers the newly requested row because the
-    # previous rows are cached.
     original_ensure = debug.sequential.ensure_row_cached
 
     @wraps(original_ensure)
@@ -86,29 +79,6 @@ def _install_timers() -> None:
 
     debug.sequential.ensure_row_cached = timed_ensure
 
-    # Rendering is intentionally measured separately.  The existing CLI writes
-    # both a per-row snapshot and the rolling output image after every row, so
-    # this may account for substantial wall time without being OCR cost.
-    original_draw = debug._draw_snapshot
-
-    @wraps(original_draw)
-    def timed_draw(*args, **kwargs):
-        started = perf_counter()
-        output = kwargs.get("output")
-        if output is None and len(args) >= 5:
-            output = args[4]
-        try:
-            return original_draw(*args, **kwargs)
-        finally:
-            elapsed = perf_counter() - started
-            _TOTALS["render"] += elapsed
-            print(
-                "raw-page-timing: "
-                f"draw-snapshot={elapsed:.6f}s output={output}"
-            )
-
-    debug._draw_snapshot = timed_draw
-
 
 def main() -> int:
     for key in _TOTALS:
@@ -120,16 +90,16 @@ def main() -> int:
         return debug.main()
     finally:
         elapsed = perf_counter() - started
-        accounted = _TOTALS["setup"] + _TOTALS["ocr"] + _TOTALS["render"]
+        accounted = _TOTALS["setup"] + _TOTALS["ocr"]
         other = max(0.0, elapsed - accounted)
         print(f"raw-page-timing: debug-main-total={elapsed:.6f}s")
         print(
             "raw-page-timing-summary: "
             f"ocr={_TOTALS['ocr']:.6f}s "
-            f"render={_TOTALS['render']:.6f}s "
             f"setup={_TOTALS['setup']:.6f}s "
             f"other={other:.6f}s "
-            f"total={elapsed:.6f}s"
+            f"total={elapsed:.6f}s "
+            "render=separate-process"
         )
 
 
