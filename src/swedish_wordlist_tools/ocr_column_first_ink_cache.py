@@ -95,3 +95,32 @@ def first_start_band_ink_y(
         if int(left) <= x < x1:
             return y
     return None
+
+
+def install_on_scanner(scanner) -> None:
+    """Make the scanner's initial-border lookup use this cache.
+
+    Keep the scanner function signature unchanged so this is a transparent
+    optimization: callers still ask for first ink in a start band, but the
+    answer comes from one cached x value per pixel row.
+    """
+
+    def _cached_first_ink_y(
+        context: dict,
+        *,
+        search_from: int,
+        search_to: int,
+        left: int,
+        right: int,
+    ) -> int | None:
+        _x0, x1 = scanner._start_band(left, right)
+        return first_start_band_ink_y(
+            context,
+            search_from=search_from,
+            search_to=search_to,
+            left=left,
+            right=right,
+            start_band_right=x1,
+        )
+
+    scanner._first_ink_y = _cached_first_ink_y
