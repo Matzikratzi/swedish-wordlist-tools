@@ -3,9 +3,9 @@ from __future__ import annotations
 """Fast regression scan for already-known facsimile pages.
 
 This path is intentionally bounded. It runs the page-cached exact-cover fast
-path first, then a provably safe horizontal-group fast path. On a miss it may
-try a small fixed number of horizontal row-boundary repairs, each verified only
-with the same bounded exact paths. It never enters the exhaustive safe-group
+path first, then a one-switch +/-1 baseline fast path. On a miss it may try a
+small fixed number of horizontal row-boundary repairs, each verified only with
+the same bounded exact paths. It never enters the exhaustive safe-group
 fallback. A row that still cannot be proved exact is reported as unresolved.
 """
 
@@ -17,7 +17,7 @@ from time import perf_counter
 
 from . import ocr_review_page_pixel_array_glyphs_html as page_editor
 from .ocr_fast_boundary_repair import try_fast_boundary_repair
-from .ocr_fast_grouped_exact import fast_grouped_exact_cover
+from .ocr_fast_two_baseline import fast_exact_cover_one_baseline_switch
 from .ocr_find_unreviewed_glyph_rows import _available_pages, _selected_pages
 from .ocr_glyph_review_delete import load_facit_with_typography
 from .ocr_page_cached_fast_path import (
@@ -39,6 +39,7 @@ class FastRegressionRow:
     elapsed: float
     text: str
     exact_path: str = ""
+    baseline_switches: int = 0
     repaired: bool = False
     moved_pixels: int = 0
     repair_attempts: int = 0
@@ -59,12 +60,21 @@ def _miss_result(ink, *, path: str) -> dict:
         "ink": ink,
         "safe_groups": [],
         "safe_group_count": 0,
+        "baseline_switches": [],
         "exact_fast_path": True,
         "exact_cover_path": path,
     }
 
 
-def _success_result(ink, baseline, selected, placements_tested, *, path: str, group_count: int = 0) -> dict:
+def _success_result(
+    ink,
+    baseline,
+    selected,
+    placements_tested,
+    *,
+    path: str,
+    baseline_switches=None,
+) -> dict:
     covered = set().union(*(match.pixels for match in selected)) if selected else set()
     return {
         "baseline": baseline,
@@ -77,7 +87,8 @@ def _success_result(ink, baseline, selected, placements_tested, *, path: str, gr
         "selected": selected,
         "ink": ink,
         "safe_groups": [],
-        "safe_group_count": group_count,
+        "safe_group_count": 0,
+        "baseline_switches": list(baseline_switches or []),
         "exact_fast_path": True,
         "exact_cover_path": path,
     }
@@ -99,6 +110,7 @@ def analyse_row_fast_only(crop, models, *, threshold: int = 210) -> dict:
             "ink": ink,
             "safe_groups": [],
             "safe_group_count": 0,
+            "baseline_switches": [],
             "exact_fast_path": True,
             "exact_cover_path": "fast-regression-empty",
         }
@@ -112,18 +124,17 @@ def analyse_row_fast_only(crop, models, *, threshold: int = 210) -> dict:
             ink, baseline, selected, placements_tested, path="fast-regression"
         )
 
-    grouped = fast_grouped_exact_cover(
-        ink, crop.width, crop.height, models, baseline_slop=1
+    shifted = fast_exact_cover_one_baseline_switch(
+        ink, crop.width, crop.height, models
     )
-    if grouped is not None:
-        baseline, selected, placements_tested, group_count = grouped
+    if shifted is not None:
         return _success_result(
             ink,
-            baseline,
-            selected,
-            placements_tested,
-            path="fast-regression-grouped",
-            group_count=group_count,
+            shifted.baseline,
+            shifted.selected,
+            shifted.placements_tested,
+            path="fast-regression-baseline-switch",
+            baseline_switches=shifted.baseline_switches,
         )
 
     return _miss_result(ink, path="fast-regression-miss")
@@ -170,6 +181,7 @@ def scan_page_fast(context: dict, models, *, boundary_radius: int = 6) -> list[F
                     elapsed=initial_elapsed + repair_elapsed,
                     text=str(state.get("text") or ""),
                     exact_path=str(state.get("exact_cover_path") or ""),
+                    baseline_switches=len(state.get("baseline_switches") or []),
                     repaired=bool(repair and repair.repaired),
                     moved_pixels=int(repair.moved_pixels if repair else 0),
                     repair_attempts=int(repair.attempts if repair else 0),
@@ -182,7 +194,7 @@ def scan_page_fast(context: dict, models, *, boundary_radius: int = 6) -> list[F
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Fast bounded regression scan: exact, grouped exact, cheap boundary repair, or unresolved; never exhaustive."
+        description="Fast bounded regression scan: exact, one +/-1 baseline switch, cheap boundary repair, or unresolved; never exhaustive."
     )
     ap.add_argument("jsonl", type=Path)
     ap.add_argument("--facit", type=Path, required=True)
@@ -218,7 +230,7 @@ def main() -> int:
     total_started = perf_counter()
     row_count = 0
     exact_count = 0
-    grouped_count = 0
+    baseline_switch_count = 0
     repaired_count = 0
     repaired_pixels = 0
     unresolved: list[FastRegressionRow] = []
@@ -229,18 +241,18 @@ def main() -> int:
         context["quiet_successful_ownership"] = True
         results = scan_page_fast(context, models, boundary_radius=args.boundary_radius)
         page_exact = sum(result.exact for result in results)
-        page_grouped = sum(result.exact_path == "fast-regression-grouped" for result in results)
+        page_switched = sum(result.exact_path == "fast-regression-baseline-switch" for result in results)
         page_repaired = sum(result.repaired for result in results)
         page_unresolved = [result for result in results if not result.exact]
         row_count += len(results)
         exact_count += page_exact
-        grouped_count += page_grouped
+        baseline_switch_count += page_switched
         repaired_count += page_repaired
         repaired_pixels += sum(result.moved_pixels for result in results)
         unresolved.extend(page_unresolved)
         print(
             f"fast-regression: page {page}: exact={page_exact}/{len(results)} "
-            f"grouped={page_grouped} repaired={page_repaired} unresolved={len(page_unresolved)} "
+            f"baseline_switch={page_switched} repaired={page_repaired} unresolved={len(page_unresolved)} "
             f"wall={perf_counter()-page_started:.3f}s",
             flush=True,
         )
@@ -265,7 +277,7 @@ def main() -> int:
     wall = perf_counter() - total_started
     print(
         f"fast-regression: pages={len(pages)} rows={row_count} exact={exact_count}/{row_count} "
-        f"grouped={grouped_count} repaired={repaired_count} repaired_pixels={repaired_pixels} "
+        f"baseline_switch={baseline_switch_count} repaired={repaired_count} repaired_pixels={repaired_pixels} "
         f"unresolved={len(unresolved)} wall={wall:.3f}s",
         flush=True,
     )
