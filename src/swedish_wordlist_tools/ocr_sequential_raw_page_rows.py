@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-"""Sequential baseline discovery with cached row boundaries.
+"""Sequential baseline discovery directly from the page pixel array.
 
-Each row has three vertical limits:
-- row_top: stable start of the row work area,
-- provisional_bottom: temporary generous search limit while solving the row,
-- final_bottom: tightened to the lowest pixel proven by the completed row walk.
+The first row is found by lowering a narrow left-edge probe from the top of the
+column until it reaches text. Later rows are found from the previous row's
+vertical start and horizontal start coordinate: the probe first has to leave
+the previous row, cross a real white gap, and then enter new ink near the left
+edge. Only then may a glyph establish a new baseline.
 
-Only final_bottom is used to advance to the next row. Legacy per-row bottoms are
-never used as OCR limits.
+A row still has a generous provisional bottom while it is solved. Its final
+bottom is tightened only after the complete fixed-baseline row walk.
 """
 
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ from .ocr_raw_page_baseline_row import _raw_ink
 class CachedRowBoundary:
     row: int
     row_top: int
+    start_x: int
     provisional_bottom: int
     baseline: int
     final_bottom: int
@@ -41,16 +43,79 @@ def _column_bounds(context: dict, column: int) -> tuple[int, int, int, int]:
     left = int(entry.get("crop_left", entry.get("left", 0)))
     right = int(entry.get("crop_right", entry.get("right", owners.width)))
     rows = entry.get("rows") or []
+    # Transitional only: old row geometry supplies the outer column extent,
+    # never an individual row boundary or jump target.
     top = max(0, min((int(r["page_top"]) for r in rows), default=0) - 12)
     bottom = min(owners.height, max((int(r["page_bottom"]) for r in rows), default=owners.height) + 12)
     return left, top, right, bottom
 
 
 def _provisional_height(models) -> int:
-    """Generous work height derived from glyph models, not row geometry."""
+    """Generous local work height derived from glyph models, not row geometry."""
     heights = [int(getattr(model, "height", 0) or 0) for model in models]
     tallest = max(heights, default=16)
     return max(24, tallest + 12)
+
+
+def _start_band(left: int, previous_start_x: int | None) -> tuple[int, int]:
+    """Return the narrow lexical-start band used only for row discovery.
+
+    The whole established SAOL left-start region remains legal, so a row may
+    switch between homonym/headword/continuation indentation. The previous
+    start coordinate is used to order candidates, not to forbid those switches.
+    """
+    return left, left + 40
+
+
+def _row_has_start_ink(context: dict, y: int, x0: int, x1: int) -> bool:
+    owners = context["pixel_owners"]
+    if y < 0 or y >= owners.height:
+        return False
+    x0 = max(0, x0)
+    x1 = min(owners.width, x1)
+    base = y * owners.width
+    data = owners.data
+    return any(data[base + x] != 0 for x in range(x0, x1))
+
+
+def _find_next_row_top(
+    context: dict,
+    *,
+    column_top: int,
+    column_bottom: int,
+    left: int,
+    previous: CachedRowBoundary | None,
+) -> int:
+    """Lower the left-edge probe until it enters a new printed row.
+
+    For row zero the first ink wins. For later rows we begin at the previous
+    row top, require a small completely white vertical gap in the lexical-start
+    band, and only then accept the next ink row. This prevents descenders or a
+    second glyph on the same printed line from becoming a new row.
+    """
+    band_left, band_right = _start_band(left, None if previous is None else previous.start_x)
+    if previous is None:
+        for y in range(column_top, column_bottom):
+            if _row_has_start_ink(context, y, band_left, band_right):
+                return y
+        raise RuntimeError("no start ink found in column")
+
+    # Two fully white pixel rows are enough to prove that we have left the
+    # previous digital glyph raster. This is separation evidence, not a pitch.
+    blank_run = 0
+    saw_previous_ink = False
+    for y in range(previous.row_top, column_bottom):
+        has_ink = _row_has_start_ink(context, y, band_left, band_right)
+        if has_ink:
+            if saw_previous_ink and blank_run >= 2:
+                return y
+            saw_previous_ink = True
+            blank_run = 0
+        elif saw_previous_ink:
+            blank_run += 1
+    raise RuntimeError(
+        f"no next left-edge ink after row={previous.row} top={previous.row_top}"
+    )
 
 
 def _walk_baseline(
@@ -61,12 +126,7 @@ def _walk_baseline(
     right: int,
     anchor_x: int,
 ) -> tuple[int, set[tuple[int, int]], int]:
-    """Consume one row left-to-right on a fixed baseline.
-
-    Pixels from neighbouring rows may be present in the provisional work area,
-    but they cannot be consumed unless a complete glyph model fits them on this
-    exact baseline. Gaps are allowed: they move the cursor, not the baseline.
-    """
+    """Consume one printed row left-to-right on one fixed baseline."""
     page_candidates = cached._bound_page_candidates(models)
     remaining = set(raw)
     owned: set[tuple[int, int]] = set()
@@ -104,9 +164,7 @@ def _walk_baseline(
             cursor = max(cursor + 1, glyph_right)
             continue
 
-        # Whitespace or a pixel belonging to another row: advance horizontally.
-        # We deliberately do not jump to an arbitrary lower pixel and therefore
-        # cannot create a new baseline while this row is being solved.
+        # A space moves only the horizontal cursor. It can never alter baseline.
         later_x = [x for x, _y in remaining if x > cursor]
         if not later_x:
             break
@@ -115,18 +173,31 @@ def _walk_baseline(
     return matched_glyphs, owned, matched_right
 
 
-def _discover_next(context: dict, column: int, row_index: int, row_top: int, models) -> CachedRowBoundary:
-    left, column_top, right, column_bottom = _column_bounds(context, column)
-    row_top = max(column_top, int(row_top))
+def _discover_at_top(
+    context: dict,
+    column: int,
+    row_index: int,
+    row_top: int,
+    previous: CachedRowBoundary | None,
+    models,
+) -> CachedRowBoundary:
+    left, _column_top, right, column_bottom = _column_bounds(context, column)
     provisional_bottom = min(column_bottom, row_top + _provisional_height(models))
     raw = _raw_ink(context, left=left, right=right, top=row_top, bottom=provisional_bottom)
     page_candidates = cached._bound_page_candidates(models)
+    band_left, band_right = _start_band(left, None if previous is None else previous.start_x)
 
-    # A new row can only be proposed from ink close to the lexical left edge.
-    # Once proposed, the complete row is walked before its bottom is tightened.
-    start_slack = 40
-    for anchor_y in range(row_top, provisional_bottom):
-        xs = sorted(x for x, y in raw if y == anchor_y and x <= left + start_slack)
+    # The top was established by left-edge re-entry. Search only the few raster
+    # rows immediately below that top for a complete starting glyph. Accents and
+    # curved glyphs need not have their leftmost model pixel on the very first y.
+    candidate_rows = range(row_top, min(provisional_bottom, row_top + 12))
+    for anchor_y in candidate_rows:
+        xs = [x for x, y in raw if y == anchor_y and band_left <= x < band_right]
+        if previous is None:
+            xs.sort()
+        else:
+            xs.sort(key=lambda x: (abs(x - previous.start_x), x))
+
         for anchor_x in xs:
             hypotheses: set[int] = set()
             for model, min_x, left_pixels in cached._iter_candidates(
@@ -155,9 +226,6 @@ def _discover_next(context: dict, column: int, row_index: int, row_top: int, mod
                 glyphs, owned, matched_right = _walk_baseline(
                     raw, baseline, models, left, right, anchor_x
                 )
-                # Prefer the hypothesis that explains a coherent row furthest
-                # to the right, then the most glyphs/pixels. The first glyph is
-                # not enough by itself to establish the baseline.
                 score = (matched_right, glyphs, len(owned))
                 walks.append((score, baseline, owned, glyphs, matched_right))
 
@@ -167,12 +235,11 @@ def _discover_next(context: dict, column: int, row_index: int, row_top: int, mod
                 continue
 
             _score, baseline, owned, glyphs, matched_right = best[0]
-            # Tighten only after the row walker has finished. This is exactly
-            # one pixel below the lowest pixel proven to belong to this row.
             final_bottom = max(y for _x, y in owned) + 1
             return CachedRowBoundary(
                 row=row_index,
                 row_top=row_top,
+                start_x=anchor_x,
                 provisional_bottom=provisional_bottom,
                 baseline=baseline,
                 final_bottom=final_bottom,
@@ -184,7 +251,7 @@ def _discover_next(context: dict, column: int, row_index: int, row_top: int, mod
 
     raise RuntimeError(
         f"sequential raw-page discovery stopped at column={column} row={row_index}: "
-        f"no unique walked baseline in work area y={row_top}..{provisional_bottom}"
+        f"no unique starting glyph from left-edge top={row_top}"
     )
 
 
@@ -192,11 +259,18 @@ def ensure_row_cached(context: dict, column: int, target_row: int, models) -> li
     if target_row < 0:
         raise ValueError("target_row must be >= 0")
     cache = _cache(context).setdefault(column, [])
-    _left, column_top, _right, _bottom = _column_bounds(context, column)
+    left, column_top, _right, column_bottom = _column_bounds(context, column)
     while len(cache) <= target_row:
         row_index = len(cache)
-        row_top = column_top if not cache else cache[-1].final_bottom
-        cache.append(_discover_next(context, column, row_index, row_top, models))
+        previous = cache[-1] if cache else None
+        row_top = _find_next_row_top(
+            context,
+            column_top=column_top,
+            column_bottom=column_bottom,
+            left=left,
+            previous=previous,
+        )
+        cache.append(_discover_at_top(context, column, row_index, row_top, previous, models))
     return cache
 
 
