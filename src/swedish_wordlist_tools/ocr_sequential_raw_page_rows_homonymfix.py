@@ -5,13 +5,14 @@ from __future__ import annotations
 This wrapper deliberately leaves the main scanner untouched while restoring two
 principles from historical commit 81b9667:
 
-* an exact homonym glyph at the left edge may propose the row baseline;
+* the true leftmost row-start ink may seed local baseline hypotheses even when
+  that ink is not itself a correctly matched glyph;
 * competing baseline hypotheses are verified by walking the whole row, with
   explained horizontal span ranked before glyph/pixel count.
 
 Unlike the previous diagnostic wrapper there is no hard-coded vertical crop and
-no x +/- 1 homonym placement heuristic.  The point of this experiment is to
-separate baseline-search correctness from facit correctness.
+no x +/- 1 homonym placement heuristic. The search stays local to the x-first
+start coordinate rather than restoring the old expensive global x/y scan.
 """
 
 from . import ocr_sequential_raw_page_rows as _scanner
@@ -76,6 +77,96 @@ def _homonym_baseline_seeds(
     return seeds
 
 
+def _local_xfirst_baseline_walks(
+    raw: set[tuple[int, int]],
+    search_from: int,
+    search_limit: int,
+    models,
+    left: int,
+    right: int,
+):
+    """Reproduce the useful part of 81b9667 at one x-first start only.
+
+    The leftmost ink x is fixed first. Exact glyph fits touching pixels at that
+    x are used only to propose baseline y values. The proposing glyph need not
+    become the first glyph in the row walk. Every proposed baseline is instead
+    judged by how much of the complete row the ordinary walker can explain.
+    """
+    anchor_x = _scanner._x_first_ink_x(
+        raw,
+        search_from=search_from,
+        search_limit=search_limit,
+        left=left,
+        right=right,
+        include_homonym=True,
+    )
+    if anchor_x is None:
+        return {}
+
+    page_candidates = _scanner.cached._bound_page_candidates(models)
+    anchor_bottom = min(search_limit, search_from + _scanner.START_SEARCH_HEIGHT)
+    hypotheses: set[int] = set()
+
+    for anchor_y in range(search_from, anchor_bottom):
+        if (anchor_x, anchor_y) not in raw:
+            continue
+        for model, min_x, left_pixels in _scanner.cached._iter_candidates(
+            page_candidates,
+            first_glyph=True,
+            previous_style=None,
+            row_kind="unknown",
+            leading_homonym_seen=False,
+            baseline_established=False,
+        ):
+            x0 = anchor_x - min_x
+            if x0 < left or x0 + model.width > right:
+                continue
+            for _mx, my in left_pixels:
+                baseline = anchor_y - my
+                if baseline < search_from or baseline >= search_limit:
+                    continue
+                placed = {(x0 + mx, baseline + py) for mx, py in model.pixels}
+                if placed and placed.issubset(raw):
+                    hypotheses.add(baseline)
+
+    walks = {}
+    for baseline in sorted(hypotheses):
+        glyphs, owned, matched_right = _scanner._walk_baseline(
+            raw,
+            baseline,
+            models,
+            left,
+            right,
+            anchor_x,
+        )
+        if glyphs <= 0 or not owned:
+            continue
+        score = (matched_right - anchor_x, glyphs, len(owned))
+        walks[(anchor_x, baseline)] = (
+            score,
+            None,
+            anchor_x,
+            owned,
+            glyphs,
+            matched_right,
+        )
+
+    if walks:
+        diagnostics = ", ".join(
+            f"b={baseline}:score={item[0]}"
+            for (_x, baseline), item in sorted(walks.items())
+        )
+        print(
+            f"raw-page-local-xfirst-baseline-candidates: x={anchor_x} "
+            f"{diagnostics}"
+        )
+    else:
+        print(
+            f"raw-page-local-xfirst-baseline-candidates: x={anchor_x} NONE"
+        )
+    return walks
+
+
 def _page1_baseline_probe_walks(
     raw: set[tuple[int, int]],
     search_from: int,
@@ -85,7 +176,18 @@ def _page1_baseline_probe_walks(
     right: int,
     first_ink_x: int,
 ):
-    """Let an exact homonym seed the baseline, then verify ordinary headword text."""
+    """Prefer a local x-first whole-row baseline search on the first page row."""
+    local_walks = _local_xfirst_baseline_walks(
+        raw,
+        search_from,
+        search_limit,
+        models,
+        left,
+        right,
+    )
+    if local_walks:
+        return local_walks
+
     page_candidates = _scanner.cached._bound_page_candidates(models)
     first_candidates = tuple(
         _scanner._bold_candidates(page_candidates, _scanner.PAGE1_EXACT_LABELS)
@@ -163,7 +265,7 @@ def _ordinary_baseline_probe_walks(
 ):
     """Verify every baseline hypothesis with a full row walk.
 
-    This keeps the current x-first anchor and current border geometry.  Only the
+    This keeps the current x-first anchor and current border geometry. Only the
     choice between baseline hypotheses changes: a candidate must compete on the
     amount of the real row it can explain instead of being judged after only
     three glyphs.
