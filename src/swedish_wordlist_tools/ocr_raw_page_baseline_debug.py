@@ -7,9 +7,9 @@ from pathlib import Path
 
 from . import ocr_page_cached_fast_path as cached
 from . import ocr_review_page_pixel_array_glyphs_html as page_editor
+from . import ocr_sequential_raw_page_rows as sequential
 from .ocr_glyph_review_delete import load_facit_with_typography
 from .ocr_page1_layout_debug import _load_thresholded_page, detect_page1_layout_details
-from .ocr_sequential_raw_page_rows import ensure_row_cached
 
 
 def _install_page1_raw_layout(context: dict, jsonl: Path, threshold: int) -> None:
@@ -46,6 +46,11 @@ def main() -> int:
     cached.bind_page_candidates(context, models)
 
     if args.page == 1:
+        # Page 1 is known to start every headword row with an a/A variant.  For
+        # this diagnostic path, use the six exact bold variants as the cheap
+        # baseline seed.  This avoids assuming that an accented glyph is
+        # geometrically equal to an unaccented a plus separate accent pixels.
+        sequential.PAGE1_BASE_LABELS = sequential.PAGE1_EXACT_LABELS
         _install_page1_raw_layout(context, args.jsonl, args.threshold)
         raw_column = context["raw_page_column_layout"][args.column]
         print(
@@ -53,8 +58,11 @@ def main() -> int:
             f"column={args.column} left={raw_column['left']} right={raw_column['right']} "
             f"row0_top={raw_column['row0_top']}"
         )
+        print(
+            "raw-page-layout: page1-start-probe=bold:a,á,à,A,Á,À"
+        )
 
-    cache = ensure_row_cached(context, args.column, args.row, models)
+    cache = sequential.ensure_row_cached(context, args.column, args.row, models)
     print(
         f"raw-page-sequential: page={args.page} column={args.column} "
         f"target_row={args.row} cached_rows={len(cache)}"
