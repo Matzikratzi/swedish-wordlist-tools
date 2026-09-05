@@ -73,6 +73,17 @@ def _first_ink_x_on_row(page: Image.Image, y: int, start_x: int = 0) -> int | No
     return None
 
 
+def _first_ink_y_in_column(page: Image.Image, x: int, start_y: int) -> int | None:
+    """Return first absolute y containing ink in exactly source column x."""
+    pix = page.load()
+    if not (0 <= x < page.width):
+        return None
+    for y in range(max(0, start_y), page.height):
+        if pix[x, y] == 0:
+            return y
+    return None
+
+
 def _vertical_occupancy(page: Image.Image, top: int) -> list[bool]:
     """True for source x columns containing any black pixel at y >= top."""
     pix = page.load()
@@ -184,6 +195,19 @@ def main() -> int:
 
     page = _load_thresholded_page(args.jsonl, args.page, args.threshold)
     row0_top, columns = detect_page1_layout(page)
+
+    # Reproduce the old mistake explicitly for diagnostics: scan all y>=row0_top
+    # for the leftmost vertically occupied x and print the first actual pixel that
+    # made that x occupied. This tells us exactly where a bogus early column start
+    # such as x=19 came from.
+    occupied = _vertical_occupancy(page, row0_top)
+    old_left = _next_black_column(occupied, 0)
+    if old_left is not None:
+        old_y = _first_ink_y_in_column(page, old_left, row0_top)
+        print(
+            f"page1-layout: old-vertical-first-pixel x={old_left} y={old_y} "
+            f"current-row0-first-x={columns[0].left}"
+        )
 
     print(
         f"page1-layout: page=1 threshold={args.threshold} blanked_y=0..{PAGE1_IGNORE_ABOVE_Y - 1} "
