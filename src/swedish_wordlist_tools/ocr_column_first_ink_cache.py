@@ -2,12 +2,13 @@ from __future__ import annotations
 
 """Cheap per-column cache of the leftmost black source pixel on every y row.
 
-This is pure page geometry.  It does not classify glyphs or choose baselines.
+This is pure page geometry. It does not classify glyphs or choose baselines.
 For a fixed column interval [left, right), scan each pixel row once and remember
-its first black x.  The same table also exposes the first/last y containing ink.
+its first black x. The same table also exposes the first/last y containing ink
+and contiguous all-white y intervals inside the column.
 
 Absolute image column x=0 is ignored deliberately: some facsimiles contain a
-spurious black edge there.  Other column-left pixels are kept unchanged.
+spurious black edge there. Other column-left pixels are kept unchanged.
 """
 
 from dataclasses import dataclass
@@ -21,10 +22,27 @@ class ColumnFirstInk:
     first_ink_y: int | None
     last_ink_y: int | None
     rows_with_ink: int
+    white_gaps: tuple[tuple[int, int], ...]
 
 
 def _cache(context: dict) -> dict[tuple[int, int], ColumnFirstInk]:
     return context.setdefault("raw_page_column_first_ink_cache", {})
+
+
+def _white_gaps(first_x: list[int]) -> tuple[tuple[int, int], ...]:
+    """Return half-open [y0,y1) runs whose complete column row is white."""
+    gaps: list[tuple[int, int]] = []
+    start: int | None = None
+    for y, x in enumerate(first_x):
+        if x < 0:
+            if start is None:
+                start = y
+        elif start is not None:
+            gaps.append((start, y))
+            start = None
+    if start is not None:
+        gaps.append((start, len(first_x)))
+    return tuple(gaps)
 
 
 def get_column_first_ink(context: dict, *, left: int, right: int) -> ColumnFirstInk:
@@ -59,6 +77,7 @@ def get_column_first_ink(context: dict, *, left: int, right: int) -> ColumnFirst
                     first_y = y
                 last_y = y
 
+    gaps = _white_gaps(first_x)
     result = ColumnFirstInk(
         left=left,
         right=right,
@@ -66,12 +85,27 @@ def get_column_first_ink(context: dict, *, left: int, right: int) -> ColumnFirst
         first_ink_y=first_y,
         last_ink_y=last_y,
         rows_with_ink=rows_with_ink,
+        white_gaps=gaps,
     )
     _cache(context)[key] = result
+
+    internal = [
+        (y0, y1)
+        for y0, y1 in gaps
+        if first_y is not None
+        and last_y is not None
+        and y0 > first_y
+        and y1 - 1 < last_y
+    ]
+    longest = sorted(internal, key=lambda gap: (gap[1] - gap[0], -gap[0]), reverse=True)[:8]
+    gap_summary = ",".join(
+        f"{y0}-{y1 - 1}({y1 - y0})" for y0, y1 in longest
+    ) or "none"
     print(
         "raw-page-column-first-ink-cache: "
         f"left={left} right={right} first_y={first_y} last_y={last_y} "
-        f"rows_with_ink={rows_with_ink}"
+        f"rows_with_ink={rows_with_ink} white_gaps={len(internal)} "
+        f"longest_white_gaps={gap_summary}"
     )
     return result
 
