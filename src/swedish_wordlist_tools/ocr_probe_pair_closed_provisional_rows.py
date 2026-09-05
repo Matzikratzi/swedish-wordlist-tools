@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-"""Strict top-down provisional ownership with adjacent-row closure.
+"""Top-down provisional ownership with adjacent-row pixel closure.
 
-A transfer from row N to N+1 is committed only when it makes N exact *and*
-N+1 is also exact with the transferred pixels.  Otherwise the tentative move
-is reverted immediately.  This keeps unresolved ownership from propagating
-through the column while testing the provisional-boundary idea.
+A transfer from row N to N+1 is committed only when it makes N exact and every
+transferred page pixel is explained by an exact glyph selected for N+1.  The
+lower row may still have unrelated residual ink of its own; that must not make
+an otherwise proven transfer fail.  Unproven transfers are reverted
+immediately, so unresolved ownership cannot propagate through the column.
 """
 
 from dataclasses import dataclass
@@ -24,6 +25,8 @@ class PairClosureResult:
     upper_before_exact: bool
     upper_after_exact: bool
     lower_after_exact: bool | None
+    transferred_pixels_explained: int | None
+    transferred_pixels_total: int | None
     committed: bool
     upper_before_covered: int
     upper_before_source: int
@@ -43,6 +46,15 @@ def _analyse(context: dict, position: tuple[int, int], models) -> tuple[dict, fl
     return state, perf_counter() - started
 
 
+def _matched_page_pixels(state: dict) -> set[tuple[int, int]]:
+    """Translate all exact selected glyph pixels from row-local to page coords."""
+    left, top, _right, _bottom = map(int, state.get("crop_box") or (0, 0, 0, 0))
+    pixels: set[tuple[int, int]] = set()
+    for match in state.get("matches") or []:
+        pixels.update((left + int(x), top + int(y)) for x, y in match.pixels)
+    return pixels
+
+
 def probe_pair_closure(context: dict, position: tuple[int, int], models) -> PairClosureResult:
     column, row_index = map(int, position)
     rows = context["row_map"]["columns"][column].get("rows") or []
@@ -51,7 +63,7 @@ def probe_pair_closure(context: dict, position: tuple[int, int], models) -> Pair
     if before.get("fully_exact") or row_index + 1 >= len(rows):
         exact = bool(before.get("fully_exact"))
         return PairClosureResult(
-            position, None, 0, 0, exact, exact, None, False,
+            position, None, 0, 0, exact, exact, None, None, None, False,
             int(before.get("covered_pixels") or 0), int(before.get("source_pixels") or 0),
             int(before.get("covered_pixels") or 0), int(before.get("source_pixels") or 0),
             None, None, before_seconds, 0.0, 0.0, None,
@@ -61,25 +73,37 @@ def probe_pair_closure(context: dict, position: tuple[int, int], models) -> Pair
     owners = context["pixel_owners"]
     upper_code = owners.row_code(row_index)
     lower_code = owners.row_code(row_index + 1)
-    changed: list[tuple[int, int, int]] = []
+    changed: list[tuple[int, int, int, int, int]] = []
     for x, y in sorted(candidates):
         if not (0 <= x < owners.width and 0 <= y < owners.height):
             continue
         offset = y * owners.width + x
         if owners.data[offset] == upper_code:
-            changed.append((offset, upper_code, lower_code))
+            changed.append((offset, upper_code, lower_code, x, y))
             owners.data[offset] = lower_code
 
     after, after_seconds = _analyse(context, position, models)
     lower_position = (column, row_index + 1)
     lower_state = None
     lower_seconds = 0.0
+    explained = None
+    transferred_total = None
     if changed and after.get("fully_exact"):
         lower_state, lower_seconds = _analyse(context, lower_position, models)
+        transferred = {(x, y) for _offset, _old, _new, x, y in changed}
+        lower_matched = _matched_page_pixels(lower_state)
+        explained = len(transferred & lower_matched)
+        transferred_total = len(transferred)
 
-    committed = bool(changed and after.get("fully_exact") and lower_state and lower_state.get("fully_exact"))
+    committed = bool(
+        changed
+        and after.get("fully_exact")
+        and lower_state is not None
+        and transferred_total is not None
+        and explained == transferred_total
+    )
     if not committed:
-        for offset, old_value, _new_value in changed:
+        for offset, old_value, _new_value, _x, _y in changed:
             owners.data[offset] = old_value
 
     return PairClosureResult(
@@ -90,6 +114,8 @@ def probe_pair_closure(context: dict, position: tuple[int, int], models) -> Pair
         bool(before.get("fully_exact")),
         bool(after.get("fully_exact")),
         bool(lower_state.get("fully_exact")) if lower_state is not None else None,
+        explained,
+        transferred_total,
         committed,
         int(before.get("covered_pixels") or 0),
         int(before.get("source_pixels") or 0),
