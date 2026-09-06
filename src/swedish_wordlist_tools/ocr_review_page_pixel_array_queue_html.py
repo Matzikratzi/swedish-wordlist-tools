@@ -79,14 +79,7 @@ def _centered_three_positions(positions, current, size=3):
 
 
 def _queue_card_image(context: dict, state: dict, *, extra_left: int = 2) -> str:
-    """Prepend raw source columns to the large clickable queue-row image.
-
-    The ordinary state image remains the owned OCR crop.  For queue review we
-    want exactly two source columns immediately *before* that crop so a stray
-    or forgotten pixel cannot be hidden merely because it was never assigned
-    to the row.  Keeping the strip separate also guarantees that the two new
-    columns are visibly at the left edge rather than changing OCR geometry.
-    """
+    """Prepend raw source columns to the large clickable queue-row image."""
     left, top, right, bottom = map(int, state["crop_box"])
     source_left = max(0, left - int(extra_left))
     strip_width = left - source_left
@@ -102,6 +95,57 @@ def _queue_card_image(context: dict, state: dict, *, extra_left: int = 2) -> str
     combined.paste(strip, (0, 0))
     combined.paste(owned, (strip.width, 0))
     return page_editor.fast.legacy._png_data_uri(combined)
+
+
+def _fine_review_display_state(context: dict, state: dict, *, extra_left: int = 2) -> dict:
+    """Return a render-only state with raw source columns before the OCR crop.
+
+    The real cached state is left untouched.  Coordinates used by the canvas are
+    shifted right by the number of added columns so glyph boxes and residuals
+    still line up with the original owned OCR image.  The prepended strip is raw
+    page source, which deliberately exposes pixels that OCR ownership omitted.
+    """
+    left, top, right, bottom = map(int, state["crop_box"])
+    source_left = max(0, left - int(extra_left))
+    pad = left - source_left
+    owners = context.get("pixel_owners")
+    if pad <= 0 or owners is None:
+        return state
+
+    owned = owners.render_owner_crop(
+        row_index=int(state["row"]), box=(left, top, right, bottom)
+    ).convert("L")
+    strip = context["page"].crop((source_left, top, left, bottom)).convert("L")
+    combined = Image.new("L", (pad + owned.width, owned.height), 255)
+    combined.paste(strip, (0, 0))
+    combined.paste(owned, (pad, 0))
+
+    out = dict(state)
+    out["image"] = page_editor.fast.legacy._png_data_uri(combined)
+    out["crop_box"] = (source_left, top, right, bottom)
+    out["crop_width"] = int(state["crop_width"]) + pad
+    out["queue_fine_left_padding"] = pad
+
+    out["source_ink_points"] = [
+        [int(x) + pad, int(y)] for x, y in state.get("source_ink_points") or []
+    ]
+    out["point_sets"] = {
+        item_id: frozenset((int(x) + pad, int(y)) for x, y in points)
+        for item_id, points in (state.get("point_sets") or {}).items()
+    }
+    shifted_items = []
+    for item in state.get("items") or []:
+        shifted = dict(item)
+        bbox = item.get("bbox")
+        if bbox:
+            shifted["bbox"] = {
+                **bbox,
+                "left": int(bbox["left"]) + pad,
+                "right": int(bbox["right"]) + pad,
+            }
+        shifted_items.append(shifted)
+    out["items"] = shifted_items
+    return out
 
 
 def main() -> int:
@@ -203,7 +247,7 @@ def main() -> int:
         print(
             f"review: queue {args.queue}: page {page_number}: "
             f"visar endast {len(context['positions'])} kö-rader; "
-            "+2 källpixelkolumner i vänsterkant på de stora radkorten",
+            "+2 råa källpixelkolumner i vänsterkant på radkort och fingranskare",
             flush=True,
         )
         return context
@@ -220,7 +264,13 @@ def main() -> int:
         return state
 
     def render_with_mismatch(state, message=""):
-        document = original_render(state, message)
+        context = context_holder.get("context")
+        display_state = (
+            _fine_review_display_state(context, state, extra_left=2)
+            if context is not None
+            else state
+        )
+        document = original_render(display_state, message)
         banner = _mismatch_banner(state)
         if not banner:
             return document
