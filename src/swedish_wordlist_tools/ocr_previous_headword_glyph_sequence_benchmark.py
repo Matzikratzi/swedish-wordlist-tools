@@ -143,9 +143,14 @@ def _sequence_exact_cover(
                 if candidate_baseline < -model.min_y or candidate_baseline > height - 1 - model.max_y:
                     continue
                 placements_tested += 1
-                placed = frozenset((x0 + x, candidate_baseline + y) for x, y in model.pixels)
-                if not placed.issubset(remaining):
+                fits = True
+                for x, y in model.pixels:
+                    if (x0 + x, candidate_baseline + y) not in remaining:
+                        fits = False
+                        break
+                if not fits:
                     continue
+                placed = frozenset((x0 + x, candidate_baseline + y) for x, y in model.pixels)
 
                 match = Match(
                     label=model.label,
