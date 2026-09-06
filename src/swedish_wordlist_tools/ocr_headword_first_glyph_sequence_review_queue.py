@@ -4,17 +4,19 @@ from __future__ import annotations
 
 This is diagnostic only.  OCR behaviour and the benchmark exit status are
 unchanged; the wrapper merely records the rows already reported by the existing
-reference comparison.
+reference comparison.  Each queued row also keeps the comparison reason and
+both reference/observed snapshots so the editor can explain why it was queued.
 """
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
 
 from . import ocr_headword_first_glyph_sequence_benchmark as benchmark
 from . import ocr_split_facit_benchmark as split_benchmark
-from .ocr_find_unreviewed_glyph_rows import RowWork, write_review_queue
+from .ocr_find_unreviewed_glyph_rows import QUEUE_FORMAT, RowWork
 
 
 _PAGE_RE = re.compile(r"page-(\d+)$")
@@ -42,6 +44,41 @@ def _row_work(page: int, key: tuple[int, int], expected, observed) -> RowWork:
     )
 
 
+def _snapshot(row) -> dict | None:
+    if row is None:
+        return None
+    return {
+        "text": str(row.get("text") or ""),
+        "source_pixels": int(row.get("source_pixels") or 0),
+        "covered_pixels": int(row.get("covered_pixels") or 0),
+        "exact": bool(row.get("exact", False)),
+    }
+
+
+def _queue_row(page: int, key: tuple[int, int], why: str, expected, observed) -> dict:
+    work = _row_work(page, key, expected, observed)
+    return {
+        "page": work.page,
+        "column": work.column,
+        "row": work.row,
+        "unreviewed_matches": work.unreviewed_matches,
+        "covered_pixels": work.covered_pixels,
+        "source_pixels": work.source_pixels,
+        "fully_exact": work.fully_exact,
+        "benchmark_mismatch": {
+            "why": str(why),
+            "reference": _snapshot(expected),
+            "observed": _snapshot(observed),
+        },
+    }
+
+
+def _write_queue(path: Path, rows: list[dict]) -> None:
+    payload = {"format": QUEUE_FORMAT, "rows": rows}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(add_help=False)
     ap.add_argument("--review-queue", type=Path, required=True)
@@ -51,7 +88,7 @@ def main() -> int:
     original_load_reference = split_benchmark._load_reference
     original_compare_page = split_benchmark._compare_page
     current_page: list[int | None] = [None]
-    queued: dict[tuple[int, int, int], RowWork] = {}
+    queued: dict[tuple[int, int, int], dict] = {}
 
     def load_reference_with_page(path: Path):
         match = _PAGE_RE.fullmatch(Path(path).stem)
@@ -63,9 +100,9 @@ def main() -> int:
         page = current_page[0]
         if page is None and mismatches:
             raise RuntimeError("could not determine page number while writing review queue")
-        for key, _why, expected, observed in mismatches:
-            work = _row_work(int(page), key, expected, observed)
-            queued[(work.page, work.column, work.row)] = work
+        for key, why, expected, observed in mismatches:
+            row = _queue_row(int(page), key, why, expected, observed)
+            queued[(row["page"], row["column"], row["row"])] = row
         return mismatches
 
     split_benchmark._load_reference = load_reference_with_page
@@ -79,7 +116,7 @@ def main() -> int:
         split_benchmark._compare_page = original_compare_page
 
     rows = [queued[key] for key in sorted(queued)]
-    write_review_queue(queue_args.review_queue, rows)
+    _write_queue(queue_args.review_queue, rows)
     print(
         f"review-queue: saved {len(rows)} benchmark mismatch rows to {queue_args.review_queue}",
         flush=True,
