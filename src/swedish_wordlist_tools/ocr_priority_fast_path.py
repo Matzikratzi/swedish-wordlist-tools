@@ -5,9 +5,9 @@ from __future__ import annotations
 The search space is unchanged: layout and previous typography only decide which
 facit raster classes are tried first. Models with identical raster geometry keep
 the old canonical order on ordinary rows so metadata/label choice cannot change
-merely because a layout hint was added. On a row already classified as a homonym
-row, the known position is allowed to distinguish otherwise identical metadata
-variants: leading homonym digit first, then bold headword.
+merely because a layout hint was added. On a homonym row the raised leading
+homonym digit is recognized specially, but it does not impose a typography on
+the following glyph; the ordinary classified model order decides that glyph.
 """
 
 from collections import Counter
@@ -17,6 +17,7 @@ from typing import Iterable
 from .ocr_glyph_matcher import GlyphModel, Match
 
 _tls = local()
+_HOMONYM_DIGITS = frozenset("123456789¹²³⁴⁵⁶⁷⁸⁹")
 
 
 def reset_priority_stats() -> None:
@@ -81,13 +82,17 @@ def _is_headword_match(match) -> bool:
     return str(style) == "headword-bold" or _typographic_style(style) == "bold"
 
 
+def _is_homonym_label(label: object) -> bool:
+    text = str(label)
+    return len(text) == 1 and text in _HOMONYM_DIGITS
+
+
 def _is_homonym_model(model: GlyphModel) -> bool:
-    return len(model.label) == 1 and model.label in "123456789"
+    return _is_homonym_label(model.label)
 
 
 def _is_homonym_match(match) -> bool:
-    label = str(getattr(match, "label", ""))
-    return len(label) == 1 and label in "123456789"
+    return _is_homonym_label(getattr(match, "label", ""))
 
 
 def _canonical_model_key(model: GlyphModel) -> tuple[int, int, str, str]:
@@ -113,16 +118,11 @@ def _priority_class(
     typography = _typographic_style(model.style)
     if first_glyph:
         if row_kind == "homonym":
-            if _is_homonym_model(model):
-                priority = 0
-            elif _is_headword_model(model):
-                priority = 2
+            priority = 0 if _is_homonym_model(model) else 1
         elif row_kind == "headword":
             priority = 0 if _is_headword_model(model) else 1
         elif row_kind == "continuation":
             priority = 2 if _is_headword_model(model) else 1
-    elif row_kind == "homonym" and leading_homonym_seen and not baseline_established:
-        priority = 0 if _is_headword_model(model) else 1
     elif previous_style is not None:
         if typography == previous_style:
             priority = 0
@@ -247,8 +247,8 @@ def prioritized_fast_exact_cover(
 
     On a row classified as a homonym row, an exact leading homonym digit keeps
     its own facit-derived placement baseline. It does not establish the shared
-    text baseline; the following non-homonym glyph does. No fixed vertical
-    offset is assumed: exact facit geometry decides every placement.
+    text baseline or the following glyph's typography. No fixed vertical offset
+    is assumed: exact facit geometry decides every placement.
     """
     if not ink:
         return None
@@ -330,14 +330,16 @@ def prioritized_fast_exact_cover(
                 )
                 if is_leading_homonym:
                     next_baseline = None
+                    next_style = None
                     saw_homonym = True
                 else:
                     next_baseline = candidate_baseline if baseline is None else baseline
+                    next_style = _typographic_style(model.style)
                     saw_homonym = leading_homonym_seen
                 tail = search(
                     frozenset(remaining.difference(placed)),
                     next_baseline,
-                    _typographic_style(model.style),
+                    next_style,
                     saw_homonym,
                 )
                 if tail is not None:
@@ -393,10 +395,7 @@ def observe_row_layout(context: dict, state: dict) -> None:
         _column_counters(context, "priority_headword_x_counts", column)[absolute_x] += 1
 
     if _is_homonym_match(first):
-        if any(
-            int(match.x) > int(first.x) and _is_headword_match(match)
-            for match in matches[1:]
-        ):
+        if any(int(match.x) > int(first.x) for match in matches[1:]):
             _column_counters(context, "priority_homonym_x_counts", column)[absolute_x] += 1
 
 
@@ -452,5 +451,9 @@ def classify_row_start(context: dict, position: tuple[int, int]) -> str:
         return "homonym"
     headword_x = _most_common_x(context, "priority_headword_x_counts", column)
     if headword_x is not None:
-        return "headword" if start_x == headword_x else "continuation"
+        if start_x < headword_x:
+            return "homonym"
+        if start_x == headword_x:
+            return "headword"
+        return "continuation"
     return "unknown"
