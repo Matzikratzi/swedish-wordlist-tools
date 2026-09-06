@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-"""Run the headword-sequence benchmark and save every reference mismatch as a row-review queue.
+"""Run the ordinary scanner/reference benchmark and save every mismatch as a queue.
 
-This is diagnostic only. OCR behaviour and the benchmark exit status are
-unchanged. Every mismatch reported by the existing reference comparison is
-preserved in the review queue so found errors remain visible until understood
-and corrected.
-
-The wrapper is intentionally quiet by default so larger page ranges remain
-readable. Pass ``--verbose`` to expose the underlying benchmark's normal stdout
-diagnostics.
+Despite the historical module name, this wrapper no longer runs the old
+benchmark experiment stack.  OCR behaviour is exactly the ordinary scanner
+path; the wrapper only collects frozen-reference mismatches into the existing
+review-queue format.
 """
 
 import argparse
@@ -20,8 +16,7 @@ import re
 import sys
 from pathlib import Path
 
-from . import ocr_headword_first_glyph_sequence_benchmark as benchmark
-from . import ocr_split_facit_benchmark as split_benchmark
+from . import ocr_scanner_reference_benchmark as benchmark
 from .ocr_find_unreviewed_glyph_rows import QUEUE_FORMAT, RowWork
 
 
@@ -91,13 +86,13 @@ def main() -> int:
     ap.add_argument(
         "--verbose",
         action="store_true",
-        help="show the underlying benchmark's normal stdout diagnostics",
+        help="show the underlying scanner/reference comparison diagnostics",
     )
     queue_args, benchmark_argv = ap.parse_known_args()
 
     original_argv = sys.argv
-    original_load_reference = split_benchmark._load_reference
-    original_compare_page = split_benchmark._compare_page
+    original_load_reference = benchmark._load_reference
+    original_compare_page = benchmark._compare_page
     current_page: list[int | None] = [None]
     queued: dict[tuple[int, int, int], dict] = {}
 
@@ -116,8 +111,8 @@ def main() -> int:
             queued[(row["page"], row["column"], row["row"])] = row
         return mismatches
 
-    split_benchmark._load_reference = load_reference_with_page
-    split_benchmark._compare_page = compare_and_collect
+    benchmark._load_reference = load_reference_with_page
+    benchmark._compare_page = compare_and_collect
     sys.argv = [original_argv[0], *benchmark_argv]
     try:
         if queue_args.verbose:
@@ -128,15 +123,15 @@ def main() -> int:
                     result = benchmark.main()
     finally:
         sys.argv = original_argv
-        split_benchmark._load_reference = original_load_reference
-        split_benchmark._compare_page = original_compare_page
+        benchmark._load_reference = original_load_reference
+        benchmark._compare_page = original_compare_page
 
     rows = [queued[key] for key in sorted(queued)]
     _write_queue(queue_args.review_queue, rows)
     pages = sorted({row["page"] for row in rows})
     page_summary = f" pages={pages[0]}..{pages[-1]}" if pages else ""
     print(
-        f"review-queue: saved {len(rows)} benchmark mismatch rows{page_summary} "
+        f"review-queue: saved {len(rows)} scanner/reference mismatch rows{page_summary} "
         f"to {queue_args.review_queue}",
         flush=True,
     )
