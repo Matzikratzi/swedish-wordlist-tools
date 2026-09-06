@@ -48,9 +48,6 @@ def _same_expected_model(model: GlyphModel, expected) -> bool:
 
 def _ordered_rows(rows, expected):
     """Stable tiers: exact previous glyph, boundary marks, then old order."""
-    if expected is None:
-        yield from rows
-        return
     exact = []
     breaks = []
     rest = []
@@ -127,7 +124,7 @@ def _sequence_exact_cover(
             leading_homonym_seen=leading_homonym_seen,
             baseline_established=baseline is not None,
         )
-        rows = _ordered_rows(base_rows, expected)
+        rows = base_rows if expected is None else _ordered_rows(base_rows, expected)
 
         for model, min_x, left_pixels in rows:
             x0 = anchor_x - min_x
