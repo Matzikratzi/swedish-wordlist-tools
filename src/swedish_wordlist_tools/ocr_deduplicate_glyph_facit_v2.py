@@ -3,16 +3,20 @@ from __future__ import annotations
 """Deduplicate SAOL14 v2 glyph facit without changing glyph semantics.
 
 A duplicate is a model with the same label, semantic role, typographic style,
-and exact baseline-relative raster.  Provenance (sources), reviewed state and
+and exact baseline-relative raster. Provenance (sources), reviewed state and
 model_id do not make otherwise identical glyph models distinct.
 
 For each duplicate group the keeper is chosen by:
 1. reviewed=true before reviewed=false
 2. lowest model_id
 
-Sources from removed duplicates are merged into the keeper.  When --apply is
+Sources from removed duplicates are merged into the keeper. When --apply is
 used, both the split store and the monolithic v2 facit are updated so they
 continue to represent the same surviving model sequence.
+
+After dedup planning, bit-exact models with the same label but conflicting
+ typographic styles are reported separately for manual review. They are never
+changed automatically.
 """
 
 import argparse
@@ -66,13 +70,25 @@ def _load_monolithic(path: Path) -> dict[str, Any]:
     return payload
 
 
+def _pixels(row: dict[str, Any]) -> tuple[tuple[int, int], ...]:
+    return tuple(
+        sorted((int(x), int(y)) for x, y in row.get("pixels_relative_to_baseline") or [])
+    )
+
+
 def _identity(row: dict[str, Any]) -> tuple[Any, ...]:
-    pixels = tuple(sorted((int(x), int(y)) for x, y in row.get("pixels_relative_to_baseline") or []))
     return (
         str(row.get("label") or ""),
         str(row.get("role") or "unknown"),
         str(row.get("style") or "roman"),
-        pixels,
+        _pixels(row),
+    )
+
+
+def _style_conflict_identity(row: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        str(row.get("label") or ""),
+        _pixels(row),
     )
 
 
@@ -125,6 +141,75 @@ def _verify_monolithic_matches_split(
                 f"monolithic/split facit differ before dedup at index={index} "
                 f"split_model_id={split.get('model_id')!r}"
             )
+
+
+def _survivors_after_plan(
+    split_rows: list[tuple[Path, dict[str, Any]]],
+    removed_ids: set[int],
+    keeper_rows: dict[int, dict[str, Any]],
+) -> list[tuple[Path, dict[str, Any]]]:
+    out: list[tuple[Path, dict[str, Any]]] = []
+    for path, row in split_rows:
+        model_id = _model_id_number(row)
+        if model_id in removed_ids:
+            continue
+        out.append((path, keeper_rows.get(model_id, row)))
+    return out
+
+
+def _report_style_conflicts(rows: list[tuple[Path, dict[str, Any]]]) -> int:
+    groups: dict[tuple[Any, ...], list[tuple[Path, dict[str, Any]]]] = {}
+    for item in rows:
+        groups.setdefault(_style_conflict_identity(item[1]), []).append(item)
+
+    conflicts = [
+        group
+        for group in groups.values()
+        if len(group) > 1
+        and len({str(row.get("style") or "roman") for _path, row in group}) > 1
+    ]
+    conflicts.sort(key=lambda group: min(_model_id_number(row) for _path, row in group))
+
+    for index, group in enumerate(conflicts, start=1):
+        first = group[0][1]
+        label = str(first.get("label") or "")
+        pixel_count = len(_pixels(first))
+        styles = sorted({str(row.get("style") or "roman") for _path, row in group})
+        print(
+            f"style-conflict: n={index} label={label!r} pixels={pixel_count} "
+            f"styles={','.join(styles)} models={len(group)}",
+            flush=True,
+        )
+        for path, row in sorted(group, key=lambda item: _model_id_number(item[1])):
+            model_id = _model_id_number(row)
+            reviewed = bool(row.get("reviewed", False))
+            role = str(row.get("role") or "unknown")
+            style = str(row.get("style") or "roman")
+            sources = row.get("sources") or []
+            source_summaries: list[str] = []
+            for source in sources[:3]:
+                if isinstance(source, dict):
+                    page = source.get("page")
+                    word = source.get("expected_word") or source.get("jsonl_word") or source.get("source_id")
+                    parts = []
+                    if page is not None:
+                        parts.append(f"p{page}")
+                    if word:
+                        parts.append(str(word))
+                    source_summaries.append(":".join(parts) if parts else _source_key(source))
+                else:
+                    source_summaries.append(str(source))
+            if len(sources) > 3:
+                source_summaries.append(f"+{len(sources) - 3} more")
+            print(
+                f"  model=g{model_id:06d}{'*' if reviewed else ''} style={style} role={role} "
+                f"sources={len(sources)} path={path}"
+                + (f" source=[{' | '.join(source_summaries)}]" if source_summaries else ""),
+                flush=True,
+            )
+
+    print(f"style-conflict-summary: groups={len(conflicts)}", flush=True)
+    return len(conflicts)
 
 
 def main() -> int:
@@ -190,6 +275,9 @@ def main() -> int:
         f"reviewed_wins={reviewed_promotions} mode={'apply' if args.apply else 'dry-run'}",
         flush=True,
     )
+
+    planned_survivors = _survivors_after_plan(split_rows, removed_ids, keeper_rows)
+    _report_style_conflicts(planned_survivors)
 
     if not args.apply:
         return 0
