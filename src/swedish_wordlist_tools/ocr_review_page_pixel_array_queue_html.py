@@ -6,6 +6,7 @@ import argparse
 import html
 import json
 import sys
+from collections import Counter
 from pathlib import Path
 
 from PIL import Image
@@ -50,9 +51,7 @@ def _mismatch_banner(state: dict) -> str:
     queue_position = state.get("queue_position")
     queue_line = ""
     if queue_position:
-        queue_line = (
-            f"<div><b>KÖPOST:</b> {int(queue_position[0])}/{int(queue_position[1])}</div>"
-        )
+        queue_line = f"<div><b>KÖPOST:</b> {int(queue_position[0])}/{int(queue_position[1])}</div>"
     if not mismatch:
         return queue_line
     current = {
@@ -75,7 +74,6 @@ def _mismatch_banner(state: dict) -> str:
 
 
 def _centered_three_positions(positions, current, size=3):
-    """Show previous/current/next so the active queued row is the middle card."""
     if current not in positions:
         raise ValueError(f"row {current} is not present on page")
     index = positions.index(current)
@@ -85,18 +83,55 @@ def _centered_three_positions(positions, current, size=3):
     return positions[start : start + 3]
 
 
+def _seed_headword_x_from_geometry(context: dict) -> None:
+    """Give a directly opened page the headword-x history batch learns earlier."""
+    owners = context.get("pixel_owners")
+    columns = context.get("row_map", {}).get("columns") or []
+    if owners is None:
+        return
+    store = context.setdefault("priority_headword_x_counts", {})
+    for column_index, column in enumerate(columns):
+        if store.get(column_index):
+            continue
+        left_value = (context.get("column_content_lefts") or {}).get(column_index)
+        left = max(0, int(left_value if left_value is not None else column.get("crop_left", column.get("left", 0))))
+        right = min(owners.width, int(column.get("crop_right", column.get("right", owners.width))))
+        starts: list[int] = []
+        for row_index, row in enumerate(column.get("rows") or []):
+            top = max(0, int(row.get("page_top", 0)))
+            bottom = min(owners.height, int(row.get("page_bottom", owners.height)))
+            code = owners.row_code(row_index)
+            start_x = next(
+                (
+                    x
+                    for x in range(left, right)
+                    if any(owners.data[y * owners.width + x] == code for y in range(top, bottom))
+                ),
+                None,
+            )
+            if start_x is not None:
+                starts.append(int(start_x))
+        if not starts:
+            continue
+        center = max(
+            starts,
+            key=lambda value: (sum(abs(other - value) <= 2 for other in starts), value),
+        )
+        members = [value for value in starts if abs(value - center) <= 2]
+        exact_counts = Counter(members)
+        headword_x = max(exact_counts, key=lambda value: (exact_counts[value], value))
+        store[column_index] = Counter({int(headword_x): len(members)})
+        context.setdefault("queue_seeded_headword_x", {})[column_index] = int(headword_x)
+
+
 def _queue_card_image(context: dict, state: dict, *, extra_left: int = 2) -> str:
-    """Prepend raw source columns to the large clickable queue-row image."""
     left, top, right, bottom = map(int, state["crop_box"])
     source_left = max(0, left - int(extra_left))
     strip_width = left - source_left
     owners = context.get("pixel_owners")
     if strip_width <= 0 or owners is None:
         return str(state["image"])
-
-    owned = owners.render_owner_crop(
-        row_index=int(state["row"]), box=(left, top, right, bottom)
-    ).convert("L")
+    owned = owners.render_owner_crop(row_index=int(state["row"]), box=(left, top, right, bottom)).convert("L")
     strip = context["page"].crop((source_left, top, left, bottom)).convert("L")
     combined = Image.new("L", (strip.width + owned.width, owned.height), 255)
     combined.paste(strip, (0, 0))
@@ -105,30 +140,23 @@ def _queue_card_image(context: dict, state: dict, *, extra_left: int = 2) -> str
 
 
 def _fine_review_display_state(context: dict, state: dict, *, extra_left: int = 2) -> dict:
-    """Return a render-only state with raw source columns before the OCR crop."""
     left, top, right, bottom = map(int, state["crop_box"])
     source_left = max(0, left - int(extra_left))
     pad = left - source_left
     owners = context.get("pixel_owners")
     if pad <= 0 or owners is None:
         return state
-
-    owned = owners.render_owner_crop(
-        row_index=int(state["row"]), box=(left, top, right, bottom)
-    ).convert("L")
+    owned = owners.render_owner_crop(row_index=int(state["row"]), box=(left, top, right, bottom)).convert("L")
     strip = context["page"].crop((source_left, top, left, bottom)).convert("L")
     combined = Image.new("L", (pad + owned.width, owned.height), 255)
     combined.paste(strip, (0, 0))
     combined.paste(owned, (pad, 0))
-
     out = dict(state)
     out["image"] = page_editor.fast.legacy._png_data_uri(combined)
     out["crop_box"] = (source_left, top, right, bottom)
     out["crop_width"] = int(state["crop_width"]) + pad
     out["queue_fine_left_padding"] = pad
-    out["source_ink_points"] = [
-        [int(x) + pad, int(y)] for x, y in state.get("source_ink_points") or []
-    ]
+    out["source_ink_points"] = [[int(x) + pad, int(y)] for x, y in state.get("source_ink_points") or []]
     out["point_sets"] = {
         item_id: frozenset((int(x) + pad, int(y)) for x, y in points)
         for item_id, points in (state.get("point_sets") or {}).items()
@@ -138,20 +166,14 @@ def _fine_review_display_state(context: dict, state: dict, *, extra_left: int = 
         shifted = dict(item)
         bbox = item.get("bbox")
         if bbox:
-            shifted["bbox"] = {
-                **bbox,
-                "left": int(bbox["left"]) + pad,
-                "right": int(bbox["right"]) + pad,
-            }
+            shifted["bbox"] = {**bbox, "left": int(bbox["left"]) + pad, "right": int(bbox["right"]) + pad}
         shifted_items.append(shifted)
     out["items"] = shifted_items
     return out
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(
-        description="Review only queued SAOL glyph rows with the page pixel-array editor."
-    )
+    ap = argparse.ArgumentParser(description="Review only queued SAOL glyph rows with the page pixel-array editor.")
     ap.add_argument("jsonl", type=Path)
     ap.add_argument("--queue", type=Path, required=True)
     ap.add_argument("--queue-index", type=int, help="1-based queue entry to start at; selects its page automatically")
@@ -218,6 +240,7 @@ def main() -> int:
 
     def build_queued_page_context(jsonl: Path, page_number: int, threshold: int = 210):
         context = original_build(jsonl, page_number, threshold)
+        _seed_headword_x_from_geometry(context)
         context_holder["context"] = context
         available = set(context["positions"])
         missing = [position for position in selected if position not in available]
@@ -226,7 +249,8 @@ def main() -> int:
         context["positions"] = [position for position in context["positions"] if position in queued]
         print(
             f"review: queue {args.queue}: page {page_number}: visar endast {len(context['positions'])} kö-rader; "
-            "samma prioriterade radparser som batch; horisontell efterkompaktering AV; +2 råa källpixelkolumner visas",
+            f"huvudords-x={context.get('queue_seeded_headword_x')}; samma prioriterade radparser som batch; "
+            "horisontell efterkompaktering AV; +2 råa källpixelkolumner visas",
             flush=True,
         )
         return context
