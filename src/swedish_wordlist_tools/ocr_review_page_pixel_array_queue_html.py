@@ -160,6 +160,15 @@ def main() -> int:
 
     def build_queued_page_context(jsonl: Path, page_number: int, threshold: int = 210):
         context = original_build(jsonl, page_number, threshold)
+        # Keep two extra source pixels visible at the left edge.  The row loader
+        # derives its crop from these per-column content-left coordinates, so
+        # this exposes any otherwise hidden stray pixel immediately left of the
+        # normal review crop as well as including it in the current exactness
+        # check.  Queue mode only; the ordinary page editor is unchanged.
+        content_lefts = context.get("column_content_lefts") or {}
+        for column, left in list(content_lefts.items()):
+            if left is not None:
+                content_lefts[column] = max(0, int(left) - 2)
         available = set(context["positions"])
         missing = [position for position in selected if position not in available]
         if missing:
@@ -171,7 +180,7 @@ def main() -> int:
         ]
         print(
             f"review: queue {args.queue}: page {page_number}: "
-            f"visar endast {len(context['positions'])} kö-rader",
+            f"visar endast {len(context['positions'])} kö-rader; +2 px vänster",
             flush=True,
         )
         return context
