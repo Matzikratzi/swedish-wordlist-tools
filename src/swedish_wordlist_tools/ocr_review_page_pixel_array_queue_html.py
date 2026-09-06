@@ -10,6 +10,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from . import ocr_neighbor_row_raster as neighbor_raster
 from . import ocr_review_page_pixel_array_glyphs_html as page_editor
 from .ocr_find_unreviewed_glyph_rows import QUEUE_FORMAT
 
@@ -229,6 +230,7 @@ def main() -> int:
     original_render = page_editor.fast.ui.editor.render_html
     original_packet_positions = page_editor.fast.ui.packet_positions
     original_packet_render = page_editor.fast.ui.render_five_row_html
+    original_compact_review_state = neighbor_raster._compact_review_state
     original_argv = sys.argv
     context_holder: dict[str, dict] = {}
 
@@ -247,7 +249,7 @@ def main() -> int:
         print(
             f"review: queue {args.queue}: page {page_number}: "
             f"visar endast {len(context['positions'])} kö-rader; "
-            "+2 råa källpixelkolumner i vänsterkant på radkort och fingranskare",
+            "horisontell efterkompaktering AV; +2 råa källpixelkolumner visas",
             flush=True,
         )
         return context
@@ -302,6 +304,7 @@ def main() -> int:
     page_editor.fast.ui.editor.render_html = render_with_mismatch
     page_editor.fast.ui.packet_positions = _centered_three_positions
     page_editor.fast.ui.render_five_row_html = render_queue_packet
+    neighbor_raster._compact_review_state = lambda _context, state: state
     argv = [
         original_argv[0],
         str(args.jsonl),
@@ -326,6 +329,7 @@ def main() -> int:
         return page_editor.main()
     finally:
         sys.argv = original_argv
+        neighbor_raster._compact_review_state = original_compact_review_state
         page_editor.build_page_context_pixel_array = original_build
         page_editor.load_review_state_pixel_array = original_loader
         page_editor.fast.ui.editor.render_html = original_render
