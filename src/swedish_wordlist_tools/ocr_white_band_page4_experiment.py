@@ -2,11 +2,12 @@ from __future__ import annotations
 
 """One-off page-4 experiment: insert a synthetic white separator band.
 
-This deliberately does *not* change normal OCR behaviour.  It builds page 4 in
+This deliberately does *not* change normal OCR behaviour. It builds page 4 in
 exactly the usual way, then for one selected physical row paints a three-raster
-white band ``offset`` pixels below that row's effective upper separator.  The
-same pixels are cleared both in the page image and in the page-wide ownership
-array so subsequent separator and glyph analysis see the synthetic whitespace.
+white band straddling that row's current effective lower separator: one raster
+line above the separator and two below it. The same pixels are cleared both in
+the page image and in the page-wide ownership array so subsequent separator and
+glyph analysis see the synthetic whitespace.
 """
 
 import argparse
@@ -24,8 +25,8 @@ def _paint_white_band(
     *,
     column: int,
     row_index: int,
-    offset: int,
     height: int,
+    start_delta: int,
 ) -> dict:
     columns = context["row_map"].get("columns") or []
     if not 0 <= column < len(columns):
@@ -49,21 +50,25 @@ def _paint_white_band(
     _box, effective_top, effective_bottom_before = page_editor._effective_owned_row_box(
         context, column, row_index, left, right, pad_y=0
     )
-    band_top = int(effective_top) + int(offset)
+    band_top = int(effective_bottom_before) + int(start_delta)
     band_bottom = min(owners.height, band_top + int(height))
     if band_top < 0 or band_top >= owners.height or band_bottom <= band_top:
         raise ValueError(
             f"synthetic band outside page: top={band_top} bottom={band_bottom} height={owners.height}"
         )
 
+    per_line_before: list[tuple[int, int]] = []
     cleared = 0
     for y in range(band_top, band_bottom):
         start = y * owners.width
+        line_ink = 0
         for x in range(left, right):
             pos = start + x
             if owners.data[pos] != WHITE:
+                line_ink += 1
                 cleared += 1
                 owners.data[pos] = WHITE
+        per_line_before.append((y, line_ink))
 
     # Keep the displayed/source grayscale in sync with the ownership experiment.
     for image_key in ("page", "pixel_gray_page"):
@@ -86,7 +91,6 @@ def _paint_white_band(
         {(column, row_index - 1), (column, row_index)}
     )
 
-    # Report what separator calculation sees after the synthetic whitespace.
     _box_after, effective_top_after, effective_bottom_after = page_editor._effective_owned_row_box(
         context, column, row_index, left, right, pad_y=0
     )
@@ -100,6 +104,7 @@ def _paint_white_band(
         "band_top": band_top,
         "band_bottom": band_bottom,
         "cleared_ink_pixels": cleared,
+        "per_line_before": per_line_before,
         "effective_top_after": int(effective_top_after),
         "effective_bottom_after": int(effective_bottom_after),
     }
@@ -108,8 +113,9 @@ def _paint_white_band(
         f"page={context['page_number']} column={column} row={row_index} "
         f"upper_boundary={record['effective_top_before']} "
         f"old_lower_boundary={record['effective_bottom_before']} "
-        f"band=[{band_top},{band_bottom}) offset={offset} height={height} "
-        f"cleared_ink={cleared} new_lower_boundary={record['effective_bottom_after']}",
+        f"band=[{band_top},{band_bottom}) start_delta={start_delta} height={height} "
+        f"line_ink={per_line_before} cleared_ink={cleared} "
+        f"new_lower_boundary={record['effective_bottom_after']}",
         flush=True,
     )
     return record
@@ -117,14 +123,19 @@ def _paint_white_band(
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Page-4-only OCR experiment with a synthetic 3-pixel white band."
+        description="Page-4-only OCR experiment with a synthetic 3-pixel white band across the current row boundary."
     )
     ap.add_argument("jsonl", type=Path)
     ap.add_argument("--facit", type=Path, required=True)
     ap.add_argument("--page", type=int, default=4)
     ap.add_argument("--column", type=int, default=1)
     ap.add_argument("--row", type=int, default=23)
-    ap.add_argument("--band-offset", type=int, default=18)
+    ap.add_argument(
+        "--band-start-delta",
+        type=int,
+        default=-1,
+        help="band start relative to the current effective lower boundary; default -1 gives one line above and two below",
+    )
     ap.add_argument("--band-height", type=int, default=3)
     ap.add_argument("--threshold", type=int, default=210)
     ap.add_argument("--boundary-radius", type=int, default=6)
@@ -132,8 +143,6 @@ def main() -> int:
 
     if args.page != 4:
         raise ValueError("this experiment is intentionally restricted to page 4")
-    if args.band_offset < 0:
-        raise ValueError("--band-offset must be >= 0")
     if args.band_height < 1:
         raise ValueError("--band-height must be >= 1")
 
@@ -144,8 +153,8 @@ def main() -> int:
         context,
         column=args.column,
         row_index=args.row,
-        offset=args.band_offset,
         height=args.band_height,
+        start_delta=args.band_start_delta,
     )
 
     started = perf_counter()
