@@ -9,6 +9,11 @@ from .ocr_page_cached_fast_path import analyse_row_prioritized
 
 install_facit_write_redirect()
 
+# Compatibility hook used by the benchmark layers.  It deliberately starts as
+# the same shared parser used by the editor/batch path; benchmark experiments may
+# temporarily replace this name and the wrapper below will see that replacement.
+analyse_row_exact_grouped = analyse_row_prioritized
+
 
 def analyse_row_exact_grouped_with_baseline_fallback(
     crop,
@@ -22,8 +27,11 @@ def analyse_row_exact_grouped_with_baseline_fallback(
     selects glyphs.  Interactive review and batch scanning must use the same
     prioritized exact-cover rules so a row cannot acquire a different glyph
     decomposition merely because it was opened in the editor.
+
+    ``analyse_row_exact_grouped`` remains an assignable compatibility hook for
+    the existing benchmark stack.  Its default value is the shared parser.
     """
-    result = analyse_row_prioritized(crop, models, threshold=threshold)
+    result = analyse_row_exact_grouped(crop, models, threshold=threshold)
     baseline = result.get("baseline")
     result["baseline_fallbacks"] = []
     result["baseline_segments"] = (
