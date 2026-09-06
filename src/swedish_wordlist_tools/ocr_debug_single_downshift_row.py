@@ -11,7 +11,7 @@ from .ocr_review_page_pixel_array_glyphs_html import (
     build_page_context_pixel_array,
     load_review_state_pixel_array,
 )
-from .ocr_single_downshift_safe_islands_benchmark import (
+from .ocr_shared_single_downshift import (
     _exact_solution_at_baseline,
     _first_island_solutions,
 )
