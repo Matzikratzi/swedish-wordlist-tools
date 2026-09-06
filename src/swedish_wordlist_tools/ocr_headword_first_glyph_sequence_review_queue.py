@@ -9,9 +9,7 @@ review-queue format.
 """
 
 import argparse
-import contextlib
 import json
-import os
 import re
 import sys
 from pathlib import Path
@@ -86,7 +84,7 @@ def main() -> int:
     ap.add_argument(
         "--verbose",
         action="store_true",
-        help="show the underlying scanner/reference comparison diagnostics",
+        help="retained for compatibility; normal progress is now always shown",
     )
     queue_args, benchmark_argv = ap.parse_known_args()
 
@@ -115,12 +113,7 @@ def main() -> int:
     benchmark._compare_page = compare_and_collect
     sys.argv = [original_argv[0], *benchmark_argv]
     try:
-        if queue_args.verbose:
-            result = benchmark.main()
-        else:
-            with open(os.devnull, "w", encoding="utf-8") as devnull:
-                with contextlib.redirect_stdout(devnull):
-                    result = benchmark.main()
+        result = benchmark.main()
     finally:
         sys.argv = original_argv
         benchmark._load_reference = original_load_reference
