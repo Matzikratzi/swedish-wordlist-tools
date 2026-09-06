@@ -6,10 +6,16 @@ This is diagnostic only.  OCR behaviour and the benchmark exit status are
 unchanged; the wrapper merely records the rows already reported by the existing
 reference comparison.  Each queued row also keeps the comparison reason and
 both reference/observed snapshots so the editor can explain why it was queued.
+
+The wrapper is intentionally quiet by default so larger page ranges remain
+readable.  Pass ``--verbose`` to expose the underlying benchmark's normal
+stdout diagnostics.
 """
 
 import argparse
+import contextlib
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -82,6 +88,11 @@ def _write_queue(path: Path, rows: list[dict]) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(add_help=False)
     ap.add_argument("--review-queue", type=Path, required=True)
+    ap.add_argument(
+        "--verbose",
+        action="store_true",
+        help="show the underlying benchmark's normal stdout diagnostics",
+    )
     queue_args, benchmark_argv = ap.parse_known_args()
 
     original_argv = sys.argv
@@ -109,7 +120,12 @@ def main() -> int:
     split_benchmark._compare_page = compare_and_collect
     sys.argv = [original_argv[0], *benchmark_argv]
     try:
-        result = benchmark.main()
+        if queue_args.verbose:
+            result = benchmark.main()
+        else:
+            with open(os.devnull, "w", encoding="utf-8") as devnull:
+                with contextlib.redirect_stdout(devnull):
+                    result = benchmark.main()
     finally:
         sys.argv = original_argv
         split_benchmark._load_reference = original_load_reference
@@ -117,8 +133,13 @@ def main() -> int:
 
     rows = [queued[key] for key in sorted(queued)]
     _write_queue(queue_args.review_queue, rows)
+    pages = sorted({row["page"] for row in rows})
+    page_summary = (
+        f" pages={pages[0]}..{pages[-1]}" if pages else ""
+    )
     print(
-        f"review-queue: saved {len(rows)} benchmark mismatch rows to {queue_args.review_queue}",
+        f"review-queue: saved {len(rows)} benchmark mismatch rows{page_summary} "
+        f"to {queue_args.review_queue}",
         flush=True,
     )
     return result
