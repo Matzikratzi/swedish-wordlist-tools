@@ -3,9 +3,9 @@ from __future__ import annotations
 """Experimental context-anchor benchmark for exact-cover OCR.
 
 A distinctive glyph inside the row (default: ``¤``) is used only to propose
-baseline hypotheses.  No source pixels are pre-owned by the anchor.  For each
+baseline hypotheses. No source pixels are pre-owned by the anchor. For each
 hypothesis the normal left-to-right exact-cover search is run with that baseline
-fixed from the first non-homonym glyph.  If all anchored hypotheses fail, the
+fixed from the first non-homonym glyph. If all anchored hypotheses fail, the
 ordinary page-cached fast path is used unchanged.
 
 This is deliberately an ordering experiment, not a relaxation of OCR exactness.
@@ -49,19 +49,12 @@ def _anchor_baseline_hypotheses(
     height: int,
     models: Iterable[GlyphModel],
 ) -> list[tuple[int, int, str]]:
-    """Return exact in-row placements of the anchor as baseline hypotheses.
-
-    Each returned item is ``(baseline, x0, style)``.  Duplicate baselines are
-    collapsed after ordering by leftmost anchor placement.
-    """
     hypotheses: list[tuple[int, int, str]] = []
     for model in models:
         if model.label != ANCHOR_LABEL or not model.pixels:
             continue
         min_x = min(x for x, _y in model.pixels)
         left_pixels = tuple((x, y) for x, y in model.pixels if x == min_x)
-        # Any source pixel can be the model's left-edge anchor.  This is only a
-        # hypothesis generator; the full exact-cover pass verifies the row.
         for anchor_x, anchor_y in sorted(ink):
             for _mx, my in left_pixels:
                 x0 = anchor_x - min_x
@@ -74,8 +67,6 @@ def _anchor_baseline_hypotheses(
                 if placed.issubset(ink):
                     hypotheses.append((baseline, x0, str(model.style)))
 
-    # Prefer leftmost observed anchor.  For the same baseline there is no value
-    # in rerunning exact cover merely because another anchor raster gave it.
     hypotheses.sort(key=lambda item: (item[1], item[0], item[2]))
     seen: set[int] = set()
     unique: list[tuple[int, int, str]] = []
@@ -103,7 +94,7 @@ def _fixed_baseline_exact_cover(
     page_candidates = cached._bound_page_candidates(models)
     row_kind = str(getattr(priority._tls, "row_kind", "unknown"))
     target = frozenset(ink)
-    failed: set[tuple[frozenset[tuple[int, int]], bool]] = set()
+    failed: set[tuple[frozenset[tuple[int, int]], bool, int | None]] = set()
     states = 0
     placements_tested = 0
 
@@ -111,11 +102,12 @@ def _fixed_baseline_exact_cover(
         remaining: frozenset[tuple[int, int]],
         previous_style: str | None,
         leading_homonym_seen: bool,
+        previous_right: int | None,
     ) -> tuple[Match, ...] | None:
         nonlocal states, placements_tested
         if not remaining:
             return ()
-        state = (remaining, leading_homonym_seen)
+        state = (remaining, leading_homonym_seen, previous_right)
         if state in failed:
             return None
         states += 1
@@ -142,8 +134,6 @@ def _fixed_baseline_exact_cover(
                 is_leading_homonym = (
                     first_glyph and row_kind == "homonym" and priority._is_homonym_model(model)
                 )
-                # A leading raised homonym is the one exception: it is not on
-                # the text baseline.  Preserve the normal special case.
                 if not is_leading_homonym and candidate_baseline != fixed_baseline:
                     continue
                 if candidate_baseline < -model.min_y:
@@ -156,6 +146,8 @@ def _fixed_baseline_exact_cover(
                     (x0 + x, candidate_baseline + y) for x, y in model.pixels
                 )
                 if not placed.issubset(remaining):
+                    continue
+                if not cached.placement_advances_right(placed, previous_right):
                     continue
 
                 match = Match(
@@ -171,6 +163,7 @@ def _fixed_baseline_exact_cover(
                     frozenset(remaining.difference(placed)),
                     priority._typographic_style(model.style),
                     leading_homonym_seen or is_leading_homonym,
+                    cached._placed_right(placed),
                 )
                 if tail is not None:
                     record_model_hit(model)
@@ -179,7 +172,7 @@ def _fixed_baseline_exact_cover(
         failed.add(state)
         return None
 
-    chosen = search(target, None, False)
+    chosen = search(target, None, False, None)
     if chosen is None:
         return None
     selected = sorted(
@@ -197,7 +190,6 @@ def _context_anchor_exact_cover(
     *,
     max_states: int = 20000,
 ):
-    """Try contextual anchor baselines, then fall back to the ordinary search."""
     frozen_ink = frozenset(ink)
     hypotheses = _anchor_baseline_hypotheses(frozen_ink, width, height, models)
     _STATS["calls"] += 1
