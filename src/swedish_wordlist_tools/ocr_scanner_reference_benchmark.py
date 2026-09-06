@@ -10,6 +10,8 @@ frozen-reference shape and comparing them with the reference JSONL.
 """
 
 import argparse
+import contextlib
+import io
 import time
 from pathlib import Path
 
@@ -47,6 +49,18 @@ def _print_mismatch(page: int, key, why, expected, observed) -> None:
         )
 
 
+def _quiet_call_preserving_warnings(function, *args, **kwargs):
+    """Run ordinary scanner code quietly, replaying only real warning lines."""
+    captured = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(captured):
+            return function(*args, **kwargs)
+    finally:
+        for line in captured.getvalue().splitlines():
+            if "VARNING" in line:
+                print(line, flush=True)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Compare the ordinary scanner row-by-row with frozen references."
@@ -70,10 +84,6 @@ def main() -> int:
     if args.split_facit is not None:
         split_models = load_split_facit_with_typography(args.split_facit)
         _verify_equivalent(models, split_models)
-        print(
-            f"facit-equivalent: models={len(models)} split_store_verified=True",
-            flush=True,
-        )
 
     pages = _selected_pages(
         _available_pages(args.jsonl),
@@ -93,8 +103,11 @@ def main() -> int:
 
     for page in pages:
         reference = _load_reference(args.reference_dir / f"page-{page:03d}.jsonl")
-        context = page_editor.build_page_context_pixel_array(
-            args.jsonl, page, args.threshold
+        context = _quiet_call_preserving_warnings(
+            page_editor.build_page_context_pixel_array,
+            args.jsonl,
+            page,
+            args.threshold,
         )
         context["quiet_successful_ownership"] = True
 
@@ -120,7 +133,7 @@ def main() -> int:
             equal = len(all_keys) - len(mismatches)
             elapsed = time.perf_counter() - column_started
             print(
-                f"scanner-reference: page={page} column={column} rows={column_rows} "
+                f"page={page} column={column} rows={column_rows} "
                 f"equal={equal}/{len(all_keys)} mismatches={len(mismatches)} "
                 f"time={elapsed:.3f}s",
                 flush=True,
@@ -144,7 +157,12 @@ def main() -> int:
                 column_rows = 0
 
             started = time.perf_counter()
-            state = page_editor.load_review_state_pixel_array(context, position, models)
+            state = _quiet_call_preserving_warnings(
+                page_editor.load_review_state_pixel_array,
+                context,
+                position,
+                models,
+            )
             elapsed = time.perf_counter() - started
             key = (column, int(position[1]))
             actual[key] = _observed_row(state)
@@ -168,20 +186,13 @@ def main() -> int:
         total_equal += equal
         total_mismatches += len(page_mismatches)
 
-        print(
-            f"scanner-reference-page: page={page} rows={len(actual)} "
-            f"equal={equal}/{len(all_keys)} mismatches={len(page_mismatches)}",
-            flush=True,
-        )
-
     total_wall = time.perf_counter() - benchmark_started
     row_time = sum(item[0] for item in timings)
     average_row = row_time / len(timings) if timings else 0.0
     print(
-        "scanner-reference-summary: "
-        f"pages={len(pages)} reference_rows={total_reference} actual_rows={total_actual} "
-        f"equal={total_equal} mismatches={total_mismatches} "
-        f"total_time={total_wall:.3f}s row_analysis_time={row_time:.3f}s "
+        "summary: "
+        f"pages={len(pages)} rows={total_actual} equal={total_equal} "
+        f"mismatches={total_mismatches} total_time={total_wall:.3f}s "
         f"average_row_time={average_row:.6f}s",
         flush=True,
     )
