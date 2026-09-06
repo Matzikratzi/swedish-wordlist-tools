@@ -5,10 +5,9 @@ from __future__ import annotations
 This deliberately does *not* change normal OCR behaviour. It builds page 4 in
 exactly the usual way, then for one selected physical row paints a three-raster
 white band just below that row's current effective lower separator. The default
-starts one raster line below the separator, i.e. two lines lower than the prior
-straddling experiment. The same pixels are cleared both in the page image and
-in the page-wide ownership array so subsequent separator and glyph analysis see
-the synthetic whitespace.
+starts two raster lines below the separator. The same pixels are cleared both in
+the page image and in the page-wide ownership array so subsequent separator and
+glyph analysis see the synthetic whitespace.
 """
 
 import argparse
@@ -134,8 +133,8 @@ def main() -> int:
     ap.add_argument(
         "--band-start-delta",
         type=int,
-        default=1,
-        help="band start relative to the current effective lower boundary; default +1 gives y=505..507 when boundary is 504",
+        default=2,
+        help="band start relative to the current effective lower boundary; default +2 gives y=506..508 when boundary is 504",
     )
     ap.add_argument("--band-height", type=int, default=3)
     ap.add_argument("--threshold", type=int, default=210)
