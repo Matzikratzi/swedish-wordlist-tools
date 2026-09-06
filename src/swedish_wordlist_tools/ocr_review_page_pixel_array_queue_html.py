@@ -8,6 +8,8 @@ import json
 import sys
 from pathlib import Path
 
+from PIL import Image
+
 from . import ocr_review_page_pixel_array_glyphs_html as page_editor
 from .ocr_find_unreviewed_glyph_rows import QUEUE_FORMAT
 
@@ -74,6 +76,32 @@ def _centered_three_positions(positions, current, size=3):
         return list(positions)
     start = max(0, min(index - 1, len(positions) - 3))
     return positions[start : start + 3]
+
+
+def _queue_card_image(context: dict, state: dict, *, extra_left: int = 2) -> str:
+    """Prepend raw source columns to the large clickable queue-row image.
+
+    The ordinary state image remains the owned OCR crop.  For queue review we
+    want exactly two source columns immediately *before* that crop so a stray
+    or forgotten pixel cannot be hidden merely because it was never assigned
+    to the row.  Keeping the strip separate also guarantees that the two new
+    columns are visibly at the left edge rather than changing OCR geometry.
+    """
+    left, top, right, bottom = map(int, state["crop_box"])
+    source_left = max(0, left - int(extra_left))
+    strip_width = left - source_left
+    owners = context.get("pixel_owners")
+    if strip_width <= 0 or owners is None:
+        return str(state["image"])
+
+    owned = owners.render_owner_crop(
+        row_index=int(state["row"]), box=(left, top, right, bottom)
+    ).convert("L")
+    strip = context["page"].crop((source_left, top, left, bottom)).convert("L")
+    combined = Image.new("L", (strip.width + owned.width, owned.height), 255)
+    combined.paste(strip, (0, 0))
+    combined.paste(owned, (strip.width, 0))
+    return page_editor.fast.legacy._png_data_uri(combined)
 
 
 def main() -> int:
@@ -156,19 +184,13 @@ def main() -> int:
     original_loader = page_editor.load_review_state_pixel_array
     original_render = page_editor.fast.ui.editor.render_html
     original_packet_positions = page_editor.fast.ui.packet_positions
+    original_packet_render = page_editor.fast.ui.render_five_row_html
     original_argv = sys.argv
+    context_holder: dict[str, dict] = {}
 
     def build_queued_page_context(jsonl: Path, page_number: int, threshold: int = 210):
         context = original_build(jsonl, page_number, threshold)
-        # Keep two extra source pixels visible at the left edge.  The row loader
-        # derives its crop from these per-column content-left coordinates, so
-        # this exposes any otherwise hidden stray pixel immediately left of the
-        # normal review crop as well as including it in the current exactness
-        # check.  Queue mode only; the ordinary page editor is unchanged.
-        content_lefts = context.get("column_content_lefts") or {}
-        for column, left in list(content_lefts.items()):
-            if left is not None:
-                content_lefts[column] = max(0, int(left) - 2)
+        context_holder["context"] = context
         available = set(context["positions"])
         missing = [position for position in selected if position not in available]
         if missing:
@@ -180,13 +202,15 @@ def main() -> int:
         ]
         print(
             f"review: queue {args.queue}: page {page_number}: "
-            f"visar endast {len(context['positions'])} kö-rader; +2 px vänster",
+            f"visar endast {len(context['positions'])} kö-rader; "
+            "+2 källpixelkolumner i vänsterkant på de stora radkorten",
             flush=True,
         )
         return context
 
     def load_with_mismatch(context, position, models):
         state = original_loader(context, position, models)
+        state["queue_card_image"] = _queue_card_image(context, state, extra_left=2)
         mismatch = metadata.get(position)
         if mismatch:
             state["benchmark_mismatch"] = mismatch
@@ -204,10 +228,30 @@ def main() -> int:
             return document.replace("<body>", "<body>" + banner, 1)
         return banner + document
 
+    def render_queue_packet(states, active_position, all_positions, message="", *, mode="all", anchor=None):
+        document = original_packet_render(
+            states, active_position, all_positions, message, mode=mode, anchor=anchor
+        )
+        for state in states:
+            position = (int(state["column"]), int(state["row"]))
+            old = (
+                f'<img src="{state["image"]}" '
+                f'alt="kolumn {position[0]}, rad {position[1]}">'
+            )
+            new = (
+                f'<img src="{state.get("queue_card_image", state["image"])}" '
+                f'alt="kolumn {position[0]}, rad {position[1]}">'
+            )
+            if old not in document:
+                raise ValueError(f"could not find queue row-card image for {position}")
+            document = document.replace(old, new, 1)
+        return document
+
     page_editor.build_page_context_pixel_array = build_queued_page_context
     page_editor.load_review_state_pixel_array = load_with_mismatch
     page_editor.fast.ui.editor.render_html = render_with_mismatch
     page_editor.fast.ui.packet_positions = _centered_three_positions
+    page_editor.fast.ui.render_five_row_html = render_queue_packet
     argv = [
         original_argv[0],
         str(args.jsonl),
@@ -236,6 +280,7 @@ def main() -> int:
         page_editor.load_review_state_pixel_array = original_loader
         page_editor.fast.ui.editor.render_html = original_render
         page_editor.fast.ui.packet_positions = original_packet_positions
+        page_editor.fast.ui.render_five_row_html = original_packet_render
 
 
 if __name__ == "__main__":
