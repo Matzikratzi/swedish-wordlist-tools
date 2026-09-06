@@ -6,8 +6,9 @@ The search space is unchanged: layout and previous typography only decide which
 facit raster classes are tried first. Models with identical raster geometry keep
 the old canonical order on ordinary rows so metadata/label choice cannot change
 merely because a layout hint was added. On a homonym row the raised leading
-homonym digit is recognized specially, but it does not impose a typography on
-the following glyph; the ordinary classified model order decides that glyph.
+homonym digit is recognized specially without imposing any style on the digit
+itself. Once that marker has been consumed and parsing reaches the headword
+position, bold glyphs are tried first, just as at an ordinary headword start.
 """
 
 from collections import Counter
@@ -118,11 +119,18 @@ def _priority_class(
     typography = _typographic_style(model.style)
     if first_glyph:
         if row_kind == "homonym":
+            # The homonym marker itself may have any facit-classified style.
+            # Its label/position, not typography, is what makes it special.
             priority = 0 if _is_homonym_model(model) else 1
         elif row_kind == "headword":
             priority = 0 if _is_headword_model(model) else 1
         elif row_kind == "continuation":
             priority = 2 if _is_headword_model(model) else 1
+    elif row_kind == "homonym" and leading_homonym_seen and not baseline_established:
+        # We have left the raised homonym-marker area and reached the normal
+        # headword position. Try bold glyphs first here, without requiring the
+        # homonym marker itself to have been bold.
+        priority = 0 if _is_headword_model(model) else 1
     elif previous_style is not None:
         if typography == previous_style:
             priority = 0
@@ -246,9 +254,10 @@ def prioritized_fast_exact_cover(
     """Anchored exact cover with layout/style-prioritized raster ordering.
 
     On a row classified as a homonym row, an exact leading homonym digit keeps
-    its own facit-derived placement baseline. It does not establish the shared
-    text baseline or the following glyph's typography. No fixed vertical offset
-    is assumed: exact facit geometry decides every placement.
+    its own facit-derived placement baseline and may have any classified style.
+    It does not establish the shared text baseline. Once the marker has been
+    consumed, the normal headword position tries bold glyphs first. No fixed
+    vertical offset is assumed: exact facit geometry decides every placement.
     """
     if not ink:
         return None
