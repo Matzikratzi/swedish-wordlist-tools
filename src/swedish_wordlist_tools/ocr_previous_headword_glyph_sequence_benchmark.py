@@ -33,10 +33,19 @@ def _model_signature(model: GlyphModel):
     return (str(model.label), str(model.style), _raster(model))
 
 
+def _match_raster(match: Match):
+    x0 = int(getattr(match, "x", 0))
+    baseline = int(getattr(match, "baseline", 0))
+    return tuple(
+        sorted(
+            (int(x) - x0, int(y) - baseline)
+            for x, y in getattr(match, "pixels", ())
+        )
+    )
+
+
 def _match_signature(match: Match):
-    # Match carries placed absolute pixels, so identify its originating model
-    # later by label/style and model raster chosen from the cached candidate set.
-    return (str(match.label), str(match.style), int(match.model_pixels))
+    return (str(match.label), str(match.style), _match_raster(match))
 
 
 def _same_expected_model(model: GlyphModel, expected) -> bool:
@@ -266,16 +275,13 @@ def _extract_headword_sequence(state: dict, models: Iterable[GlyphModel]):
         typography = priority._typographic_style(style)
         if typography == "bold" or (started and label in _BREAKS):
             started = True
+            match_signature = _match_signature(match)
             candidates = [
                 model for model in model_rows
-                if str(model.label) == label
-                and str(model.style) == style
-                and len(model.pixels) == int(getattr(match, "model_pixels", -1))
+                if _model_signature(model) == match_signature
             ]
             if not candidates:
                 return None
-            # The selected match came from one of these models.  Prefer exact
-            # raster identity when unique; otherwise stable canonical order.
             candidates.sort(key=priority._canonical_model_key)
             sequence.append(_model_signature(candidates[0]))
             continue
