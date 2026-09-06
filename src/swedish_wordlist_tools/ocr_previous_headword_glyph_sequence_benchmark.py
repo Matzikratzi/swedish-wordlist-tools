@@ -3,10 +3,10 @@ from __future__ import annotations
 """Benchmark result-neutral reuse of the previous exact headword glyph sequence.
 
 For a new headword row, try the exact glyph-model sequence from the previous
-headword first.  If the expected glyph does not fit, try full/half boundary marks
-(`|` and `·`) without consuming the previous-sequence position.  Only after that
-fall back to the ordinary candidate order.  No candidate is removed and exact
-cover semantics are unchanged.
+headword first. If the expected glyph does not fit, try full/half boundary marks
+(`|` and `·`) without consuming the previous-sequence position. Only after that
+fall back to the ordinary candidate order. Candidate ordering differs, but the
+shared exact-cover admissibility rules are the same as in the editor.
 """
 
 from collections import Counter
@@ -96,7 +96,9 @@ def _sequence_exact_cover(
         _STATS["calls_with_previous"] += 1
 
     target = frozenset(ink)
-    failed: set[tuple[frozenset[tuple[int, int]], int | None, bool, int, bool]] = set()
+    failed: set[
+        tuple[frozenset[tuple[int, int]], int | None, bool, int, bool, int | None]
+    ] = set()
     states = 0
     placements_tested = 0
 
@@ -107,11 +109,19 @@ def _sequence_exact_cover(
         leading_homonym_seen: bool,
         seq_index: int,
         sequence_active: bool,
+        previous_right: int | None,
     ):
         nonlocal states, placements_tested
         if not remaining:
             return ()
-        state = (remaining, baseline, leading_homonym_seen, seq_index, sequence_active)
+        state = (
+            remaining,
+            baseline,
+            leading_homonym_seen,
+            seq_index,
+            sequence_active,
+            previous_right,
+        )
         if state in failed:
             return None
         states += 1
@@ -157,6 +167,8 @@ def _sequence_exact_cover(
                 if not fits:
                     continue
                 placed = frozenset((x0 + x, candidate_baseline + y) for x, y in model.pixels)
+                if not cached.placement_advances_right(placed, previous_right):
+                    continue
 
                 match = Match(
                     label=model.label,
@@ -204,6 +216,7 @@ def _sequence_exact_cover(
                     saw_homonym,
                     next_index,
                     next_active,
+                    cached._placed_right(placed),
                 )
                 if tail is not None:
                     record_model_hit(model)
@@ -212,7 +225,7 @@ def _sequence_exact_cover(
         failed.add(state)
         return None
 
-    chosen = search(target, None, None, False, 0, bool(previous_sequence))
+    chosen = search(target, None, None, False, 0, bool(previous_sequence), None)
     _STATS["calls"] += 1
     _STATS["states"] += states
     _STATS["placements"] += placements_tested
@@ -236,9 +249,6 @@ def _sequence_fixed_baseline_exact_cover(
     *,
     max_states: int = 20000,
 ):
-    # Keep the anchor experiment result-neutral and simple: the previous-sequence
-    # priority is already exercised by the ordinary path.  Fixed-baseline anchor
-    # attempts keep their existing candidate order.
     return _ORIGINAL_FIXED(
         ink,
         width,
