@@ -45,17 +45,9 @@ def _row_leftmost_ink(gray, row: dict[str, Any], *, left: int, right: int, thres
 
 
 def _column_review_left(context: dict[str, Any], column: int) -> int:
-    """Choose the established compact lexical left edge for a column.
-
-    The shared headword anchor deliberately ignores far-left page furniture.
-    Homonym digits can sit left of the headword, so the lexical crop starts 15
-    pixels before the dominant headword anchor. Row-specific white safety is
-    added later without crossing any source ink.
-    """
     cache = context.setdefault("review_column_lefts", {})
     if column in cache:
         return int(cache[column])
-
     gray = context.get("pixel_gray_page") or context["page"].convert("L")
     threshold = int(context.get("threshold", 210))
     entry = context["row_map"]["columns"][column]
@@ -67,21 +59,13 @@ def _column_review_left(context: dict[str, Any], column: int) -> int:
     candidates = [
         x
         for row in entry.get("rows") or []
-        if (x := _row_leftmost_ink(
-            gray,
-            row,
-            left=anchor_search_left,
-            right=search_right,
-            threshold=threshold,
-        )) is not None
+        if (x := _row_leftmost_ink(gray,row,left=anchor_search_left,right=search_right,threshold=threshold)) is not None
     ]
     if not candidates:
         cache[column] = crop_left
         return crop_left
-
     def cluster_score(value: int) -> tuple[int, int]:
         return (sum(abs(other - value) <= _HEADWORD_CLUSTER_RADIUS for other in candidates), value)
-
     center = max(candidates, key=cluster_score)
     members = [value for value in candidates if abs(value - center) <= _HEADWORD_CLUSTER_RADIUS]
     headword_anchor = int(round(median(members))) if members else int(center)
@@ -91,27 +75,11 @@ def _column_review_left(context: dict[str, Any], column: int) -> int:
     return review_left
 
 
-def _verified_white_safety_left(
-    context: dict[str, Any],
-    state: dict[str, Any],
-    base_left: int,
-    *,
-    desired: int = _LEFT_SAFETY_WHITE_COLUMNS,
-) -> int:
-    """Extend left only through columns proven white for this owned row.
-
-    This operates on the page-wide ownership array, not on a guessed page crop.
-    Starting at the established lexical left edge, walk at most ``desired``
-    pixels left. The first column containing ink owned by this physical row is a
-    hard stop, so a page/column rule can never be pulled into the review crop.
-    If fewer than ten white columns exist before such a rule we keep the maximum
-    safe white run; importantly, the crop boundary itself is then white.
-    """
+def _verified_white_safety_left(context: dict[str, Any], state: dict[str, Any], base_left: int, *, desired: int = _LEFT_SAFETY_WHITE_COLUMNS) -> int:
     owners = context.get("pixel_owners")
     if owners is None:
         return int(base_left)
-    column = int(state["column"])
-    row_index = int(state["row"])
+    column = int(state["column"]); row_index = int(state["row"])
     entry = context["row_map"]["columns"][column]
     hard_left = max(0, int(entry.get("crop_left", entry.get("left", 0))))
     _old_left, top, _right, bottom = map(int, state["crop_box"])
@@ -125,239 +93,136 @@ def _verified_white_safety_left(
 
 
 def _bbox(points: set[tuple[int, int]]) -> dict[str, int]:
-    xs = [x for x, _y in points]
-    ys = [y for _x, y in points]
-    return {"left": min(xs), "top": min(ys), "right": max(xs) + 1, "bottom": max(ys) + 1}
+    xs = [x for x, _y in points]; ys = [y for _x, y in points]
+    return {"left": min(xs), "top": min(ys), "right": max(xs)+1, "bottom": max(ys)+1}
 
 
 def _compact_review_state(context: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
-    """Rebase the one-row editor to a compact, verified-safe left edge."""
     old_left, top, right, bottom = map(int, state["crop_box"])
     base_left = _column_review_left(context, int(state["column"]))
     new_left = _verified_white_safety_left(context, state, base_left)
     if new_left <= old_left:
         return state
-    new_left = min(new_left, right - 1)
-    shift = new_left - old_left
-
-    out = dict(state)
-    out["crop_box"] = (new_left, top, right, bottom)
-    out["crop_width"] = right - new_left
-    owners = context.get("pixel_owners")
+    new_left = min(new_left, right - 1); shift = new_left - old_left
+    out = dict(state); out["crop_box"]=(new_left,top,right,bottom); out["crop_width"]=right-new_left
+    owners=context.get("pixel_owners")
     if owners is not None:
-        image = owners.render_owner_crop(row_index=int(state["row"]), box=(new_left, top, right, bottom))
-        out["image"] = _png_data_uri(image)
-
-    source_ink = {
-        (int(x) - shift, int(y))
-        for x, y in state.get("source_ink_points") or []
-        if int(x) >= shift
-    }
-    out["source_ink_points"] = [[x, y] for x, y in sorted(source_ink)]
-
-    rebased_sets: dict[str, frozenset[tuple[int, int]]] = {}
-    for item_id, points in (state.get("point_sets") or {}).items():
-        rebased_sets[item_id] = frozenset(
-            (int(x) - shift, int(y))
-            for x, y in points
-            if int(x) >= shift
-        )
-    out["point_sets"] = rebased_sets
-
-    items = []
-    covered: set[tuple[int, int]] = set()
+        image=owners.render_owner_crop(row_index=int(state["row"]),box=(new_left,top,right,bottom)); out["image"]=_png_data_uri(image)
+    source_ink={(int(x)-shift,int(y)) for x,y in state.get("source_ink_points") or [] if int(x)>=shift}
+    out["source_ink_points"]=[[x,y] for x,y in sorted(source_ink)]
+    rebased_sets={}
+    for item_id,points in (state.get("point_sets") or {}).items():
+        rebased_sets[item_id]=frozenset((int(x)-shift,int(y)) for x,y in points if int(x)>=shift)
+    out["point_sets"]=rebased_sets
+    items=[]; covered=set()
     for item in state.get("items") or []:
-        points = set(rebased_sets.get(str(item.get("id"))) or [])
-        if not points:
-            continue
-        updated = dict(item)
-        updated["pixels"] = len(points)
-        updated["bbox"] = _bbox(points)
-        items.append(updated)
-        if item.get("kind") == "match":
-            covered.update(points)
-    out["items"] = items
-    out["source_pixels"] = len(source_ink)
-    out["covered_pixels"] = len(covered)
-    out["fully_exact"] = bool(source_ink) and covered == source_ink
-    out["review_page_left"] = new_left
-    out["review_base_left"] = base_left
-    out["review_left_safety_columns"] = base_left - new_left
-    out["review_headword_anchor"] = (context.get("review_headword_anchors") or {}).get(int(state["column"]))
+        points=set(rebased_sets.get(str(item.get("id"))) or [])
+        if not points: continue
+        updated=dict(item); updated["pixels"]=len(points); updated["bbox"]=_bbox(points); items.append(updated)
+        if item.get("kind")=="match": covered.update(points)
+    out["items"]=items; out["source_pixels"]=len(source_ink); out["covered_pixels"]=len(covered); out["fully_exact"]=bool(source_ink) and covered==source_ink
+    out["review_page_left"]=new_left; out["review_base_left"]=base_left; out["review_left_safety_columns"]=base_left-new_left
+    out["review_headword_anchor"]=(context.get("review_headword_anchors") or {}).get(int(state["column"]))
     return out
 
 
 def _ascii_raster(image, *, threshold: int, boundaries: list[tuple[int, str]], support_lines: list[tuple[int, str]]) -> str:
-    gray = image.convert("L")
-    pixels = gray.load()
-    marks: dict[int, list[str]] = {}
-    for y, label in boundaries:
-        marks.setdefault(int(y), []).append(f"RADGRÄNS {label}")
-    for y, label in support_lines:
-        marks.setdefault(int(y), []).append(f"STÖDLINJE {label}")
-    lines: list[str] = []
-    for y in range(gray.height + 1):
-        for label in marks.get(y, []):
-            lines.append(f"--- {label} y={y} ---")
-        if y == gray.height:
-            break
-        lines.append("".join("#" if pixels[x, y] < threshold else "." for x in range(gray.width)))
+    gray=image.convert("L"); pixels=gray.load(); marks={}
+    for y,label in boundaries: marks.setdefault(int(y),[]).append(f"RADGRÄNS {label}")
+    for y,label in support_lines: marks.setdefault(int(y),[]).append(f"STÖDLINJE {label}")
+    lines=[]
+    for y in range(gray.height+1):
+        for label in marks.get(y,[]): lines.append(f"--- {label} y={y} ---")
+        if y==gray.height: break
+        lines.append("".join("#" if pixels[x,y]<threshold else "." for x in range(gray.width)))
     return "\n".join(lines)
 
 
 def _known_support_lines(context: dict[str, Any], column: int, row_indexes: set[int]) -> dict[int, int]:
-    out: dict[int, int] = {}
+    out={}
     for item in context.get("known_glyph_ownership_refinements") or []:
-        if int(item.get("column", -1)) != column:
-            continue
-        upper = int(item.get("upper_row", -1)); lower = int(item.get("lower_row", -1))
-        if upper in row_indexes and item.get("upper_baseline") is not None: out[upper] = int(item["upper_baseline"])
-        if lower in row_indexes and item.get("lower_baseline") is not None: out[lower] = int(item["lower_baseline"])
+        if int(item.get("column",-1))!=column: continue
+        upper=int(item.get("upper_row",-1)); lower=int(item.get("lower_row",-1))
+        if upper in row_indexes and item.get("upper_baseline") is not None: out[upper]=int(item["upper_baseline"])
+        if lower in row_indexes and item.get("lower_baseline") is not None: out[lower]=int(item["lower_baseline"])
     return out
 
 
-def _separator_overlap_warning(
-    context: dict[str, Any],
-    *,
-    column: int,
-    upper_row_index: int,
-    separator: int,
-    lower_top: int,
-    provisional: int,
-) -> None:
-    """Record once when adjacent rows geometrically overlap.
-
-    The upper row still defines the separator.  Ink already proven to belong to
-    the lower row may extend above that separator; that is evidence of the rare
-    touching/overlapping-row case, not a reason to move the separator back to a
-    projection minimum.
-    """
-    key = (int(column), int(upper_row_index))
-    warning = {
-        "column": int(column),
-        "upper_row": int(upper_row_index),
-        "lower_row": int(upper_row_index) + 1,
-        "separator": int(separator),
-        "lower_top": int(lower_top),
-        "overlap_pixels_y": int(separator) - int(lower_top),
-        "provisional_separator": int(provisional),
-    }
-    warnings = context.setdefault("row_overlap_warnings", {})
-    previous = warnings.get(key)
-    warnings[key] = warning
-    if previous == warning:
-        return
-    print(
-        "review: VARNING överlappande rader "
-        f"c{column} r{upper_row_index}/r{upper_row_index + 1}: "
-        f"övre radens sista pixel ger gräns y={separator}, "
-        f"undre radens ägda bläck börjar y={lower_top} "
-        f"({separator - lower_top} px ovanför gränsen); "
-        f"gammal geometrigräns y={provisional}",
-        flush=True,
-    )
+def _separator_overlap_warning(context: dict[str, Any], *, column: int, upper_row_index: int, separator: int, lower_top: int, provisional: int) -> None:
+    key=(int(column),int(upper_row_index)); warning={"column":int(column),"upper_row":int(upper_row_index),"lower_row":int(upper_row_index)+1,"separator":int(separator),"lower_top":int(lower_top),"overlap_pixels_y":int(separator)-int(lower_top),"provisional_separator":int(provisional)}
+    warnings=context.setdefault("row_overlap_warnings",{}); previous=warnings.get(key); warnings[key]=warning
+    if previous==warning: return
+    print("review: VARNING överlappande rader " f"c{column} r{upper_row_index}/r{upper_row_index+1}: " f"övre radens sista pixel ger gräns y={separator}, undre radens ägda bläck börjar y={lower_top} ({separator-lower_top} px ovanför gränsen); gammal geometrigräns y={provisional}",flush=True)
 
 
 def _effective_separator_page(context: dict[str, Any], *, column: int, upper_row_index: int, left: int, right: int) -> int:
-    """Put the separator immediately after the upper row's last owned pixel.
-
-    The neighbouring lower row is deliberately not allowed to move this
-    separator.  If lower-owned ink reaches above it, record an overlap warning;
-    known-glyph ownership is the mechanism that resolves the special case.
-    """
-    rows = context["row_map"]["columns"][column]["rows"]
-    upper = rows[upper_row_index]
-    provisional = int(upper["page_bottom"])
-    owners = context.get("pixel_owners")
-    if owners is None or upper_row_index + 1 >= len(rows): return provisional
-    lower_row_index = upper_row_index + 1
-    upper_code = owners.row_code(upper_row_index); lower_code = owners.row_code(lower_row_index)
-    scan_top = max(0, int(upper["page_top"]) - 2); scan_bottom = min(owners.height, int(rows[lower_row_index]["page_bottom"]) + 2)
-    left = max(0, int(left)); right = min(owners.width, int(right))
-    max_upper_y = None; min_lower_y = None; data = owners.data
-    for y in range(scan_top, scan_bottom):
-        start = y * owners.width; has_upper = False; has_lower = False
-        for x in range(left, right):
-            value = data[start + x]
-            if value == upper_code: has_upper = True
-            elif value == lower_code: has_lower = True
+    rows=context["row_map"]["columns"][column]["rows"]; upper=rows[upper_row_index]; provisional=int(upper["page_bottom"]); owners=context.get("pixel_owners")
+    if owners is None or upper_row_index+1>=len(rows): return provisional
+    lower_row_index=upper_row_index+1; upper_code=owners.row_code(upper_row_index); lower_code=owners.row_code(lower_row_index)
+    scan_top=max(0,int(upper["page_top"])-2); scan_bottom=min(owners.height,int(rows[lower_row_index]["page_bottom"])+2); left=max(0,int(left)); right=min(owners.width,int(right)); max_upper_y=None; min_lower_y=None; data=owners.data
+    for y in range(scan_top,scan_bottom):
+        start=y*owners.width; has_upper=False; has_lower=False
+        for x in range(left,right):
+            value=data[start+x]
+            if value==upper_code: has_upper=True
+            elif value==lower_code: has_lower=True
             if has_upper and has_lower: break
-        if has_upper: max_upper_y = y
-        if has_lower and min_lower_y is None: min_lower_y = y
+        if has_upper: max_upper_y=y
+        if has_lower and min_lower_y is None: min_lower_y=y
     if max_upper_y is None: return provisional
-    candidate = max_upper_y + 1
-    if min_lower_y is not None and min_lower_y < candidate:
-        _separator_overlap_warning(
-            context,
-            column=column,
-            upper_row_index=upper_row_index,
-            separator=candidate,
-            lower_top=min_lower_y,
-            provisional=provisional,
-        )
+    candidate=max_upper_y+1
+    if min_lower_y is not None and min_lower_y<candidate:
+        _separator_overlap_warning(context,column=column,upper_row_index=upper_row_index,separator=candidate,lower_top=min_lower_y,provisional=provisional)
     return candidate
 
 
 def add_neighbor_row_raster(context: dict[str, Any], state: dict[str, Any], *, probe_y: int = 8) -> dict[str, Any]:
-    state = _compact_review_state(context, state)
-    page = context["page"]; column = int(state["column"]); row_index = int(state["row"])
-    rows = context["row_map"]["columns"][column]["rows"]; row = rows[row_index]
-    crop_left, crop_top, crop_right, _crop_bottom = map(int, state["crop_box"])
-    previous = rows[row_index - 1] if row_index > 0 else None
-    following = rows[row_index + 1] if row_index + 1 < len(rows) else None
-    source_top = int(previous["page_top"]) if previous is not None else max(0, int(row["page_top"]) - max(0, int(probe_y)))
-    source_bottom = int(following["page_bottom"]) if following is not None else min(page.height, int(row["page_bottom"]) + max(0, int(probe_y)))
-    image = page.crop((crop_left, source_top, crop_right, source_bottom)).convert("L")
-    def local_y(value: int) -> int: return max(0, min(image.height, int(value) - source_top))
-    core_top = local_y(int(row["page_top"])); core_bottom = local_y(int(row["page_bottom"]))
-    boundaries = []
+    state=_compact_review_state(context,state)
+    page=context["page"]; column=int(state["column"]); row_index=int(state["row"]); rows=context["row_map"]["columns"][column]["rows"]; row=rows[row_index]
+    crop_left,crop_top,crop_right,_crop_bottom=map(int,state["crop_box"])
+    # The large three-row context view is diagnostic: show two actual source
+    # pixel columns before the OCR crop so a forgotten/stray left-edge pixel is
+    # visible.  Do not change the OCR crop or ownership itself.
+    raster_left=max(0,crop_left-2)
+    previous=rows[row_index-1] if row_index>0 else None; following=rows[row_index+1] if row_index+1<len(rows) else None
+    source_top=int(previous["page_top"]) if previous is not None else max(0,int(row["page_top"])-max(0,int(probe_y)))
+    source_bottom=int(following["page_bottom"]) if following is not None else min(page.height,int(row["page_bottom"])+max(0,int(probe_y)))
+    image=page.crop((raster_left,source_top,crop_right,source_bottom)).convert("L")
+    def local_y(value:int)->int:return max(0,min(image.height,int(value)-source_top))
+    core_top=local_y(int(row["page_top"])); core_bottom=local_y(int(row["page_bottom"])); boundaries=[]
     if previous is not None:
-        separator = _effective_separator_page(context,column=column,upper_row_index=row_index-1,left=crop_left,right=crop_right)
-        boundaries.append((local_y(separator), f"row {row_index - 1}/{row_index}"))
+        separator=_effective_separator_page(context,column=column,upper_row_index=row_index-1,left=raster_left,right=crop_right); boundaries.append((local_y(separator),f"row {row_index-1}/{row_index}"))
     if following is not None:
-        separator = _effective_separator_page(context,column=column,upper_row_index=row_index,left=crop_left,right=crop_right)
-        boundaries.append((local_y(separator), f"row {row_index}/{row_index + 1}"))
-    visible_rows = {row_index}
-    if previous is not None: visible_rows.add(row_index - 1)
-    if following is not None: visible_rows.add(row_index + 1)
-    support_by_row = _known_support_lines(context, column, visible_rows)
-    if state.get("baseline") is not None: support_by_row[row_index] = crop_top + int(state["baseline"])
-    support_lines = [(local_y(page_y + 1), f"row {index}") for index, page_y in sorted(support_by_row.items()) if source_top <= page_y + 1 <= source_bottom]
-    state = dict(state)
-    state.update({
-        "neighbor_raster_image": _png_data_uri(image), "neighbor_raster_width": image.width, "neighbor_raster_height": image.height,
-        "neighbor_core_top": core_top, "neighbor_core_bottom": core_bottom, "neighbor_probe_y": int(probe_y),
-        "neighbor_page_top": source_top, "neighbor_page_bottom": source_bottom,
-        "neighbor_row_boundaries": [[y, label] for y, label in boundaries],
-        "neighbor_support_lines": [[y, label] for y, label in support_lines],
-        "neighbor_display_lines": [*[[y, f"RADGRÄNS {label}"] for y, label in boundaries], *[[y, f"STÖDLINJE {label}"] for y, label in support_lines]],
-        "neighbor_raster_ascii": _ascii_raster(image, threshold=int(context.get("threshold", 210)), boundaries=boundaries, support_lines=support_lines),
-    })
-    state["neighbor_row_boundaries"] = state["neighbor_display_lines"]
+        separator=_effective_separator_page(context,column=column,upper_row_index=row_index,left=raster_left,right=crop_right); boundaries.append((local_y(separator),f"row {row_index}/{row_index+1}"))
+    visible_rows={row_index}
+    if previous is not None: visible_rows.add(row_index-1)
+    if following is not None: visible_rows.add(row_index+1)
+    support_by_row=_known_support_lines(context,column,visible_rows)
+    if state.get("baseline") is not None: support_by_row[row_index]=crop_top+int(state["baseline"])
+    support_lines=[(local_y(page_y+1),f"row {index}") for index,page_y in sorted(support_by_row.items()) if source_top<=page_y+1<=source_bottom]
+    state=dict(state)
+    state.update({"neighbor_raster_image":_png_data_uri(image),"neighbor_raster_width":image.width,"neighbor_raster_height":image.height,"neighbor_core_top":core_top,"neighbor_core_bottom":core_bottom,"neighbor_probe_y":int(probe_y),"neighbor_page_top":source_top,"neighbor_page_bottom":source_bottom,"neighbor_page_left":raster_left,"neighbor_ocr_crop_left":crop_left,"neighbor_row_boundaries":[[y,label] for y,label in boundaries],"neighbor_support_lines":[[y,label] for y,label in support_lines],"neighbor_display_lines":[*[[y,f"RADGRÄNS {label}"] for y,label in boundaries],*[[y,f"STÖDLINJE {label}"] for y,label in support_lines]],"neighbor_raster_ascii":_ascii_raster(image,threshold=int(context.get("threshold",210)),boundaries=boundaries,support_lines=support_lines)})
+    state["neighbor_row_boundaries"]=state["neighbor_display_lines"]
     return state
 
 
 def _decorate_review_html(original_render, state: dict, message: str = "") -> str:
-    document = original_render(state, message)
-    document = document.replace("const scale=7, topPad=34;", "const scale=7, topPad=4, bottomPad=20;", 1)
-    document = document.replace("canvas.width=S.crop_width*scale;canvas.height=S.crop_height*scale+topPad;", "canvas.width=S.crop_width*scale;canvas.height=S.crop_height*scale+topPad+bottomPad;", 1)
-    document = document.replace("if(it.kind!=='match') return '#c77b00';", "if(it.kind!=='match' || it.reviewed===false) return '#ff5a00';", 1)
-    old_label = "ctx.fillStyle=on?'#1769d2':color;ctx.fillText(it.kind==='match'?it.label:'?',x,topPad-3);"
-    new_label = "ctx.fillStyle=on?'#1769d2':color;const label=it.kind==='match'?it.label:'?';const tw=ctx.measureText(label).width;const wanted=x;const lx=Math.max(wanted,labelRight+2);const ly=Math.min(canvas.height-2,y+h+15);ctx.fillText(label,lx,ly);labelRight=lx+tw;"
+    document=original_render(state,message)
+    document=document.replace("const scale=7, topPad=34;","const scale=7, topPad=4, bottomPad=20;",1)
+    document=document.replace("canvas.width=S.crop_width*scale;canvas.height=S.crop_height*scale+topPad;","canvas.width=S.crop_width*scale;canvas.height=S.crop_height*scale+topPad+bottomPad;",1)
+    document=document.replace("if(it.kind!=='match') return '#c77b00';","if(it.kind!=='match' || it.reviewed===false) return '#ff5a00';",1)
+    old_label="ctx.fillStyle=on?'#1769d2':color;ctx.fillText(it.kind==='match'?it.label:'?',x,topPad-3);"
+    new_label="ctx.fillStyle=on?'#1769d2':color;const label=it.kind==='match'?it.label:'?';const tw=ctx.measureText(label).width;const wanted=x;const lx=Math.max(wanted,labelRight+2);const ly=Math.min(canvas.height-2,y+h+15);ctx.fillText(label,lx,ly);labelRight=lx+tw;"
     if old_label not in document: raise ValueError("could not find paint glyph canvas label renderer")
-    document = document.replace(old_label, new_label, 1)
-    loop_needle = "for(const it of S.items){const b=it.bbox,x=b.left*scale"
+    document=document.replace(old_label,new_label,1)
+    loop_needle="for(const it of S.items){const b=it.bbox,x=b.left*scale"
     if loop_needle not in document: raise ValueError("could not find paint glyph draw loop")
-    document = document.replace(loop_needle, "let labelRight=-Infinity;" + loop_needle, 1)
-    style_needle = "</style></head><body>"
-    orange_css = "\n.chip.residual,.chip.match.needs-review{border-color:#ff5a00!important;color:#d94700!important;background:#fff0e8!important}\n"
-    if style_needle in document: document = document.replace(style_needle, orange_css + style_needle, 1)
+    document=document.replace(loop_needle,"let labelRight=-Infinity;"+loop_needle,1)
+    style_needle="</style></head><body>"; orange_css="\n.chip.residual,.chip.match.needs-review{border-color:#ff5a00!important;color:#d94700!important;background:#fff0e8!important}\n"
+    if style_needle in document: document=document.replace(style_needle,orange_css+style_needle,1)
     return document
 
 
-_ultrafast = sys.modules.get("swedish_wordlist_tools.ocr_review_five_rows_glyphs_ultrafast_html")
-if _ultrafast is not None and hasattr(_ultrafast, "render_html_with_delete"):
-    _base_render_with_delete = _ultrafast.render_html_with_delete
-    def _render_with_delete_and_layout(original_render, state: dict, message: str = "") -> str:
-        return _decorate_review_html(lambda current_state, current_message="": _base_render_with_delete(original_render, current_state, current_message), state, message)
-    _ultrafast.render_html_with_delete = _render_with_delete_and_layout
+_ultrafast=sys.modules.get("swedish_wordlist_tools.ocr_review_five_rows_glyphs_ultrafast_html")
+if _ultrafast is not None and hasattr(_ultrafast,"render_html_with_delete"):
+    _base_render_with_delete=_ultrafast.render_html_with_delete
