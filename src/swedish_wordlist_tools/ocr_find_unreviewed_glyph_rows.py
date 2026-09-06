@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -73,6 +75,13 @@ def _format_state_text(state: dict) -> str:
     return f" text={text!r}" if text else ""
 
 
+def _short_text(text: str, width: int = 110) -> str:
+    text = " ".join(str(text).split())
+    if len(text) <= width:
+        return text
+    return text[: max(0, width - 1)] + "…"
+
+
 def format_timed_row(
     prefix: str,
     page: int,
@@ -137,6 +146,18 @@ def _selected_pages(
     return selected
 
 
+def _quiet_call_preserving_warnings(function, *args, **kwargs):
+    """Run scanner internals quietly, replaying only warning lines."""
+    captured = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(captured):
+            return function(*args, **kwargs)
+    finally:
+        for line in captured.getvalue().splitlines():
+            if "VARNING" in line:
+                print(line, flush=True)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
@@ -164,19 +185,19 @@ def main() -> int:
     ap.add_argument(
         "--progress",
         action="store_true",
-        help="print every row before and after glyph analysis, including elapsed time",
+        help="print detailed scanner/page diagnostics and every row",
     )
     ap.add_argument(
         "--slow-row-seconds",
         type=float,
-        default=0.5,
-        help="report rows whose glyph analysis takes at least this many seconds; 0 disables (default: 0.5)",
+        default=0.0,
+        help="also report rows immediately when glyph analysis takes at least this many seconds; 0 disables",
     )
     ap.add_argument(
         "--sample-every",
         type=int,
-        default=10,
-        help="also report every Nth non-slow row for comparison; 0 disables (default: 10)",
+        default=0,
+        help="also report every Nth non-slow row; 0 disables",
     )
     args = ap.parse_args()
     if args.slow_row_seconds < 0:
@@ -194,37 +215,98 @@ def main() -> int:
     if not pages:
         raise ValueError("no pages selected")
 
+    scan_started = perf_counter()
     models = load_facit_with_typography(args.facit)
     work_rows: list[RowWork] = []
     scanned_rows = 0
+    exact_rows = 0
+    timings: list[tuple[float, int, int, int, str]] = []
+
     for page in pages:
-        page_prepare_started = perf_counter()
-        print(f"scan: page {page}: förbereder sida ...", flush=True)
-        context = build_page_context_pixel_array(args.jsonl, page, args.threshold)
-        prepare_elapsed = perf_counter() - page_prepare_started
+        if args.progress:
+            print(f"scan: page {page}: förbereder sida ...", flush=True)
+            context = build_page_context_pixel_array(args.jsonl, page, args.threshold)
+        else:
+            context = _quiet_call_preserving_warnings(
+                build_page_context_pixel_array,
+                args.jsonl,
+                page,
+                args.threshold,
+            )
         context["quiet_successful_ownership"] = not args.progress
         positions = context["positions"]
-        print(
-            f"scan: page {page}: förberedelse klar på {prepare_elapsed:.1f} s; "
-            f"börjar glyphanalys av {len(positions)} rader",
-            flush=True,
-        )
-        page_found = 0
-        page_scan_started = perf_counter()
+
+        if args.progress:
+            print(
+                f"scan: page {page}: börjar glyphanalys av {len(positions)} rader",
+                flush=True,
+            )
+
+        current_column: int | None = None
+        column_started = perf_counter()
+        column_rows = 0
+        column_exact = 0
+        column_work = 0
+
+        def finish_column(column: int | None) -> None:
+            nonlocal column_started, column_rows, column_exact, column_work
+            if column is None:
+                return
+            elapsed = perf_counter() - column_started
+            print(
+                f"page={page} column={column} rows={column_rows} "
+                f"exact={column_exact}/{column_rows} needs_work={column_work} "
+                f"time={elapsed:.3f}s",
+                flush=True,
+            )
+
         for index, position in enumerate(positions, start=1):
-            column, row = position
+            column, row = map(int, position)
+            if current_column is None:
+                current_column = column
+                column_started = perf_counter()
+                column_rows = column_exact = column_work = 0
+            elif column != current_column:
+                finish_column(current_column)
+                current_column = column
+                column_started = perf_counter()
+                column_rows = column_exact = column_work = 0
+
             if args.progress:
                 print(
                     f"scan: page {page}: [{index}] analyserar c{column} r{row} ...",
                     flush=True,
                 )
+
             stats_before = priority_stats()
             row_started = perf_counter()
-            state = load_review_state_pixel_array(context, position, models)
+            if args.progress:
+                state = load_review_state_pixel_array(context, position, models)
+            else:
+                state = _quiet_call_preserving_warnings(
+                    load_review_state_pixel_array,
+                    context,
+                    position,
+                    models,
+                )
             row_elapsed = perf_counter() - row_started
             stats_after = priority_stats()
-            is_slow = args.slow_row_seconds > 0 and row_elapsed >= args.slow_row_seconds
-            is_sample = args.sample_every > 0 and index % args.sample_every == 0 and not is_slow
+
+            timings.append(
+                (row_elapsed, page, column, row, str(state.get("text") or ""))
+            )
+            scanned_rows += 1
+            column_rows += 1
+
+            work = classify_row_state(page, position, state)
+            if work.fully_exact:
+                exact_rows += 1
+                column_exact += 1
+
+            if work.needs_work:
+                print(format_row_work(work), flush=True)
+                work_rows.append(work)
+                column_work += 1
 
             if args.progress:
                 print(
@@ -232,6 +314,8 @@ def main() -> int:
                     flush=True,
                 )
             else:
+                is_slow = args.slow_row_seconds > 0 and row_elapsed >= args.slow_row_seconds
+                is_sample = args.sample_every > 0 and index % args.sample_every == 0 and not is_slow
                 if is_slow:
                     print(
                         format_timed_row(
@@ -258,35 +342,32 @@ def main() -> int:
                         ),
                         flush=True,
                     )
-                if index % 10 == 0:
-                    elapsed = perf_counter() - page_scan_started
-                    print(
-                        f"scan: page {page}: {index} rader analyserade, senast c{column} r{row} "
-                        f"({elapsed:.1f} s)",
-                        flush=True,
-                    )
-            scanned_rows += 1
-            work = classify_row_state(page, position, state)
-            if not work.needs_work:
-                continue
-            print(format_row_work(work), flush=True)
-            work_rows.append(work)
-            page_found += 1
-        page_scan_elapsed = perf_counter() - page_scan_started
-        print(
-            f"scan: page {page}: {page_found} rows need work / {len(positions)} rows "
-            f"(glyphanalys {page_scan_elapsed:.3f} s)",
-            flush=True,
-        )
+
+        finish_column(current_column)
 
     if args.output is not None:
         write_review_queue(args.output, work_rows)
         print(f"scan: saved {len(work_rows)} rows to {args.output}", flush=True)
 
+    total_wall = perf_counter() - scan_started
+    row_time = sum(item[0] for item in timings)
+    average_row = row_time / len(timings) if timings else 0.0
     print(
-        f"scan: {len(work_rows)} rows need work / {scanned_rows} scanned rows on {len(pages)} pages",
+        f"summary: pages={len(pages)} rows={scanned_rows} exact={exact_rows}/{scanned_rows} "
+        f"needs_work={len(work_rows)} total_time={total_wall:.3f}s "
+        f"average_row_time={average_row:.6f}s",
         flush=True,
     )
+    print("slowest-rows: top=5", flush=True)
+    for rank, (elapsed, page, column, row, text) in enumerate(
+        sorted(timings, reverse=True)[:5], start=1
+    ):
+        print(
+            f"slowest-row: rank={rank} page={page} column={column} row={row} "
+            f"time={elapsed:.3f}s text={_short_text(text)!r}",
+            flush=True,
+        )
+
     return 0
 
 
