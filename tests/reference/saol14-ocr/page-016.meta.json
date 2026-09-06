@@ -1,0 +1,69 @@
+{
+  "all_rows_fully_exact": true,
+  "facit_path": "glyphs/saol14-manual-glyph-facit-v2.json",
+  "facit_sha256": "584ea2a720b51022ba31e4f4aa68b0664a8a9bfceac8282c0e0b658e1f165acb",
+  "format": "saol14-ocr-reference-v1",
+  "generator_git_commit": "4178de2275987f1b7a4b07467a50577b5321fa5a",
+  "page": 16,
+  "row_count": 159,
+  "slowest_export_rows": [
+    {
+      "column": 2,
+      "row": 38,
+      "seconds": 0.0663805139483884
+    },
+    {
+      "column": 1,
+      "row": 43,
+      "seconds": 0.05966963607352227
+    },
+    {
+      "column": 2,
+      "row": 0,
+      "seconds": 0.059433748945593834
+    },
+    {
+      "column": 0,
+      "row": 33,
+      "seconds": 0.05939255503471941
+    },
+    {
+      "column": 1,
+      "row": 23,
+      "seconds": 0.058808565023355186
+    },
+    {
+      "column": 1,
+      "row": 21,
+      "seconds": 0.0584544240264222
+    },
+    {
+      "column": 0,
+      "row": 29,
+      "seconds": 0.05665560101624578
+    },
+    {
+      "column": 2,
+      "row": 4,
+      "seconds": 0.056447871029376984
+    },
+    {
+      "column": 0,
+      "row": 47,
+      "seconds": 0.05542309500742704
+    },
+    {
+      "column": 2,
+      "row": 29,
+      "seconds": 0.05528361606411636
+    }
+  ],
+  "source_jsonl": "/home/matsj/proj/saol14-faksimil.jsonl",
+  "threshold": 210,
+  "timing_seconds": {
+    "glyph_analysis_settle_pass": 21.432735859998502,
+    "page_prepare": 0.3841363840037957,
+    "reference_export_pass": 6.601691234973259,
+    "total": 28.428641270962544
+  }
+}
