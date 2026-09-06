@@ -177,7 +177,6 @@ def _effective_separator_page(context: dict[str, Any], *, column: int, upper_row
 
 
 def add_neighbor_row_raster(context: dict[str, Any], state: dict[str, Any], *, probe_y: int = 8) -> dict[str, Any]:
-    state=_compact_review_state(context,state)
     page=context["page"]; column=int(state["column"]); row_index=int(state["row"]); rows=context["row_map"]["columns"][column]["rows"]; row=rows[row_index]
     crop_left,crop_top,crop_right,_crop_bottom=map(int,state["crop_box"])
     # The large three-row context view is diagnostic: show two actual source
