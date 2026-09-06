@@ -3,10 +3,10 @@ from __future__ import annotations
 """Compare the ordinary glyph scanner with frozen row references.
 
 This benchmark deliberately uses the exact same page preparation and per-row
-analysis calls as ``ocr_find_unreviewed_glyph_rows``.  It adds no OCR policy,
-anchor, boundary-repair, headword-memory, or benchmark-only parser wrappers.
-The only extra work is serializing each scanner row into the frozen-reference
-shape and comparing it with the reference JSONL.
+analysis calls, in the same order, as ``ocr_find_unreviewed_glyph_rows``.  It
+adds no OCR policy, anchor, boundary-repair, headword-memory, or benchmark-only
+parser wrappers.  The only extra work is serializing scanner rows into the
+frozen-reference shape and comparing them with the reference JSONL.
 """
 
 import argparse
@@ -32,6 +32,21 @@ def _observed_row(state: dict) -> dict:
     }
 
 
+def _print_mismatch(page: int, key, why, expected, observed) -> None:
+    print(f"DIFF page={page} column={key[0]} row={key[1]}: {why}", flush=True)
+    if expected is not None:
+        print(
+            f"  ref pixels={expected['source_pixels']} text={expected['text']!r}",
+            flush=True,
+        )
+    if observed is not None:
+        print(
+            f"  new pixels={observed['source_pixels']} covered={observed['covered_pixels']} "
+            f"exact={observed['exact']} text={observed['text']!r}",
+            flush=True,
+        )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Compare the ordinary scanner row-by-row with frozen references."
@@ -50,6 +65,7 @@ def main() -> int:
     ap.add_argument("--max-diffs", type=int, default=20)
     args = ap.parse_args()
 
+    benchmark_started = time.perf_counter()
     models = load_facit_with_typography(args.facit)
     if args.split_facit is not None:
         split_models = load_split_facit_with_typography(args.split_facit)
@@ -83,12 +99,56 @@ def main() -> int:
         context["quiet_successful_ownership"] = True
 
         actual: dict[tuple[int, int], dict] = {}
+        page_mismatches: list[tuple] = []
+        current_column: int | None = None
+        column_started = time.perf_counter()
+        column_rows = 0
+
+        def finish_column(column: int | None) -> None:
+            nonlocal printed_diffs, column_started, column_rows
+            if column is None:
+                return
+            expected_column = {
+                key: value for key, value in reference.items() if int(key[0]) == int(column)
+            }
+            actual_column = {
+                key: value for key, value in actual.items() if int(key[0]) == int(column)
+            }
+            mismatches = _compare_page(expected_column, actual_column)
+            page_mismatches.extend(mismatches)
+            all_keys = set(expected_column) | set(actual_column)
+            equal = len(all_keys) - len(mismatches)
+            elapsed = time.perf_counter() - column_started
+            print(
+                f"scanner-reference: page={page} column={column} rows={column_rows} "
+                f"equal={equal}/{len(all_keys)} mismatches={len(mismatches)} "
+                f"time={elapsed:.3f}s",
+                flush=True,
+            )
+            for key, why, expected, observed in mismatches:
+                if printed_diffs >= args.max_diffs:
+                    break
+                printed_diffs += 1
+                _print_mismatch(page, key, why, expected, observed)
+
         for position in context["positions"]:
+            column = int(position[0])
+            if current_column is None:
+                current_column = column
+                column_started = time.perf_counter()
+                column_rows = 0
+            elif column != current_column:
+                finish_column(current_column)
+                current_column = column
+                column_started = time.perf_counter()
+                column_rows = 0
+
             started = time.perf_counter()
             state = page_editor.load_review_state_pixel_array(context, position, models)
             elapsed = time.perf_counter() - started
-            key = (int(position[0]), int(position[1]))
+            key = (column, int(position[1]))
             actual[key] = _observed_row(state)
+            column_rows += 1
             timings.append(
                 (
                     elapsed,
@@ -99,46 +159,35 @@ def main() -> int:
                 )
             )
 
-        mismatches = _compare_page(reference, actual)
+        finish_column(current_column)
+
         all_keys = set(reference) | set(actual)
-        equal = len(all_keys) - len(mismatches)
+        equal = len(all_keys) - len(page_mismatches)
         total_reference += len(reference)
         total_actual += len(actual)
         total_equal += equal
-        total_mismatches += len(mismatches)
+        total_mismatches += len(page_mismatches)
 
         print(
-            f"scanner-reference: page={page} rows={len(actual)} "
-            f"equal={equal}/{len(all_keys)} mismatches={len(mismatches)}",
+            f"scanner-reference-page: page={page} rows={len(actual)} "
+            f"equal={equal}/{len(all_keys)} mismatches={len(page_mismatches)}",
             flush=True,
         )
 
-        for key, why, expected, observed in mismatches:
-            if printed_diffs >= args.max_diffs:
-                break
-            printed_diffs += 1
-            print(f"DIFF page={page} column={key[0]} row={key[1]}: {why}", flush=True)
-            if expected is not None:
-                print(
-                    f"  ref pixels={expected['source_pixels']} text={expected['text']!r}",
-                    flush=True,
-                )
-            if observed is not None:
-                print(
-                    f"  new pixels={observed['source_pixels']} covered={observed['covered_pixels']} "
-                    f"exact={observed['exact']} text={observed['text']!r}",
-                    flush=True,
-                )
-
+    total_wall = time.perf_counter() - benchmark_started
+    row_time = sum(item[0] for item in timings)
+    average_row = row_time / len(timings) if timings else 0.0
     print(
         "scanner-reference-summary: "
         f"pages={len(pages)} reference_rows={total_reference} actual_rows={total_actual} "
-        f"equal={total_equal} mismatches={total_mismatches}",
+        f"equal={total_equal} mismatches={total_mismatches} "
+        f"total_time={total_wall:.3f}s row_analysis_time={row_time:.3f}s "
+        f"average_row_time={average_row:.6f}s",
         flush=True,
     )
-    print("slowest-rows: top=4", flush=True)
+    print("slowest-rows: top=5", flush=True)
     for rank, (elapsed, page, column, row, text) in enumerate(
-        sorted(timings, reverse=True)[:4], start=1
+        sorted(timings, reverse=True)[:5], start=1
     ):
         print(
             f"slowest-row: rank={rank} page={page} column={column} row={row} "
