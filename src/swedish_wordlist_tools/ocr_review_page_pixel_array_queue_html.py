@@ -38,8 +38,14 @@ def _snapshot_text(label: str, snapshot: dict | None) -> str:
 
 def _mismatch_banner(state: dict) -> str:
     mismatch = state.get("benchmark_mismatch")
+    queue_position = state.get("queue_position")
+    queue_line = ""
+    if queue_position:
+        queue_line = (
+            f"<div><b>KÖPOST:</b> {int(queue_position[0])}/{int(queue_position[1])}</div>"
+        )
     if not mismatch:
-        return ""
+        return queue_line
     current = {
         "text": str(state.get("text") or ""),
         "source_pixels": int(state.get("source_pixels") or 0),
@@ -50,6 +56,7 @@ def _mismatch_banner(state: dict) -> str:
     return (
         "<div style=\"margin:8px 0 14px;padding:10px 12px;border:2px solid #b66;"
         "background:#fff5f0;font:14px/1.45 sans-serif\">"
+        f"{queue_line}"
         f"<div><b>BENCHMARK-AVVIKELSE:</b> {why}</div>"
         f"<div>{_snapshot_text('Referens', mismatch.get('reference'))}</div>"
         f"<div>{_snapshot_text('Benchmark', mismatch.get('observed'))}</div>"
@@ -65,10 +72,17 @@ def main() -> int:
     ap.add_argument("jsonl", type=Path)
     ap.add_argument("--queue", type=Path, required=True)
     ap.add_argument(
+        "--queue-index",
+        type=int,
+        help="1-based queue entry to start at; selects its page automatically",
+    )
+    ap.add_argument(
         "--page",
         type=int,
         help="queue page to review; defaults to the first page present in the queue",
     )
+    ap.add_argument("--column", type=int, help="column of queued row to start at")
+    ap.add_argument("--row", type=int, help="row of queued row to start at")
     ap.add_argument("--threshold", type=int, default=210)
     ap.add_argument(
         "--facit",
@@ -81,23 +95,50 @@ def main() -> int:
     args = ap.parse_args()
 
     rows = _load_queue(args.queue)
-    pages = sorted({int(row["page"]) for row in rows})
-    selected_page = int(args.page) if args.page is not None else pages[0]
-    selected_rows = [row for row in rows if int(row["page"]) == selected_page]
-    selected = [
-        (int(row["column"]), int(row["row"]))
-        for row in selected_rows
-    ]
-    # Preserve queue order but suppress accidental duplicate coordinates.
+    pages = sorted({int(item["page"]) for item in rows})
+
+    if (args.column is None) != (args.row is None):
+        ap.error("--column and --row must be given together")
+    if args.queue_index is not None and (args.page is not None or args.column is not None):
+        ap.error("--queue-index cannot be combined with --page/--column/--row")
+
+    start_item = None
+    if args.queue_index is not None:
+        if not 1 <= args.queue_index <= len(rows):
+            ap.error(f"--queue-index must be between 1 and {len(rows)}")
+        start_item = rows[args.queue_index - 1]
+        selected_page = int(start_item["page"])
+    else:
+        selected_page = int(args.page) if args.page is not None else pages[0]
+
+    selected_rows = [item for item in rows if int(item["page"]) == selected_page]
+    selected = [(int(item["column"]), int(item["row"])) for item in selected_rows]
     selected = list(dict.fromkeys(selected))
     if not selected:
         raise ValueError(
             f"queue has no rows on page {selected_page}; available pages: {pages}"
         )
+
+    if start_item is not None:
+        start_position = (int(start_item["column"]), int(start_item["row"]))
+    elif args.column is not None:
+        start_position = (int(args.column), int(args.row))
+        if start_position not in selected:
+            raise ValueError(
+                f"requested start row page={selected_page} column={args.column} row={args.row} "
+                "is not present in the review queue"
+            )
+    else:
+        start_position = selected[0]
+
     queued = set(selected)
     metadata = {
-        (int(row["column"]), int(row["row"])): row.get("benchmark_mismatch")
-        for row in selected_rows
+        (int(item["column"]), int(item["row"])): item.get("benchmark_mismatch")
+        for item in selected_rows
+    }
+    queue_numbers = {
+        (int(item["page"]), int(item["column"]), int(item["row"])): index
+        for index, item in enumerate(rows, start=1)
     }
 
     original_build = page_editor.build_page_context_pixel_array
@@ -113,7 +154,6 @@ def main() -> int:
             raise ValueError(
                 f"queued rows are not present on page {page_number}: {missing}"
             )
-        # Keep physical page order.  All editor navigation now sees only queued rows.
         context["positions"] = [
             position for position in context["positions"] if position in queued
         ]
@@ -129,6 +169,9 @@ def main() -> int:
         mismatch = metadata.get(position)
         if mismatch:
             state["benchmark_mismatch"] = mismatch
+        queue_number = queue_numbers.get((selected_page, position[0], position[1]))
+        if queue_number is not None:
+            state["queue_position"] = (queue_number, len(rows))
         return state
 
     def render_with_mismatch(state, message=""):
@@ -146,27 +189,22 @@ def main() -> int:
     argv = [
         original_argv[0],
         str(args.jsonl),
-        "--page",
-        str(selected_page),
-        "--column",
-        str(selected[0][0]),
-        "--row",
-        str(selected[0][1]),
-        "--threshold",
-        str(args.threshold),
-        "--facit",
-        str(args.facit),
-        "--host",
-        args.host,
-        "--port",
-        str(args.port),
+        "--page", str(selected_page),
+        "--column", str(start_position[0]),
+        "--row", str(start_position[1]),
+        "--threshold", str(args.threshold),
+        "--facit", str(args.facit),
+        "--host", args.host,
+        "--port", str(args.port),
     ]
     if args.no_browser:
         argv.append("--no-browser")
     sys.argv = argv
     try:
+        queue_number = queue_numbers.get((selected_page, start_position[0], start_position[1]))
         print(
-            f"review: queue pages={pages}; active page={selected_page}; rows={len(selected)}",
+            f"review: queue pages={pages}; active page={selected_page}; rows={len(selected)}; "
+            f"start={start_position}; queue-index={queue_number}/{len(rows)}",
             flush=True,
         )
         return page_editor.main()
