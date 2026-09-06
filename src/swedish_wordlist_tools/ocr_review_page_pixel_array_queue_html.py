@@ -65,6 +65,17 @@ def _mismatch_banner(state: dict) -> str:
     )
 
 
+def _centered_three_positions(positions, current, size=3):
+    """Show previous/current/next so the active queued row is the middle card."""
+    if current not in positions:
+        raise ValueError(f"row {current} is not present on page")
+    index = positions.index(current)
+    if len(positions) <= 3:
+        return list(positions)
+    start = max(0, min(index - 1, len(positions) - 3))
+    return positions[start : start + 3]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Review only queued SAOL glyph rows with the page pixel-array editor."
@@ -144,6 +155,7 @@ def main() -> int:
     original_build = page_editor.build_page_context_pixel_array
     original_loader = page_editor.load_review_state_pixel_array
     original_render = page_editor.fast.ui.editor.render_html
+    original_packet_positions = page_editor.fast.ui.packet_positions
     original_argv = sys.argv
 
     def build_queued_page_context(jsonl: Path, page_number: int, threshold: int = 210):
@@ -186,6 +198,7 @@ def main() -> int:
     page_editor.build_page_context_pixel_array = build_queued_page_context
     page_editor.load_review_state_pixel_array = load_with_mismatch
     page_editor.fast.ui.editor.render_html = render_with_mismatch
+    page_editor.fast.ui.packet_positions = _centered_three_positions
     argv = [
         original_argv[0],
         str(args.jsonl),
@@ -213,6 +226,7 @@ def main() -> int:
         page_editor.build_page_context_pixel_array = original_build
         page_editor.load_review_state_pixel_array = original_loader
         page_editor.fast.ui.editor.render_html = original_render
+        page_editor.fast.ui.packet_positions = original_packet_positions
 
 
 if __name__ == "__main__":
