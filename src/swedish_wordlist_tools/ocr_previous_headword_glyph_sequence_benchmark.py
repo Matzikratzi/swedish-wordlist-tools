@@ -109,7 +109,8 @@ def _sequence_exact_cover(
         if states > max_states:
             return None
 
-        anchor_x, anchor_y = min(remaining, key=lambda point: (point[0], point[1]))
+        anchor_x = min(x for x, _y in remaining)
+        anchor_y = min(y for x, y in remaining if x == anchor_x)
         first_glyph = len(remaining) == len(target)
         expected = None
         if sequence_active and previous_sequence and seq_index < len(previous_sequence):
