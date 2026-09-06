@@ -304,7 +304,8 @@ def main() -> int:
         return result
 
     def render(position: Position, nav: str) -> str:
-        states = [state_for(item) for item in visible(position, nav)]
+        shown = visible(position, nav)
+        states = [state_for(item) for item in shown]
         active_state = state_for(position)
         display_state = _fine_display_state(context_for(position[0]), active_state, extra_left=2)
         document = page_editor.fast.ui.editor.render_html(display_state, message["text"])
@@ -313,7 +314,7 @@ def main() -> int:
             document = document.replace("<body>", "<body>" + banner, 1)
 
         cards = []
-        for item, state in zip(visible(position, nav), states):
+        for item, state in zip(shown, states):
             active_class = " active" if item == position else ""
             exact = int(state.get("covered_pixels") or 0) == int(state.get("source_pixels") or 0)
             status = "exakt" if exact else f"{state.get('covered_pixels', 0)}/{state.get('source_pixels', 0)} px"
@@ -448,7 +449,8 @@ document.addEventListener('keydown', e => {{
             print("review:", fmt % values)
 
     server = ThreadingHTTPServer((args.host, args.port), Handler)
-    url = f"http://{args.host}:{args.port}/" + _url(initial, nav=initial_nav)[2:]
+    path = _url(initial, nav=initial_nav)
+    url = f"http://{args.host}:{args.port}{path}"
     print(
         f"review: unified three-row editor nav={initial_nav}; start={initial}; "
         f"queue={args.queue if args.queue else '-'} ({len(queue_positions)} rows)",
