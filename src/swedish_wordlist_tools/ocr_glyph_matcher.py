@@ -153,9 +153,14 @@ def exact_matches(
             for baseline in baselines:
                 if baseline < b_lo or baseline > b_hi:
                     continue
-                placed = frozenset((x0 + x, baseline + y) for x, y in model.pixels)
-                if not placed.issubset(ink):
+                fits = True
+                for x, y in model.pixels:
+                    if (x0 + x, baseline + y) not in ink:
+                        fits = False
+                        break
+                if not fits:
                     continue
+                placed = frozenset((x0 + x, baseline + y) for x, y in model.pixels)
                 if require_whole_components and not _owns_whole_touched_components(placed, components, by_pixel):
                     continue
                 out.append(Match(label=model.label, style=model.style, x=x0, baseline=baseline, pixels=placed, model_pixels=len(model.pixels), sources=model.sources))
