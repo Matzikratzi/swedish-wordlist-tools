@@ -3,6 +3,7 @@ from __future__ import annotations
 """Open the page pixel-array glyph editor on only rows listed in a review queue."""
 
 import argparse
+import html
 import json
 import sys
 from pathlib import Path
@@ -21,6 +22,40 @@ def _load_queue(path: Path) -> list[dict]:
     if not rows:
         raise ValueError(f"review queue is empty: {path}")
     return rows
+
+
+def _snapshot_text(label: str, snapshot: dict | None) -> str:
+    if snapshot is None:
+        return f"<b>{html.escape(label)}:</b> saknas"
+    return (
+        f"<b>{html.escape(label)}:</b> "
+        f"pixels={int(snapshot.get('source_pixels') or 0)} "
+        f"covered={int(snapshot.get('covered_pixels') or 0)} "
+        f"exact={bool(snapshot.get('exact', False))} "
+        f"text=<code>{html.escape(repr(str(snapshot.get('text') or '')))}</code>"
+    )
+
+
+def _mismatch_banner(state: dict) -> str:
+    mismatch = state.get("benchmark_mismatch")
+    if not mismatch:
+        return ""
+    current = {
+        "text": str(state.get("text") or ""),
+        "source_pixels": int(state.get("source_pixels") or 0),
+        "covered_pixels": int(state.get("covered_pixels") or 0),
+        "exact": bool(state.get("fully_exact", False)),
+    }
+    why = html.escape(str(mismatch.get("why") or "okänd referensavvikelse"))
+    return (
+        "<div style=\"margin:8px 0 14px;padding:10px 12px;border:2px solid #b66;"
+        "background:#fff5f0;font:14px/1.45 sans-serif\">"
+        f"<div><b>BENCHMARK-AVVIKELSE:</b> {why}</div>"
+        f"<div>{_snapshot_text('Referens', mismatch.get('reference'))}</div>"
+        f"<div>{_snapshot_text('Benchmark', mismatch.get('observed'))}</div>"
+        f"<div>{_snapshot_text('Editor nu', current)}</div>"
+        "</div>"
+    )
 
 
 def main() -> int:
@@ -48,10 +83,10 @@ def main() -> int:
     rows = _load_queue(args.queue)
     pages = sorted({int(row["page"]) for row in rows})
     selected_page = int(args.page) if args.page is not None else pages[0]
+    selected_rows = [row for row in rows if int(row["page"]) == selected_page]
     selected = [
         (int(row["column"]), int(row["row"]))
-        for row in rows
-        if int(row["page"]) == selected_page
+        for row in selected_rows
     ]
     # Preserve queue order but suppress accidental duplicate coordinates.
     selected = list(dict.fromkeys(selected))
@@ -60,8 +95,14 @@ def main() -> int:
             f"queue has no rows on page {selected_page}; available pages: {pages}"
         )
     queued = set(selected)
+    metadata = {
+        (int(row["column"]), int(row["row"])): row.get("benchmark_mismatch")
+        for row in selected_rows
+    }
 
     original_build = page_editor.build_page_context_pixel_array
+    original_loader = page_editor.load_review_state_pixel_array
+    original_render = page_editor.fast.ui.editor.render_html
     original_argv = sys.argv
 
     def build_queued_page_context(jsonl: Path, page_number: int, threshold: int = 210):
@@ -83,7 +124,25 @@ def main() -> int:
         )
         return context
 
+    def load_with_mismatch(context, position, models):
+        state = original_loader(context, position, models)
+        mismatch = metadata.get(position)
+        if mismatch:
+            state["benchmark_mismatch"] = mismatch
+        return state
+
+    def render_with_mismatch(state, message=""):
+        document = original_render(state, message)
+        banner = _mismatch_banner(state)
+        if not banner:
+            return document
+        if "<body>" in document:
+            return document.replace("<body>", "<body>" + banner, 1)
+        return banner + document
+
     page_editor.build_page_context_pixel_array = build_queued_page_context
+    page_editor.load_review_state_pixel_array = load_with_mismatch
+    page_editor.fast.ui.editor.render_html = render_with_mismatch
     argv = [
         original_argv[0],
         str(args.jsonl),
@@ -114,6 +173,8 @@ def main() -> int:
     finally:
         sys.argv = original_argv
         page_editor.build_page_context_pixel_array = original_build
+        page_editor.load_review_state_pixel_array = original_loader
+        page_editor.fast.ui.editor.render_html = original_render
 
 
 if __name__ == "__main__":
