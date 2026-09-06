@@ -20,7 +20,7 @@ from . import ocr_review_page_pixel_array_glyphs_html as page_editor
 
 
 _ORIGINAL = page_editor._load_owned_row_state
-_COUNTS: Counter[tuple[int, int]] = Counter()
+_COUNTS: Counter[tuple[int, int, int]] = Counter()
 _EVENT = 0
 
 
@@ -37,9 +37,11 @@ def _match_token(match) -> str:
 
 def _traced_load_owned_row_state(context: dict, position: tuple[int, int], models) -> dict:
     global _EVENT
+    page = int(context.get("page_number", -1))
     requested = (int(position[0]), int(position[1]))
-    _COUNTS[requested] += 1
-    occurrence = _COUNTS[requested]
+    position_key = (page, requested[0], requested[1])
+    _COUNTS[position_key] += 1
+    occurrence = _COUNTS[position_key]
     _EVENT += 1
     event = _EVENT
 
@@ -63,7 +65,7 @@ def _traced_load_owned_row_state(context: dict, position: tuple[int, int], model
 
     print(
         "live-row: "
-        f"event={event} call={occurrence} page={int(context.get('page_number', -1))} "
+        f"event={event} call={occurrence} page={page} "
         f"requested=c{requested[0]}r{requested[1]} returned=c{returned[0]}r{returned[1]} "
         f"time={elapsed:.6f}s baseline={row_baseline!r} exact={exact} "
         f"coverage={covered}/{source} effective_y={effective_top}..{effective_bottom} "
@@ -72,7 +74,7 @@ def _traced_load_owned_row_state(context: dict, position: tuple[int, int], model
         flush=True,
     )
     print(
-        f"live-glyphs: event={event} c{returned[0]}r{returned[1]} count={len(matches)} "
+        f"live-glyphs: event={event} page={page} c{returned[0]}r{returned[1]} count={len(matches)} "
         f"glyphs={glyphs!r}",
         flush=True,
     )
@@ -91,7 +93,8 @@ def _print_summary() -> None:
     )
     for rank, (position, count) in enumerate(repeated[:20], start=1):
         print(
-            f"live-row-repeat: rank={rank} column={position[0]} row={position[1]} calls={count}",
+            f"live-row-repeat: rank={rank} page={position[0]} column={position[1]} "
+            f"row={position[2]} calls={count}",
             flush=True,
         )
 
