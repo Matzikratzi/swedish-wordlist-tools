@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-"""Run the headword-sequence benchmark and save reference mismatches as a row-review queue.
+"""Run the headword-sequence benchmark and save every reference mismatch as a row-review queue.
 
 This is diagnostic only. OCR behaviour and the benchmark exit status are
-unchanged. The wrapper records rows reported by the existing reference
-comparison, but omits stale crop/reference differences when the current OCR is
-fully exact and produces the same text as the reference.
+unchanged. Every mismatch reported by the existing reference comparison is
+preserved in the review queue so found errors remain visible until understood
+and corrected.
 
 The wrapper is intentionally quiet by default so larger page ranges remain
 readable. Pass ``--verbose`` to expose the underlying benchmark's normal stdout
@@ -61,26 +61,6 @@ def _snapshot(row) -> dict | None:
     }
 
 
-def _resolved_exact_reference_crop(expected, observed) -> bool:
-    """True when a mismatch is only stale reference/crop accounting.
-
-    We learned that the old review compaction could discard already matched
-    left-edge pixels (notably homonym superscripts) and then recompute the pixel
-    totals. If the current benchmark sees exactly the same text and every current
-    source pixel is covered exactly, that row no longer needs manual glyph review
-    even when its pixel count differs from the frozen reference.
-    """
-    if expected is None or observed is None:
-        return False
-    if str(expected.get("text") or "") != str(observed.get("text") or ""):
-        return False
-    if not bool(observed.get("exact", False)):
-        return False
-    source_pixels = int(observed.get("source_pixels") or 0)
-    covered_pixels = int(observed.get("covered_pixels") or 0)
-    return source_pixels > 0 and covered_pixels == source_pixels
-
-
 def _queue_row(page: int, key: tuple[int, int], why: str, expected, observed) -> dict:
     work = _row_work(page, key, expected, observed)
     return {
@@ -120,7 +100,6 @@ def main() -> int:
     original_compare_page = split_benchmark._compare_page
     current_page: list[int | None] = [None]
     queued: dict[tuple[int, int, int], dict] = {}
-    ignored_exact_crop_mismatches = 0
 
     def load_reference_with_page(path: Path):
         match = _PAGE_RE.fullmatch(Path(path).stem)
@@ -128,15 +107,11 @@ def main() -> int:
         return original_load_reference(path)
 
     def compare_and_collect(reference, actual):
-        nonlocal ignored_exact_crop_mismatches
         mismatches = original_compare_page(reference, actual)
         page = current_page[0]
         if page is None and mismatches:
             raise RuntimeError("could not determine page number while writing review queue")
         for key, why, expected, observed in mismatches:
-            if _resolved_exact_reference_crop(expected, observed):
-                ignored_exact_crop_mismatches += 1
-                continue
             row = _queue_row(int(page), key, why, expected, observed)
             queued[(row["page"], row["column"], row["row"])] = row
         return mismatches
@@ -162,8 +137,7 @@ def main() -> int:
     page_summary = f" pages={pages[0]}..{pages[-1]}" if pages else ""
     print(
         f"review-queue: saved {len(rows)} benchmark mismatch rows{page_summary} "
-        f"to {queue_args.review_queue}; ignored {ignored_exact_crop_mismatches} "
-        "resolved exact reference/crop mismatches",
+        f"to {queue_args.review_queue}",
         flush=True,
     )
     return result
