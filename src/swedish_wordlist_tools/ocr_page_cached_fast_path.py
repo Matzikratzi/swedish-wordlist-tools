@@ -9,7 +9,7 @@ inside ordinary row analysis.
 """
 
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Callable, Iterable
 
 from . import ocr_priority_fast_path as priority
 from .ocr_glyph_matcher import GlyphModel, Match
@@ -271,6 +271,24 @@ def _iter_candidates(
         yield from bucket
 
 
+def _placed_right(placed: Iterable[tuple[int, int]]) -> int:
+    """Return the first x column strictly to the right of a placed glyph."""
+    return max(int(x) for x, _y in placed) + 1
+
+
+def placement_advances_right(
+    placed: Iterable[tuple[int, int]], previous_right: int | None
+) -> bool:
+    """Require every later glyph to protrude to the right of the previous glyph.
+
+    SAOL glyphs may lean into each other, so their horizontal extents may overlap.
+    What is not a valid reading is stacking another glyph wholly inside the
+    previous glyph's x extent.  In particular this prevents a thick bold dash
+    from being explained as two thin roman dashes on top of each other.
+    """
+    return previous_right is None or _placed_right(placed) > int(previous_right)
+
+
 def page_cached_prioritized_fast_exact_cover(
     ink: set[tuple[int, int]],
     width: int,
@@ -290,7 +308,7 @@ def page_cached_prioritized_fast_exact_cover(
     stats[f"{row_kind}_hints"] += 1
 
     target = frozenset(ink)
-    failed: set[tuple[frozenset[tuple[int, int]], int | None, bool]] = set()
+    failed: set[tuple[frozenset[tuple[int, int]], int | None, bool, int | None]] = set()
     states = 0
     placements_tested = 0
 
@@ -299,11 +317,12 @@ def page_cached_prioritized_fast_exact_cover(
         baseline: int | None,
         previous_style: str | None,
         leading_homonym_seen: bool,
+        previous_right: int | None,
     ) -> tuple[Match, ...] | None:
         nonlocal states, placements_tested
         if not remaining:
             return ()
-        state = (remaining, baseline, leading_homonym_seen)
+        state = (remaining, baseline, leading_homonym_seen, previous_right)
         if state in failed:
             return None
         states += 1
@@ -342,6 +361,8 @@ def page_cached_prioritized_fast_exact_cover(
                 )
                 if not placed.issubset(remaining):
                     continue
+                if not placement_advances_right(placed, previous_right):
+                    continue
                 match = Match(
                     label=model.label,
                     style=model.style,
@@ -362,6 +383,7 @@ def page_cached_prioritized_fast_exact_cover(
                     next_baseline,
                     priority._typographic_style(model.style),
                     saw_homonym,
+                    _placed_right(placed),
                 )
                 if tail is not None:
                     record_model_hit(model)
@@ -370,7 +392,7 @@ def page_cached_prioritized_fast_exact_cover(
         failed.add(state)
         return None
 
-    chosen = search(target, None, None, False)
+    chosen = search(target, None, None, False, None)
     stats["placements_tested"] += placements_tested
     if chosen is None:
         return None
@@ -390,3 +412,73 @@ def page_cached_prioritized_fast_exact_cover(
 
     stats["successful_calls"] += 1
     return baseline, selected, placements_tested
+
+
+def _row_ink(crop, *, threshold: int = 210) -> set[tuple[int, int]]:
+    gray = crop.convert("L")
+    pixels = gray.load()
+    return {
+        (x, y)
+        for y in range(gray.height)
+        for x in range(gray.width)
+        if pixels[x, y] < threshold
+    }
+
+
+def analyse_row_prioritized(
+    crop,
+    models: Iterable[GlyphModel],
+    *,
+    threshold: int = 210,
+    exact_cover: Callable | None = None,
+) -> dict:
+    """Shared row parser used by both interactive review and batch scanning."""
+    ink = _row_ink(crop, threshold=threshold)
+    base = {
+        "source_pixels": len(ink),
+        "ink": ink,
+        "safe_groups": [],
+        "safe_group_count": 0,
+        "exact_fast_path": True,
+    }
+    if not ink:
+        return {
+            **base,
+            "baseline": None,
+            "covered_pixels": 0,
+            "unmatched_pixels": 0,
+            "unmatched_components": [],
+            "fully_exact": True,
+            "candidate_count": 0,
+            "selected": [],
+            "exact_cover_path": "shared-empty",
+        }
+
+    cover = exact_cover or page_cached_prioritized_fast_exact_cover
+    result = cover(ink, crop.width, crop.height, models)
+    if result is None:
+        return {
+            **base,
+            "baseline": None,
+            "covered_pixels": 0,
+            "unmatched_pixels": len(ink),
+            "unmatched_components": [],
+            "fully_exact": False,
+            "candidate_count": 0,
+            "selected": [],
+            "exact_cover_path": "shared-miss",
+        }
+
+    baseline, selected, placements_tested = result
+    covered = set().union(*(match.pixels for match in selected)) if selected else set()
+    return {
+        **base,
+        "baseline": baseline,
+        "covered_pixels": len(covered),
+        "unmatched_pixels": len(ink - covered),
+        "unmatched_components": [],
+        "fully_exact": covered == ink,
+        "candidate_count": placements_tested,
+        "selected": selected,
+        "exact_cover_path": "shared-prioritized",
+    }
