@@ -2,9 +2,10 @@ from __future__ import annotations
 
 """Report bit-exact glyph models whose metadata disagree.
 
-Models are grouped solely by their baseline-relative pixel raster.  A group is
-reported when two or more surviving models have different label, role or
-style.  This tool is diagnostic only and never rewrites the facit.
+Models are grouped solely by their baseline-relative pixel raster, using the
+same set semantics as the OCR matcher. A group is reported when two or more
+models have different label, role or style. This tool is diagnostic only and
+never rewrites the facit.
 """
 
 import argparse
@@ -15,10 +16,16 @@ from .ocr_deduplicate_glyph_facit_v2 import (
     _load_monolithic,
     _load_split,
     _model_id_number,
-    _pixels,
     _source_key,
     _verify_monolithic_matches_split,
 )
+
+
+def _pixel_set(row: dict[str, Any]) -> frozenset[tuple[int, int]]:
+    return frozenset(
+        (int(x), int(y))
+        for x, y in row.get("pixels_relative_to_baseline") or []
+    )
 
 
 def _metadata(row: dict[str, Any]) -> tuple[str, str, str]:
@@ -58,9 +65,9 @@ def main() -> int:
     rows = _load_split(args.split_facit)
     _verify_monolithic_matches_split(monolithic, rows)
 
-    groups: dict[tuple[tuple[int, int], ...], list[tuple[Path, dict[str, Any]]]] = {}
+    groups: dict[frozenset[tuple[int, int]], list[tuple[Path, dict[str, Any]]]] = {}
     for item in rows:
-        groups.setdefault(_pixels(item[1]), []).append(item)
+        groups.setdefault(_pixel_set(item[1]), []).append(item)
 
     conflicts = [
         group
@@ -77,7 +84,7 @@ def main() -> int:
         roles = sorted({str(row.get("role") or "unknown") for _path, row in group})
         styles = sorted({str(row.get("style") or "roman") for _path, row in group})
         print(
-            f"bitexact-conflict: n={index} pixels={len(_pixels(first))} models={len(group)} "
+            f"bitexact-conflict: n={index} pixels={len(_pixel_set(first))} models={len(group)} "
             f"labels={labels!r} roles={roles!r} styles={styles!r}",
             flush=True,
         )
@@ -89,10 +96,12 @@ def main() -> int:
             shown = [_source_summary(source) for source in sources[:4]]
             if len(sources) > 4:
                 shown.append(f"+{len(sources) - 4} more")
+            raw_pixels = row.get("pixels_relative_to_baseline") or []
+            repeated = len(raw_pixels) - len(_pixel_set(row))
             print(
                 f"  model=g{model_id:06d}{'*' if reviewed else ''} "
                 f"label={label!r} role={role} style={style} sources={len(sources)} "
-                f"path={path}"
+                f"repeated_pixels={repeated} path={path}"
                 + (f" source=[{' | '.join(shown)}]" if shown else ""),
                 flush=True,
             )
