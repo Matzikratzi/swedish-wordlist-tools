@@ -32,6 +32,15 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _source_record(sources):
+    if sources is None or isinstance(sources, (str, int, float, bool)):
+        return sources
+    try:
+        return list(sources)
+    except TypeError:
+        return sources
+
+
 def _match_record(match) -> dict:
     return {
         "label": match.label,
@@ -39,7 +48,7 @@ def _match_record(match) -> dict:
         "x": int(match.x),
         "baseline": int(match.baseline),
         "model_pixels": int(match.model_pixels),
-        "sources": list(match.sources),
+        "sources": _source_record(match.sources),
     }
 
 
