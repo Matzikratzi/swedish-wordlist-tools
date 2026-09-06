@@ -7,12 +7,12 @@ reference row when the current shared OCR parser:
 
 * produces exactly the same text as the reference;
 * fully covers the current source row exactly; and
-* differs only in pixel accounting.
+* has different source/covered pixel counts than the frozen reference.
 
-Rows with text differences, non-exact OCR, missing rows, or extra rows are left
-untouched and reported as unresolved.  This is intended for repairing frozen
-references created while the old post-match horizontal compaction could discard
-already matched left-edge pixels.
+Rows with text differences, non-exact OCR, missing rows, extra rows, or only an
+old ``exact`` flag are left untouched.  This is intended for repairing frozen
+references created while older crop/compaction logic could discard already
+matched edge pixels.
 """
 
 import argparse
@@ -63,19 +63,26 @@ def _repair_page(reference: dict, actual: dict) -> tuple[dict, list[tuple], list
 
         expected_source = int(expected.get("source_pixels") or 0)
         expected_covered = int(expected.get("covered_pixels") or 0)
-        expected_exact = bool(expected.get("exact", False))
-        if (
-            expected_source == source_pixels
-            and expected_covered == covered_pixels
-            and expected_exact is True
-        ):
+
+        # This command repairs pixel accounting only.  An old exact=False flag
+        # with identical pixel counts is intentionally not a REPAIR.
+        if expected_source == source_pixels and expected_covered == covered_pixels:
             continue
 
         row = repaired[key]
         row["source_pixels"] = source_pixels
         row["covered_pixels"] = covered_pixels
         row["exact"] = True
-        changed.append((key, expected_source, source_pixels, str(observed.get("text") or "")))
+        changed.append(
+            (
+                key,
+                expected_source,
+                source_pixels,
+                expected_covered,
+                covered_pixels,
+                str(observed.get("text") or ""),
+            )
+        )
 
     return repaired, changed, unresolved
 
@@ -123,10 +130,11 @@ def main() -> int:
         actual = _actual_rows(fast_rows, fallback_rows)
         repaired, changed, unresolved = _repair_page(reference, actual)
 
-        for key, old_pixels, new_pixels, text in changed:
+        for key, old_source, new_source, old_covered, new_covered, text in changed:
             print(
                 f"REPAIR page={page} column={key[0]} row={key[1]} "
-                f"source_pixels {old_pixels} -> {new_pixels} text={text!r}",
+                f"source_pixels {old_source} -> {new_source}; "
+                f"covered_pixels {old_covered} -> {new_covered}; text={text!r}",
                 flush=True,
             )
         for key, why, expected, observed in unresolved:
