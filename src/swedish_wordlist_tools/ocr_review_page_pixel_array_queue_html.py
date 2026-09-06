@@ -13,6 +13,12 @@ from PIL import Image
 from . import ocr_neighbor_row_raster as neighbor_raster
 from . import ocr_review_page_pixel_array_glyphs_html as page_editor
 from .ocr_find_unreviewed_glyph_rows import QUEUE_FORMAT
+from .ocr_page_cached_fast_path import bind_page_candidates
+from .ocr_priority_fast_path import (
+    classify_row_start,
+    observe_row_layout,
+    set_row_priority_hint,
+)
 
 
 def _load_queue(path: Path) -> list[dict]:
@@ -99,13 +105,7 @@ def _queue_card_image(context: dict, state: dict, *, extra_left: int = 2) -> str
 
 
 def _fine_review_display_state(context: dict, state: dict, *, extra_left: int = 2) -> dict:
-    """Return a render-only state with raw source columns before the OCR crop.
-
-    The real cached state is left untouched.  Coordinates used by the canvas are
-    shifted right by the number of added columns so glyph boxes and residuals
-    still line up with the original owned OCR image.  The prepended strip is raw
-    page source, which deliberately exposes pixels that OCR ownership omitted.
-    """
+    """Return a render-only state with raw source columns before the OCR crop."""
     left, top, right, bottom = map(int, state["crop_box"])
     source_left = max(0, left - int(extra_left))
     pad = left - source_left
@@ -126,7 +126,6 @@ def _fine_review_display_state(context: dict, state: dict, *, extra_left: int = 
     out["crop_box"] = (source_left, top, right, bottom)
     out["crop_width"] = int(state["crop_width"]) + pad
     out["queue_fine_left_padding"] = pad
-
     out["source_ink_points"] = [
         [int(x) + pad, int(y)] for x, y in state.get("source_ink_points") or []
     ]
@@ -155,24 +154,12 @@ def main() -> int:
     )
     ap.add_argument("jsonl", type=Path)
     ap.add_argument("--queue", type=Path, required=True)
-    ap.add_argument(
-        "--queue-index",
-        type=int,
-        help="1-based queue entry to start at; selects its page automatically",
-    )
-    ap.add_argument(
-        "--page",
-        type=int,
-        help="queue page to review; defaults to the first page present in the queue",
-    )
+    ap.add_argument("--queue-index", type=int, help="1-based queue entry to start at; selects its page automatically")
+    ap.add_argument("--page", type=int, help="queue page to review; defaults to the first page present in the queue")
     ap.add_argument("--column", type=int, help="column of queued row to start at")
     ap.add_argument("--row", type=int, help="row of queued row to start at")
     ap.add_argument("--threshold", type=int, default=210)
-    ap.add_argument(
-        "--facit",
-        type=Path,
-        default=Path("glyphs/saol14-manual-glyph-facit.json"),
-    )
+    ap.add_argument("--facit", type=Path, default=Path("glyphs/saol14-manual-glyph-facit.json"))
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--no-browser", action="store_true")
@@ -180,7 +167,6 @@ def main() -> int:
 
     rows = _load_queue(args.queue)
     pages = sorted({int(item["page"]) for item in rows})
-
     if (args.column is None) != (args.row is None):
         ap.error("--column and --row must be given together")
     if args.queue_index is not None and (args.page is not None or args.column is not None):
@@ -196,12 +182,9 @@ def main() -> int:
         selected_page = int(args.page) if args.page is not None else pages[0]
 
     selected_rows = [item for item in rows if int(item["page"]) == selected_page]
-    selected = [(int(item["column"]), int(item["row"])) for item in selected_rows]
-    selected = list(dict.fromkeys(selected))
+    selected = list(dict.fromkeys((int(item["column"]), int(item["row"])) for item in selected_rows))
     if not selected:
-        raise ValueError(
-            f"queue has no rows on page {selected_page}; available pages: {pages}"
-        )
+        raise ValueError(f"queue has no rows on page {selected_page}; available pages: {pages}")
 
     if start_item is not None:
         start_position = (int(start_item["column"]), int(start_item["row"]))
@@ -209,8 +192,7 @@ def main() -> int:
         start_position = (int(args.column), int(args.row))
         if start_position not in selected:
             raise ValueError(
-                f"requested start row page={selected_page} column={args.column} row={args.row} "
-                "is not present in the review queue"
+                f"requested start row page={selected_page} column={args.column} row={args.row} is not present in the review queue"
             )
     else:
         start_position = selected[0]
@@ -240,22 +222,23 @@ def main() -> int:
         available = set(context["positions"])
         missing = [position for position in selected if position not in available]
         if missing:
-            raise ValueError(
-                f"queued rows are not present on page {page_number}: {missing}"
-            )
-        context["positions"] = [
-            position for position in context["positions"] if position in queued
-        ]
+            raise ValueError(f"queued rows are not present on page {page_number}: {missing}")
+        context["positions"] = [position for position in context["positions"] if position in queued]
         print(
-            f"review: queue {args.queue}: page {page_number}: "
-            f"visar endast {len(context['positions'])} kö-rader; "
-            "horisontell efterkompaktering AV; +2 råa källpixelkolumner visas",
+            f"review: queue {args.queue}: page {page_number}: visar endast {len(context['positions'])} kö-rader; "
+            "samma prioriterade radparser som batch; horisontell efterkompaktering AV; +2 råa källpixelkolumner visas",
             flush=True,
         )
         return context
 
     def load_with_mismatch(context, position, models):
+        bind_page_candidates(context, models)
+        kind = classify_row_start(context, position)
+        set_row_priority_hint(kind)
         state = original_loader(context, position, models)
+        state["row_priority_kind"] = kind
+        if state.get("fully_exact"):
+            observe_row_layout(context, state)
         state["queue_card_image"] = _queue_card_image(context, state, extra_left=2)
         mismatch = metadata.get(position)
         if mismatch:
@@ -267,11 +250,7 @@ def main() -> int:
 
     def render_with_mismatch(state, message=""):
         context = context_holder.get("context")
-        display_state = (
-            _fine_review_display_state(context, state, extra_left=2)
-            if context is not None
-            else state
-        )
+        display_state = _fine_review_display_state(context, state, extra_left=2) if context is not None else state
         document = original_render(display_state, message)
         banner = _mismatch_banner(state)
         if not banner:
@@ -281,19 +260,11 @@ def main() -> int:
         return banner + document
 
     def render_queue_packet(states, active_position, all_positions, message="", *, mode="all", anchor=None):
-        document = original_packet_render(
-            states, active_position, all_positions, message, mode=mode, anchor=anchor
-        )
+        document = original_packet_render(states, active_position, all_positions, message, mode=mode, anchor=anchor)
         for state in states:
             position = (int(state["column"]), int(state["row"]))
-            old = (
-                f'<img src="{state["image"]}" '
-                f'alt="kolumn {position[0]}, rad {position[1]}">'
-            )
-            new = (
-                f'<img src="{state.get("queue_card_image", state["image"])}" '
-                f'alt="kolumn {position[0]}, rad {position[1]}">'
-            )
+            old = f'<img src="{state["image"]}" alt="kolumn {position[0]}, rad {position[1]}">'
+            new = f'<img src="{state.get("queue_card_image", state["image"])}" alt="kolumn {position[0]}, rad {position[1]}">'
             if old not in document:
                 raise ValueError(f"could not find queue row-card image for {position}")
             document = document.replace(old, new, 1)
@@ -306,15 +277,9 @@ def main() -> int:
     page_editor.fast.ui.render_five_row_html = render_queue_packet
     neighbor_raster._compact_review_state = lambda _context, state: state
     argv = [
-        original_argv[0],
-        str(args.jsonl),
-        "--page", str(selected_page),
-        "--column", str(start_position[0]),
-        "--row", str(start_position[1]),
-        "--threshold", str(args.threshold),
-        "--facit", str(args.facit),
-        "--host", args.host,
-        "--port", str(args.port),
+        original_argv[0], str(args.jsonl), "--page", str(selected_page), "--column", str(start_position[0]),
+        "--row", str(start_position[1]), "--threshold", str(args.threshold), "--facit", str(args.facit),
+        "--host", args.host, "--port", str(args.port),
     ]
     if args.no_browser:
         argv.append("--no-browser")
@@ -322,8 +287,7 @@ def main() -> int:
     try:
         queue_number = queue_numbers.get((selected_page, start_position[0], start_position[1]))
         print(
-            f"review: queue pages={pages}; active page={selected_page}; rows={len(selected)}; "
-            f"start={start_position}; queue-index={queue_number}/{len(rows)}",
+            f"review: queue pages={pages}; active page={selected_page}; rows={len(selected)}; start={start_position}; queue-index={queue_number}/{len(rows)}",
             flush=True,
         )
         return page_editor.main()
