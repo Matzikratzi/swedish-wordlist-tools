@@ -2,11 +2,9 @@ from __future__ import annotations
 
 """Fast regression scan for already-known facsimile pages.
 
-This path is intentionally bounded.  It runs the page-cached exact-cover fast
-path first.  On a miss it may try a small fixed number of horizontal row-boundary
-repairs, each verified only with the same fast exact path.  It never enters the
-exhaustive safe-group fallback.  A row that still cannot be proved exact is
-reported as unresolved/regression and the scan continues.
+This path is intentionally bounded. It runs the same shared prioritized row
+parser as the editor, with the batch's exact-cover callable injected so benchmark
+ordering experiments remain possible without changing parsing rules.
 """
 
 import argparse
@@ -20,11 +18,11 @@ from .ocr_fast_boundary_repair import try_fast_boundary_repair
 from .ocr_find_unreviewed_glyph_rows import _available_pages, _selected_pages
 from .ocr_glyph_review_delete import load_facit_with_typography
 from .ocr_page_cached_fast_path import (
+    analyse_row_prioritized,
     bind_page_candidates,
     page_cached_prioritized_fast_exact_cover,
 )
 from .ocr_priority_fast_path import classify_row_start, set_row_priority_hint
-from .ocr_probe_row_glyphs import row_ink
 
 
 @dataclass(frozen=True)
@@ -46,62 +44,13 @@ class FastRegressionRow:
 
 
 def analyse_row_fast_only(crop, models, *, threshold: int = 210) -> dict:
-    """Return the normal analyser shape without any exhaustive fallback."""
-    ink = row_ink(crop, threshold=threshold)
-    if not ink:
-        return {
-            "baseline": None,
-            "source_pixels": 0,
-            "covered_pixels": 0,
-            "unmatched_pixels": 0,
-            "unmatched_components": [],
-            "fully_exact": True,
-            "candidate_count": 0,
-            "selected": [],
-            "ink": ink,
-            "safe_groups": [],
-            "safe_group_count": 0,
-            "exact_fast_path": True,
-            "exact_cover_path": "fast-regression-empty",
-        }
-
-    result = page_cached_prioritized_fast_exact_cover(
-        ink, crop.width, crop.height, models
+    """Use the shared editor/batch parser with the active batch exact-cover path."""
+    return analyse_row_prioritized(
+        crop,
+        models,
+        threshold=threshold,
+        exact_cover=page_cached_prioritized_fast_exact_cover,
     )
-    if result is None:
-        return {
-            "baseline": None,
-            "source_pixels": len(ink),
-            "covered_pixels": 0,
-            "unmatched_pixels": len(ink),
-            "unmatched_components": [],
-            "fully_exact": False,
-            "candidate_count": 0,
-            "selected": [],
-            "ink": ink,
-            "safe_groups": [],
-            "safe_group_count": 0,
-            "exact_fast_path": True,
-            "exact_cover_path": "fast-regression-miss",
-        }
-
-    baseline, selected, placements_tested = result
-    covered = set().union(*(match.pixels for match in selected)) if selected else set()
-    return {
-        "baseline": baseline,
-        "source_pixels": len(ink),
-        "covered_pixels": len(covered),
-        "unmatched_pixels": len(ink - covered),
-        "unmatched_components": [],
-        "fully_exact": covered == ink,
-        "candidate_count": placements_tested,
-        "selected": selected,
-        "ink": ink,
-        "safe_groups": [],
-        "safe_group_count": 0,
-        "exact_fast_path": True,
-        "exact_cover_path": "fast-regression",
-    }
 
 
 @contextmanager
