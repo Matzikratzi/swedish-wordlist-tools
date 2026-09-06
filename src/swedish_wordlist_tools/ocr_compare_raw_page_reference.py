@@ -7,6 +7,10 @@ page-absolute, so baseline numbers are intentionally not compared directly.
 Instead each solved row is compared by the ordered glyph signature
 ``(label, model_pixels)``.  For current glyphs we also report the absolute
 vertical pixel extent, making descender/border mistakes visible immediately.
+
+The detailed reconstruction deliberately uses the same maximal facit selection
+as the active sequential matcher.  Otherwise this diagnostic can report stale
+subset-first glyph choices even when row discovery itself is using newer rules.
 """
 
 import argparse
@@ -17,6 +21,7 @@ from pathlib import Path
 
 from . import ocr_raw_page_baseline_debug as debug
 from . import ocr_sequential_raw_page_rows as scanner
+from . import ocr_sequential_raw_page_rows_exactmatch as active_matcher
 from . import ocr_priority_fast_path as priority
 from .ocr_raw_page_baseline_row import _raw_ink
 
@@ -51,29 +56,30 @@ def _detailed_walk(raw, baseline, models, left, right, anchor_x, first_candidate
 
     while cursor < right:
         if not matches and first_candidates is not None:
-            candidates = first_candidates
+            candidates = tuple(first_candidates)
         else:
-            candidates = scanner.cached._iter_candidates(
-                page_candidates,
-                first_glyph=not matches,
-                previous_style=previous_style,
-                row_kind="unknown",
-                leading_homonym_seen=False,
-                baseline_established=True,
+            candidates = tuple(
+                scanner.cached._iter_candidates(
+                    page_candidates,
+                    first_glyph=not matches,
+                    previous_style=previous_style,
+                    row_kind="unknown",
+                    leading_homonym_seen=False,
+                    baseline_established=True,
+                )
             )
 
-        chosen = None
-        for model, min_x, _left_pixels in candidates:
-            x0 = cursor - min_x
-            if x0 < left or x0 + model.width > right:
-                continue
-            placed = {(x0 + mx, baseline + my) for mx, my in model.pixels}
-            if placed and placed.issubset(remaining):
-                chosen = (model, x0, placed)
-                break
+        chosen = active_matcher._best_subset_candidate(
+            candidates,
+            cursor=cursor,
+            baseline=baseline,
+            raw=remaining,
+            left=left,
+            right=right,
+        )
 
         if chosen is not None:
-            model, x0, placed = chosen
+            model, placed, x0 = chosen
             remaining.difference_update(placed)
             ys = [y for _x, y in placed]
             matches.append(
@@ -85,6 +91,8 @@ def _detailed_walk(raw, baseline, models, left, right, anchor_x, first_candidate
                     "x0": x0,
                     "y_min": min(ys),
                     "y_max": max(ys),
+                    "baseline_offset_min": min(ys) - baseline,
+                    "baseline_offset_max": max(ys) - baseline,
                     "placed": placed,
                 }
             )
@@ -127,6 +135,8 @@ def _homonym_match(raw, baseline, models, left, text_start_x):
         "x0": x0,
         "y_min": min(ys),
         "y_max": max(ys),
+        "baseline_offset_min": min(ys) - baseline,
+        "baseline_offset_max": max(ys) - baseline,
         "placed": placed,
     }
 
@@ -180,6 +190,7 @@ def _glyph_text(g):
     return (
         f"{g['label']!r}/{g['model_pixels']}px"
         f"@x={g['x0']} y={g['y_min']}..{g['y_max']}"
+        f" rel={g['baseline_offset_min']}..{g['baseline_offset_max']}"
         f" id={g['model_id']!r}"
     )
 
