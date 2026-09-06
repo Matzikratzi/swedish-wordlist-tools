@@ -10,6 +10,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from . import ocr_neighbor_row_raster as neighbor_raster
 from . import ocr_review_page_pixel_array_glyphs_html as page_editor
 from .ocr_find_unreviewed_glyph_rows import QUEUE_FORMAT
 
@@ -78,53 +79,60 @@ def _centered_three_positions(positions, current, size=3):
     return positions[start : start + 3]
 
 
-def _queue_card_image(context: dict, state: dict, *, extra_left: int = 2) -> str:
-    """Prepend raw source columns to the large clickable queue-row image."""
+def _fixed_column_left(context: dict, column: int) -> int:
+    """Return one stable facsimile x coordinate for every row in a column.
+
+    The shared review geometry already estimates the dominant headword start for
+    the physical column and places its lexical review edge 15 source pixels to
+    the left.  Reuse that exact page coordinate here instead of deriving a
+    row-specific crop.  Consequently homonym digits, punctuation and forgotten
+    pixels are always viewed against the same left edge.
+    """
+    return int(neighbor_raster._column_review_left(context, int(column)))
+
+
+def _fixed_left_image(context: dict, state: dict, fixed_left: int) -> tuple[str, int]:
+    """Render from a fixed page x while preserving the owned OCR crop to its right."""
     left, top, right, bottom = map(int, state["crop_box"])
-    source_left = max(0, left - int(extra_left))
-    strip_width = left - source_left
+    fixed_left = max(0, min(int(fixed_left), left))
+    pad = left - fixed_left
     owners = context.get("pixel_owners")
-    if strip_width <= 0 or owners is None:
-        return str(state["image"])
+    if owners is None:
+        return str(state["image"]), 0
 
     owned = owners.render_owner_crop(
         row_index=int(state["row"]), box=(left, top, right, bottom)
     ).convert("L")
-    strip = context["page"].crop((source_left, top, left, bottom)).convert("L")
-    combined = Image.new("L", (strip.width + owned.width, owned.height), 255)
-    combined.paste(strip, (0, 0))
-    combined.paste(owned, (strip.width, 0))
-    return page_editor.fast.legacy._png_data_uri(combined)
+    if pad <= 0:
+        return page_editor.fast.legacy._png_data_uri(owned), 0
+
+    raw_left = context["page"].crop((fixed_left, top, left, bottom)).convert("L")
+    combined = Image.new("L", (pad + owned.width, owned.height), 255)
+    combined.paste(raw_left, (0, 0))
+    combined.paste(owned, (pad, 0))
+    return page_editor.fast.legacy._png_data_uri(combined), pad
 
 
-def _fine_review_display_state(context: dict, state: dict, *, extra_left: int = 2) -> dict:
-    """Return a render-only state with raw source columns before the OCR crop.
+def _queue_card_image(context: dict, state: dict) -> str:
+    fixed_left = _fixed_column_left(context, int(state["column"]))
+    image, _pad = _fixed_left_image(context, state, fixed_left)
+    return image
 
-    The real cached state is left untouched.  Coordinates used by the canvas are
-    shifted right by the number of added columns so glyph boxes and residuals
-    still line up with the original owned OCR image.  The prepended strip is raw
-    page source, which deliberately exposes pixels that OCR ownership omitted.
-    """
-    left, top, right, bottom = map(int, state["crop_box"])
-    source_left = max(0, left - int(extra_left))
-    pad = left - source_left
-    owners = context.get("pixel_owners")
-    if pad <= 0 or owners is None:
+
+def _fine_review_display_state(context: dict, state: dict) -> dict:
+    """Return a render-only state using the column's fixed facsimile left edge."""
+    fixed_left = _fixed_column_left(context, int(state["column"]))
+    image, pad = _fixed_left_image(context, state, fixed_left)
+    if pad <= 0:
         return state
 
-    owned = owners.render_owner_crop(
-        row_index=int(state["row"]), box=(left, top, right, bottom)
-    ).convert("L")
-    strip = context["page"].crop((source_left, top, left, bottom)).convert("L")
-    combined = Image.new("L", (pad + owned.width, owned.height), 255)
-    combined.paste(strip, (0, 0))
-    combined.paste(owned, (pad, 0))
-
+    left, top, right, bottom = map(int, state["crop_box"])
     out = dict(state)
-    out["image"] = page_editor.fast.legacy._png_data_uri(combined)
-    out["crop_box"] = (source_left, top, right, bottom)
+    out["image"] = image
+    out["crop_box"] = (fixed_left, top, right, bottom)
     out["crop_width"] = int(state["crop_width"]) + pad
     out["queue_fine_left_padding"] = pad
+    out["queue_fixed_page_left"] = fixed_left
 
     out["source_ink_points"] = [
         [int(x) + pad, int(y)] for x, y in state.get("source_ink_points") or []
@@ -235,6 +243,11 @@ def main() -> int:
     def build_queued_page_context(jsonl: Path, page_number: int, threshold: int = 210):
         context = original_build(jsonl, page_number, threshold)
         context_holder["context"] = context
+        fixed_lefts = {
+            column: _fixed_column_left(context, column)
+            for column in range(len(context["row_map"].get("columns") or []))
+        }
+        context["queue_fixed_column_lefts"] = fixed_lefts
         available = set(context["positions"])
         missing = [position for position in selected if position not in available]
         if missing:
@@ -247,14 +260,15 @@ def main() -> int:
         print(
             f"review: queue {args.queue}: page {page_number}: "
             f"visar endast {len(context['positions'])} kö-rader; "
-            "+2 råa källpixelkolumner i vänsterkant på radkort och fingranskare",
+            f"fast faksimil-vänster per kolumn={fixed_lefts} (ca 15 px före huvudordsstart)",
             flush=True,
         )
         return context
 
     def load_with_mismatch(context, position, models):
         state = original_loader(context, position, models)
-        state["queue_card_image"] = _queue_card_image(context, state, extra_left=2)
+        state["queue_card_image"] = _queue_card_image(context, state)
+        state["queue_fixed_page_left"] = _fixed_column_left(context, int(position[0]))
         mismatch = metadata.get(position)
         if mismatch:
             state["benchmark_mismatch"] = mismatch
@@ -266,7 +280,7 @@ def main() -> int:
     def render_with_mismatch(state, message=""):
         context = context_holder.get("context")
         display_state = (
-            _fine_review_display_state(context, state, extra_left=2)
+            _fine_review_display_state(context, state)
             if context is not None
             else state
         )
