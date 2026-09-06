@@ -1,18 +1,20 @@
 from __future__ import annotations
 
-"""Benchmark safe x-islands with at most one permanent +1 baseline shift.
+"""Benchmark safe x-islands with one deterministic permanent +1 baseline shift.
 
 A blank x-run wider than every learned glyph's internal blank run proves that
-no glyph can cross it.  Such gaps may split the row into combinatorially
-independent islands, but they do *not* make baseline arbitrary:
+no glyph can cross it. Such gaps split the row into combinatorially independent
+islands, but baseline remains globally constrained:
 
 * the first island establishes baseline B;
-* every later island must use B, until optionally one gap performs B -> B+1;
-* after that single downshift, every remaining island must stay on B+1.
+* later islands are tested on B from left to right;
+* at the first island that cannot be solved exactly on B, B+1 is tried once;
+* if B+1 succeeds, the downshift is locked and all remaining islands must use
+  B+1;
+* there is no upward shift and no second shift.
 
-There is no upward shift and no second shift.  Every island is still required
-to cover its source ink exactly.  If this strict model cannot prove the row,
-the unchanged existing analyser remains authoritative.
+Every island must still cover its source ink exactly. If this strict model
+cannot prove the row, the unchanged existing analyser remains authoritative.
 
 The wrapper delegates to the monotonic-boundary benchmark, retaining live row
 logging, regression comparison, and TOP 4 slow-row reporting.
@@ -35,7 +37,7 @@ from .ocr_probe_row_glyphs import row_ink
 
 
 _STATS: Counter[str] = Counter()
-_SLOW_ROWS: list[tuple[float, int, int, str]] = []
+_SLOW_ROWS: list[tuple[float, int, int | None, str]] = []
 
 
 def _covered(matches) -> set[tuple[int, int]]:
@@ -51,20 +53,75 @@ def _shift_match(match, dx: int):
     )
 
 
-def _exact_solutions_by_baseline(local_ink, width: int, height: int, models):
-    """Return every baseline that has a complete exact solution for one island."""
+def _exact_solution_at_baseline(local_ink, width: int, height: int, models, baseline: int):
+    """Return one complete exact solution at ``baseline`` or None.
+
+    Candidate generation is still exact and unchanged. The important
+    difference from the previous experiment is that we never enumerate all
+    possible exact baselines for an island and never reconsider an island for
+    multiple candidate switch points.
+    """
+    candidates, _bounds = exact_matches_by_safe_gaps(local_ink, width, height, models)
+    same = [match for match in candidates if int(match.baseline) == int(baseline)]
+    if not same:
+        return None, len(candidates)
+    chosen = select_best_disjoint_exact_for_ink(same, local_ink)
+    chosen = _drop_partial_component_matches(chosen, local_ink)
+    if _covered(chosen) != local_ink:
+        return None, len(candidates)
+    return chosen, len(candidates)
+
+
+def _first_island_solutions(local_ink, width: int, height: int, models):
+    """Return exact first-island solutions keyed by baseline.
+
+    Only the first island is allowed to establish B. This is the one place
+    where multiple baselines may be considered. Subsequent islands are tested
+    only at the single current baseline (B or, after the shift, B+1).
+    """
     candidates, _bounds = exact_matches_by_safe_gaps(local_ink, width, height, models)
     by_baseline: dict[int, list] = {}
-    baselines = sorted({int(match.baseline) for match in candidates})
-    for baseline in baselines:
+    for baseline in sorted({int(match.baseline) for match in candidates}):
         same = [match for match in candidates if int(match.baseline) == baseline]
-        if not same:
-            continue
         chosen = select_best_disjoint_exact_for_ink(same, local_ink)
         chosen = _drop_partial_component_matches(chosen, local_ink)
         if _covered(chosen) == local_ink:
             by_baseline[baseline] = chosen
     return by_baseline, len(candidates)
+
+
+def _try_deterministic_plan(groups, crop_height: int, model_rows, base: int, first_selected):
+    selected = [_shift_match(match, int(groups[0][0])) for match in first_selected]
+    candidate_count = 0
+    shifted = False
+    switch_index: int | None = None
+
+    for index, (left, right, local_ink) in enumerate(groups[1:], start=1):
+        width = int(right) - int(left)
+        wanted = int(base) + (1 if shifted else 0)
+        local_selected, candidates = _exact_solution_at_baseline(
+            local_ink, width, crop_height, model_rows, wanted
+        )
+        candidate_count += int(candidates)
+
+        if local_selected is None and not shifted:
+            # First failure at B is the only place a downshift can begin. Try
+            # exactly B+1 once, then lock the state permanently on success.
+            local_selected, candidates2 = _exact_solution_at_baseline(
+                local_ink, width, crop_height, model_rows, int(base) + 1
+            )
+            candidate_count += int(candidates2)
+            if local_selected is not None:
+                shifted = True
+                switch_index = index
+                wanted = int(base) + 1
+
+        if local_selected is None:
+            return None, candidate_count, switch_index
+
+        selected.extend(_shift_match(match, int(left)) for match in local_selected)
+
+    return selected, candidate_count, switch_index
 
 
 def _strict_single_downshift_analyser(crop, models, *, threshold: int = 210) -> dict:
@@ -87,39 +144,25 @@ def _strict_single_downshift_analyser(crop, models, *, threshold: int = 210) -> 
     _STATS["islands"] += len(groups)
     _STATS["max_islands"] = max(_STATS["max_islands"], len(groups))
 
-    island_solutions = []
-    candidate_count = 0
-    for left, right, local_ink in groups:
-        solutions, candidates = _exact_solutions_by_baseline(
-            local_ink, int(right) - int(left), crop.height, model_rows
+    first_left, first_right, first_ink = groups[0]
+    first_solutions, first_candidates = _first_island_solutions(
+        first_ink, int(first_right) - int(first_left), crop.height, model_rows
+    )
+    if not first_solutions:
+        _STATS["fallback_rows"] += 1
+        return baseline_fallback._single_downshift_original(
+            crop, model_rows, threshold=threshold
         )
-        candidate_count += int(candidates)
-        if not solutions:
-            _STATS["fallback_rows"] += 1
-            return baseline_fallback._single_downshift_original(
-                crop, model_rows, threshold=threshold
-            )
-        island_solutions.append((int(left), int(right), local_ink, solutions))
 
-    # First island establishes B.  A shift may happen only after an island,
-    # hence switch_index is in 1..N-1; N means no shift at all.
-    first_solutions = island_solutions[0][3]
     chosen_plan = None
-    for base in sorted(first_solutions):
-        for switch_index in range(len(island_solutions), 0, -1):
-            selected = []
-            ok = True
-            for index, (left, _right, _local_ink, solutions) in enumerate(island_solutions):
-                wanted = int(base) if index < switch_index else int(base) + 1
-                local_selected = solutions.get(wanted)
-                if local_selected is None:
-                    ok = False
-                    break
-                selected.extend(_shift_match(match, left) for match in local_selected)
-            if ok:
-                chosen_plan = (int(base), int(switch_index), selected)
-                break
-        if chosen_plan is not None:
+    candidate_count = int(first_candidates)
+    for base, first_selected in first_solutions.items():
+        plan, extra_candidates, switch_index = _try_deterministic_plan(
+            groups, crop.height, model_rows, int(base), first_selected
+        )
+        candidate_count += int(extra_candidates)
+        if plan is not None:
+            chosen_plan = (int(base), switch_index, plan)
             break
 
     if chosen_plan is None:
@@ -138,7 +181,7 @@ def _strict_single_downshift_analyser(crop, models, *, threshold: int = 210) -> 
             crop, model_rows, threshold=threshold
         )
 
-    shifted = switch_index < len(island_solutions)
+    shifted = switch_index is not None
     _STATS["strict_exact_rows"] += 1
     _STATS["shifted_rows" if shifted else "unshifted_rows"] += 1
     elapsed = perf_counter() - started
@@ -148,8 +191,8 @@ def _strict_single_downshift_analyser(crop, models, *, threshold: int = 210) -> 
     print(
         "single-downshift: "
         f"islands={len(groups)} base={base} "
-        f"shift_after={'none' if not shifted else switch_index - 1} "
-        f"next_baseline={'none' if not shifted else base + 1} "
+        f"shift_after={'none' if switch_index is None else switch_index - 1} "
+        f"next_baseline={'none' if switch_index is None else base + 1} "
         f"time={elapsed:.4f}s text={''.join(match.label for match in selected)!r}",
         flush=True,
     )
@@ -167,15 +210,15 @@ def _strict_single_downshift_analyser(crop, models, *, threshold: int = 210) -> 
         "safe_groups": [(int(left), int(right)) for left, right, _local in groups],
         "safe_group_count": len(groups),
         "exact_fast_path": False,
-        "exact_cover_path": "single-downshift-safe-islands",
+        "exact_cover_path": "single-downshift-safe-islands-deterministic",
         "baseline_segments": [
             {"left": 0, "right": crop.width, "baseline": base}
-        ] if not shifted else [
-            {"left": 0, "right": island_solutions[switch_index][0], "baseline": base},
-            {"left": island_solutions[switch_index][0], "right": crop.width, "baseline": base + 1},
+        ] if switch_index is None else [
+            {"left": 0, "right": int(groups[switch_index][0]), "baseline": base},
+            {"left": int(groups[switch_index][0]), "right": crop.width, "baseline": base + 1},
         ],
         "single_downshift_base": base,
-        "single_downshift_switch_index": None if not shifted else switch_index,
+        "single_downshift_switch_index": switch_index,
     }
 
 
