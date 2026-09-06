@@ -7,3 +7,10 @@ __version__ = "0.1.0"
 from .ocr_left_crop_safety import install_left_crop_safety_margin
 
 install_left_crop_safety_margin()
+
+# A completely unrecognized row has no OCR baseline. The glyph editor must still
+# be able to bootstrap it by saving a manually selected glyph against the row's
+# geometric support line (or an explicitly edited baseline).
+from .ocr_manual_baseline_editor import install_manual_baseline_editor
+
+install_manual_baseline_editor()
