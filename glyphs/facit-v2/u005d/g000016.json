@@ -1,0 +1,180 @@
+{
+  "label": "]",
+  "role": "unknown",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -11
+    ],
+    [
+      0,
+      4
+    ],
+    [
+      1,
+      -11
+    ],
+    [
+      1,
+      4
+    ],
+    [
+      2,
+      -11
+    ],
+    [
+      2,
+      -10
+    ],
+    [
+      2,
+      -9
+    ],
+    [
+      2,
+      -8
+    ],
+    [
+      2,
+      -7
+    ],
+    [
+      2,
+      -6
+    ],
+    [
+      2,
+      -5
+    ],
+    [
+      2,
+      -4
+    ],
+    [
+      2,
+      -3
+    ],
+    [
+      2,
+      -2
+    ],
+    [
+      2,
+      -1
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      2,
+      1
+    ],
+    [
+      2,
+      2
+    ],
+    [
+      2,
+      3
+    ],
+    [
+      2,
+      4
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "[-i't-]",
+      "jsonl_word": "+t",
+      "jsonl_similarity": 0.667,
+      "page": 1,
+      "subnr": "ocr-4-1-8-7",
+      "source_id": "page:1:ocr:4:1:8:7",
+      "page_word_bbox": [
+        342,
+        185,
+        35,
+        98
+      ],
+      "suggestion": ""
+    },
+    {
+      "expected_word": "abdomimal[-a'l]",
+      "jsonl_word": "abdom·in·al",
+      "jsonl_similarity": 0.8,
+      "page": 1,
+      "subnr": "ocr-4-1-21-4",
+      "source_id": "page:1:ocr:4:1:21:4",
+      "page_word_bbox": [
+        265,
+        403,
+        112,
+        121
+      ],
+      "suggestion": ""
+    },
+    {
+      "expected_word": "[abesi'ni-]namn",
+      "jsonl_word": "Abessini·en",
+      "jsonl_similarity": 0.762,
+      "page": 1,
+      "subnr": "ocr-6-1-2-2",
+      "source_id": "page:1:ocr:6:1:2:2",
+      "page_word_bbox": [
+        345,
+        555,
+        106,
+        119
+      ],
+      "suggestion": "e{b}"
+    },
+    {
+      "expected_word": "[abesi'nska]s.",
+      "jsonl_word": "abessinska",
+      "jsonl_similarity": 0.9,
+      "page": 1,
+      "subnr": "ocr-11-3-1-7",
+      "source_id": "page:1:ocr:11:3:1:7",
+      "page_word_bbox": [
+        344,
+        687,
+        95,
+        107
+      ],
+      "suggestion": ""
+    },
+    {
+      "expected_word": "[-en't]",
+      "jsonl_word": "+en",
+      "jsonl_similarity": 0.8,
+      "page": 1,
+      "subnr": "ocr-11-4-2-6",
+      "source_id": "page:1:ocr:11:4:2:6",
+      "page_word_bbox": [
+        340,
+        776,
+        41,
+        113
+      ],
+      "suggestion": ""
+    },
+    {
+      "expected_word": "abonment[-en't]s",
+      "jsonl_word": "abonn·ent",
+      "jsonl_similarity": 0.7,
+      "page": 1,
+      "subnr": "ocr-4-1-21-7",
+      "source_id": "page:1:ocr:4:1:21:7",
+      "page_word_bbox": [
+        471,
+        403,
+        124,
+        107
+      ],
+      "suggestion": ""
+    }
+  ],
+  "reviewed": true,
+  "model_id": "g000016"
+}

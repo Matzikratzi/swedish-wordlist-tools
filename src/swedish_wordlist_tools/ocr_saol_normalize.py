@@ -1,0 +1,108 @@
+from __future__ import annotations
+
+import re
+import unicodedata
+
+from .ocr_tsv_articles import OcrArticle
+
+
+_BRACKETED = re.compile(r"\[[^\]]*\]")
+_WS = re.compile(r"\s+")
+
+# Characters that may appear as SAOL word-boundary/typographic separators or be
+# introduced by OCR for them. They are ignored in the broad fallback matching
+# form, but structural matching distinguishes SAOL's half and full boundary
+# marks whenever JSONL supplies them.
+_WORD_BOUNDARY_MARKS = str.maketrans("", "", "|¦‖ˈˌ·•")
+_HALF_BOUNDARY_SUBSTITUTES = str.maketrans({
+    "¦": "·",
+    "ˈ": "·",
+    "ˌ": "·",
+    "•": "·",
+})
+_FULL_BOUNDARY_SUBSTITUTES = str.maketrans({
+    "‖": "|",
+})
+_DASHES = str.maketrans({
+    "‐": "-",
+    "‑": "-",
+    "‒": "-",
+    "–": "-",
+    "—": "-",
+    "−": "-",
+})
+
+
+def normalize_text_for_match(text: str) -> str:
+    """Return a broad, conservative SAOL/OCR matching form.
+
+    This is deliberately lossy and MUST NOT be used as reconstructed source
+    text. It exists only to compare known JSONL text/headwords with OCR when
+    typographic word-boundary marks are unreliable or missing in OCR.
+    """
+
+    text = unicodedata.normalize("NFKC", text)
+    text = text.translate(_DASHES)
+    text = _BRACKETED.sub(" ", text)
+    text = text.translate(_WORD_BOUNDARY_MARKS)
+    text = text.casefold()
+    text = _WS.sub(" ", text).strip()
+    return text
+
+
+def normalize_headword_structure(text: str) -> str:
+    """Normalize a SAOL structural headword/split while preserving boundary strength.
+
+    JSONL distinguishes half boundary ``·`` from full boundary ``|`` and both
+    may occur in the same structural form, e.g. ``abs·cess|bild·ning``. Keep
+    that distinction. This function does not imply that the structured ``ord``
+    value is the literal bold headword printed first in the article; SAOL can
+    print a separate headword followed by an explicit split, e.g.
+    ``bollek uppdelas boll|lek``.
+    """
+
+    text = unicodedata.normalize("NFKC", text)
+    text = text.translate(_DASHES)
+    text = _BRACKETED.sub(" ", text)
+    text = text.translate(_HALF_BOUNDARY_SUBSTITUTES)
+    text = text.translate(_FULL_BOUNDARY_SUBSTITUTES)
+    text = text.casefold()
+    text = _WS.sub(" ", text).strip()
+    return text
+
+
+def printed_headword_for_match(text: str) -> str:
+    """Normalize the literal printed headword without deriving it from ``ord``.
+
+    Use JSONL ``normaliserat_ord`` (or an explicitly observed printed headword)
+    as this signal. In particular, do not infer ``bollek`` by rewriting
+    ``boll|lek``: the facsimile explicitly contains both pieces of information.
+    """
+
+    return normalize_text_for_match(text)
+
+
+def article_raw_lines(article: OcrArticle) -> list[str]:
+    return [" ".join(word.text for word in line.words) for line in article.lines]
+
+
+def article_text_for_match(article: OcrArticle) -> str:
+    """Flatten an OCR article for matching, joining likely line-broken words.
+
+    A trailing hyphen at a physical line break is treated as a continuation
+    marker for matching. This lets e.g. ``abro-`` + ``vinsch`` compare as
+    ``abrovinsch`` while preserving the original OCR separately.
+    """
+
+    lines = article_raw_lines(article)
+    if not lines:
+        return ""
+
+    joined = lines[0]
+    for line in lines[1:]:
+        stripped = joined.rstrip()
+        if stripped.endswith("-"):
+            joined = stripped[:-1] + line.lstrip()
+        else:
+            joined = stripped + " " + line.lstrip()
+    return normalize_text_for_match(joined)

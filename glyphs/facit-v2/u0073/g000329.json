@@ -1,0 +1,65 @@
+{
+  "label": "s",
+  "style": "italic",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -1
+    ],
+    [
+      1,
+      -1
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      -4
+    ],
+    [
+      2,
+      -3
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      -5
+    ],
+    [
+      3,
+      -2
+    ],
+    [
+      3,
+      0
+    ],
+    [
+      4,
+      -5
+    ],
+    [
+      4,
+      -1
+    ]
+  ],
+  "sources": [
+    {
+      "page": 16,
+      "column": 1,
+      "row": 48,
+      "review_selection": [
+        "U00"
+      ],
+      "review_pixel_count": 0,
+      "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00016.png"
+    }
+  ],
+  "role": "italic",
+  "reviewed": true,
+  "model_id": "g000329"
+}

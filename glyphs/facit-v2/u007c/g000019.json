@@ -1,0 +1,67 @@
+{
+  "label": "|",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -11
+    ],
+    [
+      0,
+      -10
+    ],
+    [
+      0,
+      -9
+    ],
+    [
+      0,
+      -8
+    ],
+    [
+      0,
+      -7
+    ],
+    [
+      0,
+      -6
+    ],
+    [
+      0,
+      -5
+    ],
+    [
+      0,
+      -4
+    ],
+    [
+      0,
+      -3
+    ],
+    [
+      0,
+      -2
+    ],
+    [
+      0,
+      -1
+    ],
+    [
+      0,
+      0
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "backljus",
+      "page": 71,
+      "subnr": 4974,
+      "source_id": "next20:10:71:4974",
+      "word_file": "words-next/n10-p71-sub4974-backljus.png"
+    }
+  ],
+  "role": "unknown",
+  "legacy_style": "bold",
+  "reviewed": true,
+  "style": "bold",
+  "model_id": "g000019"
+}

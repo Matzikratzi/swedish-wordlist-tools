@@ -1,0 +1,182 @@
+{
+  "label": "ö",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -4
+    ],
+    [
+      0,
+      -3
+    ],
+    [
+      0,
+      -2
+    ],
+    [
+      0,
+      -1
+    ],
+    [
+      1,
+      -5
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      -8
+    ],
+    [
+      2,
+      -6
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      -6
+    ],
+    [
+      3,
+      0
+    ],
+    [
+      4,
+      -6
+    ],
+    [
+      4,
+      -1
+    ],
+    [
+      5,
+      -8
+    ],
+    [
+      5,
+      -5
+    ],
+    [
+      5,
+      -4
+    ],
+    [
+      5,
+      -3
+    ],
+    [
+      5,
+      -2
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "behövde",
+      "page": 93,
+      "subnr": "6393",
+      "source_id": "7",
+      "word_file": "words/w00007-italic-sub6393-p93-c2-behövde.png"
+    },
+    {
+      "expected_word": "behövt",
+      "page": 93,
+      "subnr": "6393",
+      "source_id": "8",
+      "word_file": "words/w00008-italic-sub6393-p93-c2-behövt.png"
+    },
+    {
+      "expected_word": "fördrömt",
+      "page": 359,
+      "subnr": "24277",
+      "source_id": "55",
+      "word_file": "words/w00055-italic-sub24277-p359-c1-fördrömt.png"
+    },
+    {
+      "expected_word": "fördold",
+      "page": 359,
+      "subnr": "24303",
+      "source_id": "57",
+      "word_file": "words/w00057-italic-sub24303-p359-c1-fördold.png"
+    },
+    {
+      "expected_word": "fördömde",
+      "page": 359,
+      "subnr": "24304",
+      "source_id": "60",
+      "word_file": "words/w00060-italic-sub24304-p359-c1-fördömde.png"
+    },
+    {
+      "expected_word": "fördömt",
+      "page": 359,
+      "subnr": "24304",
+      "source_id": "61",
+      "word_file": "words/w00061-italic-sub24304-p359-c1-fördömt.png"
+    },
+    {
+      "expected_word": "fördömt",
+      "page": 359,
+      "subnr": "24305",
+      "source_id": "62",
+      "word_file": "words/w00062-italic-sub24305-p359-c1-fördömt.png"
+    },
+    {
+      "expected_word": "förnärmat",
+      "page": 372,
+      "subnr": "25209",
+      "source_id": "68",
+      "word_file": "words/w00068-italic-sub25209-p372-c1-förnärmat.png"
+    },
+    {
+      "expected_word": "förnöjde",
+      "page": 372,
+      "subnr": "25213",
+      "source_id": "69",
+      "word_file": "words/w00069-italic-sub25213-p372-c1-förnöjde.png"
+    },
+    {
+      "expected_word": "förnöjt",
+      "page": 372,
+      "subnr": "25213",
+      "source_id": "70",
+      "word_file": "words/w00070-italic-sub25213-p372-c1-förnöjt.png"
+    },
+    {
+      "expected_word": "förnöjt",
+      "page": 372,
+      "subnr": "25214",
+      "source_id": "71",
+      "word_file": "words/w00071-italic-sub25214-p372-c1-förnöjt.png"
+    },
+    {
+      "expected_word": "förnötte",
+      "page": 372,
+      "subnr": "25218",
+      "source_id": "72",
+      "word_file": "words/w00072-italic-sub25218-p372-c1-förnötte.png"
+    },
+    {
+      "expected_word": "förnött",
+      "page": 372,
+      "subnr": "25218",
+      "source_id": "73",
+      "word_file": "words/w00073-italic-sub25218-p372-c1-förnött.png"
+    },
+    {
+      "expected_word": "-stövarna",
+      "page": 1121,
+      "subnr": "79666",
+      "source_id": "117",
+      "word_file": "words/w00117-italic-sub79666-p1121-c1-u002dstövarna.png"
+    }
+  ],
+  "role": "unknown",
+  "legacy_style": "italic",
+  "reviewed": true,
+  "style": "italic",
+  "model_id": "g000092"
+}

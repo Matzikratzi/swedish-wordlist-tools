@@ -1,0 +1,87 @@
+{
+  "label": "I",
+  "style": "italic",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      0
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      -10
+    ],
+    [
+      2,
+      -5
+    ],
+    [
+      2,
+      -4
+    ],
+    [
+      2,
+      -3
+    ],
+    [
+      2,
+      -2
+    ],
+    [
+      2,
+      -1
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      -10
+    ],
+    [
+      3,
+      -9
+    ],
+    [
+      3,
+      -8
+    ],
+    [
+      3,
+      -7
+    ],
+    [
+      3,
+      -6
+    ],
+    [
+      3,
+      0
+    ],
+    [
+      4,
+      -10
+    ],
+    [
+      5,
+      -10
+    ]
+  ],
+  "sources": [
+    {
+      "page": 82,
+      "column": 2,
+      "row": 48,
+      "review_selection": [],
+      "review_pixel_count": 17,
+      "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00082.png"
+    }
+  ],
+  "role": "italic",
+  "model_id": "g000433",
+  "reviewed": true
+}

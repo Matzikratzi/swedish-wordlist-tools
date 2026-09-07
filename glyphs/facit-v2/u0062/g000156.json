@@ -1,0 +1,130 @@
+{
+  "label": "b",
+  "style": "italic",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -3
+    ],
+    [
+      0,
+      -2
+    ],
+    [
+      0,
+      -1
+    ],
+    [
+      1,
+      -11
+    ],
+    [
+      1,
+      -7
+    ],
+    [
+      1,
+      -6
+    ],
+    [
+      1,
+      -5
+    ],
+    [
+      1,
+      -4
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      -11
+    ],
+    [
+      2,
+      -10
+    ],
+    [
+      2,
+      -9
+    ],
+    [
+      2,
+      -8
+    ],
+    [
+      2,
+      -5
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      -12
+    ],
+    [
+      3,
+      -5
+    ],
+    [
+      3,
+      0
+    ],
+    [
+      4,
+      -6
+    ],
+    [
+      4,
+      -1
+    ],
+    [
+      5,
+      -6
+    ],
+    [
+      5,
+      -3
+    ],
+    [
+      5,
+      -2
+    ],
+    [
+      6,
+      -5
+    ],
+    [
+      6,
+      -4
+    ]
+  ],
+  "sources": [
+    {
+      "page": 1,
+      "column": 0,
+      "row": 6,
+      "review_selection": [
+        "U00"
+      ],
+      "review_pixel_count": 0,
+      "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+    },
+    {
+      "page": 1,
+      "column": 2,
+      "row": 30,
+      "review_selection": [
+        "U00"
+      ],
+      "review_pixel_count": 25,
+      "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+    }
+  ],
+  "reviewed": true,
+  "model_id": "g000156"
+}

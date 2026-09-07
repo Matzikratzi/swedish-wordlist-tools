@@ -1,0 +1,102 @@
+{
+  "label": "c",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -3
+    ],
+    [
+      0,
+      -2
+    ],
+    [
+      0,
+      -1
+    ],
+    [
+      1,
+      -5
+    ],
+    [
+      1,
+      -4
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      -5
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      -6
+    ],
+    [
+      3,
+      0
+    ],
+    [
+      4,
+      -6
+    ],
+    [
+      4,
+      -1
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "-olyckades",
+      "page": 372,
+      "subnr": "25220",
+      "source_id": "74",
+      "word_file": "words/w00074-italic-sub25220-p372-c1-u002dolyckades.png"
+    },
+    {
+      "expected_word": "-olyckats",
+      "page": 372,
+      "subnr": "25220",
+      "source_id": "75",
+      "word_file": "words/w00075-italic-sub25220-p372-c1-u002dolyckats.png"
+    },
+    {
+      "expected_word": "schweizarna",
+      "page": 1121,
+      "subnr": "79695",
+      "source_id": "122",
+      "word_file": "words/w00122-italic-sub79695-p1121-c3-schweizarna.png"
+    },
+    {
+      "expected_word": "schweiziskor",
+      "page": 1121,
+      "subnr": "79699",
+      "source_id": "124",
+      "word_file": "words/w00124-italic-sub79699-p1121-c3-schweiziskor.png"
+    },
+    {
+      "expected_word": "schäfrar",
+      "page": 1121,
+      "subnr": "79706",
+      "source_id": "125",
+      "word_file": "words/w00125-italic-sub79706-p1121-c3-schäfrar.png"
+    },
+    {
+      "expected_word": "-tecknen",
+      "page": 1558,
+      "subnr": "111664",
+      "source_id": "205",
+      "word_file": "words/w00205-italic-sub111664-p1558-c3-u002dtecknen.png"
+    }
+  ],
+  "role": "unknown",
+  "legacy_style": "italic",
+  "reviewed": true,
+  "style": "italic",
+  "model_id": "g000038"
+}

@@ -1,0 +1,90 @@
+{
+  "label": "e",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -4
+    ],
+    [
+      0,
+      -3
+    ],
+    [
+      0,
+      -2
+    ],
+    [
+      1,
+      -6
+    ],
+    [
+      1,
+      -5
+    ],
+    [
+      1,
+      -1
+    ],
+    [
+      2,
+      -7
+    ],
+    [
+      2,
+      -5
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      -7
+    ],
+    [
+      3,
+      -5
+    ],
+    [
+      3,
+      0
+    ],
+    [
+      4,
+      -7
+    ],
+    [
+      4,
+      -5
+    ],
+    [
+      4,
+      0
+    ],
+    [
+      5,
+      -6
+    ],
+    [
+      5,
+      -5
+    ],
+    [
+      5,
+      -1
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "zimbabwe",
+      "page": 1558,
+      "subnr": 420846,
+      "source_id": "next20:0:1558:420846",
+      "word_file": "words-next/n00-p1558-sub420846-zimbabwe.png"
+    }
+  ],
+  "role": "unknown",
+  "legacy_style": "roman",
+  "reviewed": true,
+  "model_id": "g000047"
+}

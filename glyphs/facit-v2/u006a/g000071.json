@@ -1,0 +1,92 @@
+{
+  "label": "j",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      3
+    ],
+    [
+      1,
+      -5
+    ],
+    [
+      1,
+      -1
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      1,
+      1
+    ],
+    [
+      1,
+      2
+    ],
+    [
+      2,
+      -6
+    ],
+    [
+      2,
+      -5
+    ],
+    [
+      2,
+      -4
+    ],
+    [
+      2,
+      -3
+    ],
+    [
+      2,
+      -2
+    ],
+    [
+      3,
+      -9
+    ],
+    [
+      3,
+      -6
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "förnöjde",
+      "page": 372,
+      "subnr": "25213",
+      "source_id": "69",
+      "word_file": "words/w00069-italic-sub25213-p372-c1-förnöjde.png"
+    },
+    {
+      "expected_word": "förnöjt",
+      "page": 372,
+      "subnr": "25213",
+      "source_id": "70",
+      "word_file": "words/w00070-italic-sub25213-p372-c1-förnöjt.png"
+    },
+    {
+      "expected_word": "förnöjt",
+      "page": 372,
+      "subnr": "25214",
+      "source_id": "71",
+      "word_file": "words/w00071-italic-sub25214-p372-c1-förnöjt.png"
+    },
+    {
+      "expected_word": "-baljor",
+      "page": 1558,
+      "subnr": "111645",
+      "source_id": "200",
+      "word_file": "words/w00200-italic-sub111645-p1558-c3-u002dbaljor.png"
+    }
+  ],
+  "role": "unknown",
+  "legacy_style": "italic",
+  "reviewed": true,
+  "style": "italic",
+  "model_id": "g000071"
+}

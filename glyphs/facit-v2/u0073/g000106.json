@@ -1,0 +1,205 @@
+{
+  "label": "s",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -1
+    ],
+    [
+      1,
+      -1
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      -5
+    ],
+    [
+      2,
+      -4
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      -6
+    ],
+    [
+      3,
+      -3
+    ],
+    [
+      3,
+      0
+    ],
+    [
+      4,
+      -6
+    ],
+    [
+      4,
+      -5
+    ],
+    [
+      4,
+      -2
+    ],
+    [
+      4,
+      -1
+    ]
+  ],
+  "sources": [
+    {
+      "expected_word": "behärskat",
+      "page": 93,
+      "subnr": "6381",
+      "source_id": "6",
+      "word_file": "words/w00006-italic-sub6381-p93-c1-behärskat.png"
+    },
+    {
+      "expected_word": "dessa",
+      "page": 199,
+      "subnr": "426026",
+      "source_id": "24",
+      "word_file": "words/w00024-italic-sub426026-p199-c3-dessa.png"
+    },
+    {
+      "expected_word": "desamma",
+      "page": 199,
+      "subnr": "426042",
+      "source_id": "28",
+      "word_file": "words/w00028-italic-sub426042-p199-c3-desamma.png"
+    },
+    {
+      "expected_word": "-står",
+      "page": 252,
+      "subnr": "16764",
+      "source_id": "40",
+      "word_file": "words/w00040-italic-sub16764-p252-c1-u002dstår.png"
+    },
+    {
+      "expected_word": "-olyckades",
+      "page": 372,
+      "subnr": "25220",
+      "source_id": "74",
+      "word_file": "words/w00074-italic-sub25220-p372-c1-u002dolyckades.png"
+    },
+    {
+      "expected_word": "-olyckats",
+      "page": 372,
+      "subnr": "25220",
+      "source_id": "75",
+      "word_file": "words/w00075-italic-sub25220-p372-c1-u002dolyckats.png"
+    },
+    {
+      "expected_word": "-beställde",
+      "page": 849,
+      "subnr": "59765",
+      "source_id": "100",
+      "word_file": "words/w00100-italic-sub59765-p849-c3-u002dbeställde.png"
+    },
+    {
+      "expected_word": "-beställt",
+      "page": 849,
+      "subnr": "59765",
+      "source_id": "101",
+      "word_file": "words/w00101-italic-sub59765-p849-c3-u002dbeställt.png"
+    },
+    {
+      "expected_word": "-strålar",
+      "page": 849,
+      "subnr": "59682",
+      "source_id": "92",
+      "word_file": "words/w00092-italic-sub59682-p849-c2-u002dstrålar.png"
+    },
+    {
+      "expected_word": "-buskar",
+      "page": 1121,
+      "subnr": "79659",
+      "source_id": "114",
+      "word_file": "words/w00114-italic-sub79659-p1121-c1-u002dbuskar.png"
+    },
+    {
+      "expected_word": "-stövarna",
+      "page": 1121,
+      "subnr": "79666",
+      "source_id": "117",
+      "word_file": "words/w00117-italic-sub79666-p1121-c1-u002dstövarna.png"
+    },
+    {
+      "expected_word": "schweizarna",
+      "page": 1121,
+      "subnr": "79695",
+      "source_id": "122",
+      "word_file": "words/w00122-italic-sub79695-p1121-c3-schweizarna.png"
+    },
+    {
+      "expected_word": "schweiziskor",
+      "page": 1121,
+      "subnr": "79699",
+      "source_id": "124",
+      "word_file": "words/w00124-italic-sub79699-p1121-c3-schweiziskor.png"
+    },
+    {
+      "expected_word": "schäfrar",
+      "page": 1121,
+      "subnr": "79706",
+      "source_id": "125",
+      "word_file": "words/w00125-italic-sub79706-p1121-c3-schäfrar.png"
+    },
+    {
+      "expected_word": "-ställt",
+      "page": 1424,
+      "subnr": "102055",
+      "source_id": "140",
+      "word_file": "words/w00140-italic-sub102055-p1424-c1-u002dställt.png"
+    },
+    {
+      "expected_word": "-summor",
+      "page": 1424,
+      "subnr": "102056",
+      "source_id": "141",
+      "word_file": "words/w00141-italic-sub102056-p1424-c1-u002dsummor.png"
+    },
+    {
+      "expected_word": "walesarna",
+      "page": 1550,
+      "subnr": "106875",
+      "source_id": "181",
+      "word_file": "words/w00181-italic-sub106875-p1550-c1-walesarna.png"
+    },
+    {
+      "expected_word": "walesiskor",
+      "page": 1550,
+      "subnr": "106877",
+      "source_id": "182",
+      "word_file": "words/w00182-italic-sub106877-p1550-c1-walesiskor.png"
+    },
+    {
+      "expected_word": "sebror",
+      "page": 1558,
+      "subnr": "79754",
+      "source_id": "192",
+      "word_file": "words/w00192-italic-sub79754-p1558-c1-sebror.png"
+    },
+    {
+      "page": 1,
+      "column": 2,
+      "row": 31,
+      "review_selection": [],
+      "review_pixel_count": 13,
+      "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00001.png"
+    }
+  ],
+  "role": "unknown",
+  "legacy_style": "italic",
+  "reviewed": true,
+  "style": "italic",
+  "model_id": "g000106"
+}

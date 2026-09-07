@@ -1,0 +1,75 @@
+{
+  "label": "é",
+  "style": "roman",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -3
+    ],
+    [
+      0,
+      -2
+    ],
+    [
+      0,
+      -1
+    ],
+    [
+      1,
+      -7
+    ],
+    [
+      1,
+      -5
+    ],
+    [
+      1,
+      -4
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      -8
+    ],
+    [
+      2,
+      -5
+    ],
+    [
+      2,
+      -4
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      -9
+    ],
+    [
+      3,
+      -4
+    ],
+    [
+      3,
+      -1
+    ]
+  ],
+  "sources": [
+    {
+      "page": 54,
+      "column": 0,
+      "row": 2,
+      "review_selection": [],
+      "review_pixel_count": 14,
+      "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00054.png"
+    }
+  ],
+  "role": "roman",
+  "model_id": "g000419",
+  "reviewed": true
+}

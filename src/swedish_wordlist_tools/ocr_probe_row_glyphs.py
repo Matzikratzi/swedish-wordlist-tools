@@ -1,0 +1,351 @@
+from __future__ import annotations
+
+import argparse
+import math
+from collections import deque
+from pathlib import Path
+from statistics import median
+
+from .ocr_column_row_segmentation import segment_page_rows
+from .ocr_glyph_matcher import exact_matches, load_facit, select_best_baseline_partition
+from .ocr_prepare_sequential_page import _load_source_image, read_jsonl, source_for_page
+from .ocr_row_map_words import _persistent_left_rule_x, _row_crop_box
+
+
+def row_ink(crop, *, threshold: int = 210) -> set[tuple[int, int]]:
+    gray = crop.convert("L")
+    pixels = gray.load()
+    return {
+        (x, y)
+        for y in range(gray.height)
+        for x in range(gray.width)
+        if pixels[x, y] < threshold
+    }
+
+
+def ink_components(ink: set[tuple[int, int]]) -> list[dict]:
+    """Return 8-connected components for an arbitrary set of row-ink pixels."""
+    remaining = set(ink)
+    components: list[dict] = []
+    while remaining:
+        start = min(remaining, key=lambda point: (point[0], point[1]))
+        remaining.remove(start)
+        queue = deque([start])
+        points = [start]
+        while queue:
+            x, y = queue.popleft()
+            for ny in range(y - 1, y + 2):
+                for nx in range(x - 1, x + 2):
+                    if (nx, ny) in remaining:
+                        remaining.remove((nx, ny))
+                        queue.append((nx, ny))
+                        points.append((nx, ny))
+        xs = [x for x, _y in points]
+        ys = [y for _x, y in points]
+        components.append(
+            {
+                "left": min(xs),
+                "top": min(ys),
+                "right": max(xs) + 1,
+                "bottom": max(ys) + 1,
+                "width": max(xs) - min(xs) + 1,
+                "height": max(ys) - min(ys) + 1,
+                "pixels": len(points),
+            }
+        )
+    components.sort(key=lambda item: (item["left"], item["top"], item["right"], item["bottom"]))
+    return components
+
+
+def analyse_row_exact(crop, models, *, threshold: int = 210) -> dict:
+    ink = row_ink(crop, threshold=threshold)
+    baseline, selected = select_best_baseline_partition(ink, crop.width, crop.height, models)
+    covered = set().union(*(match.pixels for match in selected)) if selected else set()
+    unmatched = ink - covered
+    return {
+        "baseline": baseline,
+        "source_pixels": len(ink),
+        "covered_pixels": len(covered),
+        "unmatched_pixels": len(unmatched),
+        "unmatched_components": ink_components(unmatched),
+        "fully_exact": bool(ink) and covered == ink,
+        "candidate_count": len(exact_matches(ink, crop.width, crop.height, models)),
+        "selected": selected,
+        "ink": ink,
+    }
+
+
+def _render_style(match) -> str:
+    # ¤ is its own raised explanatory glyph. Some old facit samples happen to
+    # carry style=italic because it sits next to italic inflection text, but the
+    # serialized facsimile representation should not attach formatting to it.
+    return "plain" if match.label == "¤" else match.style
+
+
+def _match_width(match) -> int:
+    if not match.pixels:
+        return 1
+    xs = [x for x, _y in match.pixels]
+    return max(xs) - min(xs) + 1
+
+
+def infer_space_gap(matches, *, minimum: int = 4) -> int:
+    """Infer a row-local minimum width for a real printed word space.
+
+    SAOL bold letter spacing can contain three wholly white pixel columns, so a
+    word space must contain at least four. Wider faces can raise that threshold
+    to half the median exact-glyph width.
+    """
+    widths = [_match_width(match) for match in matches if match.label not in {".", ",", ";", ":"}]
+    if not widths:
+        return minimum
+    return max(minimum, int(math.ceil(float(median(widths)) / 2.0)))
+
+
+def _visible_blank_gap(
+    previous_right: int | None,
+    current_left: int,
+    *,
+    source_ink: set[tuple[int, int]] | None,
+) -> int:
+    """Return the longest completely blank column run between two exact glyphs.
+
+    On incomplete rows there can be unmatched glyphs between two exact matches.
+    Such ink must not make the entire interval non-whitespace: real word spaces
+    can still exist on either side of the unknown glyph. Measuring the longest
+    run of source columns with no ink preserves those spaces while refusing to
+    invent a space through an unmatched glyph itself.
+    """
+    if previous_right is None or current_left <= previous_right + 1:
+        return 0
+    left = previous_right + 1
+    right = current_left - 1
+    if source_ink is None:
+        return right - left + 1
+
+    occupied_x = {x for x, _y in source_ink if left <= x <= right}
+    longest = 0
+    current = 0
+    for x in range(left, right + 1):
+        if x in occupied_x:
+            current = 0
+        else:
+            current += 1
+            longest = max(longest, current)
+    return longest
+
+
+def exact_text_runs(
+    matches,
+    *,
+    space_gap: int | None = None,
+    source_ink: set[tuple[int, int]] | None = None,
+) -> list[dict]:
+    """Render exact glyphs as compact visual-style runs.
+
+    Formatting changes only when the rendered style changes. Printed ~, · and ¤
+    are emitted literally. Word spaces are inferred from row-local glyph size;
+    on incomplete rows the source pixels decide whether there is a sufficiently
+    long completely blank column run between exact glyphs.
+    """
+    rows = sorted(matches, key=lambda m: (m.x, m.baseline, m.label, m.style))
+    if space_gap is None:
+        space_gap = infer_space_gap(rows)
+    runs: list[dict] = []
+    previous_right: int | None = None
+    for match in rows:
+        blank_gap = _visible_blank_gap(previous_right, match.x, source_ink=source_ink)
+        gap = blank_gap >= space_gap
+        style = _render_style(match)
+        if runs and runs[-1]["style"] == style:
+            if gap:
+                runs[-1]["text"] += " "
+            runs[-1]["text"] += match.label
+        else:
+            if gap:
+                runs.append({"style": "space", "text": " "})
+            runs.append({"style": style, "text": match.label})
+        previous_right = max(previous_right or match.x1, match.x1)
+    return runs
+
+
+def _render_run(run: dict, *, markup: bool) -> str:
+    text = run["text"]
+    style = run["style"]
+    if markup and style == "bold":
+        return f"<b>{text}</b>"
+    if markup and style == "italic":
+        return f"<i>{text}</i>"
+    return text
+
+
+def render_exact_text(
+    matches,
+    *,
+    space_gap: int | None = None,
+    source_ink: set[tuple[int, int]] | None = None,
+) -> str:
+    return "".join(
+        _render_run(run, markup=False)
+        for run in exact_text_runs(matches, space_gap=space_gap, source_ink=source_ink)
+    )
+
+
+def render_exact_markup(
+    matches,
+    *,
+    space_gap: int | None = None,
+    source_ink: set[tuple[int, int]] | None = None,
+) -> str:
+    return "".join(
+        _render_run(run, markup=True)
+        for run in exact_text_runs(matches, space_gap=space_gap, source_ink=source_ink)
+    )
+
+
+def text_boundary(matches) -> tuple[int, str | None]:
+    """Return the first glyph that ends SAOL's inflection/text field.
+
+    Known boundaries are the raised explanatory marker, a numbered explanation,
+    or a new bold headword after the initial headword has ended.
+    """
+    rows = sorted(matches, key=lambda m: (m.x, m.baseline, m.label, m.style))
+    left_initial_bold = False
+    for index, match in enumerate(rows):
+        if index == 0 and match.style != "bold":
+            left_initial_bold = True
+        elif match.style != "bold":
+            left_initial_bold = True
+
+        if match.label == "¤":
+            return index, "explanation-marker"
+        if left_initial_bold and match.label.isdigit():
+            return index, "numbered-explanation"
+        if left_initial_bold and match.style == "bold":
+            return index, "next-headword"
+    return len(rows), None
+
+
+def jsonl_like_fields(
+    matches,
+    *,
+    space_gap: int | None = None,
+    source_ink: set[tuple[int, int]] | None = None,
+) -> dict:
+    """Project one exact physical row into the facsimile JSONL field convention.
+
+    This is intentionally row-local. It reconstructs the initial bold stycke,
+    ordkl through the first text boundary, and text beginning at the first italic
+    glyph. Multi-row article continuation is handled later.
+    """
+    rows = sorted(matches, key=lambda m: (m.x, m.baseline, m.label, m.style))
+    boundary_index, boundary_reason = text_boundary(rows)
+    field_rows = rows[:boundary_index]
+
+    headword_end = 0
+    while headword_end < len(field_rows) and field_rows[headword_end].style == "bold":
+        headword_end += 1
+    headword_rows = field_rows[:headword_end]
+    ordkl_rows = field_rows[headword_end:]
+
+    text_start = next(
+        (index for index, match in enumerate(ordkl_rows) if match.style == "italic"),
+        len(ordkl_rows),
+    )
+    text_rows = ordkl_rows[text_start:]
+
+    return {
+        "stycke": render_exact_text(
+            headword_rows, space_gap=space_gap, source_ink=source_ink
+        ).strip(),
+        "ordkl": render_exact_markup(
+            ordkl_rows, space_gap=space_gap, source_ink=source_ink
+        ).strip(),
+        "text": render_exact_text(
+            text_rows, space_gap=space_gap, source_ink=source_ink
+        ).strip(),
+        "boundary": boundary_reason,
+        "remainder": render_exact_markup(
+            rows[boundary_index:], space_gap=space_gap, source_ink=source_ink
+        ).strip(),
+    }
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Match one pixel-owned SAOL row against the exact manual glyph facit.")
+    ap.add_argument("jsonl", type=Path)
+    ap.add_argument("--page", type=int, required=True)
+    ap.add_argument("--column", type=int, choices=(0, 1, 2), required=True)
+    ap.add_argument("--row", type=int, required=True)
+    ap.add_argument("--threshold", type=int, default=210)
+    ap.add_argument("--facit", type=Path, default=Path("glyphs/saol14-manual-glyph-facit.json"))
+    args = ap.parse_args()
+
+    jsonl_rows = list(read_jsonl(args.jsonl))
+    source = source_for_page(jsonl_rows, args.page)
+    if not source:
+        raise SystemExit(f"no source found for page {args.page}")
+    page = _load_source_image(source)
+    if page is None:
+        raise SystemExit(f"could not load page image: {source}")
+
+    row_map = segment_page_rows(page, threshold=args.threshold)
+    column_entry = row_map["columns"][args.column]
+    rows = column_entry.get("rows") or []
+    if not 0 <= args.row < len(rows):
+        raise SystemExit(f"row {args.row} out of range; column {args.column} has {len(rows)} rows")
+    row = rows[args.row]
+    rule_x = _persistent_left_rule_x(page, column_entry, threshold=args.threshold)
+    content_left = rule_x + 2 if rule_x is not None else None
+    box = _row_crop_box(
+        row,
+        column=args.column,
+        page_width=page.width,
+        page_height=page.height,
+        pad_y=1,
+        left_override=content_left,
+    )
+    crop = page.crop(box).convert("L")
+    models = load_facit(args.facit)
+    result = analyse_row_exact(crop, models, threshold=args.threshold)
+    selected = result["selected"]
+    inferred_gap = infer_space_gap(selected) if selected else None
+
+    print(
+        f"page={args.page} column={args.column} row={args.row} "
+        f"y={row['page_top']}..{row['page_bottom']} rule_x={rule_x} crop_left={box[0]} "
+        f"models={len(models)} candidates={result['candidate_count']} "
+        f"baseline={result['baseline']} covered={result['covered_pixels']}/{result['source_pixels']} "
+        f"unmatched={result['unmatched_pixels']} fully_exact={result['fully_exact']} space_gap={inferred_gap}"
+    )
+    if selected:
+        print(f"text={render_exact_text(selected, source_ink=result['ink'])}")
+        print(f"markup={render_exact_markup(selected, source_ink=result['ink'])}")
+        fields = jsonl_like_fields(selected, source_ink=result["ink"])
+        print(f"stycke={fields['stycke']}")
+        print(f"ordkl={fields['ordkl']}")
+        print(f"jsonl_text={fields['text']}")
+        print(f"boundary={fields['boundary']}")
+        print(f"remainder={fields['remainder']}")
+    for index, match in enumerate(selected):
+        page_x = box[0] + match.x
+        print(
+            f"{index:02d}\tx={page_x}\tlabel={match.label!r}\tstyle={match.style}\t"
+            f"baseline={box[1] + match.baseline}\tpx={match.model_pixels}\tsources={match.sources}"
+        )
+    if result["unmatched_components"]:
+        print(f"unmatched_components={len(result['unmatched_components'])}")
+        for index, item in enumerate(result["unmatched_components"]):
+            page_left = box[0] + item["left"]
+            page_right = box[0] + item["right"] - 1
+            page_top = box[1] + item["top"]
+            page_bottom = box[1] + item["bottom"] - 1
+            print(
+                f"U{index:02d}\tx={page_left}..{page_right}\ty={page_top}..{page_bottom}\t"
+                f"w={item['width']} h={item['height']} px={item['pixels']}"
+            )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

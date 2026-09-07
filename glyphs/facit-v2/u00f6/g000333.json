@@ -1,0 +1,87 @@
+{
+  "label": "ö",
+  "style": "italic",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -3
+    ],
+    [
+      0,
+      -2
+    ],
+    [
+      0,
+      -1
+    ],
+    [
+      1,
+      -4
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      -8
+    ],
+    [
+      2,
+      -5
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      -5
+    ],
+    [
+      3,
+      0
+    ],
+    [
+      4,
+      -5
+    ],
+    [
+      4,
+      -1
+    ],
+    [
+      5,
+      -8
+    ],
+    [
+      5,
+      -4
+    ],
+    [
+      5,
+      -3
+    ],
+    [
+      5,
+      -2
+    ]
+  ],
+  "sources": [
+    {
+      "page": 16,
+      "column": 1,
+      "row": 48,
+      "review_selection": [
+        "M14",
+        "U00",
+        "U01"
+      ],
+      "review_pixel_count": 0,
+      "source": "https://spraakbanken.gu.se/resurser/data/karp/saol-faksimil/SAOL14/SAOL14_00016.png"
+    }
+  ],
+  "role": "italic",
+  "reviewed": true,
+  "model_id": "g000333"
+}
