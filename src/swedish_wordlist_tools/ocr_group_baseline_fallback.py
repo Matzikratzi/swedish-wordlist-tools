@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Iterable, Iterator
 
 from .ocr_glyph_facit_write_redirect import install_facit_write_redirect
 from .ocr_glyph_matcher import (
@@ -38,6 +38,99 @@ def _anchor_scan_key(match: Match) -> tuple[int, int, int, int, int, str, str]:
     )
 
 
+def _iter_baseline_anchor_candidates(
+    ink: set[tuple[int, int]],
+    width: int,
+    height: int,
+    models: Iterable[GlyphModel],
+    *,
+    line_start_left: int = 0,
+    line_start_right: int | None = None,
+) -> Iterator[Match]:
+    """Yield exact baseline anchors lazily in the old raster-sort order.
+
+    The previous implementation called ``exact_matches`` for every model, x
+    placement and baseline on the complete row, materialised every hit, then
+    sorted all of them merely to inspect the first useful baseline.  Here we
+    invert the loops to the actual ordering criterion: top raster y first,
+    then placed left x.  At one raster position we keep the same remaining
+    tie-break as ``_anchor_scan_key``.  Therefore fallback decisions are
+    unchanged, while ordinary cases stop as soon as their first accepted
+    baseline has been tested.
+    """
+    if not ink:
+        return
+
+    left = max(0, min(width, int(line_start_left)))
+    right = width if line_start_right is None else max(left, min(width, int(line_start_right)))
+    model_rows = list(models)
+
+    prepared: list[tuple[GlyphModel, int, int, tuple[tuple[int, int], ...]]] = []
+    for model in model_rows:
+        if not model.pixels:
+            continue
+        min_x = min(x for x, _y in model.pixels)
+        top_y = model.min_y
+        top_pixels = tuple(sorted((x, y) for x, y in model.pixels if y == top_y))
+        prepared.append((model, min_x, top_y, top_pixels))
+
+    # A match can only have its top raster row on an ink-bearing y.  Likewise,
+    # its leftmost occupied x must be an ink-bearing x on some model pixel, so
+    # scanning only the bounding raster positions that can overlap ink avoids
+    # the old width*height*models baseline sweep.
+    ink_by_y: dict[int, set[int]] = {}
+    for x, y in ink:
+        ink_by_y.setdefault(y, set()).add(x)
+
+    for top in sorted(ink_by_y):
+        candidates_at_top: list[Match] = []
+        for model, min_x, model_top, top_pixels in prepared:
+            baseline = top - model_top
+            if baseline < -model.min_y or baseline > height - 1 - model.max_y:
+                continue
+
+            # Every valid placement has at least one model-top pixel on this
+            # raster row.  Use those source x positions to derive possible x0
+            # values instead of sweeping the complete row width.
+            x0_values: set[int] = set()
+            source_xs = ink_by_y[top]
+            for model_x, _model_y in top_pixels:
+                for source_x in source_xs:
+                    x0_values.add(source_x - model_x)
+
+            for x0 in sorted(x0_values):
+                placed_left = x0 + min_x
+                if placed_left < left or placed_left >= right:
+                    continue
+                if x0 < 0 or x0 + model.width > width:
+                    continue
+                fits = True
+                for x, y in model.pixels:
+                    if (x0 + x, baseline + y) not in ink:
+                        fits = False
+                        break
+                if not fits:
+                    continue
+                placed = frozenset((x0 + x, baseline + y) for x, y in model.pixels)
+                candidates_at_top.append(
+                    Match(
+                        label=model.label,
+                        style=model.style,
+                        x=x0,
+                        baseline=baseline,
+                        pixels=placed,
+                        model_pixels=len(model.pixels),
+                        sources=model.sources,
+                    )
+                )
+
+        # The old global sort compares left x before model/source tie-breaks.
+        # Sorting only this top-y bucket is therefore exactly equivalent, and
+        # allows the caller to stop before any lower raster row is inspected.
+        candidates_at_top.sort(key=_anchor_scan_key)
+        yield from candidates_at_top
+
+
 def _baseline_anchor_candidates(
     ink: set[tuple[int, int]],
     width: int,
@@ -47,29 +140,16 @@ def _baseline_anchor_candidates(
     line_start_left: int = 0,
     line_start_right: int | None = None,
 ) -> list[Match]:
-    """Find exact glyphs that can supply a baseline when the normal parser misses.
-
-    Whole-component ownership is intentionally disabled: touching neighbouring
-    glyphs must not prevent the first real line-start glyph from being found.
-    The candidates are then ordered exactly like the proposed pixel scan:
-    upper raster row first, then leftmost candidate on that row.
-    """
-    left = max(0, min(width, int(line_start_left)))
-    right = width if line_start_right is None else max(left, min(width, int(line_start_right)))
-    candidates = exact_matches(
-        ink,
-        width,
-        height,
-        models,
-        require_whole_components=False,
-    )
-    return sorted(
-        (
-            match
-            for match in candidates
-            if any(left <= x < right for x, _y in match.pixels)
-        ),
-        key=_anchor_scan_key,
+    """Compatibility wrapper returning all raster-ordered anchor candidates."""
+    return list(
+        _iter_baseline_anchor_candidates(
+            ink,
+            width,
+            height,
+            models,
+            line_start_left=line_start_left,
+            line_start_right=line_start_right,
+        )
     )
 
 
@@ -201,7 +281,7 @@ def _anchor_missing_baseline(
         return result
 
     model_rows = list(models)
-    anchors = _baseline_anchor_candidates(
+    anchors = _iter_baseline_anchor_candidates(
         result["ink"],
         crop.width,
         crop.height,
