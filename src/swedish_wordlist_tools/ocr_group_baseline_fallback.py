@@ -6,8 +6,8 @@ from .ocr_glyph_facit_write_redirect import install_facit_write_redirect
 from .ocr_glyph_matcher import (
     GlyphModel,
     Match,
+    _ink_components,
     exact_matches,
-    select_best_disjoint_exact_for_ink,
 )
 from .ocr_page_cached_fast_path import analyse_row_prioritized
 
@@ -73,6 +73,103 @@ def _baseline_anchor_candidates(
     )
 
 
+def _select_best_disjoint_exact_for_ink_fast(
+    matches: Iterable[Match],
+    ink: set[tuple[int, int]],
+    *,
+    beam_width: int = 512,
+) -> list[Match]:
+    """Exact equivalent of the old beam selector using integer pixel masks.
+
+    The fallback used to spend seconds repeatedly unioning frozensets and
+    rescanning all source components for every beam state.  Keep exactly the
+    same candidate order, score tuple, occupied-state deduplication and beam
+    width, but represent occupied pixels as one Python integer and update the
+    component-completeness score only for components touched by the new match.
+    """
+    rows = sorted(
+        matches,
+        key=lambda m: (-m.model_pixels, -m.score, -m.sources, m.x, m.label, m.style),
+    )
+    if not rows:
+        return []
+
+    point_bits = {point: 1 << index for index, point in enumerate(sorted(ink))}
+    components, by_pixel = _ink_components(ink)
+    component_masks: list[tuple[int, int]] = []
+    for component in components:
+        mask = 0
+        for point in component:
+            mask |= point_bits[point]
+        component_masks.append((mask, len(component)))
+
+    prepared: list[tuple[Match, int, tuple[int, ...]]] = []
+    for match in rows:
+        mask = 0
+        touched: set[int] = set()
+        for point in match.pixels:
+            bit = point_bits.get(point)
+            if bit is None:
+                # exact_matches() never emits this, but keep this helper safe
+                # when unit tests construct Match objects directly.
+                mask = 0
+                touched.clear()
+                break
+            mask |= bit
+            touched.add(by_pixel[point])
+        if mask:
+            prepared.append((match, mask, tuple(sorted(touched))))
+
+    # State key is exactly _component_partition_key():
+    # (complete_component_pixels, model_pixels, model_pixels^2, sources, -count)
+    states: list[tuple[tuple[Match, ...], int, tuple[int, int, int, int, int]]] = [
+        ((), 0, (0, 0, 0, 0, 0))
+    ]
+
+    for match, match_mask, touched_components in prepared:
+        expanded = list(states)
+        for chosen, occupied, key in states:
+            if occupied & match_mask:
+                continue
+            new_occupied = occupied | match_mask
+            complete_pixels = key[0]
+            for component_index in touched_components:
+                component_mask, component_pixels = component_masks[component_index]
+                if (
+                    occupied & component_mask != component_mask
+                    and new_occupied & component_mask == component_mask
+                ):
+                    complete_pixels += component_pixels
+            new_key = (
+                complete_pixels,
+                key[1] + match.model_pixels,
+                key[2] + match.model_pixels * match.model_pixels,
+                key[3] + match.sources,
+                key[4] - 1,
+            )
+            expanded.append((chosen + (match,), new_occupied, new_key))
+
+        best_by_occupied: dict[
+            int, tuple[tuple[Match, ...], tuple[int, int, int, int, int]]
+        ] = {}
+        for chosen, occupied, key in expanded:
+            previous = best_by_occupied.get(occupied)
+            if previous is None or key > previous[1]:
+                best_by_occupied[occupied] = (chosen, key)
+
+        states = sorted(
+            (
+                (chosen, occupied, key)
+                for occupied, (chosen, key) in best_by_occupied.items()
+            ),
+            key=lambda state: state[2],
+            reverse=True,
+        )[:beam_width]
+
+    best = max(states, key=lambda state: state[2])[0] if states else ()
+    return sorted(best, key=lambda m: (m.x, m.baseline, m.label, m.style))
+
+
 def _select_at_baseline(
     ink: set[tuple[int, int]],
     width: int,
@@ -88,7 +185,7 @@ def _select_at_baseline(
         baseline_only=int(baseline),
         require_whole_components=False,
     )
-    return select_best_disjoint_exact_for_ink(candidates, ink)
+    return _select_best_disjoint_exact_for_ink_fast(candidates, ink)
 
 
 def _anchor_missing_baseline(
