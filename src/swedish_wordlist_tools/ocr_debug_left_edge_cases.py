@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .ocr_glyph_matcher import load_facit
 from .ocr_left_edge_index import LeftEdgeIndex, derived_baseline
-from .ocr_left_edge_source_walk import source_walk_hits
+from .ocr_left_edge_source_walk import source_walk_hits_with_top_retry
 from .ocr_prepare_sequential_page import _load_source_image, read_jsonl, source_for_page
 
 
@@ -51,11 +51,12 @@ def run_case(jsonl: Path, facit: Path, case: Case, *, threshold: int, limit: int
     crop = page.crop(case.crop)
     black = _black_points(crop, threshold=threshold)
     index = LeftEdgeIndex(load_facit(facit))
-    hits = source_walk_hits(
+    hits = source_walk_hits_with_top_retry(
         black,
         index,
         max_x=case.current_anchor_x,
         max_depth=16,
+        max_skip_rows=8,
     )
 
     print(
@@ -64,13 +65,14 @@ def run_case(jsonl: Path, facit: Path, case: Case, *, threshold: int, limit: int
         f"current={case.current_text!r}"
     )
     if not hits:
-        print("  source walk found no exact glyph at or before current anchor")
+        print("  source walk found no exact glyph at or before current anchor after top-row retry")
         return
 
     leftmost = min(hit.x for hit in hits)
+    skipped = min(hit.skipped_top_rows for hit in hits)
     print(
-        f"  source-walk hits={len(hits)} leftmost_x={leftmost} "
-        f"delta_to_current={case.current_anchor_x-leftmost}"
+        f"  source-walk hits={len(hits)} skipped_top_rows={skipped} "
+        f"leftmost_x={leftmost} delta_to_current={case.current_anchor_x-leftmost}"
     )
 
     shown = 0
@@ -96,7 +98,7 @@ def run_case(jsonl: Path, facit: Path, case: Case, *, threshold: int, limit: int
                 "." if value is None else str(value) for value in hit.prefix
             ) + "]"
             print(
-                f"  x={hit.x:>3} y={hit.y:>2} "
+                f"  x={hit.x:>3} y={hit.y:>2} skip={hit.skipped_top_rows:>2} "
                 f"page=({case.crop[0]+hit.x},{case.crop[1]+hit.y}) "
                 f"glyph={model.label!r}/{model.style} px={len(model.pixels):>3} "
                 f"prefix_len={len(hit.prefix):>2} candidates={len(hit.candidates):>3} "
@@ -110,7 +112,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
             "Walk source left contours without a baseline on the collected #2 "
-            "anchor-failure rows, then verify surviving glyph rasters exactly."
+            "anchor-failure rows, retrying below top ink when a later tall glyph "
+            "may protrude above a low first glyph."
         )
     )
     ap.add_argument("jsonl", type=Path)
