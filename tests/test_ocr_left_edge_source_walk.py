@@ -94,24 +94,61 @@ class LeftEdgeSourceWalkTests(unittest.TestCase):
         known = GlyphModel(
             label="x",
             style="roman",
-            pixels=frozenset({(0, -1), (1, -1), (0, 0), (1, 0)}),
+            pixels=frozenset({
+                (0, -3), (1, -3),
+                (0, -2), (1, -2),
+                (0, -1), (1, -1),
+                (0, 0), (1, 0),
+            }),
             sources=1,
         )
-        # x=3..5 is an unknown leading glyph absent from facit.  The known glyph
-        # begins later at x=10 and must still be found without inventing a model
-        # for the unknown one.
         black = {
             (3, 20), (4, 20), (5, 20),
             (3, 21), (5, 21),
             (4, 22),
+            (10, 19), (11, 19),
+            (10, 20), (11, 20),
             (10, 21), (11, 21),
             (10, 22), (11, 22),
         }
         index = LeftEdgeIndex([known])
         hits = source_walk_hits_with_resync(black, index, max_skip_rows=4)
         self.assertTrue(hits)
-        self.assertTrue(any(hit.x == 10 and hit.y == 21 for hit in hits))
+        self.assertTrue(any(hit.x == 10 and hit.y == 19 for hit in hits))
         self.assertEqual(7, min(hit.skipped_left_columns for hit in hits))
+
+    def test_horizontal_resync_skips_weak_dash_before_strong_letter(self) -> None:
+        dash = GlyphModel(
+            label="-",
+            style="roman",
+            pixels=frozenset({(0, 0), (1, 0), (2, 0)}),
+            sources=1,
+        )
+        letter = GlyphModel(
+            label="p",
+            style="roman",
+            pixels=frozenset({
+                (0, -4), (1, -4),
+                (0, -3), (2, -3),
+                (0, -2), (1, -2), (2, -2),
+                (0, -1), (2, -1),
+                (0, 0), (1, 0), (2, 0),
+            }),
+            sources=1,
+        )
+        black = {
+            (3, 25), (4, 25), (5, 25),
+            (10, 20), (11, 20),
+            (10, 21), (12, 21),
+            (10, 22), (11, 22), (12, 22),
+            (10, 23), (12, 23),
+            (10, 24), (11, 24), (12, 24),
+        }
+        index = LeftEdgeIndex([dash, letter])
+        hits = source_walk_hits_with_resync(black, index, max_skip_rows=8)
+        self.assertTrue(hits)
+        self.assertTrue(any(glyph.model.label == "p" for hit in hits for glyph in hit.exact))
+        self.assertTrue(all(hit.x == 10 for hit in hits))
 
 
 if __name__ == "__main__":
