@@ -182,6 +182,20 @@ def source_walk_hits_with_top_retry(
     return ()
 
 
+def is_strong_anchor(hit: SourceWalkHit) -> bool:
+    """Return whether a hit is substantial enough to stop horizontal resync.
+
+    Tiny one-row punctuation rasters such as '-' and '.' are exact matches very
+    often inside unrelated source ink.  They are useful observations but poor
+    synchronization anchors.  For this diagnostic experiment a strong anchor
+    must have a contour of at least three raster rows and at least eight pixels
+    in one fully verified glyph model.
+    """
+    if len(hit.prefix) < 3:
+        return False
+    return any(len(glyph.model.pixels) >= 8 for glyph in hit.exact)
+
+
 def source_walk_hits_with_resync(
     black: set[tuple[int, int]],
     index: LeftEdgeIndex,
@@ -190,20 +204,20 @@ def source_walk_hits_with_resync(
     max_depth: int = 16,
     max_skip_rows: int = 8,
 ) -> tuple[SourceWalkHit, ...]:
-    """Search left-to-right, skipping an unrecognized leading glyph if necessary.
+    """Search left-to-right until a strong exact glyph anchor is found.
 
-    Each occupied source column is treated as a possible glyph-start column.  At
-    that x we apply the top-row retry.  If no complete facit glyph verifies, move
-    right to the next occupied column.  This lets OCR regain synchronization when
-    a leading glyph is genuinely absent from the current facit.
-
-    Full-raster verification always uses the complete original source set, so
-    moving the proposed start boundary never deletes pixels from a candidate.
+    A leading glyph may be absent from facit, and tiny punctuation rasters may
+    occur accidentally inside its pixels.  Therefore each occupied source column
+    is tried in order, but weak exact hits do not stop resynchronization.  The
+    first column containing at least one strong anchor wins.  If no strong anchor
+    exists before ``max_x``, the earliest weak exact hit is returned as a fallback
+    so diagnostics still show what was seen.
     """
     if not black:
         return ()
     left = min(x for x, _y in black)
     columns = sorted({x for x, _y in black if max_x is None or x <= max_x})
+    weak_fallback: tuple[SourceWalkHit, ...] = ()
     for x in columns:
         hits = source_walk_hits_with_top_retry(
             black,
@@ -214,6 +228,11 @@ def source_walk_hits_with_resync(
             only_x=x,
             skipped_left_columns=x - left,
         )
-        if hits:
-            return hits
-    return ()
+        if not hits:
+            continue
+        strong = tuple(hit for hit in hits if is_strong_anchor(hit))
+        if strong:
+            return strong
+        if not weak_fallback:
+            weak_fallback = hits
+    return weak_fallback
