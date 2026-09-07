@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .ocr_glyph_matcher import load_facit
 from .ocr_left_edge_index import LeftEdgeIndex, derived_baseline
-from .ocr_left_edge_source_walk import source_walk_hits_with_top_retry
+from .ocr_left_edge_source_walk import source_walk_hits_with_resync
 from .ocr_prepare_sequential_page import _load_source_image, read_jsonl, source_for_page
 
 
@@ -51,7 +51,7 @@ def run_case(jsonl: Path, facit: Path, case: Case, *, threshold: int, limit: int
     crop = page.crop(case.crop)
     black = _black_points(crop, threshold=threshold)
     index = LeftEdgeIndex(load_facit(facit))
-    hits = source_walk_hits_with_top_retry(
+    hits = source_walk_hits_with_resync(
         black,
         index,
         max_x=case.current_anchor_x,
@@ -65,14 +65,16 @@ def run_case(jsonl: Path, facit: Path, case: Case, *, threshold: int, limit: int
         f"current={case.current_text!r}"
     )
     if not hits:
-        print("  source walk found no exact glyph at or before current anchor after top-row retry")
+        print("  source walk found no exact glyph at/before current anchor after x/y resync")
         return
 
     leftmost = min(hit.x for hit in hits)
-    skipped = min(hit.skipped_top_rows for hit in hits)
+    skipped_top = min(hit.skipped_top_rows for hit in hits)
+    skipped_left = min(hit.skipped_left_columns for hit in hits)
     print(
-        f"  source-walk hits={len(hits)} skipped_top_rows={skipped} "
-        f"leftmost_x={leftmost} delta_to_current={case.current_anchor_x-leftmost}"
+        f"  source-walk hits={len(hits)} skipped_left_columns={skipped_left} "
+        f"skipped_top_rows={skipped_top} leftmost_x={leftmost} "
+        f"delta_to_current={case.current_anchor_x-leftmost}"
     )
 
     shown = 0
@@ -87,7 +89,7 @@ def run_case(jsonl: Path, facit: Path, case: Case, *, threshold: int, limit: int
     ):
         for glyph in sorted(
             hit.exact,
-            key=lambda item: (-len(item.model.pixels), item.model.label, item.model.style),
+            key=lambda item: (-len(item.model.pixels), item.model.label, item.model.style, item.variant),
         ):
             if shown >= limit:
                 return
@@ -98,12 +100,12 @@ def run_case(jsonl: Path, facit: Path, case: Case, *, threshold: int, limit: int
                 "." if value is None else str(value) for value in hit.prefix
             ) + "]"
             print(
-                f"  x={hit.x:>3} y={hit.y:>2} skip={hit.skipped_top_rows:>2} "
-                f"page=({case.crop[0]+hit.x},{case.crop[1]+hit.y}) "
-                f"glyph={model.label!r}/{model.style} px={len(model.pixels):>3} "
-                f"prefix_len={len(hit.prefix):>2} candidates={len(hit.candidates):>3} "
-                f"baseline_local={baseline:>2} baseline_page={case.crop[1]+baseline} "
-                f"prefix={prefix_text} {marker}".rstrip()
+                f"  x={hit.x:>3} y={hit.y:>2} skipx={hit.skipped_left_columns:>3} "
+                f"skipy={hit.skipped_top_rows:>2} page=({case.crop[0]+hit.x},{case.crop[1]+hit.y}) "
+                f"glyph={model.label!r}/{model.style} variant={glyph.variant} "
+                f"px={len(model.pixels):>3} prefix_len={len(hit.prefix):>2} "
+                f"candidates={len(hit.candidates):>3} baseline_local={baseline:>2} "
+                f"baseline_page={case.crop[1]+baseline} prefix={prefix_text} {marker}".rstrip()
             )
             shown += 1
 
@@ -112,8 +114,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
             "Walk source left contours without a baseline on the collected #2 "
-            "anchor-failure rows, retrying below top ink when a later tall glyph "
-            "may protrude above a low first glyph."
+            "anchor-failure rows, resynchronizing both downward and rightward."
         )
     )
     ap.add_argument("jsonl", type=Path)
