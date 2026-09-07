@@ -344,50 +344,58 @@ def page_cached_prioritized_fast_exact_cover(
             x0 = anchor_x - min_x
             if x0 < 0 or x0 + model.width > width:
                 continue
-            for _mx, my in left_pixels:
-                candidate_baseline = anchor_y - my
-                is_leading_homonym = (
-                    first_glyph and row_kind == "homonym" and priority._is_homonym_model(model)
-                )
-                if baseline is not None and candidate_baseline != baseline:
-                    continue
-                if candidate_baseline < -model.min_y:
-                    continue
-                if candidate_baseline > height - 1 - model.max_y:
-                    continue
-                placements_tested += 1
-                placed = frozenset(
-                    (x0 + x, candidate_baseline + y) for x, y in model.pixels
-                )
-                if not placed.issubset(remaining):
-                    continue
-                if not placement_advances_right(placed, previous_right):
-                    continue
-                match = Match(
-                    label=model.label,
-                    style=model.style,
-                    x=x0,
-                    baseline=candidate_baseline,
-                    pixels=placed,
-                    model_pixels=len(model.pixels),
-                    sources=model.sources,
-                )
-                if is_leading_homonym:
-                    next_baseline = None
-                    saw_homonym = True
-                else:
-                    next_baseline = candidate_baseline if baseline is None else baseline
-                    saw_homonym = leading_homonym_seen
-                tail = search(
-                    frozenset(remaining.difference(placed)),
-                    next_baseline,
-                    priority._typographic_style(model.style),
-                    saw_homonym,
-                    _placed_right(placed),
-                )
-                if tail is not None:
-                    record_model_hit(model)
-                    return (match,) + tail
+
+            # The chosen glyph must cover the topmost remaining pixel in the
+            # leftmost remaining x column.  Since the model is horizontally
+            # aligned so its own left edge lands in that column, only its
+            # topmost left-edge pixel can possibly cover the anchor.  Aligning
+            # any lower left-edge pixel would place another model pixel above
+            # anchor_y, contradicting anchor_y being the topmost remaining ink
+            # in this column.  Avoid trying those impossible baselines.
+            _mx, my = left_pixels[0]
+            candidate_baseline = anchor_y - my
+            is_leading_homonym = (
+                first_glyph and row_kind == "homonym" and priority._is_homonym_model(model)
+            )
+            if baseline is not None and candidate_baseline != baseline:
+                continue
+            if candidate_baseline < -model.min_y:
+                continue
+            if candidate_baseline > height - 1 - model.max_y:
+                continue
+            placements_tested += 1
+            placed = frozenset(
+                (x0 + x, candidate_baseline + y) for x, y in model.pixels
+            )
+            if not placed.issubset(remaining):
+                continue
+            if not placement_advances_right(placed, previous_right):
+                continue
+            match = Match(
+                label=model.label,
+                style=model.style,
+                x=x0,
+                baseline=candidate_baseline,
+                pixels=placed,
+                model_pixels=len(model.pixels),
+                sources=model.sources,
+            )
+            if is_leading_homonym:
+                next_baseline = None
+                saw_homonym = True
+            else:
+                next_baseline = candidate_baseline if baseline is None else baseline
+                saw_homonym = leading_homonym_seen
+            tail = search(
+                frozenset(remaining.difference(placed)),
+                next_baseline,
+                priority._typographic_style(model.style),
+                saw_homonym,
+                _placed_right(placed),
+            )
+            if tail is not None:
+                record_model_hit(model)
+                return (match,) + tail
 
         failed.add(state)
         return None
