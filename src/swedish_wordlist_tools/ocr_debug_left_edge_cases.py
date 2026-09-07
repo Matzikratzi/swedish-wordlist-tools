@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .ocr_glyph_matcher import load_facit
 from .ocr_left_edge_index import LeftEdgeIndex, derived_baseline
-from .ocr_left_edge_source_walk import source_walk_hits_with_resync
+from .ocr_left_edge_source_walk import is_strong_anchor, source_walk_hits_with_resync
 from .ocr_prepare_sequential_page import _load_source_image, read_jsonl, source_for_page
 
 
@@ -71,10 +71,11 @@ def run_case(jsonl: Path, facit: Path, case: Case, *, threshold: int, limit: int
     leftmost = min(hit.x for hit in hits)
     skipped_top = min(hit.skipped_top_rows for hit in hits)
     skipped_left = min(hit.skipped_left_columns for hit in hits)
+    quality = "STRONG" if any(is_strong_anchor(hit) for hit in hits) else "WEAK-FALLBACK"
     print(
-        f"  source-walk hits={len(hits)} skipped_left_columns={skipped_left} "
-        f"skipped_top_rows={skipped_top} leftmost_x={leftmost} "
-        f"delta_to_current={case.current_anchor_x-leftmost}"
+        f"  source-walk hits={len(hits)} quality={quality} "
+        f"skipped_left_columns={skipped_left} skipped_top_rows={skipped_top} "
+        f"leftmost_x={leftmost} delta_to_current={case.current_anchor_x-leftmost}"
     )
 
     shown = 0
@@ -87,6 +88,7 @@ def run_case(jsonl: Path, facit: Path, case: Case, *, threshold: int, limit: int
             len(item.candidates),
         ),
     ):
+        hit_quality = "STRONG" if is_strong_anchor(hit) else "WEAK"
         for glyph in sorted(
             hit.exact,
             key=lambda item: (-len(item.model.pixels), item.model.label, item.model.style, item.variant),
@@ -100,8 +102,9 @@ def run_case(jsonl: Path, facit: Path, case: Case, *, threshold: int, limit: int
                 "." if value is None else str(value) for value in hit.prefix
             ) + "]"
             print(
-                f"  x={hit.x:>3} y={hit.y:>2} skipx={hit.skipped_left_columns:>3} "
-                f"skipy={hit.skipped_top_rows:>2} page=({case.crop[0]+hit.x},{case.crop[1]+hit.y}) "
+                f"  x={hit.x:>3} y={hit.y:>2} quality={hit_quality} "
+                f"skipx={hit.skipped_left_columns:>3} skipy={hit.skipped_top_rows:>2} "
+                f"page=({case.crop[0]+hit.x},{case.crop[1]+hit.y}) "
                 f"glyph={model.label!r}/{model.style} variant={glyph.variant} "
                 f"px={len(model.pixels):>3} prefix_len={len(hit.prefix):>2} "
                 f"candidates={len(hit.candidates):>3} baseline_local={baseline:>2} "
