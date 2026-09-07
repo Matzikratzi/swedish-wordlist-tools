@@ -101,6 +101,27 @@ class PageCachedFastPathTests(unittest.TestCase):
             [("1", 1), ("a", 5)],
         )
 
+    def test_only_top_left_pixel_can_anchor_model(self):
+        model = GlyphModel(
+            "I",
+            _RoleWithTypography("unknown", "roman"),
+            frozenset({(0, 0), (0, 1), (0, 2)}),
+            1,
+        )
+        models = [model]
+        bind_page_candidates({}, models)
+        set_row_priority_hint("continuation")
+
+        result = page_cached_prioritized_fast_exact_cover(
+            {(0, 0), (0, 1), (0, 2)}, 1, 3, models
+        )
+
+        self.assertIsNotNone(result)
+        baseline, selected, tested = result
+        self.assertEqual(baseline, 0)
+        self.assertEqual([match.label for match in selected], ["I"])
+        self.assertEqual(tested, 1)
+
 
 if __name__ == "__main__":
     unittest.main()
