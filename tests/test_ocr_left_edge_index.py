@@ -39,6 +39,40 @@ class LeftEdgeIndexTests(unittest.TestCase):
         self.assertEqual(22, derived_baseline(glyph, source_top_y=20))
         self.assertFalse(exact_model_at(black - {(11, 22)}, glyph, x=11, y=20))
 
+    def test_internal_white_gap_adds_restart_fingerprint(self) -> None:
+        k_like = GlyphModel(
+            label="k",
+            style="roman",
+            pixels=frozenset({
+                (0, -5), (1, -5),
+                (0, -4),
+                # y=-3 deliberately all white inside the glyph
+                (1, -2), (2, -2),
+                (0, -1), (1, -1),
+                (0, 0),
+            }),
+            sources=1,
+        )
+        index = LeftEdgeIndex([k_like])
+        variants = [glyph for glyph in index.glyphs if glyph.model.label == "k"]
+        self.assertEqual(2, len(variants))
+        self.assertEqual({"full", "after-gap--2"}, {glyph.variant for glyph in variants})
+
+        lower = next(glyph for glyph in variants if glyph.variant != "full")
+        black = {
+            (20, 30), (21, 30),
+            (20, 31),
+            # source row 32 can contain unrelated following-glyph ink
+            (30, 32),
+            (21, 33), (22, 33),
+            (20, 34), (21, 34),
+            (20, 35),
+        }
+        # The lower fingerprint starts at model y=-2, source (21,33), but exact
+        # verification still checks every pixel of the complete k-like glyph.
+        self.assertTrue(exact_model_at(black, lower, x=21, y=33))
+        self.assertEqual(35, derived_baseline(lower, source_top_y=33))
+
 
 if __name__ == "__main__":
     unittest.main()
