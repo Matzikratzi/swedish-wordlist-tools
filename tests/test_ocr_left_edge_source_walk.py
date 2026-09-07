@@ -6,6 +6,7 @@ from swedish_wordlist_tools.ocr_glyph_matcher import GlyphModel
 from swedish_wordlist_tools.ocr_left_edge_index import LeftEdgeIndex
 from swedish_wordlist_tools.ocr_left_edge_source_walk import (
     source_walk_hits,
+    source_walk_hits_with_resync,
     source_walk_hits_with_top_retry,
     walk_prefixes_at,
 )
@@ -40,8 +41,6 @@ class LeftEdgeSourceWalkTests(unittest.TestCase):
             (11, 20), (12, 20),
             (10, 21), (11, 21),
             (11, 22),
-            # Extra pixels can exist nearby but must not turn another glyph into
-            # an exact match at the same start.
             (10, 20), (10, 22),
         }
         hits = source_walk_hits(black, index, max_x=11)
@@ -74,7 +73,7 @@ class LeftEdgeSourceWalkTests(unittest.TestCase):
             sources=1,
         )
         tall_following = {
-            (15, 10),  # later glyph sticks up above the low first glyph
+            (15, 10),
             (15, 11),
             (15, 12),
             (10, 12), (11, 12),
@@ -90,6 +89,29 @@ class LeftEdgeSourceWalkTests(unittest.TestCase):
         self.assertTrue(hits)
         self.assertTrue(any(hit.x == 10 and hit.y == 12 for hit in hits))
         self.assertEqual(2, min(hit.skipped_top_rows for hit in hits))
+
+    def test_horizontal_resync_skips_unknown_leading_glyph(self) -> None:
+        known = GlyphModel(
+            label="x",
+            style="roman",
+            pixels=frozenset({(0, -1), (1, -1), (0, 0), (1, 0)}),
+            sources=1,
+        )
+        # x=3..5 is an unknown leading glyph absent from facit.  The known glyph
+        # begins later at x=10 and must still be found without inventing a model
+        # for the unknown one.
+        black = {
+            (3, 20), (4, 20), (5, 20),
+            (3, 21), (5, 21),
+            (4, 22),
+            (10, 21), (11, 21),
+            (10, 22), (11, 22),
+        }
+        index = LeftEdgeIndex([known])
+        hits = source_walk_hits_with_resync(black, index, max_skip_rows=4)
+        self.assertTrue(hits)
+        self.assertTrue(any(hit.x == 10 and hit.y == 21 for hit in hits))
+        self.assertEqual(7, min(hit.skipped_left_columns for hit in hits))
 
 
 if __name__ == "__main__":
