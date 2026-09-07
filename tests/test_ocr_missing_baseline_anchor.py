@@ -3,10 +3,15 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from swedish_wordlist_tools.ocr_glyph_matcher import GlyphModel
+from swedish_wordlist_tools.ocr_glyph_matcher import (
+    GlyphModel,
+    Match,
+    select_best_disjoint_exact_for_ink,
+)
 from swedish_wordlist_tools.ocr_group_baseline_fallback import (
     _anchor_missing_baseline,
     _baseline_anchor_candidates,
+    _select_best_disjoint_exact_for_ink_fast,
 )
 
 
@@ -87,6 +92,25 @@ class MissingBaselineAnchorTest(unittest.TestCase):
             line_start_right=6,
         )
         self.assertEqual(anchors, [])
+
+    def test_bitmask_selector_matches_reference_beam_selector(self):
+        ink = {
+            (0, 0), (1, 0), (2, 0),
+            (4, 0), (5, 0),
+            (7, 0),
+        }
+        matches = [
+            Match("A", "roman", 0, 1, frozenset({(0, 0), (1, 0)}), 2, 3),
+            Match("x", "roman", 1, 1, frozenset({(1, 0)}), 1, 9),
+            Match("B", "roman", 2, 1, frozenset({(2, 0)}), 1, 2),
+            Match("C", "italic", 4, 1, frozenset({(4, 0), (5, 0)}), 2, 4),
+            Match("D", "roman", 7, 1, frozenset({(7, 0)}), 1, 1),
+        ]
+
+        reference = select_best_disjoint_exact_for_ink(matches, ink)
+        fast = _select_best_disjoint_exact_for_ink_fast(matches, ink)
+
+        self.assertEqual(fast, reference)
 
 
 if __name__ == "__main__":
