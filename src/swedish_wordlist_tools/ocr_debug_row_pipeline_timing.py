@@ -53,6 +53,9 @@ def main() -> int:
     _wrap(ultrafast, "analyse_row_exact_grouped_with_baseline_fallback", timings)
     _wrap(fallback, "_anchor_missing_baseline", timings)
     _wrap(fallback, "_select_at_baseline", timings)
+    _wrap(page_fast, "_row_ink", timings)
+    _wrap(page_fast, "_build_page_candidates", timings)
+    _wrap(page_fast, "_bound_page_candidates", timings)
     _wrap(page_fast, "page_cached_prioritized_fast_exact_cover", timings)
 
     started = perf_counter()
@@ -70,7 +73,10 @@ def main() -> int:
         "_load_owned_row_state",
         "analyse_row_exact",
         "analyse_row_exact_grouped_with_baseline_fallback",
+        "_row_ink",
         "page_cached_prioritized_fast_exact_cover",
+        "_bound_page_candidates",
+        "_build_page_candidates",
         "_anchor_missing_baseline",
         "_select_at_baseline",
         "_ensure_known_glyph_ownership",
