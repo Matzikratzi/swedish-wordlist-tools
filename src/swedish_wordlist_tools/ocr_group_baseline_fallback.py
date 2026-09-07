@@ -9,7 +9,12 @@ from .ocr_glyph_gap_matcher import (
     _drop_partial_component_matches,
     exact_matches_by_safe_gaps,
 )
-from .ocr_glyph_matcher import GlyphModel, Match, select_best_disjoint_exact_for_ink
+from .ocr_glyph_matcher import (
+    GlyphModel,
+    Match,
+    exact_matches,
+    select_best_disjoint_exact_for_ink,
+)
 from .ocr_probe_row_glyphs_grouped import analyse_row_exact_grouped
 
 
@@ -31,6 +36,149 @@ def _trace_stage(name: str, elapsed: float, **fields) -> None:
 def _covered(matches: Iterable[Match]) -> set[tuple[int, int]]:
     rows = list(matches)
     return set().union(*(match.pixels for match in rows)) if rows else set()
+
+
+def _anchor_scan_key(match: Match) -> tuple[int, int, int, int, int, str, str]:
+    """Order exact anchors like a raster scan: top row first, then leftmost.
+
+    A model is positioned relative to its baseline.  Consequently the first
+    exact glyph found this way supplies a baseline without us having to guess
+    one from the row geometry.  The remaining fields only make ties stable and
+    favour stronger learned glyphs.
+    """
+    top = min(y for _x, y in match.pixels)
+    left = min(x for x, _y in match.pixels)
+    return (
+        top,
+        left,
+        -match.model_pixels,
+        -match.sources,
+        match.baseline,
+        match.label,
+        match.style,
+    )
+
+
+def _baseline_anchor_candidates(
+    ink: set[tuple[int, int]],
+    width: int,
+    height: int,
+    models: Iterable[GlyphModel],
+    *,
+    line_start_left: int = 0,
+    line_start_right: int | None = None,
+) -> list[Match]:
+    """Find permissive exact glyphs that may anchor a previously missing baseline.
+
+    Whole-component ownership is deliberately disabled here.  Printed adjacent
+    glyphs can touch, and this fallback is specifically for rows where the safe
+    grouping could not establish any baseline.  Search order mirrors scanning
+    pixel rows down from the top and, on each row, from the line-start region's
+    left edge toward the right.
+    """
+    right = width if line_start_right is None else max(line_start_left, min(width, int(line_start_right)))
+    left = max(0, min(width, int(line_start_left)))
+    candidates = exact_matches(
+        ink,
+        width,
+        height,
+        models,
+        require_whole_components=False,
+    )
+    return sorted(
+        (
+            match
+            for match in candidates
+            if any(left <= x < right for x, _y in match.pixels)
+        ),
+        key=_anchor_scan_key,
+    )
+
+
+def _select_at_baseline(
+    ink: set[tuple[int, int]],
+    width: int,
+    height: int,
+    models: Iterable[GlyphModel],
+    baseline: int,
+) -> list[Match]:
+    candidates = exact_matches(
+        ink,
+        width,
+        height,
+        models,
+        baseline_only=int(baseline),
+        require_whole_components=False,
+    )
+    return select_best_disjoint_exact_for_ink(candidates, ink)
+
+
+def _anchor_missing_baseline(
+    result: dict,
+    crop,
+    models: Iterable[GlyphModel],
+    *,
+    line_start_left: int = 0,
+    line_start_right: int | None = None,
+) -> dict:
+    """Use the first useful exact line-start glyph to recover a missing baseline."""
+    if result.get("baseline") is not None or not result.get("ink"):
+        return result
+
+    model_rows = list(models)
+    started = perf_counter()
+    anchors = _baseline_anchor_candidates(
+        result["ink"],
+        crop.width,
+        crop.height,
+        model_rows,
+        line_start_left=line_start_left,
+        line_start_right=line_start_right,
+    )
+    _trace_stage(
+        "missing_baseline_anchor_candidates",
+        perf_counter() - started,
+        candidates=len(anchors),
+    )
+
+    tried: set[int] = set()
+    for anchor in anchors:
+        baseline = int(anchor.baseline)
+        if baseline in tried:
+            continue
+        tried.add(baseline)
+        selected = _select_at_baseline(
+            result["ink"], crop.width, crop.height, model_rows, baseline
+        )
+        if not selected:
+            continue
+        # The anchor itself must survive the baseline-constrained partition.
+        # Otherwise some accidental contained shape could dictate the row.
+        if not any(match == anchor for match in selected):
+            continue
+
+        covered = _covered(selected)
+        result["baseline"] = baseline
+        result["selected"] = sorted(
+            selected, key=lambda m: (m.x, m.baseline, m.label, m.style)
+        )
+        result["covered_pixels"] = len(covered)
+        result["unmatched_pixels"] = len(result["ink"] - covered)
+        result["fully_exact"] = bool(result["ink"]) and covered == result["ink"]
+        result["baseline_anchor"] = {
+            "label": anchor.label,
+            "style": anchor.style,
+            "x": int(anchor.x),
+            "top": min(y for _x, y in anchor.pixels),
+            "baseline": baseline,
+            "pixels": int(anchor.model_pixels),
+            "sources": int(anchor.sources),
+            "status": "exact-glyph-line-start-anchor",
+        }
+        return result
+
+    result["baseline_anchor"] = None
+    return result
 
 
 def _exact_group_at_baseline(
@@ -55,9 +203,12 @@ def analyse_row_exact_grouped_with_baseline_fallback(
     *,
     threshold: int = 210,
 ) -> dict:
-    """Allow exact safe groups to choose a local ±1 baseline independently."""
+    """Recover missing baselines, then allow local exact groups a ±1 baseline."""
     model_rows = list(models)
     result = analyse_row_exact_grouped(crop, model_rows, threshold=threshold)
+    if result.get("baseline") is None:
+        result = _anchor_missing_baseline(result, crop, model_rows)
+
     main_baseline = result.get("baseline")
     groups = list(result.get("safe_groups") or [])
     if main_baseline is None or not groups or result.get("fully_exact"):
