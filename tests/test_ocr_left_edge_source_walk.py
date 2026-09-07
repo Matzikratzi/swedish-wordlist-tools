@@ -4,7 +4,11 @@ import unittest
 
 from swedish_wordlist_tools.ocr_glyph_matcher import GlyphModel
 from swedish_wordlist_tools.ocr_left_edge_index import LeftEdgeIndex
-from swedish_wordlist_tools.ocr_left_edge_source_walk import source_walk_hits, walk_prefixes_at
+from swedish_wordlist_tools.ocr_left_edge_source_walk import (
+    source_walk_hits,
+    source_walk_hits_with_top_retry,
+    walk_prefixes_at,
+)
 
 
 class LeftEdgeSourceWalkTests(unittest.TestCase):
@@ -22,7 +26,7 @@ class LeftEdgeSourceWalkTests(unittest.TestCase):
             sources=1,
         )
 
-    def test_source_pixels_drive_prefix_branching(self) -> None:
+    def test_source_pixels_drive_actual_left_edge(self) -> None:
         index = LeftEdgeIndex([self.a, self.b])
         black = {(11, 20), (12, 20), (10, 21), (11, 21), (11, 22)}
         states = walk_prefixes_at(black, index, x=11, y=20, max_depth=4)
@@ -36,8 +40,8 @@ class LeftEdgeSourceWalkTests(unittest.TestCase):
             (11, 20), (12, 20),
             (10, 21), (11, 21),
             (11, 22),
-            # Extra pixels can satisfy other prefix branches but must not make a
-            # different full glyph raster exact at the same start.
+            # Extra pixels can exist nearby but must not turn another glyph into
+            # an exact match at the same start.
             (10, 20), (10, 22),
         }
         hits = source_walk_hits(black, index, max_x=11)
@@ -61,6 +65,31 @@ class LeftEdgeSourceWalkTests(unittest.TestCase):
                 for hit in hits
             )
         )
+
+    def test_top_retry_can_skip_taller_following_glyph_ink(self) -> None:
+        low = GlyphModel(
+            label="x",
+            style="roman",
+            pixels=frozenset({(0, -1), (1, -1), (0, 0), (1, 0)}),
+            sources=1,
+        )
+        tall_following = {
+            (15, 10),  # later glyph sticks up above the low first glyph
+            (15, 11),
+            (15, 12),
+            (10, 12), (11, 12),
+            (10, 13), (11, 13),
+        }
+        index = LeftEdgeIndex([low])
+        hits = source_walk_hits_with_top_retry(
+            tall_following,
+            index,
+            max_x=14,
+            max_skip_rows=4,
+        )
+        self.assertTrue(hits)
+        self.assertTrue(any(hit.x == 10 and hit.y == 12 for hit in hits))
+        self.assertEqual(2, min(hit.skipped_top_rows for hit in hits))
 
 
 if __name__ == "__main__":
