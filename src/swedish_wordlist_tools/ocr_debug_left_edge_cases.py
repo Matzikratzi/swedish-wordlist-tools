@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .ocr_glyph_matcher import load_facit
+from .ocr_group_baseline_fallback import _select_at_baseline
 from .ocr_left_edge_index import LeftEdgeIndex, derived_baseline
 from .ocr_left_edge_source_walk import is_strong_anchor, source_walk_hits_with_resync
 from .ocr_prepare_sequential_page import _load_source_image, read_jsonl, source_for_page
@@ -40,6 +41,47 @@ def _black_points(image, *, threshold: int) -> set[tuple[int, int]]:
     }
 
 
+def _covered(selected) -> set[tuple[int, int]]:
+    return set().union(*(match.pixels for match in selected)) if selected else set()
+
+
+def _selected_text(selected) -> str:
+    return "".join(match.label for match in sorted(selected, key=lambda m: (m.x, m.baseline, m.label, m.style)))
+
+
+def _probe_anchor_baselines(black, crop, models, hits) -> None:
+    baseline_sources: dict[int, list[str]] = {}
+    for hit in hits:
+        for glyph in hit.exact:
+            if not is_strong_anchor(glyph, hit.prefix):
+                continue
+            baseline = derived_baseline(glyph, source_top_y=hit.y)
+            baseline_sources.setdefault(baseline, []).append(
+                f"{glyph.model.label!r}/{glyph.model.style}:{glyph.variant}@x{hit.x}"
+            )
+
+    if not baseline_sources:
+        print("  baseline-probe: no strong contour anchor")
+        return
+
+    rows = []
+    for baseline, sources in sorted(baseline_sources.items()):
+        selected = _select_at_baseline(black, crop.width, crop.height, models, baseline)
+        covered = _covered(selected)
+        rows.append((len(covered), baseline, selected, sources))
+
+    rows.sort(key=lambda row: (-row[0], row[1]))
+    for rank, (covered_pixels, baseline, selected, sources) in enumerate(rows, 1):
+        text = _selected_text(selected)
+        fully_exact = bool(black) and covered_pixels == len(black)
+        print(
+            f"  baseline-probe rank={rank} baseline={baseline} "
+            f"coverage={covered_pixels}/{len(black)} fully_exact={fully_exact} "
+            f"selected={len(selected)} text={text!r} "
+            f"anchors={';'.join(sources)}"
+        )
+
+
 def run_case(jsonl: Path, facit: Path, case: Case, *, threshold: int, limit: int) -> None:
     source = source_for_page(read_jsonl(jsonl), case.page)
     if not source:
@@ -50,7 +92,8 @@ def run_case(jsonl: Path, facit: Path, case: Case, *, threshold: int, limit: int
 
     crop = page.crop(case.crop)
     black = _black_points(crop, threshold=threshold)
-    index = LeftEdgeIndex(load_facit(facit))
+    models = load_facit(facit)
+    index = LeftEdgeIndex(models)
     hits = source_walk_hits_with_resync(
         black,
         index,
@@ -68,10 +111,15 @@ def run_case(jsonl: Path, facit: Path, case: Case, *, threshold: int, limit: int
         print("  source walk found no exact glyph at/before current anchor after x/y resync")
         return
 
+    strong = any(
+        is_strong_anchor(glyph, hit.prefix)
+        for hit in hits
+        for glyph in hit.exact
+    )
+    quality = "STRONG" if strong else "WEAK-FALLBACK"
     leftmost = min(hit.x for hit in hits)
     skipped_top = min(hit.skipped_top_rows for hit in hits)
     skipped_left = min(hit.skipped_left_columns for hit in hits)
-    quality = "STRONG" if any(is_strong_anchor(hit) for hit in hits) else "WEAK-FALLBACK"
     print(
         f"  source-walk hits={len(hits)} quality={quality} "
         f"skipped_left_columns={skipped_left} skipped_top_rows={skipped_top} "
@@ -88,21 +136,21 @@ def run_case(jsonl: Path, facit: Path, case: Case, *, threshold: int, limit: int
             len(item.candidates),
         ),
     ):
-        hit_quality = "STRONG" if is_strong_anchor(hit) else "WEAK"
         for glyph in sorted(
             hit.exact,
             key=lambda item: (-len(item.model.pixels), item.model.label, item.model.style, item.variant),
         ):
             if shown >= limit:
-                return
+                break
             model = glyph.model
             baseline = derived_baseline(glyph, source_top_y=hit.y)
+            glyph_quality = "STRONG" if is_strong_anchor(glyph, hit.prefix) else "WEAK"
             marker = "LEFTMOST" if hit.x == leftmost else ""
             prefix_text = "[" + ",".join(
                 "." if value is None else str(value) for value in hit.prefix
             ) + "]"
             print(
-                f"  x={hit.x:>3} y={hit.y:>2} quality={hit_quality} "
+                f"  x={hit.x:>3} y={hit.y:>2} quality={glyph_quality} "
                 f"skipx={hit.skipped_left_columns:>3} skipy={hit.skipped_top_rows:>2} "
                 f"page=({case.crop[0]+hit.x},{case.crop[1]+hit.y}) "
                 f"glyph={model.label!r}/{model.style} variant={glyph.variant} "
@@ -111,13 +159,18 @@ def run_case(jsonl: Path, facit: Path, case: Case, *, threshold: int, limit: int
                 f"baseline_page={case.crop[1]+baseline} prefix={prefix_text} {marker}".rstrip()
             )
             shown += 1
+        if shown >= limit:
+            break
+
+    _probe_anchor_baselines(black, crop, models, hits)
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
             "Walk source left contours without a baseline on the collected #2 "
-            "anchor-failure rows, resynchronizing both downward and rightward."
+            "anchor-failure rows, resynchronizing both downward and rightward, "
+            "then probe the existing baseline-constrained selector from strong anchors."
         )
     )
     ap.add_argument("jsonl", type=Path)
