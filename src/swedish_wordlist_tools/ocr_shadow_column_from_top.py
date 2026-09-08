@@ -53,7 +53,6 @@ def _left_profile_group(completed, *, baseline: int | None = None):
         return [], []
     left_x = min(_hit_bounds(hit)[0] for hit in candidates)
     candidates = [hit for hit in candidates if _hit_bounds(hit)[0] == left_x]
-
     pixel_sets = {id(hit): _hit_pixels(hit) for hit in candidates}
     maximal = [
         hit
@@ -71,15 +70,11 @@ def _pick_left_anchor(completed, *, baseline: int | None = None):
     candidates, maximal = _left_profile_group(completed, baseline=baseline)
     if not candidates or not maximal:
         return None
-
-    # Several model records can describe exactly the same placed raster.  That
-    # is not a geometric ambiguity, so collapse identical pixel sets first.
     by_pixels: dict[frozenset[tuple[int, int]], list[object]] = defaultdict(list)
     for hit in maximal:
         by_pixels[_hit_pixels(hit)].append(hit)
     if len(by_pixels) != 1:
         return None
-
     equivalent = next(iter(by_pixels.values()))
     return max(
         equivalent,
@@ -184,6 +179,22 @@ def _blank_through_baseline(
     return all((x, y) not in black for y in range(top_y, baseline + 1))
 
 
+def _row_lane_ink_to_right(
+    black: set[tuple[int, int]],
+    *,
+    after_x: int,
+    end_x: int,
+    row_top: int,
+    row_bottom: int,
+) -> set[tuple[int, int]]:
+    """Black pixels still belonging to this row's raster lanes, to the right."""
+    return {
+        (x, y)
+        for x, y in black
+        if after_x < x <= end_x and row_top <= y < row_bottom
+    }
+
+
 def _profile_restart(
     black: set[tuple[int, int]],
     models,
@@ -230,7 +241,7 @@ def _walk_first_row(
         _left, right = _hit_bounds(current)
         cursor = right + 1
         if cursor >= column_right:
-            print(f"column-top-walk-stop: reason=column-end x={cursor}", flush=True)
+            print(f"column-top-walk-stop: reason=row-end-column x={cursor}", flush=True)
             break
 
         if _blank_through_baseline(black, x=cursor, top_y=row_top, baseline=baseline):
@@ -241,6 +252,22 @@ def _walk_first_row(
                 f"below_baseline_ink={below}",
                 flush=True,
             )
+
+            lane_ink = _row_lane_ink_to_right(
+                black,
+                after_x=cursor,
+                end_x=column_right - 1,
+                row_top=row_top,
+                row_bottom=row_bottom,
+            )
+            if not lane_ink:
+                print(
+                    f"column-top-walk-stop: reason=row-end-empty-lanes separator={cursor} "
+                    f"row_y={row_top}..{row_bottom-1}",
+                    flush=True,
+                )
+                break
+
             restart_result, next_hit = _profile_restart(
                 black,
                 models,
@@ -250,7 +277,10 @@ def _walk_first_row(
                 row_bottom=row_bottom,
             )
             if restart_result is None:
-                print(f"column-top-walk-stop: reason=no-ink-after-separator x={cursor}", flush=True)
+                print(
+                    f"column-top-walk-stop: reason=row-end-no-ink separator={cursor}",
+                    flush=True,
+                )
                 break
 
             _print_profile_group("column-top-walk-profile-group", restart_result.completed)
@@ -260,7 +290,8 @@ def _walk_first_row(
                 print(
                     f"column-top-walk-stop: reason=profile-ambiguous-after-separator "
                     f"separator={cursor} old_baseline={old_baseline} "
-                    f"candidates={len(candidates)} distinct_maximal={distinct_maximal}",
+                    f"lane_pixels={len(lane_ink)} candidates={len(candidates)} "
+                    f"distinct_maximal={distinct_maximal}",
                     flush=True,
                 )
                 break
