@@ -6,6 +6,7 @@ from time import perf_counter
 
 from .ocr_canonical_facit import load_canonical_facit_with_typography
 from .ocr_left_edge_local_index import prepare_local_fingerprint_indexes
+from .ocr_left_edge_prefix_hypotheses import build_prefix_index
 from .ocr_review_page_pixel_array_glyphs_html import build_page_context_pixel_array
 from .ocr_row_split_left_support import row_start_geometry
 from .ocr_row_start_band_search import ranked_exact_row_start_band_hits
@@ -78,7 +79,12 @@ def main() -> int:
     models = tuple(load_canonical_facit_with_typography(args.facit))
     prepared_started = perf_counter()
     prepared = prepare_local_fingerprint_indexes(models, max_steps=8, min_steps=args.min_steps, max_row_gap=1)
-    print(f"shadow-fingerprints: models={len(models)} build={perf_counter()-prepared_started:.4f}s reusable=yes", flush=True)
+    prefix_index = build_prefix_index(models, max_row_gap=1)
+    print(
+        f"shadow-fingerprints: models={len(models)} build={perf_counter()-prepared_started:.4f}s "
+        f"reusable=yes prefix_buckets={len(prefix_index.buckets)}",
+        flush=True,
+    )
     context = build_page_context_pixel_array(args.jsonl, args.page, args.threshold)
     bounds = _column_bounds(context, args.column)
     black = _black_pixels(context, bounds)
@@ -103,18 +109,25 @@ def main() -> int:
     )
     print(f"shadow-column: exact-local-hits={len(hits)} search={perf_counter()-hits_started:.4f}s", flush=True)
 
-    fallback_started = perf_counter()
-    fallback_starts = exact_mature_prefix_row_starts(
-        black,
-        models,
-        start_ranges=start_ranges,
-        max_row_gap=1,
-    )
-    print(
-        f"shadow-column: mature-prefix-starts={len(fallback_starts)} "
-        f"search={perf_counter()-fallback_started:.4f}s",
-        flush=True,
-    )
+    prefix_search_calls = 0
+    prefix_search_seconds = 0.0
+    prefix_start_count = 0
+
+    def prefix_provider(search_y: int, limit_y: int):
+        nonlocal prefix_search_calls, prefix_search_seconds, prefix_start_count
+        started = perf_counter()
+        starts = exact_mature_prefix_row_starts(
+            black,
+            start_ranges=start_ranges,
+            max_row_gap=1,
+            index=prefix_index,
+            min_y=search_y,
+            max_y=limit_y,
+        )
+        prefix_search_calls += 1
+        prefix_search_seconds += perf_counter() - started
+        prefix_start_count += len(starts)
+        return starts
 
     _left, _right, top, bottom = bounds
     shadow = walk_row_starts(
@@ -126,7 +139,12 @@ def main() -> int:
         max_row_distance=args.max_row_distance,
         min_steps=args.min_steps,
         min_baseline_delta=args.min_baseline_delta,
-        fallback_starts=fallback_starts,
+        fallback_provider=prefix_provider,
+    )
+    print(
+        f"shadow-column: mature-prefix-window-searches={prefix_search_calls} "
+        f"starts={prefix_start_count} search={prefix_search_seconds:.4f}s",
+        flush=True,
     )
     old_rows = (context["row_map"].get("columns") or [])[args.column].get("rows") or []
     matched_old: set[int] = set()
