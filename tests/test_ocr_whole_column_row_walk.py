@@ -23,38 +23,30 @@ class WholeColumnRowWalkTest(unittest.TestCase):
         a = model("a")
         b = model("b")
         geometry = row_start_geometry(46, 57, 68)
-        rows = walk_row_starts(
-            [
-                hit(a, x=57, top_y=7, baseline=10),
-                hit(b, x=57, top_y=24, baseline=27),
-            ],
-            models=[a, b],
-            geometry=geometry,
-            start_y=0,
-            end_y=40,
-            max_row_distance=24,
-            min_steps=3,
-            vertical_slack=1,
-        )
+        rows = walk_row_starts([hit(a, x=57, top_y=7, baseline=10), hit(b, x=57, top_y=24, baseline=27)], models=[a, b], geometry=geometry, start_y=0, end_y=40, max_row_distance=24, min_steps=3)
         self.assertEqual(["a", "b"], [row.start.label for row in rows])
-        self.assertLess(rows[0].next_search_y, rows[1].start.top_y + 1)
+
+    def test_deep_facit_glyph_cannot_make_walker_skip_next_row(self):
+        a = model("a")
+        deep = model("deep", min_y=-3, max_y=20)
+        b = model("b")
+        geometry = row_start_geometry(46, 57, 68)
+        rows = walk_row_starts([hit(a, x=57, top_y=7, baseline=10), hit(b, x=57, top_y=21, baseline=24)], models=[a, deep, b], geometry=geometry, start_y=0, end_y=40, max_row_distance=24, min_steps=3)
+        self.assertEqual([10, 24], [row.start.baseline for row in rows])
+
+    def test_same_baseline_hit_is_not_mistaken_for_next_row(self):
+        a = model("a")
+        same = model("s")
+        b = model("b")
+        geometry = row_start_geometry(46, 57, 68)
+        rows = walk_row_starts([hit(a, x=57, top_y=7, baseline=10), hit(same, x=68, top_y=9, baseline=10), hit(b, x=57, top_y=24, baseline=27)], models=[a, same, b], geometry=geometry, start_y=0, end_y=40, max_row_distance=24, min_steps=3)
+        self.assertEqual([10, 27], [row.start.baseline for row in rows])
 
     def test_late_apne_fragment_does_not_create_shadow_row(self):
         mark = model("mark")
         a = model("a")
         geometry = row_start_geometry(46, 57, 68)
-        rows = walk_row_starts(
-            [
-                hit(mark, x=83, top_y=4, baseline=7, steps=8),
-                hit(a, x=57, top_y=7, baseline=10, steps=7),
-            ],
-            models=[mark, a],
-            geometry=geometry,
-            start_y=0,
-            end_y=20,
-            max_row_distance=16,
-            min_steps=3,
-        )
+        rows = walk_row_starts([hit(mark, x=83, top_y=4, baseline=7, steps=8), hit(a, x=57, top_y=7, baseline=10, steps=7)], models=[mark, a], geometry=geometry, start_y=0, end_y=20, max_row_distance=16, min_steps=3)
         self.assertEqual(1, len(rows))
         self.assertEqual("a", rows[0].start.label)
         self.assertEqual(57, rows[0].start.x)
