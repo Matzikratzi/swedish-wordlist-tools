@@ -46,7 +46,7 @@ class CandidateSurvivalTest(unittest.TestCase):
         self.assertTrue(any(hit.x == 57 and hit.baseline == 20 for hit in result.completed))
 
         dirty = set(clean)
-        dirty.add((58, 18))  # inside i width, in the dot/stem gap
+        dirty.add((58, 18))
         result2 = run_candidate_survival(
             dirty,
             [i],
@@ -59,7 +59,7 @@ class CandidateSurvivalTest(unittest.TestCase):
     def test_gap_ignores_ink_beyond_glyph_width(self):
         i = glyph("i", {(0, -3), (0, -1), (0, 0), (1, 0)})
         black = place(i, x=57, baseline=20)
-        black.add((61, 18))  # same y as the gap, but beyond i width
+        black.add((61, 18))
 
         result = run_candidate_survival(
             black,
@@ -69,6 +69,22 @@ class CandidateSurvivalTest(unittest.TestCase):
             allowed_translate_x_ranges=((50, 64),),
         )
         self.assertTrue(any(hit.x == 57 and hit.baseline == 20 for hit in result.completed))
+
+    def test_candidate_is_born_only_at_model_top_not_from_internal_rows(self):
+        tall = glyph("T", {(0, -4), (0, -3), (0, -2), (0, -1), (0, 0)})
+        black = place(tall, x=57, baseline=20)
+
+        result = run_candidate_survival(
+            black,
+            [tall],
+            start_y=16,
+            end_y=20,
+            allowed_translate_x_ranges=((50, 64),),
+        )
+
+        self.assertEqual(1, result.seeded)
+        self.assertEqual([1, 0, 0, 0, 0], [step.born for step in result.steps])
+        self.assertEqual([(57, 20)], [(hit.x, hit.baseline) for hit in result.completed])
 
 
 if __name__ == "__main__":
