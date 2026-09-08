@@ -38,6 +38,7 @@ class GuidedStats:
     relation_steps: int
     exact_checks: int
     max_requested_bottom_y: int | None
+    expected_pixel_checks: int = 0
 
 
 def _source_left_rows(
@@ -55,6 +56,58 @@ def _source_left_rows(
     return tuple(sorted(by_y.items()))
 
 
+def _extend_expected_contour(
+    black: set[tuple[int, int]],
+    rows: tuple[tuple[int, int], ...],
+    *,
+    anchor_index: int,
+    source_anchor_y: int,
+    source_anchor_x: int,
+    max_row_gap: int,
+) -> tuple[int, int, int]:
+    """Follow one model candidate by probing only its expected contour pixels.
+
+    The first relation has already matched.  That fixes the model translation.
+    Every subsequent model contour row therefore predicts one exact source
+    ``(x, y)`` position.  We test only those positions instead of rebuilding a
+    source contour and comparing it wholesale.
+
+    Returns ``(matched_steps, requested_bottom_y, pixel_checks)``.  A model-side
+    white-row gap larger than ``max_row_gap`` ends this local fingerprint run;
+    there is deliberately no invented dx relation across the gap.
+    """
+    tx = source_anchor_x - rows[anchor_index][1]
+    ty = source_anchor_y - rows[anchor_index][0]
+
+    # Candidate creation guarantees that relation anchor_index -> anchor_index+1
+    # matched, so one real relation is already known.
+    matched_steps = 1
+    requested_bottom_y = source_anchor_y + (rows[anchor_index + 1][0] - rows[anchor_index][0])
+    pixel_checks = 0
+
+    prev_index = anchor_index + 1
+    next_index = prev_index + 1
+    while next_index < len(rows):
+        py, _px = rows[prev_index]
+        ny, nx = rows[next_index]
+        dy = ny - py
+        if dy > max_row_gap:
+            break
+
+        expected_y = ny + ty
+        expected_x = nx + tx
+        requested_bottom_y = expected_y
+        pixel_checks += 1
+        if (expected_x, expected_y) not in black:
+            break
+
+        matched_steps += 1
+        prev_index = next_index
+        next_index += 1
+
+    return matched_steps, requested_bottom_y, pixel_checks
+
+
 def candidate_guided_exact_hits(
     black: set[tuple[int, int]],
     models: Iterable[GlyphModel],
@@ -63,18 +116,20 @@ def candidate_guided_exact_hits(
     max_x: int | None = None,
     min_exact_steps: int = 1,
 ) -> tuple[tuple[GuidedExactHit, ...], GuidedStats]:
-    """Walk source contours only as far as surviving glyph candidates require.
+    """Find exact placements by letting each glyph candidate guide the walk.
 
-    For each possible horizontal resynchronisation x, the first source relation
-    is looked up in the one-step local contour index.  Those concrete
-    ``(glyph, model-offset)`` candidates are then extended one relation at a
-    time.  A track dies immediately when the next ``(dy, dx)`` differs.
+    Candidate generation still uses one observed source ``(dy, dx)`` relation.
+    That one relation identifies concrete ``(glyph, model-offset)`` candidates
+    and fixes each candidate's translation.  From then on the source contour is
+    *not* regenerated.  Instead, the candidate predicts the exact source pixel
+    for its next occupied model row.  The walk continues while those predicted
+    pixels exist, and stops at the model's end, a model-side white-row gap, or
+    the first missing predicted pixel.
 
-    The walk does not use a fixed maximum fingerprint length.  It continues
-    only while at least one candidate survives and only down to the deepest
-    occupied model row required by those candidates.  Whenever a surviving
-    candidate already implies a full exact glyph placement, that placement is
-    recorded; later matching relations may strengthen the same placement.
+    Full glyph raster verification is done once per sufficiently long track,
+    after the cheap guided contour walk.  Thus a candidate can ask us to look
+    farther down than an arbitrary fixed 8-step fingerprint without paying for
+    repeated full-raster checks at every intermediate step.
     """
     if max_row_gap <= 0:
         raise ValueError("max_row_gap must be positive")
@@ -95,7 +150,13 @@ def candidate_guided_exact_hits(
     started_tracks = 0
     relation_steps = 0
     exact_checks = 0
+    expected_pixel_checks = 0
     max_requested_bottom_y: int | None = None
+
+    # The same concrete candidate placement can be rediscovered from several
+    # scan_x values / source windows.  Extend and exact-check it only once for a
+    # given model-local anchor; retain the strongest resulting placement below.
+    seen_tracks: set[tuple[int, int, int, int]] = set()
 
     for scan_x in scan_xs:
         source_rows = _source_left_rows(black, min_x=scan_x)
@@ -111,85 +172,62 @@ def candidate_guided_exact_hits(
             indexed_candidates = one_step.candidates(signature)
             if not indexed_candidates:
                 continue
-            started_tracks += 1
 
-            # Each entry keeps the model-local occupied-row index that
-            # corresponds to the source anchor, together with the indexed
-            # one-step object used for exact placement verification.
-            live: list[tuple[object, int]] = []
             for indexed in indexed_candidates:
                 idx = anchor_index.get((id(indexed.model), indexed.anchor_y, indexed.anchor_x))
-                if idx is not None:
-                    live.append((indexed, idx))
+                if idx is None:
+                    continue
+                rows = rows_by_model[id(indexed.model)]
+                if idx + 1 >= len(rows):
+                    continue
 
-            source_pos = start + 1
-            matched_steps = 1
-            while live:
-                relation_steps += 1
-                requested_bottom = max(
-                    sy0 + (rows_by_model[id(indexed.model)][-1][0] - indexed.anchor_y)
-                    for indexed, _idx in live
+                tx = sx0 - indexed.anchor_x
+                ty = sy0 - indexed.anchor_y
+                track_key = (id(indexed.model), idx, tx, ty)
+                if track_key in seen_tracks:
+                    continue
+                seen_tracks.add(track_key)
+                started_tracks += 1
+
+                matched_steps, requested_bottom, checks = _extend_expected_contour(
+                    black,
+                    rows,
+                    anchor_index=idx,
+                    source_anchor_y=sy0,
+                    source_anchor_x=sx0,
+                    max_row_gap=max_row_gap,
                 )
+                relation_steps += matched_steps
+                expected_pixel_checks += checks
                 if max_requested_bottom_y is None or requested_bottom > max_requested_bottom_y:
                     max_requested_bottom_y = requested_bottom
 
-                if matched_steps >= min_exact_steps:
-                    for indexed, _idx in live:
-                        exact_checks += 1
-                        if not exact_local_model_at(
-                            black,
-                            indexed,
-                            source_anchor_y=sy0,
-                            source_anchor_x=sx0,
-                        ):
-                            continue
-                        tx = sx0 - indexed.anchor_x
-                        ty = sy0 - indexed.anchor_y
-                        key = (id(indexed.model), tx, ty)
-                        hit = GuidedExactHit(
-                            model=indexed.model,
-                            source_anchor_y=sy0,
-                            source_anchor_x=sx0,
-                            model_anchor_y=indexed.anchor_y,
-                            model_anchor_x=indexed.anchor_x,
-                            matched_steps=matched_steps,
-                            scan_x=scan_x,
-                            requested_bottom_y=requested_bottom,
-                        )
-                        old = best.get(key)
-                        if old is None or hit.matched_steps > old.matched_steps:
-                            best[key] = hit
+                if matched_steps < min_exact_steps:
+                    continue
 
-                next_source_pos = source_pos + 1
-                if next_source_pos >= len(source_rows):
-                    break
-                sy_prev, sx_prev = source_rows[source_pos]
-                sy_next, sx_next = source_rows[next_source_pos]
-                if sy_next > requested_bottom:
-                    break
-                source_dy = sy_next - sy_prev
-                if source_dy > max_row_gap:
-                    break
-                source_relation = (source_dy, sx_next - sx_prev)
+                exact_checks += 1
+                if not exact_local_model_at(
+                    black,
+                    indexed,
+                    source_anchor_y=sy0,
+                    source_anchor_x=sx0,
+                ):
+                    continue
 
-                next_live: list[tuple[object, int]] = []
-                for indexed, idx in live:
-                    rows = rows_by_model[id(indexed.model)]
-                    model_next = idx + matched_steps + 1
-                    model_prev = model_next - 1
-                    if model_next >= len(rows):
-                        continue
-                    my0, mx0 = rows[model_prev]
-                    my1, mx1 = rows[model_next]
-                    model_relation = (my1 - my0, mx1 - mx0)
-                    if model_relation == source_relation:
-                        next_live.append((indexed, idx))
-
-                if not next_live:
-                    break
-                live = next_live
-                source_pos = next_source_pos
-                matched_steps += 1
+                placement_key = (id(indexed.model), tx, ty)
+                hit = GuidedExactHit(
+                    model=indexed.model,
+                    source_anchor_y=sy0,
+                    source_anchor_x=sx0,
+                    model_anchor_y=indexed.anchor_y,
+                    model_anchor_x=indexed.anchor_x,
+                    matched_steps=matched_steps,
+                    scan_x=scan_x,
+                    requested_bottom_y=requested_bottom,
+                )
+                old = best.get(placement_key)
+                if old is None or hit.matched_steps > old.matched_steps:
+                    best[placement_key] = hit
 
     hits = sorted(
         best.values(),
@@ -208,4 +246,5 @@ def candidate_guided_exact_hits(
         relation_steps=relation_steps,
         exact_checks=exact_checks,
         max_requested_bottom_y=max_requested_bottom_y,
+        expected_pixel_checks=expected_pixel_checks,
     )
