@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from time import perf_counter
 
 from .ocr_canonical_facit import load_canonical_facit_with_typography
-from .ocr_left_edge_local_index import ranked_exact_local_hits
+from .ocr_left_edge_local_index import prepare_local_fingerprint_indexes, ranked_exact_local_hits
 from .ocr_review_page_pixel_array_glyphs_html import build_page_context_pixel_array
 from .ocr_row_split_left_support import row_start_geometry
 from .ocr_whole_column_row_walk import walk_row_starts
@@ -34,12 +35,7 @@ def _black_pixels(context: dict, bounds: tuple[int, int, int, int]) -> set[tuple
     gray = context["pixel_gray_page"]
     threshold = int(context["threshold"])
     pixels = gray.load()
-    return {
-        (x, y)
-        for y in range(top, bottom)
-        for x in range(left, right)
-        if int(pixels[x, y]) < threshold
-    }
+    return {(x, y) for y in range(top, bottom) for x in range(left, right) if int(pixels[x, y]) < threshold}
 
 
 def _old_row_for_y(rows: list[dict], y: int) -> int | None:
@@ -50,12 +46,7 @@ def _old_row_for_y(rows: list[dict], y: int) -> int | None:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(
-        description=(
-            "Shadow experiment: find rows one at a time from whole-column pixels; "
-            "old row segmentation is used only for horizontal bounds and comparison."
-        )
-    )
+    ap = argparse.ArgumentParser(description="Shadow experiment: find rows one at a time from whole-column pixels; old segmentation is comparison only.")
     ap.add_argument("jsonl", type=Path)
     ap.add_argument("--facit", type=Path, required=True)
     ap.add_argument("--page", type=int, default=39)
@@ -69,39 +60,19 @@ def main() -> int:
     args = ap.parse_args()
 
     models = tuple(load_canonical_facit_with_typography(args.facit))
+    prepared_started = perf_counter()
+    prepared = prepare_local_fingerprint_indexes(models, max_steps=8, min_steps=args.min_steps, max_row_gap=1)
+    print(f"shadow-fingerprints: models={len(models)} build={perf_counter()-prepared_started:.4f}s reusable=yes", flush=True)
     context = build_page_context_pixel_array(args.jsonl, args.page, args.threshold)
     bounds = _column_bounds(context, args.column)
     black = _black_pixels(context, bounds)
     geometry = row_start_geometry(args.homonym_x, args.headword_x, args.continuation_x)
-
-    print(
-        f"shadow-column: page={args.page} column={args.column} bounds={bounds} "
-        f"black={len(black)} models={len(models)} geometry="
-        f"{geometry.homonym_start_x}/{geometry.headword_start_x}/"
-        f"{geometry.continuation_start_x} late_limit={geometry.late_start_limit_x}",
-        flush=True,
-    )
-    hits = ranked_exact_local_hits(
-        black,
-        models,
-        max_steps=8,
-        min_steps=args.min_steps,
-        max_row_gap=1,
-        max_x=geometry.late_start_limit_x,
-        include_tiny_fallback=False,
-    )
-    print(f"shadow-column: exact-local-hits={len(hits)}", flush=True)
-
-    left, right, top, bottom = bounds
-    shadow = walk_row_starts(
-        hits,
-        models=models,
-        geometry=geometry,
-        start_y=top,
-        end_y=bottom - 1,
-        max_row_distance=args.max_row_distance,
-        min_steps=args.min_steps,
-    )
+    print(f"shadow-column: page={args.page} column={args.column} bounds={bounds} black={len(black)} models={len(models)} geometry={geometry.homonym_start_x}/{geometry.headword_start_x}/{geometry.continuation_start_x} late_limit={geometry.late_start_limit_x}", flush=True)
+    hits_started = perf_counter()
+    hits = ranked_exact_local_hits(black, max_steps=8, min_steps=args.min_steps, max_row_gap=1, max_x=geometry.late_start_limit_x, include_tiny_fallback=False, prepared=prepared)
+    print(f"shadow-column: exact-local-hits={len(hits)} search={perf_counter()-hits_started:.4f}s", flush=True)
+    _left, _right, top, bottom = bounds
+    shadow = walk_row_starts(hits, models=models, geometry=geometry, start_y=top, end_y=bottom - 1, max_row_distance=args.max_row_distance, min_steps=args.min_steps)
     old_rows = (context["row_map"].get("columns") or [])[args.column].get("rows") or []
     matched_old: set[int] = set()
     for row in shadow:
@@ -109,25 +80,12 @@ def main() -> int:
         if old_index is not None:
             matched_old.add(old_index)
         old_text = "none" if old_index is None else str(old_index)
-        print(
-            f"shadow-row: new={row.index} old={old_text} search={row.search_from_y} "
-            f"top={row.start.top_y} baseline={row.start.baseline} next={row.next_search_y} "
-            f"start={row.start.label!r}/{row.start.style}@x{row.start.x} steps={row.start.steps}",
-            flush=True,
-        )
-
+        print(f"shadow-row: new={row.index} old={old_text} search={row.search_from_y} top={row.start.top_y} baseline={row.start.baseline} next={row.next_search_y} start={row.start.label!r}/{row.start.style}@x{row.start.x} steps={row.start.steps}", flush=True)
     unmatched = [i for i in range(len(old_rows)) if i not in matched_old]
-    print(
-        f"shadow-summary: new_rows={len(shadow)} old_rows={len(old_rows)} "
-        f"matched_old={len(matched_old)} unmatched_old={len(unmatched)}",
-        flush=True,
-    )
+    print(f"shadow-summary: new_rows={len(shadow)} old_rows={len(old_rows)} matched_old={len(matched_old)} unmatched_old={len(unmatched)}", flush=True)
     for index in unmatched:
         row = old_rows[index]
-        print(
-            f"shadow-old-only: old={index} y={int(row['page_top'])}..{int(row['page_bottom'])}",
-            flush=True,
-        )
+        print(f"shadow-old-only: old={index} y={int(row['page_top'])}..{int(row['page_bottom'])}", flush=True)
     return 0
 
 
