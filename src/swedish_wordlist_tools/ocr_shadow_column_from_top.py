@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 from time import perf_counter
 
@@ -27,13 +27,84 @@ def _row_page_span(context: dict, column: int, row_index: int) -> tuple[int, int
     return top, bottom
 
 
+def _model_x_bounds(model) -> tuple[int, int]:
+    xs = [x for x, _y in model.pixels]
+    return min(xs), max(xs)
+
+
+def _placed_pixels(model, *, tx: int, baseline: int) -> frozenset[tuple[int, int]]:
+    return frozenset((tx + x, baseline + y) for x, y in model.pixels)
+
+
+def _pick_left_anchor(completed):
+    if not completed:
+        return None
+    left_x = min(hit.x + _model_x_bounds(hit.model)[0] for hit in completed)
+    candidates = [
+        hit
+        for hit in completed
+        if hit.x + _model_x_bounds(hit.model)[0] == left_x
+    ]
+    return max(
+        candidates,
+        key=lambda hit: (
+            hit.front_rows,
+            len(hit.model.pixels),
+            hit.bottom_y - hit.top_y + 1,
+            -hit.hidden_rows,
+            hit.model.sources,
+        ),
+    )
+
+
+def _baseline_locked_matches(
+    black: set[tuple[int, int]],
+    models,
+    *,
+    baseline: int,
+    start_x: int,
+    end_x: int,
+):
+    """Return exact 2-D model placements on one already established baseline.
+
+    This deliberately does not choose a sequence.  It is a shadow diagnostic
+    for the connected-glyph phase: after the leftmost glyph establishes the
+    row baseline, show every canonical glyph that is actually present at each
+    physical left x.  Descenders are checked because the complete model bitmap
+    is required, including pixels below baseline.
+    """
+    by_left: dict[int, list[tuple[object, int, int, frozenset[tuple[int, int]]]]] = defaultdict(list)
+    for model in models:
+        min_x, max_x = _model_x_bounds(model)
+        for physical_left in range(start_x, end_x + 1):
+            tx = physical_left - min_x
+            physical_right = tx + max_x
+            if physical_right > end_x:
+                continue
+            placed = _placed_pixels(model, tx=tx, baseline=baseline)
+            if placed.issubset(black):
+                by_left[physical_left].append((model, tx, physical_right, placed))
+    for rows in by_left.values():
+        rows.sort(
+            key=lambda row: (
+                -len(row[0].pixels),
+                -row[0].sources,
+                row[2],
+                row[0].label,
+                row[0].style,
+            )
+        )
+    return dict(sorted(by_left.items()))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
             "Shadow experiment: begin at the absolute first text row in a column, "
-            "run whole-column candidate survival across that row, and report the "
-            "baseline hypotheses produced by the glyph matches. Existing row "
-            "geometry is used only to delimit the shadow experiment."
+            "run whole-column candidate survival across that row, report the "
+            "baseline hypotheses, choose only a diagnostic left-anchor candidate, "
+            "and list exact baseline-locked 2-D candidates to its right. Existing "
+            "row geometry is used only to delimit the shadow experiment."
         )
     )
     ap.add_argument("jsonl", type=Path)
@@ -47,6 +118,8 @@ def main() -> int:
     ap.add_argument("--start-x-tolerance", type=int, default=7)
     ap.add_argument("--show-steps", action="store_true")
     ap.add_argument("--show-completed", type=int, default=80)
+    ap.add_argument("--show-horizontal", type=int, default=80,
+                    help="Maximum baseline-locked 2-D candidate lines to print.")
     args = ap.parse_args()
 
     models_started = perf_counter()
@@ -120,6 +193,51 @@ def main() -> int:
             f"profile=[{profile}] glyph_pixels={len(hit.model.pixels)}",
             flush=True,
         )
+
+    anchor = _pick_left_anchor(result.completed)
+    if anchor is None:
+        print("column-top-anchor: none", flush=True)
+        return 0
+
+    min_model_x, max_model_x = _model_x_bounds(anchor.model)
+    anchor_left = anchor.x + min_model_x
+    anchor_right = anchor.x + max_model_x
+    print(
+        f"column-top-anchor: start={anchor.model.label!r}/{anchor.model.style} "
+        f"x={anchor_left}..{anchor_right} baseline={anchor.baseline} "
+        f"front={anchor.front_rows} hidden={anchor.hidden_rows} "
+        f"glyph_pixels={len(anchor.model.pixels)}",
+        flush=True,
+    )
+
+    _column_left, column_right, _column_top, _column_bottom = bounds
+    horizontal = _baseline_locked_matches(
+        black,
+        models,
+        baseline=anchor.baseline,
+        start_x=anchor_right + 1,
+        end_x=column_right - 1,
+    )
+    printed = 0
+    for physical_left, rows in horizontal.items():
+        for model, tx, physical_right, _placed in rows:
+            if printed >= max(0, args.show_horizontal):
+                break
+            print(
+                f"column-top-horizontal: left={physical_left} right={physical_right} "
+                f"start={model.label!r}/{model.style}@x{tx} "
+                f"baseline={anchor.baseline} glyph_pixels={len(model.pixels)} "
+                f"sources={model.sources}",
+                flush=True,
+            )
+            printed += 1
+        if printed >= max(0, args.show_horizontal):
+            break
+    print(
+        f"column-top-horizontal-summary: positions={len(horizontal)} printed={printed} "
+        f"search_x={anchor_right + 1}..{column_right - 1}",
+        flush=True,
+    )
 
     return 0
 
