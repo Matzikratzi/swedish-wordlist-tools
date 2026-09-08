@@ -123,6 +123,16 @@ def _full_candidate_compatible(
     )
 
 
+def _has_ink_in_span(
+    black_by_y: dict[int, tuple[int, ...]],
+    *,
+    y: int,
+    x0: int,
+    x1: int,
+) -> bool:
+    return any(x0 <= px <= x1 for px in black_by_y.get(y, ()))
+
+
 def _seed_at_y(
     black_by_y: dict[int, tuple[int, ...]],
     models: tuple[GlyphModel, ...],
@@ -132,11 +142,12 @@ def _seed_at_y(
     rows_by_model: dict[int, dict[int, frozenset[int]]],
     gaps_by_model: dict[int, frozenset[int]],
 ) -> tuple[SurvivalCandidate, ...]:
-    """Create hypotheses whose *topmost glyph raster row* starts at ``y``.
+    """Create hypotheses whose physical raster top starts at ``y``.
 
-    Candidates are born only when the downward scan reaches their physical top.
-    This is deliberately different from the earlier brute-force experiment,
-    which pre-created placements from every left-edge pixel at every future y.
+    A candidate is born only at a real new top: its top glyph row must match at
+    ``y`` and the same horizontal glyph span must be blank at ``y - 1``.  Thus a
+    vertical stroke continuing straight down advances an existing candidate
+    instead of spawning the same model again one pixel lower.
     """
     page_xs = black_by_y.get(y, ())
     if not page_xs:
@@ -161,6 +172,13 @@ def _seed_at_y(
                 x=tx,
                 baseline=baseline,
                 page_y=y,
+            ):
+                continue
+            if _has_ink_in_span(
+                black_by_y,
+                y=y - 1,
+                x0=tx,
+                x1=tx + model.width - 1,
             ):
                 continue
             key = (id(model), tx, baseline)
