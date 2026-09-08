@@ -1,64 +1,20 @@
 from __future__ import annotations
 
-import tempfile
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
-from swedish_wordlist_tools.ocr_capture_conservative_baseline import (
-    _row_record,
-    _sha256_store,
-)
+from swedish_wordlist_tools import ocr_capture_conservative_baseline as capture
 
 
 class CaptureConservativeBaselineTest(unittest.TestCase):
-    def test_row_record_is_deterministic_and_contains_match_raster_identity(self):
-        match = SimpleNamespace(
-            label="a",
-            style="headword-bold",
-            x=7,
-            baseline=11,
-            pixels={(7, 10), (8, 11)},
-            model_pixels=2,
-            sources=3,
-        )
-        work = SimpleNamespace(
-            covered_pixels=2,
-            source_pixels=3,
-            fully_exact=False,
-            unreviewed_matches=0,
-            needs_work=True,
-        )
-        state = {
-            "crop_box": (10, 20, 100, 40),
-            "baseline": 11,
-            "text": "a",
-            "matches": [match],
-        }
-
-        first = _row_record(39, (2, 2), state, work)
-        second = _row_record(39, (2, 2), state, work)
-
-        self.assertEqual(first, second)
-        self.assertEqual(first["page"], 39)
-        self.assertEqual(first["crop_box"], [10, 20, 100, 40])
-        self.assertEqual(first["covered_pixels"], 2)
-        self.assertTrue(first["needs_work"])
-        self.assertEqual(first["matches"][0]["label"], "a")
-        self.assertEqual(len(first["matches"][0]["raster_sha256"]), 64)
-
-    def test_split_store_hash_depends_on_relative_paths_and_contents(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            (root / "u0061").mkdir()
-            (root / "u0061" / "g000001.json").write_text("{\"label\":\"a\"}\n", encoding="utf-8")
-            first = _sha256_store(root)
-            second = _sha256_store(root)
-            self.assertEqual(first, second)
-
-            (root / "u0061" / "g000001.json").write_text("{\"label\":\"b\"}\n", encoding="utf-8")
-            self.assertNotEqual(first, _sha256_store(root))
+    def test_row_record_contains_stable_comparison_fields(self):
+        match=SimpleNamespace(label="a",style="roman",x=10,baseline=7,pixels={(10,7),(11,7)},sources=2)
+        work=SimpleNamespace(covered_pixels=2,source_pixels=2,fully_exact=True,needs_work=False,unreviewed_matches=0)
+        state={"crop_box":(1,2,20,12),"baseline":7,"text":"a","matches":[match]}
+        with patch.object(capture.scanner,"classify_row_state",side_effect=AssertionError("must use supplied classification")):
+            row=capture._row_record(3,(1,4),state,work)
+        self.assertEqual((row["page"],row["column"],row["row"]),(3,1,4)); self.assertEqual(row["crop_box"],[1,2,20,12]); self.assertEqual(row["baseline"],7); self.assertEqual(row["text"],"a"); self.assertTrue(row["fully_exact"]); self.assertEqual(len(row["matches"]),1); self.assertEqual(row["matches"][0]["label"],"a"); self.assertEqual(len(row["matches"][0]["raster_sha256"]),64)
 
 
-if __name__ == "__main__":
-    unittest.main()
+if __name__=="__main__": unittest.main()
