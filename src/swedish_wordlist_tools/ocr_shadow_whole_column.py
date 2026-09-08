@@ -53,13 +53,12 @@ def _start_search_geometry(geometry, tolerance: int) -> tuple[tuple[int, ...], t
         int(geometry.headword_start_x),
         int(geometry.continuation_start_x),
     )
-    # Only a few contour resynchronisation thresholds are needed per known
-    # typographic start. The hard translate-x gate below remains wider, because
-    # the first black raster column of different glyphs is not identical to the
-    # nominal typesetting origin.
-    offsets = (-3, 0, 3)
-    scan_xs = tuple(sorted({center + offset for center in centers for offset in offsets}))
     ranges = tuple((center - tolerance, center + tolerance) for center in centers)
+    # Resynchronisation thresholds are dense *inside* the only x-regions where
+    # a row-start glyph may actually be placed. This preserves italic/inset
+    # starts that require a threshold near the glyph itself (for example x=74)
+    # without returning to scanning every x from the column edge to late_limit.
+    scan_xs = tuple(sorted({x for lo, hi in ranges for x in range(lo, hi + 1)}))
     return scan_xs, ranges
 
 
@@ -76,6 +75,7 @@ def main() -> int:
     ap.add_argument("--start-x-tolerance", type=int, default=7)
     ap.add_argument("--max-row-distance", type=int, default=24)
     ap.add_argument("--min-steps", type=int, default=3)
+    ap.add_argument("--min-baseline-delta", type=int, default=8)
     args = ap.parse_args()
 
     models = tuple(load_canonical_facit_with_typography(args.facit))
@@ -106,7 +106,16 @@ def main() -> int:
     )
     print(f"shadow-column: exact-local-hits={len(hits)} search={perf_counter()-hits_started:.4f}s", flush=True)
     _left, _right, top, bottom = bounds
-    shadow = walk_row_starts(hits, models=models, geometry=geometry, start_y=top, end_y=bottom - 1, max_row_distance=args.max_row_distance, min_steps=args.min_steps)
+    shadow = walk_row_starts(
+        hits,
+        models=models,
+        geometry=geometry,
+        start_y=top,
+        end_y=bottom - 1,
+        max_row_distance=args.max_row_distance,
+        min_steps=args.min_steps,
+        min_baseline_delta=args.min_baseline_delta,
+    )
     old_rows = (context["row_map"].get("columns") or [])[args.column].get("rows") or []
     matched_old: set[int] = set()
     for row in shadow:
