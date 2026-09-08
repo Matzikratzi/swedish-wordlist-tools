@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from swedish_wordlist_tools.ocr_candidate_survival import run_candidate_survival
+from swedish_wordlist_tools.ocr_candidate_survival import glyph_left_profile, run_candidate_survival
 from swedish_wordlist_tools.ocr_glyph_matcher import GlyphModel
 
 
@@ -15,6 +15,24 @@ def place(model: GlyphModel, *, x: int, baseline: int) -> set[tuple[int, int]]:
 
 
 class CandidateSurvivalTest(unittest.TestCase):
+    def test_normalized_glyph_profile_can_go_negative_below_top(self):
+        # Same shape as Mats's observed SAOL a-profile: the first visible raster
+        # row is normalized to zero, while later rows can extend farther left.
+        a = glyph(
+            "a",
+            {
+                (2, 0),
+                (0, 1),
+                (1, 2),
+                (3, 3),
+                (0, 4),
+                (0, 5),
+                (0, 6),
+                (1, 7),
+            },
+        )
+        self.assertEqual((0, -2, -1, 1, -2, -2, -2, -1), glyph_left_profile(a))
+
     def test_wrong_left_edge_dies_when_profile_changes(self):
         straight = glyph("I", {(0, -3), (0, -2), (0, -1), (0, 0)})
         bend = glyph("L", {(0, -3), (0, -2), (1, -1), (1, 0)})
@@ -32,6 +50,26 @@ class CandidateSurvivalTest(unittest.TestCase):
         self.assertIn(("L", 57, 20), hits)
         self.assertNotIn(("I", 57, 20), hits)
         self.assertTrue(any(step.died > 0 for step in result.steps))
+
+    def test_candidate_survives_when_another_glyph_owns_front_temporarily(self):
+        model = glyph("x", {(2, -2), (0, -1), (1, 0)})
+        black = place(model, x=57, baseline=20)
+        black.add((56, 19))  # another glyph is farther left on the middle row
+        black.add((70, 18))  # unrelated ink farther right on the top row
+
+        result = run_candidate_survival(
+            black,
+            [model],
+            start_y=18,
+            end_y=20,
+            allowed_translate_x_ranges=((50, 64),),
+        )
+
+        self.assertEqual(1, len(result.completed))
+        hit = result.completed[0]
+        self.assertEqual((57, 20), (hit.x, hit.baseline))
+        self.assertEqual(2, hit.front_rows)
+        self.assertEqual(1, hit.hidden_rows)
 
     def test_horizontal_gap_must_be_blank_inside_glyph_width(self):
         i = glyph("i", {(0, -3), (0, -1), (0, 0), (1, 0)})
