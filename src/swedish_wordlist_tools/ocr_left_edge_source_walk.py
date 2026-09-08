@@ -18,6 +18,74 @@ class SourceWalkHit:
     skipped_left_columns: int = 0
 
 
+@dataclass(frozen=True)
+class StableLeftContour:
+    first_ink_y: int
+    chosen_y: int
+    chosen_x: int
+    observations: tuple[tuple[int, int], ...]
+    skipped_ink_rows: int
+
+
+def stable_left_contour_start(
+    black: set[tuple[int, int]],
+    *,
+    min_ink_rows: int = 4,
+    min_later_rows: int = 3,
+    min_left_shift: int = 4,
+    x_tolerance: int = 2,
+) -> StableLeftContour | None:
+    """Estimate where the source's left edge becomes a stable local contour.
+
+    We first collect leftmost x for consecutive ink-bearing raster rows starting
+    at the first ink row.  The earliest rows may belong to a taller glyph farther
+    right.  A later row becomes the preferred contour start when at least
+    ``min_later_rows`` observations from there onward cluster within
+    ``x_tolerance`` of that row's x and the original first-row x is at least
+    ``min_left_shift`` pixels farther right.
+
+    This is intentionally source geometry only: it does not identify a glyph and
+    does not change OCR decisions by itself.
+    """
+    if min_ink_rows <= 0 or min_later_rows <= 0:
+        raise ValueError("row counts must be positive")
+    if min_left_shift < 0 or x_tolerance < 0:
+        raise ValueError("pixel thresholds must be non-negative")
+    if not black:
+        return None
+
+    by_y: dict[int, int] = {}
+    for x, y in black:
+        current = by_y.get(y)
+        if current is None or x < current:
+            by_y[y] = x
+    observations = tuple(sorted(by_y.items()))
+    if len(observations) < min_ink_rows:
+        y, x = observations[0]
+        return StableLeftContour(y, y, x, observations, 0)
+
+    first_y, first_x = observations[0]
+    chosen_index = 0
+    for index, (_y, x) in enumerate(observations[1:], 1):
+        later = observations[index:]
+        clustered = sum(1 for _later_y, later_x in later if abs(later_x - x) <= x_tolerance)
+        if clustered < min_later_rows:
+            continue
+        if first_x - x < min_left_shift:
+            continue
+        chosen_index = index
+        break
+
+    chosen_y, chosen_x = observations[chosen_index]
+    return StableLeftContour(
+        first_ink_y=first_y,
+        chosen_y=chosen_y,
+        chosen_x=chosen_x,
+        observations=observations,
+        skipped_ink_rows=chosen_index,
+    )
+
+
 def _next_values(candidates: Iterable[IndexedGlyph], depth: int) -> tuple[int | None, ...]:
     values = {
         glyph.signature[depth]
