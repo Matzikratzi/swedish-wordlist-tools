@@ -6,6 +6,7 @@ from pathlib import Path
 
 from . import ocr_find_unreviewed_glyph_rows as scanner
 from .ocr_conservative_row_repair import apply_conservative_row_repairs
+from .ocr_conservative_row_split import apply_conservative_row_splits
 from .ocr_glyph_review_delete import load_facit_with_typography
 
 
@@ -30,6 +31,17 @@ def main() -> int:
                 f"moved={record.moved_pixels} start={record.establishing_label!r}/"
                 f"{record.establishing_style}@x{record.establishing_x} "
                 f"baseline={record.establishing_baseline} reason={record.reason}",
+                flush=True,
+            )
+        split_records = apply_conservative_row_splits(context, models)
+        for record in split_records:
+            print(
+                "conservative-row-split: "
+                f"page={record.page} c{record.column} r{record.old_row} cut_y={record.cut_y} "
+                f"baselines={record.upper_baseline}/{record.lower_baseline} "
+                f"pixels={record.upper_pixels}+{record.lower_pixels} "
+                f"starts={record.upper_start_label!r}/{record.lower_start_label!r} "
+                f"reason={record.reason}",
                 flush=True,
             )
         return context
