@@ -36,15 +36,19 @@ def _placed_pixels(model, *, tx: int, baseline: int) -> frozenset[tuple[int, int
     return frozenset((tx + x, baseline + y) for x, y in model.pixels)
 
 
-def _pick_left_anchor(completed):
-    if not completed:
+def _hit_bounds(hit) -> tuple[int, int]:
+    min_x, max_x = _model_x_bounds(hit.model)
+    return hit.x + min_x, hit.x + max_x
+
+
+def _pick_left_anchor(completed, *, baseline: int | None = None):
+    candidates = list(completed)
+    if baseline is not None:
+        candidates = [hit for hit in candidates if hit.baseline == baseline]
+    if not candidates:
         return None
-    left_x = min(hit.x + _model_x_bounds(hit.model)[0] for hit in completed)
-    candidates = [
-        hit
-        for hit in completed
-        if hit.x + _model_x_bounds(hit.model)[0] == left_x
-    ]
+    left_x = min(_hit_bounds(hit)[0] for hit in candidates)
+    candidates = [hit for hit in candidates if _hit_bounds(hit)[0] == left_x]
     return max(
         candidates,
         key=lambda hit: (
@@ -92,26 +96,23 @@ def _baseline_locked_matches(
 def _dominance(rows):
     out = []
     for row in rows:
-        model, tx, physical_right, placed = row
+        placed = row[3]
         strict_subsets = [other for other in rows if other is not row and other[3] < placed]
         strict_supersets = [other for other in rows if other is not row and placed < other[3]]
         out.append((row, len(strict_subsets), len(strict_supersets)))
     return out
 
 
+def _unique_maximal_at(rows):
+    dominance = _dominance(rows)
+    maximal = [row for row, _subsets, supersets in dominance if supersets == 0]
+    return maximal[0] if len(maximal) == 1 else None
+
+
 def _blank_through_baseline(
     black: set[tuple[int, int]], *, x: int, top_y: int, baseline: int
 ) -> bool:
     return all((x, y) not in black for y in range(top_y, baseline + 1))
-
-
-def _first_separator_after(
-    black: set[tuple[int, int]], *, after_x: int, end_x: int, top_y: int, baseline: int
-) -> int | None:
-    for x in range(after_x + 1, end_x + 1):
-        if _blank_through_baseline(black, x=x, top_y=top_y, baseline=baseline):
-            return x
-    return None
 
 
 def _profile_restart(
@@ -122,6 +123,7 @@ def _profile_restart(
     end_x: int,
     row_top: int,
     row_bottom: int,
+    baseline: int,
 ):
     right_black = {(x, y) for x, y in black if separator_x < x <= end_x}
     if not right_black:
@@ -133,17 +135,137 @@ def _profile_restart(
         end_y=row_bottom - 1,
         allowed_translate_x_ranges=((separator_x + 1, end_x),),
     )
-    return result, _pick_left_anchor(result.completed)
+    return result, _pick_left_anchor(result.completed, baseline=baseline)
+
+
+def _walk_first_row(
+    black: set[tuple[int, int]],
+    models,
+    *,
+    first_anchor,
+    row_top: int,
+    row_bottom: int,
+    column_right: int,
+    max_glyphs: int = 80,
+):
+    """Walk rightward using separator/profile and connected 2-D fallback.
+
+    Only the x column immediately following a completed glyph decides whether
+    profile survival may restart.  We never skip over occupied ink in search of
+    a later separator.  The baseline established by the first anchor remains
+    fixed for the whole row.
+    """
+    baseline = first_anchor.baseline
+    current = first_anchor
+    labels = [first_anchor.model.label]
+    print(
+        f"column-top-walk-glyph: n=0 via=initial start={first_anchor.model.label!r}/"
+        f"{first_anchor.model.style} x={_hit_bounds(first_anchor)[0]}..{_hit_bounds(first_anchor)[1]} "
+        f"baseline={baseline}",
+        flush=True,
+    )
+
+    for n in range(1, max_glyphs):
+        _left, right = _hit_bounds(current)
+        cursor = right + 1
+        if cursor >= column_right:
+            print(f"column-top-walk-stop: reason=column-end x={cursor}", flush=True)
+            break
+
+        if _blank_through_baseline(black, x=cursor, top_y=row_top, baseline=baseline):
+            below = sorted(
+                y
+                for x, y in black
+                if x == cursor and baseline < y < row_bottom
+            )
+            print(
+                f"column-top-walk-separator: x={cursor} top={row_top} baseline={baseline} "
+                f"below_baseline_ink={below}",
+                flush=True,
+            )
+            restart_result, next_hit = _profile_restart(
+                black,
+                models,
+                separator_x=cursor,
+                end_x=column_right - 1,
+                row_top=row_top,
+                row_bottom=row_bottom,
+                baseline=baseline,
+            )
+            if restart_result is None:
+                print(f"column-top-walk-stop: reason=no-ink-after-separator x={cursor}", flush=True)
+                break
+            if next_hit is None:
+                print(
+                    f"column-top-walk-stop: reason=no-baseline-locked-profile-hit "
+                    f"separator={cursor} baseline={baseline} completed={len(restart_result.completed)}",
+                    flush=True,
+                )
+                break
+            next_left, next_right = _hit_bounds(next_hit)
+            print(
+                f"column-top-walk-glyph: n={n} via=profile separator={cursor} "
+                f"start={next_hit.model.label!r}/{next_hit.model.style} "
+                f"x={next_left}..{next_right} baseline={next_hit.baseline} "
+                f"front={next_hit.front_rows} hidden={next_hit.hidden_rows} "
+                f"glyph_pixels={len(next_hit.model.pixels)}",
+                flush=True,
+            )
+            current = next_hit
+            labels.append(next_hit.model.label)
+            continue
+
+        # No separator immediately after the accepted glyph.  This is the
+        # connected/touching case: use exact full 2-D candidates at this exact
+        # physical x, never at a later x.
+        horizontal = _baseline_locked_matches(
+            black,
+            models,
+            baseline=baseline,
+            start_x=cursor,
+            end_x=column_right - 1,
+        )
+        rows = horizontal.get(cursor, [])
+        chosen = _unique_maximal_at(rows)
+        if chosen is None:
+            maximal = sum(1 for _row, _subsets, supersets in _dominance(rows) if supersets == 0)
+            print(
+                f"column-top-walk-stop: reason=connected-ambiguous x={cursor} "
+                f"candidates={len(rows)} maximal={maximal}",
+                flush=True,
+            )
+            break
+
+        model, tx, physical_right, _placed = chosen
+        print(
+            f"column-top-walk-glyph: n={n} via=2d-connected "
+            f"start={model.label!r}/{model.style} x={cursor}..{physical_right} "
+            f"baseline={baseline} glyph_pixels={len(model.pixels)} sources={model.sources}",
+            flush=True,
+        )
+
+        class _PlacedHit:
+            pass
+
+        next_hit = _PlacedHit()
+        next_hit.model = model
+        next_hit.x = tx
+        next_hit.baseline = baseline
+        current = next_hit
+        labels.append(model.label)
+    else:
+        print(f"column-top-walk-stop: reason=max-glyphs n={max_glyphs}", flush=True)
+
+    print(f"column-top-walk-text: {''.join(labels)!r}", flush=True)
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
             "Shadow experiment: start at the first row in a column, establish the "
-            "left glyph and baseline with profile survival, then restart profile "
-            "survival to the right of a vertical separator that is blank from row "
-            "top through baseline. Baseline-locked 2-D candidates are also printed "
-            "as diagnostics for future connected-glyph fallback."
+            "left glyph and baseline with profile survival, then walk rightward. "
+            "An immediately blank vertical column restarts profile survival; an "
+            "occupied column invokes baseline-locked exact 2-D fallback."
         )
     )
     ap.add_argument("jsonl", type=Path)
@@ -157,7 +279,7 @@ def main() -> int:
     ap.add_argument("--start-x-tolerance", type=int, default=7)
     ap.add_argument("--show-steps", action="store_true")
     ap.add_argument("--show-completed", type=int, default=80)
-    ap.add_argument("--show-horizontal", type=int, default=80)
+    ap.add_argument("--show-horizontal", type=int, default=0)
     args = ap.parse_args()
 
     models_started = perf_counter()
@@ -222,9 +344,7 @@ def main() -> int:
         print("column-top-anchor: none", flush=True)
         return 0
 
-    min_model_x, max_model_x = _model_x_bounds(anchor.model)
-    anchor_left = anchor.x + min_model_x
-    anchor_right = anchor.x + max_model_x
+    anchor_left, anchor_right = _hit_bounds(anchor)
     print(
         f"column-top-anchor: start={anchor.model.label!r}/{anchor.model.style} "
         f"x={anchor_left}..{anchor_right} baseline={anchor.baseline} "
@@ -233,82 +353,44 @@ def main() -> int:
     )
 
     _column_left, column_right, _column_top, _column_bottom = bounds
-
-    separator = _first_separator_after(
+    _walk_first_row(
         black,
-        after_x=anchor_right,
-        end_x=column_right - 1,
-        top_y=row_top,
-        baseline=anchor.baseline,
+        models,
+        first_anchor=anchor,
+        row_top=row_top,
+        row_bottom=row_bottom,
+        column_right=column_right,
     )
-    if separator is None:
-        print(
-            f"column-top-separator: none after={anchor_right} top={row_top} baseline={anchor.baseline}",
-            flush=True,
-        )
-    else:
-        below = sorted(y for x, y in black if x == separator and y > anchor.baseline and y < row_bottom)
-        print(
-            f"column-top-separator: x={separator} top={row_top} baseline={anchor.baseline} "
-            f"below_baseline_ink={below}", flush=True,
-        )
-        restart_result, restart_anchor = _profile_restart(
-            black,
-            models,
-            separator_x=separator,
-            end_x=column_right - 1,
-            row_top=row_top,
-            row_bottom=row_bottom,
-        )
-        if restart_result is None:
-            print("column-top-restart: no-ink", flush=True)
-        else:
-            print(
-                f"column-top-restart-summary: separator={separator} seeded={restart_result.seeded} "
-                f"completed={len(restart_result.completed)}", flush=True,
-            )
-            if restart_anchor is None:
-                print("column-top-restart-anchor: none", flush=True)
-            else:
-                rmin, rmax = _model_x_bounds(restart_anchor.model)
-                rleft = restart_anchor.x + rmin
-                rright = restart_anchor.x + rmax
-                print(
-                    f"column-top-restart-anchor: start={restart_anchor.model.label!r}/"
-                    f"{restart_anchor.model.style} x={rleft}..{rright} "
-                    f"baseline={restart_anchor.baseline} front={restart_anchor.front_rows} "
-                    f"hidden={restart_anchor.hidden_rows} glyph_pixels={len(restart_anchor.model.pixels)}",
-                    flush=True,
-                )
 
-    horizontal = _baseline_locked_matches(
-        black, models, baseline=anchor.baseline,
-        start_x=anchor_right + 1, end_x=column_right - 1,
-    )
-    printed = 0
-    for physical_left, rows in horizontal.items():
-        dominance_rows = _dominance(rows)
-        maximal = sum(1 for _row, _subsets, supersets in dominance_rows if supersets == 0)
-        print(
-            f"column-top-horizontal-group: left={physical_left} candidates={len(rows)} maximal={maximal}",
-            flush=True,
+    if args.show_horizontal > 0:
+        horizontal = _baseline_locked_matches(
+            black, models, baseline=anchor.baseline,
+            start_x=anchor_right + 1, end_x=column_right - 1,
         )
-        for (model, tx, physical_right, _placed), dominates, dominated_by in dominance_rows:
-            if printed >= max(0, args.show_horizontal):
-                break
+        printed = 0
+        for physical_left, rows in horizontal.items():
+            dominance_rows = _dominance(rows)
+            maximal = sum(1 for _row, _subsets, supersets in dominance_rows if supersets == 0)
             print(
-                f"column-top-horizontal: left={physical_left} right={physical_right} "
-                f"start={model.label!r}/{model.style}@x{tx} baseline={anchor.baseline} "
-                f"glyph_pixels={len(model.pixels)} sources={model.sources} "
-                f"dominates={dominates} dominated_by={dominated_by}", flush=True,
+                f"column-top-horizontal-group: left={physical_left} candidates={len(rows)} maximal={maximal}",
+                flush=True,
             )
-            printed += 1
-        if printed >= max(0, args.show_horizontal):
-            break
-    print(
-        f"column-top-horizontal-summary: positions={len(horizontal)} printed={printed} "
-        f"search_x={anchor_right + 1}..{column_right - 1}", flush=True,
-    )
+            for (model, tx, physical_right, _placed), dominates, dominated_by in dominance_rows:
+                if printed >= args.show_horizontal:
+                    break
+                print(
+                    f"column-top-horizontal: left={physical_left} right={physical_right} "
+                    f"start={model.label!r}/{model.style}@x{tx} baseline={anchor.baseline} "
+                    f"glyph_pixels={len(model.pixels)} sources={model.sources} "
+                    f"dominates={dominates} dominated_by={dominated_by}", flush=True,
+                )
+                printed += 1
+            if printed >= args.show_horizontal:
+                break
+        print(
+            f"column-top-horizontal-summary: positions={len(horizontal)} printed={printed} "
+            f"search_x={anchor_right + 1}..{column_right - 1}", flush=True,
+        )
 
     return 0
 
