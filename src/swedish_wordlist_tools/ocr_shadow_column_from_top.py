@@ -41,24 +41,88 @@ def _hit_bounds(hit) -> tuple[int, int]:
     return hit.x + min_x, hit.x + max_x
 
 
-def _pick_left_anchor(completed, *, baseline: int | None = None):
+def _hit_pixels(hit) -> frozenset[tuple[int, int]]:
+    return _placed_pixels(hit.model, tx=hit.x, baseline=hit.baseline)
+
+
+def _left_profile_group(completed, *, baseline: int | None = None):
     candidates = list(completed)
     if baseline is not None:
         candidates = [hit for hit in candidates if hit.baseline == baseline]
     if not candidates:
-        return None
+        return [], []
     left_x = min(_hit_bounds(hit)[0] for hit in candidates)
     candidates = [hit for hit in candidates if _hit_bounds(hit)[0] == left_x]
+
+    pixel_sets = {id(hit): _hit_pixels(hit) for hit in candidates}
+    maximal = [
+        hit
+        for hit in candidates
+        if not any(
+            pixel_sets[id(hit)] < pixel_sets[id(other)]
+            for other in candidates
+            if other is not hit
+        )
+    ]
+    return candidates, maximal
+
+
+def _pick_left_anchor(completed, *, baseline: int | None = None):
+    candidates, maximal = _left_profile_group(completed, baseline=baseline)
+    if not candidates or not maximal:
+        return None
+
+    # Several model records can describe exactly the same placed raster.  That
+    # is not a geometric ambiguity, so collapse identical pixel sets first.
+    by_pixels: dict[frozenset[tuple[int, int]], list[object]] = defaultdict(list)
+    for hit in maximal:
+        by_pixels[_hit_pixels(hit)].append(hit)
+    if len(by_pixels) != 1:
+        return None
+
+    equivalent = next(iter(by_pixels.values()))
     return max(
-        candidates,
+        equivalent,
         key=lambda hit: (
-            hit.front_rows,
             len(hit.model.pixels),
-            hit.bottom_y - hit.top_y + 1,
+            hit.front_rows,
             -hit.hidden_rows,
             hit.model.sources,
+            hit.bottom_y - hit.top_y + 1,
         ),
     )
+
+
+def _print_profile_group(prefix: str, completed, *, baseline: int | None = None) -> None:
+    candidates, maximal = _left_profile_group(completed, baseline=baseline)
+    if not candidates:
+        print(f"{prefix}: candidates=0 maximal=0", flush=True)
+        return
+    left_x = _hit_bounds(candidates[0])[0]
+    maximal_ids = {id(hit) for hit in maximal}
+    distinct_maximal = len({_hit_pixels(hit) for hit in maximal})
+    print(
+        f"{prefix}: left={left_x} candidates={len(candidates)} "
+        f"maximal={len(maximal)} distinct_maximal={distinct_maximal}",
+        flush=True,
+    )
+    for hit in sorted(
+        candidates,
+        key=lambda h: (
+            id(h) not in maximal_ids,
+            -len(h.model.pixels),
+            h.baseline,
+            h.model.label,
+            h.model.style,
+        ),
+    ):
+        print(
+            f"{prefix}-candidate: start={hit.model.label!r}/{hit.model.style} "
+            f"x={_hit_bounds(hit)[0]}..{_hit_bounds(hit)[1]} baseline={hit.baseline} "
+            f"glyph_pixels={len(hit.model.pixels)} front={hit.front_rows} "
+            f"hidden={hit.hidden_rows} maximal={id(hit) in maximal_ids}",
+            flush=True,
+        )
 
 
 def _baseline_locked_matches(
@@ -106,7 +170,12 @@ def _dominance(rows):
 def _unique_maximal_at(rows):
     dominance = _dominance(rows)
     maximal = [row for row, _subsets, supersets in dominance if supersets == 0]
-    return maximal[0] if len(maximal) == 1 else None
+    distinct = {row[3] for row in maximal}
+    if len(distinct) != 1:
+        return None
+    target = next(iter(distinct))
+    equivalent = [row for row in maximal if row[3] == target]
+    return max(equivalent, key=lambda row: (len(row[0].pixels), row[0].sources))
 
 
 def _blank_through_baseline(
@@ -124,13 +193,6 @@ def _profile_restart(
     row_top: int,
     row_bottom: int,
 ):
-    """Restart profile survival after a vertical separator.
-
-    A separator is the one place where a new baseline is allowed.  Therefore
-    the restarted profile search is deliberately not filtered by the previous
-    baseline; the chosen left anchor establishes the baseline for the new
-    horizontal run.
-    """
     right_black = {(x, y) for x, y in black if separator_x < x <= end_x}
     if not right_black:
         return None, None
@@ -154,14 +216,6 @@ def _walk_first_row(
     column_right: int,
     max_glyphs: int = 80,
 ):
-    """Walk rightward using separator/profile and connected 2-D fallback.
-
-    Only the x column immediately following a completed glyph decides whether
-    profile survival may restart.  We never skip over occupied ink in search of
-    a later separator.  Baseline is fixed while glyphs are connected, but a
-    vertical separator permits the restarted profile search to establish a new
-    baseline.
-    """
     baseline = first_anchor.baseline
     current = first_anchor
     labels = [first_anchor.model.label]
@@ -180,11 +234,7 @@ def _walk_first_row(
             break
 
         if _blank_through_baseline(black, x=cursor, top_y=row_top, baseline=baseline):
-            below = sorted(
-                y
-                for x, y in black
-                if x == cursor and baseline < y < row_bottom
-            )
+            below = sorted(y for x, y in black if x == cursor and baseline < y < row_bottom)
             old_baseline = baseline
             print(
                 f"column-top-walk-separator: x={cursor} top={row_top} baseline={old_baseline} "
@@ -202,14 +252,19 @@ def _walk_first_row(
             if restart_result is None:
                 print(f"column-top-walk-stop: reason=no-ink-after-separator x={cursor}", flush=True)
                 break
+
+            _print_profile_group("column-top-walk-profile-group", restart_result.completed)
             if next_hit is None:
+                candidates, maximal = _left_profile_group(restart_result.completed)
+                distinct_maximal = len({_hit_pixels(hit) for hit in maximal})
                 print(
-                    f"column-top-walk-stop: reason=no-profile-hit-after-separator "
+                    f"column-top-walk-stop: reason=profile-ambiguous-after-separator "
                     f"separator={cursor} old_baseline={old_baseline} "
-                    f"completed={len(restart_result.completed)}",
+                    f"candidates={len(candidates)} distinct_maximal={distinct_maximal}",
                     flush=True,
                 )
                 break
+
             next_left, next_right = _hit_bounds(next_hit)
             baseline = next_hit.baseline
             print(
@@ -225,9 +280,6 @@ def _walk_first_row(
             labels.append(next_hit.model.label)
             continue
 
-        # No separator immediately after the accepted glyph.  This is the
-        # connected/touching case: use exact full 2-D candidates at this exact
-        # physical x and keep the current baseline fixed.
         horizontal = _baseline_locked_matches(
             black,
             models,
@@ -238,10 +290,11 @@ def _walk_first_row(
         rows = horizontal.get(cursor, [])
         chosen = _unique_maximal_at(rows)
         if chosen is None:
-            maximal = sum(1 for _row, _subsets, supersets in _dominance(rows) if supersets == 0)
+            maximal = [row for row, _subsets, supersets in _dominance(rows) if supersets == 0]
             print(
                 f"column-top-walk-stop: reason=connected-ambiguous x={cursor} "
-                f"candidates={len(rows)} maximal={maximal} baseline={baseline}",
+                f"candidates={len(rows)} distinct_maximal={len({row[3] for row in maximal})} "
+                f"baseline={baseline}",
                 flush=True,
             )
             break
@@ -270,15 +323,7 @@ def _walk_first_row(
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(
-        description=(
-            "Shadow experiment: start at the first row in a column, establish the "
-            "left glyph and baseline with profile survival, then walk rightward. "
-            "An immediately blank vertical column restarts profile survival and may "
-            "establish a new baseline; an occupied column invokes exact 2-D fallback "
-            "locked to the current baseline."
-        )
-    )
+    ap = argparse.ArgumentParser()
     ap.add_argument("jsonl", type=Path)
     ap.add_argument("--facit", type=Path, required=True)
     ap.add_argument("--page", type=int, default=39)
@@ -350,9 +395,10 @@ def main() -> int:
             f"profile=[{profile}] glyph_pixels={len(hit.model.pixels)}", flush=True,
         )
 
+    _print_profile_group("column-top-anchor-group", result.completed)
     anchor = _pick_left_anchor(result.completed)
     if anchor is None:
-        print("column-top-anchor: none", flush=True)
+        print("column-top-anchor: ambiguous", flush=True)
         return 0
 
     anchor_left, anchor_right = _hit_bounds(anchor)
