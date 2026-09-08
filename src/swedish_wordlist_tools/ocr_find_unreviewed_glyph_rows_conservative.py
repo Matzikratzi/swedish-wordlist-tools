@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 
 from . import ocr_find_unreviewed_glyph_rows as scanner
+from . import ocr_review_page_pixel_array_glyphs_html as pixel_review
+from .ocr_conservative_late_anchor import guarded_analyser
 from .ocr_conservative_row_repair import apply_conservative_row_repairs
 from .ocr_conservative_row_split import apply_conservative_row_splits
 from .ocr_glyph_review_delete import load_facit_with_typography
@@ -20,6 +22,17 @@ def _facit_from_argv(argv: list[str]) -> Path:
 def main() -> int:
     models = load_facit_with_typography(_facit_from_argv(sys.argv[1:]))
     original_build = scanner.build_page_context_pixel_array
+    original_analyse = pixel_review.fast.analyse_row_exact
+
+    def report_late_anchor(record):
+        print(
+            "conservative-baseline-anchor: "
+            f"ink_left={record.ink_left} old_left={record.old_left} "
+            f"baseline={record.old_baseline}->{record.new_baseline} "
+            f"start={record.new_label!r}/{record.new_style}@x{record.new_left} "
+            f"pixels={record.covered_pixels}/{record.source_pixels}",
+            flush=True,
+        )
 
     def build_with_conservative_repair(jsonl, page_number, threshold=210):
         context = original_build(jsonl, page_number, threshold)
@@ -47,9 +60,14 @@ def main() -> int:
         return context
 
     scanner.build_page_context_pixel_array = build_with_conservative_repair
+    pixel_review.fast.analyse_row_exact = guarded_analyser(
+        original_analyse,
+        on_repair=report_late_anchor,
+    )
     try:
         return scanner.main()
     finally:
+        pixel_review.fast.analyse_row_exact = original_analyse
         scanner.build_page_context_pixel_array = original_build
 
 
