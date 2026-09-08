@@ -99,7 +99,7 @@ def build_profile_fragment_index(
     models: Iterable[GlyphModel],
     *,
     min_rows: int = 2,
-    max_rows: int = 8,
+    max_rows: int = 20,
     min_ink_rows: int = 2,
 ) -> dict[tuple[int, ProfileSignature], tuple[IndexedProfileFragment, ...]]:
     """Index partial glyph left profiles that include a real start-x pixel.
@@ -153,7 +153,7 @@ def profile_guided_exact_hits(
     fragment_index: dict[tuple[int, ProfileSignature], tuple[IndexedProfileFragment, ...]],
     allowed_translate_x_ranges: Iterable[TranslateXRange],
     min_rows: int = 2,
-    max_rows: int = 8,
+    max_rows: int = 20,
 ) -> tuple[ProfileExactHit, ...]:
     """Find partial profile matches, then verify the complete glyph in 2D ink.
 
