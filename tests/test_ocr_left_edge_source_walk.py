@@ -9,6 +9,7 @@ from swedish_wordlist_tools.ocr_left_edge_source_walk import (
     source_walk_hits,
     source_walk_hits_with_resync,
     source_walk_hits_with_top_retry,
+    stable_left_contour_start,
     walk_prefixes_at,
 )
 
@@ -191,6 +192,32 @@ class LeftEdgeSourceWalkTests(unittest.TestCase):
             for glyph in hit.exact
         }
         self.assertEqual({baseline}, derived)
+
+    def test_stable_left_contour_can_ignore_far_right_top_ink(self) -> None:
+        black = {
+            (85, 2),
+            (84, 3),
+            (60, 4), (61, 4),
+            (59, 5), (60, 5),
+            (60, 6),
+            (59, 7),
+        }
+        contour = stable_left_contour_start(black)
+        self.assertIsNotNone(contour)
+        assert contour is not None
+        self.assertEqual((2, 85), contour.observations[0])
+        self.assertEqual(4, contour.chosen_y)
+        self.assertEqual(60, contour.chosen_x)
+        self.assertEqual(2, contour.skipped_ink_rows)
+
+    def test_stable_left_contour_keeps_top_when_no_large_shift_exists(self) -> None:
+        black = {(10, 2), (11, 3), (10, 4), (9, 5), (10, 6)}
+        contour = stable_left_contour_start(black)
+        self.assertIsNotNone(contour)
+        assert contour is not None
+        self.assertEqual(2, contour.chosen_y)
+        self.assertEqual(10, contour.chosen_x)
+        self.assertEqual(0, contour.skipped_ink_rows)
 
 
 if __name__ == "__main__":
