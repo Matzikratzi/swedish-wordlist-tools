@@ -9,6 +9,7 @@ from .ocr_glyph_matcher import GlyphModel
 
 LocalRelation = tuple[int, int]
 LocalSignature = tuple[LocalRelation, ...]
+TranslateXRange = tuple[int, int]
 
 
 @dataclass(frozen=True)
@@ -155,6 +156,12 @@ def _tiny_model_anchor(model: GlyphModel) -> LocalIndexedGlyph:
     return LocalIndexedGlyph(model, (), y, x, y)
 
 
+def _translate_x_allowed(x: int, ranges: tuple[TranslateXRange, ...] | None) -> bool:
+    if ranges is None:
+        return True
+    return any(lo <= x <= hi for lo, hi in ranges)
+
+
 def prepare_local_fingerprint_indexes(
     models: Iterable[GlyphModel], *, max_steps: int = 8, min_steps: int = 1, max_row_gap: int = 1
 ) -> PreparedLocalFingerprintIndexes:
@@ -184,8 +191,16 @@ def ranked_exact_local_hits(
     max_x: int | None = None,
     include_tiny_fallback: bool = True,
     prepared: PreparedLocalFingerprintIndexes | None = None,
+    scan_xs: Iterable[int] | None = None,
+    allowed_translate_x_ranges: Iterable[TranslateXRange] | None = None,
 ) -> tuple[LocalExactHit, ...]:
-    """Return exact placements; facit fingerprints may be supplied precomputed."""
+    """Return exact placements; facit fingerprints may be supplied precomputed.
+
+    ``scan_xs`` lets a caller restrict expensive source-contour resynchronisation
+    to known typographic start zones instead of trying every black x coordinate.
+    ``allowed_translate_x_ranges`` is the corresponding hard acceptance gate on
+    the full glyph placement. Exact verification still uses every glyph pixel.
+    """
     if prepared is None:
         if models is None:
             raise ValueError("models or prepared must be supplied")
@@ -193,16 +208,23 @@ def ranked_exact_local_hits(
     else:
         if (prepared.min_steps, prepared.max_steps, prepared.max_row_gap) != (min_steps, max_steps, max_row_gap):
             raise ValueError("prepared fingerprint parameters do not match search parameters")
-    model_rows = prepared.models
-    scan_xs = sorted({x for x, _y in black if max_x is None or x <= max_x})
+    ranges = None if allowed_translate_x_ranges is None else tuple((int(lo), int(hi)) for lo, hi in allowed_translate_x_ranges)
+    if ranges is not None and any(lo > hi for lo, hi in ranges):
+        raise ValueError("allowed translate-x ranges must have lo <= hi")
+    if scan_xs is None:
+        source_scan_xs = sorted({x for x, _y in black if max_x is None or x <= max_x})
+    else:
+        source_scan_xs = sorted({int(x) for x in scan_xs if max_x is None or int(x) <= max_x})
     hits: list[LocalExactHit] = []
     seen: set[tuple[int, int, int]] = set()
     for steps in range(max_steps, min_steps - 1, -1):
         index = prepared.indexes[steps]
-        for scan_x in scan_xs:
+        for scan_x in source_scan_xs:
             for source_y, source_x, signature in source_local_signatures(black, steps=steps, max_row_gap=max_row_gap, min_x=scan_x):
                 for indexed in index.candidates(signature):
                     tx = source_x - indexed.anchor_x
+                    if not _translate_x_allowed(tx, ranges):
+                        continue
                     ty = source_y - indexed.anchor_y
                     placement_key = (id(indexed.model), tx, ty)
                     if placement_key in seen:
@@ -216,6 +238,8 @@ def ranked_exact_local_hits(
         for model, indexed in prepared.tiny:
             for source_x, source_y in source_points:
                 tx = source_x - indexed.anchor_x
+                if not _translate_x_allowed(tx, ranges):
+                    continue
                 ty = source_y - indexed.anchor_y
                 placement_key = (id(model), tx, ty)
                 if placement_key in seen:
