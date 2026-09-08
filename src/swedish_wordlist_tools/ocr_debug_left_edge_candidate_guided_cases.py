@@ -44,6 +44,7 @@ def run_case(
     print(
         f"  guided stats scan_positions={stats.scan_positions} "
         f"started_tracks={stats.started_tracks} relation_steps={stats.relation_steps} "
+        f"expected_pixel_checks={stats.expected_pixel_checks} "
         f"exact_checks={stats.exact_checks} "
         f"max_requested_bottom_y={stats.max_requested_bottom_y}"
     )
@@ -106,8 +107,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
             "Probe the collected #2 rows with a candidate-guided local left-edge "
-            "walker.  The walker has no fixed fingerprint depth: surviving "
-            "glyph candidates decide how far down the source contour is useful."
+            "walker.  After the first observed dx relation, each glyph candidate "
+            "predicts the exact source contour pixels that should follow; there "
+            "is no fixed fingerprint depth."
         )
     )
     ap.add_argument("jsonl", type=Path)
