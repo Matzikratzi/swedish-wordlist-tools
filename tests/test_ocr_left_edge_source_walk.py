@@ -5,6 +5,7 @@ import unittest
 from swedish_wordlist_tools.ocr_glyph_matcher import GlyphModel
 from swedish_wordlist_tools.ocr_left_edge_index import LeftEdgeIndex
 from swedish_wordlist_tools.ocr_left_edge_source_walk import (
+    is_strong_anchor,
     source_walk_hits,
     source_walk_hits_with_resync,
     source_walk_hits_with_top_retry,
@@ -149,6 +150,47 @@ class LeftEdgeSourceWalkTests(unittest.TestCase):
         self.assertTrue(hits)
         self.assertTrue(any(glyph.model.label == "p" for hit in hits for glyph in hit.exact))
         self.assertTrue(all(hit.x == 10 for hit in hits))
+        self.assertTrue(all(is_strong_anchor(hit) for hit in hits))
+
+    def test_only_weak_anchor_is_not_accepted_as_strong_baseline_source(self) -> None:
+        dash = GlyphModel(
+            label="-",
+            style="roman",
+            pixels=frozenset({(0, 0), (1, 0), (2, 0)}),
+            sources=1,
+        )
+        black = {(3, 7), (4, 7), (5, 7)}
+        hits = source_walk_hits_with_resync(black, LeftEdgeIndex([dash]))
+        self.assertTrue(hits)
+        self.assertTrue(all(not is_strong_anchor(hit) for hit in hits))
+
+    def test_strong_anchor_derives_model_baseline_without_row_baseline(self) -> None:
+        letter = GlyphModel(
+            label="t",
+            style="roman",
+            pixels=frozenset({
+                (0, -6), (1, -6),
+                (0, -5),
+                (0, -4), (1, -4),
+                (0, -3),
+                (0, -2),
+                (0, -1),
+                (0, 0), (1, 0),
+            }),
+            sources=1,
+        )
+        baseline = 15
+        x0 = 22
+        black = {(x0 + x, baseline + y) for x, y in letter.pixels}
+        hits = source_walk_hits_with_resync(black, LeftEdgeIndex([letter]))
+        strong = [hit for hit in hits if is_strong_anchor(hit)]
+        self.assertTrue(strong)
+        derived = {
+            hit.y - glyph.model.min_y
+            for hit in strong
+            for glyph in hit.exact
+        }
+        self.assertEqual({baseline}, derived)
 
 
 if __name__ == "__main__":
