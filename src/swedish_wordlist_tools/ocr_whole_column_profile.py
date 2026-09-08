@@ -60,7 +60,7 @@ def whole_column_left_profile(
 ) -> tuple[ProfileValue, ...]:
     """Return the leftmost ink x for every physical pixel row in a column.
 
-    The result is dense: blank raster rows are represented by ``None``.  It is
+    The result is dense: blank raster rows are represented by ``None``. It is
     deliberately computed once for the whole column so later searches only scan
     this small one-dimensional profile instead of rescanning page pixels.
     """
@@ -105,7 +105,7 @@ def build_profile_fragment_index(
     """Index partial glyph left profiles that include a real start-x pixel.
 
     A fragment may be only part of a glyph, but it must contain at least one
-    raster row where the glyph reaches its own leftmost x.  That is the hard
+    raster row where the glyph reaches its own leftmost x. That is the hard
     anchor which prevents an arbitrary interior piece from being treated as a
     row-start glyph.
     """
@@ -158,8 +158,8 @@ def profile_guided_exact_hits(
     """Find partial profile matches, then verify the complete glyph in 2D ink.
 
     The cheap stage is a substring lookup in the already-built whole-column
-    left profile.  Only candidates whose translated glyph start x lies in one
-    of the typographic start ranges reach the expensive stage.  The expensive
+    left profile. Only candidates whose translated glyph start x lies in one
+    of the typographic start ranges reach the expensive stage. The expensive
     stage requires every facit pixel of the placed glyph to exist in the page,
     including pixels behind the visible left-edge profile.
     """
@@ -220,6 +220,36 @@ def profile_guided_exact_hits(
     )
 
 
+def _placed_pixels(hit: ProfileExactHit) -> frozenset[tuple[int, int]]:
+    return frozenset((hit.x + x, hit.baseline + y) for x, y in hit.model.pixels)
+
+
+def _baseline_evidence_key(hits: Iterable[ProfileExactHit]) -> tuple[int, int, int, int, int]:
+    """Score one baseline without counting overlapping alias matches twice.
+
+    A tall glyph can contain the complete bitmap of a shorter glyph at several
+    vertical offsets. Those are real exact submatches, not search errors. A real
+    text baseline normally has corroboration from several start-zone glyphs, so
+    score the union of verified glyph pixels and distinct x anchors before the
+    strongest single profile fragment.
+    """
+    rows = tuple(hits)
+    covered: set[tuple[int, int]] = set()
+    for hit in rows:
+        covered.update(_placed_pixels(hit))
+    distinct_x = len({hit.x for hit in rows})
+    max_model_pixels = max((len(hit.model.pixels) for hit in rows), default=0)
+    max_profile_ink_rows = max((hit.profile_ink_rows for hit in rows), default=0)
+    max_profile_rows = max((hit.profile_rows for hit in rows), default=0)
+    return (
+        len(covered),
+        distinct_x,
+        max_model_pixels,
+        max_profile_ink_rows,
+        max_profile_rows,
+    )
+
+
 def walk_profile_row_starts(
     hits: Iterable[ProfileExactHit],
     *,
@@ -228,13 +258,15 @@ def walk_profile_row_starts(
     max_row_distance: int = 20,
     min_baseline_delta: int = 8,
 ) -> tuple[ProfileRowStart, ...]:
-    """Walk downward using baseline first and leftmost start x second.
+    """Walk downward, resolving nearby baseline aliases by combined evidence.
 
     Profile fragments may appear in surprising vertical order (for example the
-    top of a late capital may be the first visible ink in ``¤aicvP``).  Once
-    exact placements exist, candidates in the current 20-pixel search band are
-    therefore grouped by physical baseline.  The earliest baseline wins and the
-    leftmost legal glyph start on that baseline represents the row start.
+    top of a late capital may be the first visible ink in ``¤aicvP``). A tall
+    glyph may also contain an exact shorter glyph at several vertical offsets.
+    Baselines closer than ``min_baseline_delta`` cannot represent separate text
+    rows, so the walker first forms the earliest such baseline cluster and picks
+    the baseline with the strongest combined exact-glyph evidence. The leftmost
+    verified glyph on that winning baseline represents the row start.
     """
     if max_row_distance <= 0:
         raise ValueError("max_row_distance must be positive")
@@ -255,9 +287,23 @@ def walk_profile_row_starts(
         ]
         if not legal:
             break
-        legal.sort(
+
+        by_baseline: dict[int, list[ProfileExactHit]] = defaultdict(list)
+        for hit in legal:
+            by_baseline[hit.baseline].append(hit)
+        first_baseline = min(by_baseline)
+        alias_limit = first_baseline + min_baseline_delta - 1
+        candidate_baselines = [
+            baseline for baseline in by_baseline
+            if first_baseline <= baseline <= alias_limit
+        ]
+        chosen_baseline = max(
+            candidate_baselines,
+            key=lambda baseline: (_baseline_evidence_key(by_baseline[baseline]), -baseline),
+        )
+        same_baseline = by_baseline[chosen_baseline]
+        same_baseline.sort(
             key=lambda hit: (
-                hit.baseline,
                 hit.x,
                 -hit.profile_ink_rows,
                 -hit.profile_rows,
@@ -266,7 +312,7 @@ def walk_profile_row_starts(
                 hit.model.style,
             )
         )
-        found = legal[0]
+        found = same_baseline[0]
         next_search_y = max(search_y + 1, found.baseline + 1)
         out.append(
             ProfileRowStart(
