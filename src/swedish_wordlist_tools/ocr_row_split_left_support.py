@@ -48,6 +48,12 @@ class RowCompatibility:
         return self.outside_baseline_band == 0
 
 
+@dataclass(frozen=True)
+class ConservativeSplitRepair:
+    repair: bool
+    reason: str
+
+
 T = TypeVar("T")
 
 
@@ -56,12 +62,6 @@ def row_start_geometry(
     headword_start_x: int,
     continuation_start_x: int,
 ) -> RowStartGeometry:
-    """Build the typographic row-start gate from the three known start positions.
-
-    A candidate may be slightly farther right than the continuation start, but
-    not by more than half the headword->continuation indentation.  This is only
-    a *gate*: a candidate inside it still needs real glyph/raster evidence.
-    """
     if not homonym_start_x <= headword_start_x <= continuation_start_x:
         raise ValueError(
             "expected homonym_start_x <= headword_start_x <= continuation_start_x"
@@ -82,7 +82,6 @@ def row_start_is_typographically_plausible(
     start_x: int,
     geometry: RowStartGeometry,
 ) -> bool:
-    """Return whether x is still inside the region where a row may begin."""
     return start_x <= geometry.late_start_limit_x
 
 
@@ -93,13 +92,6 @@ def first_typographic_start_evidence(
     previous_break_y: int,
     max_row_distance: int,
 ) -> RowStartEvidence | None:
-    """Find the earliest raster row with ink at a legal row-start x.
-
-    Crucially this does not require that the ink can already be named by the
-    glyph facit.  An unknown first glyph is still evidence that a physical row
-    may begin here.  Exact known glyphs are used later only to recover a
-    baseline and explain as much of the row as possible.
-    """
     if max_row_distance < 0:
         raise ValueError("max_row_distance must be non-negative")
     limit_y = previous_break_y + max_row_distance
@@ -126,14 +118,6 @@ def baseline_row_compatibility(
     max_relative_y: int,
     vertical_slack: int = 0,
 ) -> RowCompatibility:
-    """Judge whether unknown/unmatched ink can still belong to one baseline.
-
-    Full facit coverage is deliberately *not* required: unknown glyphs may occur
-    anywhere in a row.  Unexplained pixels are acceptable when they remain in
-    the vertical band that the font's known glyph models occupy around the
-    candidate baseline.  Ink outside that band is evidence that this baseline
-    may be swallowing another physical row and must not be silently accepted.
-    """
     if min_relative_y > max_relative_y:
         raise ValueError("min_relative_y must be <= max_relative_y")
     if vertical_slack < 0:
@@ -150,6 +134,41 @@ def baseline_row_compatibility(
     )
 
 
+def conservative_split_repair_decision(
+    upper_black: set[tuple[int, int]],
+    combined_black: set[tuple[int, int]],
+    *,
+    geometry: RowStartGeometry,
+    establishing_start_x: int | None,
+    compatibility: RowCompatibility | None,
+    max_upper_pixels: int = 24,
+) -> ConservativeSplitRepair:
+    """Conservatively suppress a pseudo-row above an established real row.
+
+    This deliberately repairs only a narrow case: the old upper row is tiny,
+    starts too far right to be a typographic row start, a known glyph has
+    established the following row in the legal start region, and all ink in the
+    combined region is compatible with that baseline.  Otherwise the old split
+    is retained unchanged.
+    """
+    if not upper_black:
+        return ConservativeSplitRepair(False, "empty-upper")
+    if len(upper_black) > max_upper_pixels:
+        return ConservativeSplitRepair(False, "upper-not-tiny")
+    upper_left = min(x for x, _y in upper_black)
+    if row_start_is_typographically_plausible(upper_left, geometry):
+        return ConservativeSplitRepair(False, "upper-could-start-row")
+    if establishing_start_x is None:
+        return ConservativeSplitRepair(False, "no-established-row")
+    if not row_start_is_typographically_plausible(establishing_start_x, geometry):
+        return ConservativeSplitRepair(False, "established-start-not-legal")
+    if compatibility is None or not compatibility.compatible:
+        return ConservativeSplitRepair(False, "combined-ink-not-baseline-compatible")
+    if not combined_black:
+        return ConservativeSplitRepair(False, "empty-combined")
+    return ConservativeSplitRepair(True, "tiny-late-upper-belongs-to-established-row")
+
+
 def first_plausible_candidate_downward(
     candidates: Iterable[T],
     *,
@@ -160,13 +179,6 @@ def first_plausible_candidate_downward(
     max_row_distance: int,
     strong_enough,
 ) -> T | None:
-    """Legacy helper: pick first strong known candidate at a legal x.
-
-    New code must not assume the first glyph is known.  Prefer
-    ``first_typographic_start_evidence`` to establish that a row starts in the
-    legal zone, then use any known glyph on that same row to recover baseline.
-    This helper remains for the existing diagnostics/tests.
-    """
     if max_row_distance < 0:
         raise ValueError("max_row_distance must be non-negative")
     limit_y = previous_break_y + max_row_distance
@@ -218,7 +230,6 @@ def split_left_support_decision(
     min_left_rows: int = 3,
     max_fragment_pixels: int = 24,
 ) -> SplitLeftSupportDecision:
-    """Legacy geometric evidence for a suspicious upper fragment."""
     if left_band_width <= 0:
         raise ValueError("left_band_width must be positive")
     if max_start_delta < 0:
