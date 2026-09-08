@@ -19,22 +19,12 @@ def load_canonical_facit_with_typography(facit_path: Path):
     """Load split-store truth for the canonical v2 aggregate path.
 
     Explicit non-canonical JSON paths retain legacy semantics so frozen fixtures
-    remain usable. The temporary aggregate is only an adapter into the existing
+    remain usable. The temporary JSON is only an adapter into the established
     model parser; its bytes come solely from the split store.
     """
-    facit_path = Path(facit_path)
-    store = canonical_store_for_facit(facit_path)
-    if store is None:
-        return load_facit_with_typography(facit_path)
-    if not store.is_dir():
-        raise FileNotFoundError(
-            f"canonical facit store is missing: {store}; "
-            f"{facit_path.name} is only a compatibility aggregate"
-        )
-    payload = load_split_facit(store)
+    facit_path=Path(facit_path); store=canonical_store_for_facit(facit_path)
+    if store is None: return load_facit_with_typography(facit_path)
+    if not store.is_dir(): raise FileNotFoundError(f"canonical facit store is missing: {store}; {facit_path.name} is only a compatibility aggregate")
+    payload=load_split_facit(store)
     with tempfile.TemporaryDirectory() as td:
-        adapter = Path(td) / "facit.json"
-        adapter.write_text(
-            json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8"
-        )
-        return load_facit_with_typography(adapter)
+        adapter=Path(td)/"facit.json"; adapter.write_text(json.dumps(payload,ensure_ascii=False)+"\n",encoding="utf-8"); return load_facit_with_typography(adapter)
