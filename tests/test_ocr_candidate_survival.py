@@ -67,6 +67,49 @@ class CandidateSurvivalTest(unittest.TestCase):
             ),
         )
 
+    def test_descender_may_reenter_separator_below_baseline_and_complete_glyph(self):
+        # x=57 is a perfectly blank separator through baseline=20.  The glyph
+        # itself starts to its right, but its descender bends left into x=57 at
+        # baseline+1.  Separator detection must still accept x=57, and glyph
+        # verification must continue below baseline and use that pixel.
+        j = glyph(
+            "j",
+            {
+                (1, -3),
+                (1, -2),
+                (1, -1),
+                (1, 0),
+                (0, 1),
+            },
+        )
+        black = place(j, x=57, baseline=20)
+
+        self.assertEqual(
+            (57,),
+            vertical_blank_columns(
+                black,
+                start_x=57,
+                end_x=57,
+                top_y=17,
+                baseline=20,
+            ),
+        )
+
+        result = run_candidate_survival(
+            black,
+            [j],
+            start_y=17,
+            end_y=21,
+            allowed_translate_x_ranges=((50, 64),),
+        )
+        self.assertEqual(
+            [("j", 57, 20, 21)],
+            [
+                (hit.model.label, hit.x, hit.baseline, hit.survived_to_y)
+                for hit in result.completed
+            ],
+        )
+
     def test_wrong_left_edge_dies_when_profile_changes(self):
         straight = glyph("I", {(0, -3), (0, -2), (0, -1), (0, 0)})
         bend = glyph("L", {(0, -3), (0, -2), (1, -1), (1, 0)})
