@@ -72,6 +72,30 @@ class WholeColumnProfileTest(unittest.TestCase):
         )
         self.assertEqual((), hits)
 
+    def test_small_internal_hole_may_contain_other_glyph_ink(self):
+        # i has a one-row vertical hole between dot and stem.  Another glyph is
+        # leftmost in that raster row, but i must still be discoverable from its
+        # profile and then verified by all of its real 2D pixels.
+        i = glyph("i", {(0, -3), (0, -1), (0, 0), (1, 0)})
+        black = place(i, x=57, baseline=20)
+        black.add((52, 18))  # foreign left-edge ink in i's y=-2 hole
+        profile = whole_column_left_profile(black, min_y=16, max_y=22, min_x=0, max_x=75)
+        self.assertEqual(57, profile[17 - 16])
+        self.assertEqual(52, profile[18 - 16])
+        self.assertEqual(57, profile[19 - 16])
+
+        index = build_profile_fragment_index([i], min_rows=4, max_rows=4, min_ink_rows=3)
+        hits = profile_guided_exact_hits(
+            black,
+            profile,
+            profile_min_y=16,
+            fragment_index=index,
+            allowed_translate_x_ranges=((50, 64),),
+            min_rows=4,
+            max_rows=4,
+        )
+        self.assertTrue(any(hit.model.label == "i" and hit.x == 57 and hit.baseline == 20 for hit in hits))
+
     def test_tall_late_glyph_can_appear_first_but_leftmost_same_baseline_start_wins(self):
         mark = glyph("¤", {(0, -2), (1, -2), (0, -1), (1, 0)})
         i = glyph("i", {(0, -4), (0, -3), (0, -1), (0, 0)})
@@ -82,7 +106,6 @@ class WholeColumnProfileTest(unittest.TestCase):
         black |= place(p, x=70, baseline=20)
 
         profile = whole_column_left_profile(black, min_y=10, max_y=25, min_x=0, max_x=75)
-        # The capital is physically the first visible left-profile ink.
         self.assertEqual(70, profile[13 - 10])
         self.assertEqual(58, profile[16 - 10])
         self.assertEqual(46, profile[18 - 10])
