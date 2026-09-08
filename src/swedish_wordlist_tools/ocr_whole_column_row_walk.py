@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Callable, Iterable
 
 from .ocr_glyph_matcher import GlyphModel
 from .ocr_left_edge_local_index import LocalExactHit
@@ -16,6 +16,9 @@ class ShadowRow:
     search_from_y: int
     next_search_y: int
     source: str = "fingerprint"
+
+
+FallbackProvider = Callable[[int, int], Iterable[FoundRowStart]]
 
 
 def _first_fallback_start(
@@ -49,14 +52,18 @@ def walk_row_starts(
     vertical_slack: int = 1,
     min_baseline_delta: int = 8,
     fallback_starts: Iterable[FoundRowStart] = (),
+    fallback_provider: FallbackProvider | None = None,
 ) -> tuple[ShadowRow, ...]:
     """Walk a column top-to-bottom without pre-segmented row boxes.
 
-    The ordinary path establishes a row from a known exact glyph with a strong
-    left-edge fingerprint at a legal typographic start.  If that path has no
-    candidate in the current physical search window, an independently
-    full-raster-verified mature-prefix start may establish the row instead.
-    This keeps shallow starts such as ``~e`` out of the normal min-steps logic.
+    Ordinary strong fingerprint starts and independently full-raster-verified
+    mature-prefix starts compete in physical top-to-bottom order. A prefix start
+    is therefore allowed to establish a real row before a later ordinary start;
+    this is required for shallow starts such as ``~e``.
+
+    ``fallback_provider`` is evaluated only for the current search window and,
+    when an ordinary start exists, only up to that start's top y. This avoids a
+    whole-column mature-prefix scan while preserving physical ordering.
     """
     if end_y < start_y:
         raise ValueError("end_y must be >= start_y")
@@ -76,22 +83,31 @@ def walk_row_starts(
         eligible = remaining
         if minimum_baseline is not None:
             eligible = tuple(hit for hit in remaining if hit.baseline >= minimum_baseline)
-        found = first_known_row_start(
+        ordinary = first_known_row_start(
             eligible,
             geometry=geometry,
             previous_break_y=search_y,
             max_row_distance=max_row_distance,
             min_steps=min_steps,
         )
-        source = "fingerprint"
-        if found is None:
-            found = _first_fallback_start(
-                fallback,
-                search_y=search_y,
-                limit_y=search_y + max_row_distance,
-                minimum_baseline=minimum_baseline,
-            )
+        window_limit = min(end_y, search_y + max_row_distance)
+        prefix_limit = window_limit if ordinary is None else min(window_limit, ordinary.top_y)
+        prefix_candidates: Iterable[FoundRowStart] = fallback
+        if fallback_provider is not None:
+            prefix_candidates = tuple(fallback_provider(search_y, prefix_limit))
+        prefix = _first_fallback_start(
+            prefix_candidates,
+            search_y=search_y,
+            limit_y=prefix_limit,
+            minimum_baseline=minimum_baseline,
+        )
+
+        if prefix is not None and (ordinary is None or prefix.top_y < ordinary.top_y):
+            found = prefix
             source = "mature-prefix"
+        else:
+            found = ordinary
+            source = "fingerprint"
         if found is None or found.top_y > end_y:
             break
         next_y = max(search_y + 1, found.bottom_y + 1 + vertical_slack)
