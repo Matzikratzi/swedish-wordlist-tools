@@ -27,21 +27,23 @@ def walk_row_starts(
     max_row_distance: int = 24,
     min_steps: int = 3,
     vertical_slack: int = 1,
+    min_baseline_delta: int = 8,
 ) -> tuple[ShadowRow, ...]:
     """Walk a column top-to-bottom without pre-segmented row boxes.
 
     A row is established by the first exact known glyph at a legal typographic
-    start. The next search begins just below the *actual raster extent of that
-    establishing glyph*, not below the tallest glyph in the facit and not merely
-    one pixel below its top. This suppresses same-row accent/punctuation hits
-    whose alternate model placement implies a slightly lower fake baseline,
-    while avoiding the old mistake where a globally deep glyph could skip a
-    genuine following row.
+    start. The next search begins just below the actual raster extent of that
+    establishing glyph. In addition, a following row must have a baseline at
+    least ``min_baseline_delta`` pixels lower than the previous accepted row.
+    This rejects alternate punctuation/accent placements a few pixels below the
+    same physical row while remaining well below the observed SAOL line pitch.
     """
     if end_y < start_y:
         raise ValueError("end_y must be >= start_y")
     if vertical_slack < 0:
         raise ValueError("vertical_slack must be non-negative")
+    if min_baseline_delta <= 0:
+        raise ValueError("min_baseline_delta must be positive")
     tuple(models)  # keep API stable; no global facit extent is used
     remaining = tuple(hits)
     out: list[ShadowRow] = []
@@ -51,7 +53,8 @@ def walk_row_starts(
     while search_y <= end_y:
         eligible = remaining
         if previous_baseline is not None:
-            eligible = tuple(hit for hit in remaining if hit.baseline > previous_baseline)
+            minimum_baseline = previous_baseline + min_baseline_delta
+            eligible = tuple(hit for hit in remaining if hit.baseline >= minimum_baseline)
         found = first_known_row_start(
             eligible,
             geometry=geometry,
@@ -61,10 +64,7 @@ def walk_row_starts(
         )
         if found is None or found.top_y > end_y:
             break
-        next_y = max(
-            search_y + 1,
-            found.bottom_y + 1 + vertical_slack,
-        )
+        next_y = max(search_y + 1, found.bottom_y + 1 + vertical_slack)
         out.append(
             ShadowRow(
                 index=index,
