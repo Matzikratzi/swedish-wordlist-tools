@@ -7,7 +7,11 @@ from pathlib import Path
 from .ocr_glyph_matcher import load_facit
 from .ocr_group_baseline_fallback import _select_at_baseline
 from .ocr_left_edge_index import LeftEdgeIndex, derived_baseline
-from .ocr_left_edge_source_walk import is_strong_anchor, source_walk_hits_with_resync
+from .ocr_left_edge_source_walk import (
+    is_strong_anchor,
+    source_walk_hits_with_resync,
+    stable_left_contour_start,
+)
 from .ocr_prepare_sequential_page import _load_source_image, read_jsonl, source_for_page
 
 
@@ -82,6 +86,19 @@ def _probe_anchor_baselines(black, crop, models, hits) -> None:
         )
 
 
+def _print_stable_left_contour(black) -> None:
+    contour = stable_left_contour_start(black)
+    if contour is None:
+        print("  stable-left: no ink")
+        return
+    observations = " ".join(f"y{y}:x{x}" for y, x in contour.observations)
+    print(
+        f"  stable-left first=(y{contour.first_ink_y},x{contour.observations[0][1]}) "
+        f"chosen=(y{contour.chosen_y},x{contour.chosen_x}) "
+        f"skipped_ink_rows={contour.skipped_ink_rows} observations={observations}"
+    )
+
+
 def run_case(jsonl: Path, facit: Path, case: Case, *, threshold: int, limit: int) -> None:
     source = source_for_page(read_jsonl(jsonl), case.page)
     if not source:
@@ -107,6 +124,7 @@ def run_case(jsonl: Path, facit: Path, case: Case, *, threshold: int, limit: int
         f"crop={case.crop} ink={len(black)} current_anchor_x={case.current_anchor_x} "
         f"current={case.current_text!r}"
     )
+    _print_stable_left_contour(black)
     if not hits:
         print("  source walk found no exact glyph at/before current anchor after x/y resync")
         return
@@ -165,8 +183,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
             "Walk source left contours without a baseline on the collected #2 "
-            "anchor-failure rows, resynchronizing both downward and rightward, "
-            "then probe the existing baseline-constrained selector from strong anchors."
+            "anchor-failure rows, show the source-only stable left contour, "
+            "resynchronize both downward and rightward, then probe the existing "
+            "baseline-constrained selector from strong anchors."
         )
     )
     ap.add_argument("jsonl", type=Path)
