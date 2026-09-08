@@ -6,17 +6,15 @@ from pathlib import Path
 from .ocr_debug_left_edge_cases import _black_points, _covered, _selected_text
 from .ocr_glyph_matcher import load_facit
 from .ocr_group_baseline_fallback import _select_at_baseline
-from .ocr_left_edge_candidate_guided import candidate_guided_exact_hits
+from .ocr_left_edge_local_index import ranked_exact_local_hits
 from .ocr_prepare_sequential_page import _load_source_image, read_jsonl, source_for_page
 from .ocr_row_split_left_support import (
-    first_plausible_candidate_downward,
+    baseline_row_compatibility,
     row_start_geometry,
     split_left_support_decision,
 )
 
 
-# Page 39, column 0: current segmentation creates a three-raster-row pseudo-row
-# from the high mark over the following "apne" row.
 PAGE = 39
 LEFT = 2
 RIGHT = 255
@@ -29,9 +27,8 @@ LOWER_BOTTOM = 559
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
-            "Diagnose the page-39 apne split by rejecting glyph starts too far "
-            "right of the continuation start, then continuing downward for at "
-            "most one normal row distance looking for the first strong exact glyph."
+            "Diagnose the page-39 apne split with the typographic start gate, "
+            "multi-step local contour index and baseline-compatible unknown ink."
         )
     )
     ap.add_argument("jsonl", type=Path)
@@ -46,6 +43,7 @@ def main() -> int:
     ap.add_argument("--continuation-start", type=int, default=68)
     ap.add_argument("--max-row-distance", type=int, default=16)
     ap.add_argument("--min-steps", type=int, default=3)
+    ap.add_argument("--max-steps", type=int, default=10)
     args = ap.parse_args()
 
     source = source_for_page(read_jsonl(args.jsonl), PAGE)
@@ -95,36 +93,42 @@ def main() -> int:
     )
 
     models = load_facit(args.facit)
-    hits, stats = candidate_guided_exact_hits(
+    hits = ranked_exact_local_hits(
         combined,
         models,
+        max_steps=args.max_steps,
+        min_steps=args.min_steps,
         max_row_gap=1,
         max_x=geometry.late_start_limit_x,
-        min_exact_steps=args.min_steps,
+        include_tiny_fallback=False,
+    )
+    legal = [
+        hit
+        for hit in hits
+        if hit.translate_x <= geometry.late_start_limit_x
+        and hit.translate_y + hit.model.min_y <= args.max_row_distance
+    ]
+    legal.sort(
+        key=lambda hit: (
+            hit.translate_y + hit.model.min_y,
+            -hit.steps,
+            hit.translate_x,
+            -len(hit.model.pixels),
+        )
     )
     print(
-        f"  guided legal-zone stats starts={stats.scan_positions} "
-        f"tracks={stats.started_tracks} exact_checks={stats.exact_checks} "
-        f"hits={len(hits)}"
+        f"  indexed legal-zone exact-placements={len(legal)} "
+        f"all-indexed-hits={len(hits)}"
     )
-
-    hit = first_plausible_candidate_downward(
-        hits,
-        start_x=lambda item: item.translate_x,
-        top_y=lambda item: item.translate_y + item.model.min_y,
-        geometry=geometry,
-        previous_break_y=0,
-        max_row_distance=args.max_row_distance,
-        strong_enough=lambda item: item.matched_steps >= args.min_steps,
-    )
-    if hit is None:
-        print("  downward-start: no strong exact glyph in legal start zone")
+    if not legal:
+        print("  downward-start: no known strong glyph in legal start zone")
         return 0
 
+    hit = legal[0]
     glyph_top = hit.translate_y + hit.model.min_y
     print(
         f"  downward-start glyph={hit.model.label!r}/{hit.model.style} "
-        f"steps={hit.matched_steps} x={hit.translate_x} top_y={glyph_top} "
+        f"steps={hit.steps} x={hit.translate_x} top_y={glyph_top} "
         f"baseline={hit.baseline}"
     )
 
@@ -136,9 +140,24 @@ def main() -> int:
         hit.baseline,
     )
     covered = _covered(selected)
+    min_relative_y = min(model.min_y for model in models)
+    max_relative_y = max(model.max_y for model in models)
+    compatibility = baseline_row_compatibility(
+        combined,
+        covered,
+        baseline=hit.baseline,
+        min_relative_y=min_relative_y,
+        max_relative_y=max_relative_y,
+    )
     print(
         f"  whole-since-break coverage={len(covered)}/{len(combined)} "
         f"fully_exact={len(covered) == len(combined)} text={_selected_text(selected)!r}"
+    )
+    print(
+        f"  baseline-compatible={compatibility.compatible} "
+        f"unexplained={compatibility.unexplained_pixels} "
+        f"outside_baseline_band={compatibility.outside_baseline_band} "
+        f"font_relative_y={min_relative_y}..{max_relative_y}"
     )
     unexplained = combined - covered
     if unexplained:
