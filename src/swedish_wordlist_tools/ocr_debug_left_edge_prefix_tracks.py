@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 from .ocr_canonical_facit import load_canonical_facit_with_typography
-from .ocr_left_edge_prefix_hypotheses import branch_source_left_contour, build_prefix_index
+from .ocr_left_edge_prefix_hypotheses import build_prefix_index, scan_prefix_candidate_lifetimes
 from .ocr_review_page_pixel_array_glyphs_html import build_page_context_pixel_array
 from .ocr_shadow_whole_column import _black_pixels, _column_bounds
 
@@ -28,7 +28,7 @@ def _fmt_relations(relations: tuple[tuple[int, int], ...]) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Show branching facit-prefix hypotheses along a source left contour."
+        description="Show facit-prefix lifetimes and exact raster tests along a source left contour."
     )
     ap.add_argument("jsonl", type=Path)
     ap.add_argument("--facit", type=Path, required=True)
@@ -39,7 +39,6 @@ def main() -> int:
     ap.add_argument("--x0", type=int, default=39)
     ap.add_argument("--x1", type=int, default=75)
     ap.add_argument("--threshold", type=int, default=210)
-    ap.add_argument("--max-candidates", type=int, default=12)
     args = ap.parse_args()
 
     if args.y1 < args.y0:
@@ -57,29 +56,33 @@ def main() -> int:
         f"max_relations={index.max_relations}",
         flush=True,
     )
+
+    previous_rows: tuple[tuple[int, int], ...] | None = None
     for min_x in range(args.x0, args.x1 + 1):
         rows = _left_rows(black, min_x=min_x, y0=args.y0, y1=args.y1)
-        tracks = branch_source_left_contour(rows, index=index, max_row_gap=1)
-        if not tracks:
+        # Different x thresholds that expose the same contour are identical work.
+        if rows == previous_rows:
             continue
-        interesting = [track for track in tracks if len(track.relations) >= 2]
-        if not interesting:
+        previous_rows = rows
+        runs = scan_prefix_candidate_lifetimes(rows, black=black, index=index, max_row_gap=1)
+        if not runs:
             continue
+
         print(f"scan-x={min_x} rows={rows}", flush=True)
-        for number, track in enumerate(tracks):
-            if not track.relations:
-                continue
-            candidates = index.candidates(track.relations)
-            labels = sorted({f"{item.model.label!r}/{item.model.style}" for item in candidates})
-            shown = labels[: args.max_candidates]
-            extra = len(labels) - len(shown)
-            suffix = f" +{extra} more" if extra > 0 else ""
+        for number, run in enumerate(runs):
             print(
-                f"  track={number} source_rows={track.start_row}..{track.end_row} "
-                f"steps={len(track.relations)} candidates={len(candidates)} "
-                f"rels={_fmt_relations(track.relations)} labels={','.join(shown)}{suffix}",
+                f"  run={number} source_rows={run.source_start_row}..{run.source_end_row} "
+                f"steps={len(run.relations)} surviving={run.surviving_candidates} "
+                f"rels={_fmt_relations(run.relations)}",
                 flush=True,
             )
+            for test in run.mature_tests:
+                print(
+                    f"    mature-at={test.source_end_row} glyph={test.model.label!r}/{test.model.style} "
+                    f"model-start={test.model_start_row} x={test.translate_x} baseline={test.baseline} "
+                    f"pixels={len(test.model.pixels)} exact={'YES' if test.exact else 'no'}",
+                    flush=True,
+                )
     return 0
 
 
