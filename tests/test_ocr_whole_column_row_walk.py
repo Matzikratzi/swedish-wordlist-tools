@@ -94,7 +94,7 @@ class WholeColumnRowWalkTest(unittest.TestCase):
         self.assertEqual("a", rows[0].start.label)
         self.assertEqual(57, rows[0].start.x)
 
-    def test_ordinary_fingerprint_wins_before_fallback_in_same_window(self):
+    def test_earlier_mature_prefix_wins_before_later_fingerprint(self):
         a = model("a")
         geometry = row_start_geometry(46, 57, 68)
         fallback = FoundRowStart(
@@ -116,7 +116,31 @@ class WholeColumnRowWalkTest(unittest.TestCase):
             min_steps=3,
             fallback_starts=[fallback],
         )
-        self.assertEqual(1, len(rows))
+        self.assertEqual("~", rows[0].start.label)
+        self.assertEqual("mature-prefix", rows[0].source)
+
+    def test_earlier_fingerprint_wins_before_later_mature_prefix(self):
+        a = model("a")
+        geometry = row_start_geometry(46, 57, 68)
+        fallback = FoundRowStart(
+            x=66,
+            top_y=9,
+            bottom_y=10,
+            baseline=10,
+            label="~",
+            style="italic",
+            steps=1,
+        )
+        rows = walk_row_starts(
+            [hit(a, x=57, top_y=7, baseline=10, steps=7)],
+            models=[a],
+            geometry=geometry,
+            start_y=0,
+            end_y=20,
+            max_row_distance=16,
+            min_steps=3,
+            fallback_starts=[fallback],
+        )
         self.assertEqual("a", rows[0].start.label)
         self.assertEqual("fingerprint", rows[0].source)
 
