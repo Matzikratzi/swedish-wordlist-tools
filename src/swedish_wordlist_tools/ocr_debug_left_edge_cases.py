@@ -52,9 +52,9 @@ def _selected_text(selected) -> str:
 def _probe_anchor_baselines(black, crop, models, hits) -> None:
     baseline_sources: dict[int, list[str]] = {}
     for hit in hits:
+        if not is_strong_anchor(hit):
+            continue
         for glyph in hit.exact:
-            if not is_strong_anchor(glyph, hit.prefix):
-                continue
             baseline = derived_baseline(glyph, source_top_y=hit.y)
             baseline_sources.setdefault(baseline, []).append(
                 f"{glyph.model.label!r}/{glyph.model.style}:{glyph.variant}@x{hit.x}"
@@ -111,11 +111,7 @@ def run_case(jsonl: Path, facit: Path, case: Case, *, threshold: int, limit: int
         print("  source walk found no exact glyph at/before current anchor after x/y resync")
         return
 
-    strong = any(
-        is_strong_anchor(glyph, hit.prefix)
-        for hit in hits
-        for glyph in hit.exact
-    )
+    strong = any(is_strong_anchor(hit) for hit in hits)
     quality = "STRONG" if strong else "WEAK-FALLBACK"
     leftmost = min(hit.x for hit in hits)
     skipped_top = min(hit.skipped_top_rows for hit in hits)
@@ -136,6 +132,7 @@ def run_case(jsonl: Path, facit: Path, case: Case, *, threshold: int, limit: int
             len(item.candidates),
         ),
     ):
+        hit_quality = "STRONG" if is_strong_anchor(hit) else "WEAK"
         for glyph in sorted(
             hit.exact,
             key=lambda item: (-len(item.model.pixels), item.model.label, item.model.style, item.variant),
@@ -144,13 +141,12 @@ def run_case(jsonl: Path, facit: Path, case: Case, *, threshold: int, limit: int
                 break
             model = glyph.model
             baseline = derived_baseline(glyph, source_top_y=hit.y)
-            glyph_quality = "STRONG" if is_strong_anchor(glyph, hit.prefix) else "WEAK"
             marker = "LEFTMOST" if hit.x == leftmost else ""
             prefix_text = "[" + ",".join(
                 "." if value is None else str(value) for value in hit.prefix
             ) + "]"
             print(
-                f"  x={hit.x:>3} y={hit.y:>2} quality={glyph_quality} "
+                f"  x={hit.x:>3} y={hit.y:>2} quality={hit_quality} "
                 f"skipx={hit.skipped_left_columns:>3} skipy={hit.skipped_top_rows:>2} "
                 f"page=({case.crop[0]+hit.x},{case.crop[1]+hit.y}) "
                 f"glyph={model.label!r}/{model.style} variant={glyph.variant} "
