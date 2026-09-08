@@ -65,6 +65,25 @@ class WholeColumnRowWalkTest(unittest.TestCase):
         self.assertGreater(rows[0].next_search_y, 87)
         self.assertLessEqual(rows[0].next_search_y, 101)
 
+    def test_nearby_fake_baseline_after_glyph_extent_is_not_a_new_row(self):
+        a = model("a", min_y=-7, max_y=-3)
+        dot = model("dot", min_y=-4, max_y=1)
+        b = model("b", min_y=-7, max_y=2)
+        geometry = row_start_geometry(46, 57, 68)
+        rows = walk_row_starts(
+            [
+                hit(a, x=51, top_y=294, baseline=305, steps=7),
+                hit(dot, x=68, top_y=303, baseline=307, steps=4),
+                hit(b, x=66, top_y=319, baseline=324, steps=8),
+            ],
+            models=[a, dot, b],
+            geometry=geometry,
+            start_y=290,
+            end_y=340,
+            min_baseline_delta=8,
+        )
+        self.assertEqual([305, 324], [row.start.baseline for row in rows])
+
     def test_late_apne_fragment_does_not_create_shadow_row(self):
         mark = model("mark")
         a = model("a")
