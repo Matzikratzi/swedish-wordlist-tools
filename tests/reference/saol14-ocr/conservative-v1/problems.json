@@ -1,0 +1,964 @@
+{
+  "format": "saol14-ocr-baseline-problems-v1",
+  "rows": [
+    {
+      "baseline": 15,
+      "column": 2,
+      "covered_pixels": 238,
+      "crop_box": [
+        458,
+        114,
+        698,
+        132
+      ],
+      "fully_exact": false,
+      "matches": [
+        {
+          "baseline": 15,
+          "label": "t",
+          "model_pixels": 11,
+          "raster_sha256": "c674b8e11ed89e646ce2663da0440387d0abf6233da876886c1645206ab207c0",
+          "sources": 3,
+          "style": "unknown",
+          "x": 21
+        },
+        {
+          "baseline": 15,
+          "label": ".",
+          "model_pixels": 3,
+          "raster_sha256": "514371013f1f183551375b1a84ad7f752009f44ab6b939a3f627a51c5bf3c1f3",
+          "sources": 1,
+          "style": "unknown",
+          "x": 27
+        },
+        {
+          "baseline": 15,
+          "label": "e",
+          "model_pixels": 11,
+          "raster_sha256": "e6b70a2441df3098c798c9d325e753503fc2729ba4cc260eb18029b98b7f6de2",
+          "sources": 8,
+          "style": "unknown",
+          "x": 30
+        },
+        {
+          "baseline": 15,
+          "label": "x",
+          "model_pixels": 20,
+          "raster_sha256": "0a25516cb410eab8b2528eb6485d67ab7e7e1b970c8eefb83151a13be031d311",
+          "sources": 1,
+          "style": "unknown",
+          "x": 35
+        },
+        {
+          "baseline": 15,
+          "label": ".",
+          "model_pixels": 3,
+          "raster_sha256": "514371013f1f183551375b1a84ad7f752009f44ab6b939a3f627a51c5bf3c1f3",
+          "sources": 1,
+          "style": "unknown",
+          "x": 44
+        },
+        {
+          "baseline": 15,
+          "label": "i",
+          "model_pixels": 10,
+          "raster_sha256": "e4babed00df2d968e2a2ba84eaccd70ab73187746c8c0c645849681650f6aed3",
+          "sources": 1,
+          "style": "unknown",
+          "x": 50
+        },
+        {
+          "baseline": 15,
+          "label": "t",
+          "model_pixels": 14,
+          "raster_sha256": "848cdf999bb0fb71dff3be856fd35b9ad56645fbc5502e6a37017963f3cdb657",
+          "sources": 1,
+          "style": "italic",
+          "x": 59
+        },
+        {
+          "baseline": 15,
+          "label": "a",
+          "model_pixels": 20,
+          "raster_sha256": "3a18ce66ba7f9a25fe6825d20b07acf3b1b30def1c2f0faadc6f89ef4aea6e8a",
+          "sources": 1,
+          "style": "italic",
+          "x": 63
+        },
+        {
+          "baseline": 15,
+          "label": "t",
+          "model_pixels": 14,
+          "raster_sha256": "848cdf999bb0fb71dff3be856fd35b9ad56645fbc5502e6a37017963f3cdb657",
+          "sources": 1,
+          "style": "italic",
+          "x": 75
+        },
+        {
+          "baseline": 15,
+          "label": "f",
+          "model_pixels": 17,
+          "raster_sha256": "019900b300c87881cb9e463337532daa07158339c419c503ff447d430c61c9d3",
+          "sources": 1,
+          "style": "unknown",
+          "x": 84
+        },
+        {
+          "baseline": 15,
+          "label": "ö",
+          "model_pixels": 16,
+          "raster_sha256": "4e4f59cd82b3b365505d6b6b4086bfe91db7c01b23a6ec5292b12758068f01fd",
+          "sources": 1,
+          "style": "unknown",
+          "x": 88
+        },
+        {
+          "baseline": 15,
+          "label": "r",
+          "model_pixels": 11,
+          "raster_sha256": "4fdc38724d0d7d4c2eb1d4cfda1ae0cf49fd753015c16bd69421d2a6b5182d72",
+          "sources": 5,
+          "style": "unknown",
+          "x": 95
+        },
+        {
+          "baseline": 15,
+          "label": "t",
+          "model_pixels": 14,
+          "raster_sha256": "848cdf999bb0fb71dff3be856fd35b9ad56645fbc5502e6a37017963f3cdb657",
+          "sources": 1,
+          "style": "italic",
+          "x": 105
+        },
+        {
+          "baseline": 15,
+          "label": "a",
+          "model_pixels": 20,
+          "raster_sha256": "3a18ce66ba7f9a25fe6825d20b07acf3b1b30def1c2f0faadc6f89ef4aea6e8a",
+          "sources": 1,
+          "style": "italic",
+          "x": 109
+        },
+        {
+          "baseline": 15,
+          "label": "d",
+          "model_pixels": 26,
+          "raster_sha256": "cf641bc44747fc268cb8a76e1ea3dae5239c7c9151369a9a1ffb63b9332fbe6a",
+          "sources": 1,
+          "style": "italic",
+          "x": 121
+        },
+        {
+          "baseline": 15,
+          "label": "e",
+          "model_pixels": 14,
+          "raster_sha256": "b7bf6979735b7c724bab702bac2d3924b468b8693c0f39a76037101789e78f90",
+          "sources": 1,
+          "style": "unknown",
+          "x": 129
+        },
+        {
+          "baseline": 15,
+          "label": "t",
+          "model_pixels": 14,
+          "raster_sha256": "848cdf999bb0fb71dff3be856fd35b9ad56645fbc5502e6a37017963f3cdb657",
+          "sources": 1,
+          "style": "italic",
+          "x": 136
+        }
+      ],
+      "needs_work": true,
+      "page": 39,
+      "row": 2,
+      "source_pixels": 244,
+      "text": "t.ex. i tat för ta det",
+      "unreviewed_matches": 0
+    },
+    {
+      "baseline": 22,
+      "column": 1,
+      "covered_pixels": 17,
+      "crop_box": [
+        249,
+        305,
+        456,
+        327
+      ],
+      "fully_exact": false,
+      "matches": [
+        {
+          "baseline": 22,
+          "label": "´",
+          "model_pixels": 5,
+          "raster_sha256": "5bc00e9b46680278a4388a82ef9f461bd87fdd7edd7807b7c205b562e5e5ba86",
+          "sources": 7,
+          "style": "unknown",
+          "x": 18
+        },
+        {
+          "baseline": 22,
+          "label": "-",
+          "model_pixels": 3,
+          "raster_sha256": "bc1ea4d1f6d70ea541ee3d2008b8af21add44c7c1cedcf4ff3b98cbb34df2329",
+          "sources": 1,
+          "style": "unknown",
+          "x": 26
+        },
+        {
+          "baseline": 22,
+          "label": "-",
+          "model_pixels": 3,
+          "raster_sha256": "bc1ea4d1f6d70ea541ee3d2008b8af21add44c7c1cedcf4ff3b98cbb34df2329",
+          "sources": 1,
+          "style": "unknown",
+          "x": 32
+        },
+        {
+          "baseline": 22,
+          "label": "-",
+          "model_pixels": 3,
+          "raster_sha256": "bc1ea4d1f6d70ea541ee3d2008b8af21add44c7c1cedcf4ff3b98cbb34df2329",
+          "sources": 1,
+          "style": "unknown",
+          "x": 49
+        },
+        {
+          "baseline": 22,
+          "label": "-",
+          "model_pixels": 3,
+          "raster_sha256": "bc1ea4d1f6d70ea541ee3d2008b8af21add44c7c1cedcf4ff3b98cbb34df2329",
+          "sources": 1,
+          "style": "unknown",
+          "x": 57
+        }
+      ],
+      "needs_work": true,
+      "page": 48,
+      "row": 13,
+      "source_pixels": 113,
+      "text": "´----",
+      "unreviewed_matches": 0
+    },
+    {
+      "baseline": 15,
+      "column": 2,
+      "covered_pixels": 227,
+      "crop_box": [
+        456,
+        291,
+        698,
+        312
+      ],
+      "fully_exact": false,
+      "matches": [
+        {
+          "baseline": 15,
+          "label": "-",
+          "model_pixels": 4,
+          "raster_sha256": "05497b15d04eef95342bc0cf59389b681bf831cb963fa98d881d96c68e405a07",
+          "sources": 23,
+          "style": "unknown",
+          "x": 17
+        },
+        {
+          "baseline": 15,
+          "label": "s",
+          "model_pixels": 13,
+          "raster_sha256": "8e1fc2284295be6a83b0fc8a37f8c9dec37118bf0eb38da9ed48cb36fbaab1fc",
+          "sources": 20,
+          "style": "unknown",
+          "x": 22
+        },
+        {
+          "baseline": 15,
+          "label": "y",
+          "model_pixels": 18,
+          "raster_sha256": "38cfd5757b90541568c4da4a91351406545bcf45235e1596e7c6d6e98325ffaf",
+          "sources": 2,
+          "style": "unknown",
+          "x": 28
+        },
+        {
+          "baseline": 15,
+          "label": "r",
+          "model_pixels": 11,
+          "raster_sha256": "b05afad5c56810bc8909e3e658abdfaebc20a13829f7b153662db2d8aca98f1d",
+          "sources": 1,
+          "style": "unknown",
+          "x": 36
+        },
+        {
+          "baseline": 15,
+          "label": "o",
+          "model_pixels": 16,
+          "raster_sha256": "29121b81a4eef6cd3e5bb8f206072deb744a97cc9f02f4b82a20ee0826c227e5",
+          "sources": 13,
+          "style": "unknown",
+          "x": 42
+        },
+        {
+          "baseline": 15,
+          "label": "r",
+          "model_pixels": 11,
+          "raster_sha256": "b05afad5c56810bc8909e3e658abdfaebc20a13829f7b153662db2d8aca98f1d",
+          "sources": 1,
+          "style": "unknown",
+          "x": 50
+        },
+        {
+          "baseline": 15,
+          "label": "¤",
+          "model_pixels": 10,
+          "raster_sha256": "0c9a73e251e7917131b29bf06f68be2aff23663e3f72923b6f01c810c523c1d1",
+          "sources": 3,
+          "style": "unknown",
+          "x": 59
+        },
+        {
+          "baseline": 15,
+          "label": "-",
+          "model_pixels": 4,
+          "raster_sha256": "a7e54afd898d35f4a652d750dd26c7a5320d72c065268615736b2d7c908ecebd",
+          "sources": 6,
+          "style": "unknown",
+          "x": 80
+        },
+        {
+          "baseline": 15,
+          "label": "v",
+          "model_pixels": 19,
+          "raster_sha256": "9a7cf651886529c82050d4b8266a67fcaabb00f676e048ea2f3d6f52b8a91d2b",
+          "sources": 1,
+          "style": "unknown",
+          "x": 84
+        },
+        {
+          "baseline": 15,
+          "label": "i",
+          "model_pixels": 13,
+          "raster_sha256": "3eb24e702e09cd957eb73d6e1daed90cec2d7c16b4db94b68596dbbb4e6feaaf",
+          "sources": 1,
+          "style": "unknown",
+          "x": 94
+        },
+        {
+          "baseline": 15,
+          "label": "t",
+          "model_pixels": 14,
+          "raster_sha256": "403534295d39c73b8f20805411b72aca4b374848d3030b17ce7472204456e8d8",
+          "sources": 1,
+          "style": "unknown",
+          "x": 98
+        },
+        {
+          "baseline": 15,
+          "label": "a",
+          "model_pixels": 20,
+          "raster_sha256": "da585c58aaa44612bbe1a71372a9905417f4fd3a1e9697653bd68a6dc3570040",
+          "sources": 1,
+          "style": "unknown",
+          "x": 104
+        },
+        {
+          "baseline": 15,
+          "label": "m",
+          "model_pixels": 37,
+          "raster_sha256": "268ab523a7678e51b4437c2c4cf8f811213e8597053d75e6d5407d3c535afecd",
+          "sources": 1,
+          "style": "unknown",
+          "x": 112
+        },
+        {
+          "baseline": 15,
+          "label": "i",
+          "model_pixels": 13,
+          "raster_sha256": "3eb24e702e09cd957eb73d6e1daed90cec2d7c16b4db94b68596dbbb4e6feaaf",
+          "sources": 1,
+          "style": "unknown",
+          "x": 126
+        },
+        {
+          "baseline": 15,
+          "label": "n",
+          "model_pixels": 24,
+          "raster_sha256": "013a6fa93bb8f2851b9bb2b8480f59e5e4c47b77d90f837e601900129e481cb9",
+          "sources": 9,
+          "style": "unknown",
+          "x": 131
+        }
+      ],
+      "needs_work": true,
+      "page": 50,
+      "row": 12,
+      "source_pixels": 254,
+      "text": "-syror ¤ -vitamin",
+      "unreviewed_matches": 0
+    },
+    {
+      "baseline": 14,
+      "column": 2,
+      "covered_pixels": 350,
+      "crop_box": [
+        461,
+        504,
+        698,
+        525
+      ],
+      "fully_exact": false,
+      "matches": [
+        {
+          "baseline": 14,
+          "label": "k",
+          "model_pixels": 30,
+          "raster_sha256": "13704294e0ec9cad1828b5c4cd085016a6273ac6efaf205500ef640c99ffcca1",
+          "sources": 1,
+          "style": "unknown",
+          "x": 19
+        },
+        {
+          "baseline": 14,
+          "label": "o",
+          "model_pixels": 18,
+          "raster_sha256": "d45c5b95b79bd3c33a1110d7989713955f782effd30947249e6caed08769a7ea",
+          "sources": 2,
+          "style": "definition-roman",
+          "x": 28
+        },
+        {
+          "baseline": 14,
+          "label": "k",
+          "model_pixels": 30,
+          "raster_sha256": "13704294e0ec9cad1828b5c4cd085016a6273ac6efaf205500ef640c99ffcca1",
+          "sources": 1,
+          "style": "unknown",
+          "x": 38
+        },
+        {
+          "baseline": 14,
+          "label": "n",
+          "model_pixels": 24,
+          "raster_sha256": "013a6fa93bb8f2851b9bb2b8480f59e5e4c47b77d90f837e601900129e481cb9",
+          "sources": 9,
+          "style": "unknown",
+          "x": 47
+        },
+        {
+          "baseline": 14,
+          "label": "i",
+          "model_pixels": 13,
+          "raster_sha256": "3eb24e702e09cd957eb73d6e1daed90cec2d7c16b4db94b68596dbbb4e6feaaf",
+          "sources": 1,
+          "style": "unknown",
+          "x": 56
+        },
+        {
+          "baseline": 14,
+          "label": "n",
+          "model_pixels": 24,
+          "raster_sha256": "013a6fa93bb8f2851b9bb2b8480f59e5e4c47b77d90f837e601900129e481cb9",
+          "sources": 9,
+          "style": "unknown",
+          "x": 61
+        },
+        {
+          "baseline": 14,
+          "label": "g",
+          "model_pixels": 42,
+          "raster_sha256": "9742e1f5c034b167c48cb58e120afdaed9691ac3e147bf2b32ae866637371c15",
+          "sources": 1,
+          "style": "unknown",
+          "x": 69
+        },
+        {
+          "baseline": 14,
+          "label": "a",
+          "model_pixels": 20,
+          "raster_sha256": "da585c58aaa44612bbe1a71372a9905417f4fd3a1e9697653bd68a6dc3570040",
+          "sources": 1,
+          "style": "unknown",
+          "x": 83
+        },
+        {
+          "baseline": 14,
+          "label": "v",
+          "model_pixels": 19,
+          "raster_sha256": "9a7cf651886529c82050d4b8266a67fcaabb00f676e048ea2f3d6f52b8a91d2b",
+          "sources": 1,
+          "style": "unknown",
+          "x": 90
+        },
+        {
+          "baseline": 14,
+          "label": "v",
+          "model_pixels": 19,
+          "raster_sha256": "9a7cf651886529c82050d4b8266a67fcaabb00f676e048ea2f3d6f52b8a91d2b",
+          "sources": 1,
+          "style": "unknown",
+          "x": 102
+        },
+        {
+          "baseline": 14,
+          "label": "ä",
+          "model_pixels": 24,
+          "raster_sha256": "ac05ef14a528948e13f0fe80a45b18f7d6f89f7a4d1f6384ebab5491eecae9e1",
+          "sources": 1,
+          "style": "unknown",
+          "x": 112
+        },
+        {
+          "baseline": 14,
+          "label": "x",
+          "model_pixels": 25,
+          "raster_sha256": "d91c66feb52d04d39b800056736242caf7802aa11ad0b3c4357a11b8b5a1a5b8",
+          "sources": 1,
+          "style": "unknown",
+          "x": 119
+        },
+        {
+          "baseline": 14,
+          "label": "t",
+          "model_pixels": 14,
+          "raster_sha256": "403534295d39c73b8f20805411b72aca4b374848d3030b17ce7472204456e8d8",
+          "sources": 1,
+          "style": "unknown",
+          "x": 129
+        },
+        {
+          "baseline": 14,
+          "label": "-",
+          "model_pixels": 4,
+          "raster_sha256": "a7e54afd898d35f4a652d750dd26c7a5320d72c065268615736b2d7c908ecebd",
+          "sources": 6,
+          "style": "unknown",
+          "x": 135
+        },
+        {
+          "baseline": 14,
+          "label": "-",
+          "model_pixels": 3,
+          "raster_sha256": "bc1ea4d1f6d70ea541ee3d2008b8af21add44c7c1cedcf4ff3b98cbb34df2329",
+          "sources": 1,
+          "style": "unknown",
+          "x": 146
+        },
+        {
+          "baseline": 14,
+          "label": "·",
+          "model_pixels": 5,
+          "raster_sha256": "4965c0048d11c55f01bc2f77bf43d689152332a705abd22c3f6c2746b8123c4d",
+          "sources": 2,
+          "style": "unknown",
+          "x": 151
+        },
+        {
+          "baseline": 14,
+          "label": "|",
+          "model_pixels": 12,
+          "raster_sha256": "cff810fd5a5ff23a63646a74c126c012e8d5351d302bf6d59787612525951707",
+          "sources": 1,
+          "style": "unknown",
+          "x": 168
+        },
+        {
+          "baseline": 14,
+          "label": "·",
+          "model_pixels": 5,
+          "raster_sha256": "4965c0048d11c55f01bc2f77bf43d689152332a705abd22c3f6c2746b8123c4d",
+          "sources": 2,
+          "style": "unknown",
+          "x": 173
+        },
+        {
+          "baseline": 14,
+          "label": "·",
+          "model_pixels": 5,
+          "raster_sha256": "4965c0048d11c55f01bc2f77bf43d689152332a705abd22c3f6c2746b8123c4d",
+          "sources": 2,
+          "style": "unknown",
+          "x": 177
+        },
+        {
+          "baseline": 14,
+          "label": "·",
+          "model_pixels": 5,
+          "raster_sha256": "4965c0048d11c55f01bc2f77bf43d689152332a705abd22c3f6c2746b8123c4d",
+          "sources": 2,
+          "style": "unknown",
+          "x": 182
+        },
+        {
+          "baseline": 14,
+          "label": "·",
+          "model_pixels": 5,
+          "raster_sha256": "4965c0048d11c55f01bc2f77bf43d689152332a705abd22c3f6c2746b8123c4d",
+          "sources": 2,
+          "style": "unknown",
+          "x": 187
+        },
+        {
+          "baseline": 14,
+          "label": "-",
+          "model_pixels": 4,
+          "raster_sha256": "05497b15d04eef95342bc0cf59389b681bf831cb963fa98d881d96c68e405a07",
+          "sources": 23,
+          "style": "unknown",
+          "x": 191
+        }
+      ],
+      "needs_work": true,
+      "page": 61,
+      "row": 24,
+      "source_pixels": 420,
+      "text": "kokning av växt- -· |····-",
+      "unreviewed_matches": 0
+    },
+    {
+      "baseline": 15,
+      "column": 2,
+      "covered_pixels": 99,
+      "crop_box": [
+        461,
+        521,
+        698,
+        539
+      ],
+      "fully_exact": false,
+      "matches": [
+        {
+          "baseline": 15,
+          "label": "d",
+          "model_pixels": 29,
+          "raster_sha256": "1b36a0c4ba6b832b2bf8fe66d31b944233f4c4599ce267e579a2921daf67da3a",
+          "sources": 2,
+          "style": "unknown",
+          "x": 19
+        },
+        {
+          "baseline": 15,
+          "label": "e",
+          "model_pixels": 18,
+          "raster_sha256": "496de946676d9413330d92e51b57bcb2248762113fc81b9ce3009ceb8b2b0686",
+          "sources": 1,
+          "style": "unknown",
+          "x": 28
+        },
+        {
+          "baseline": 15,
+          "label": "l",
+          "model_pixels": 16,
+          "raster_sha256": "a09270542fbf4253adb6358cdfe96cd900155d2452cfa7ba6e543c7fbe651f65",
+          "sources": 2,
+          "style": "unknown",
+          "x": 36
+        },
+        {
+          "baseline": 15,
+          "label": "a",
+          "model_pixels": 20,
+          "raster_sha256": "da585c58aaa44612bbe1a71372a9905417f4fd3a1e9697653bd68a6dc3570040",
+          "sources": 1,
+          "style": "unknown",
+          "x": 40
+        },
+        {
+          "baseline": 15,
+          "label": "r",
+          "model_pixels": 16,
+          "raster_sha256": "b8a5b79226f60f2247302ec13f5f3c31098f138c44266ed68cabbdcb16f855e5",
+          "sources": 3,
+          "style": "unknown",
+          "x": 49
+        }
+      ],
+      "needs_work": true,
+      "page": 61,
+      "row": 25,
+      "source_pixels": 100,
+      "text": "delar",
+      "unreviewed_matches": 0
+    },
+    {
+      "baseline": 17,
+      "column": 0,
+      "covered_pixels": 259,
+      "crop_box": [
+        0,
+        838,
+        249,
+        861
+      ],
+      "fully_exact": false,
+      "matches": [
+        {
+          "baseline": 17,
+          "label": "p",
+          "model_pixels": 23,
+          "raster_sha256": "f731a3ee8c17070044cd4e653f1d562a798e416d2e8fbd122c01dbf71852a567",
+          "sources": 10,
+          "style": "unknown",
+          "x": 60
+        },
+        {
+          "baseline": 17,
+          "label": "r",
+          "model_pixels": 11,
+          "raster_sha256": "4fdc38724d0d7d4c2eb1d4cfda1ae0cf49fd753015c16bd69421d2a6b5182d72",
+          "sources": 5,
+          "style": "unknown",
+          "x": 67
+        },
+        {
+          "baseline": 17,
+          "label": "e",
+          "model_pixels": 11,
+          "raster_sha256": "e6b70a2441df3098c798c9d325e753503fc2729ba4cc260eb18029b98b7f6de2",
+          "sources": 8,
+          "style": "unknown",
+          "x": 73
+        },
+        {
+          "baseline": 17,
+          "label": "s",
+          "model_pixels": 10,
+          "raster_sha256": "e402e6f737969c062748a980c3c450236550cda0e242350f75f369c75a0f9d20",
+          "sources": 1,
+          "style": "unknown",
+          "x": 79
+        },
+        {
+          "baseline": 17,
+          "label": ".",
+          "model_pixels": 3,
+          "raster_sha256": "514371013f1f183551375b1a84ad7f752009f44ab6b939a3f627a51c5bf3c1f3",
+          "sources": 1,
+          "style": "unknown",
+          "x": 85
+        },
+        {
+          "baseline": 17,
+          "label": "-",
+          "model_pixels": 4,
+          "raster_sha256": "05497b15d04eef95342bc0cf59389b681bf831cb963fa98d881d96c68e405a07",
+          "sources": 23,
+          "style": "unknown",
+          "x": 91
+        },
+        {
+          "baseline": 17,
+          "label": "r",
+          "model_pixels": 11,
+          "raster_sha256": "b05afad5c56810bc8909e3e658abdfaebc20a13829f7b153662db2d8aca98f1d",
+          "sources": 1,
+          "style": "unknown",
+          "x": 97
+        },
+        {
+          "baseline": 17,
+          "label": "i",
+          "model_pixels": 11,
+          "raster_sha256": "5fa4281fd644b8c203a41bd2812752542f5401d1345feeeb1046a23a4d0c79ae",
+          "sources": 6,
+          "style": "unknown",
+          "x": 102
+        },
+        {
+          "baseline": 17,
+          "label": "n",
+          "model_pixels": 22,
+          "raster_sha256": "a3f2a92063e6a59e20e30d4d0d92e346715ccae109e60a6d73ac460cc7c391fc",
+          "sources": 1,
+          "style": "italic",
+          "x": 106
+        },
+        {
+          "baseline": 17,
+          "label": "n",
+          "model_pixels": 22,
+          "raster_sha256": "a3f2a92063e6a59e20e30d4d0d92e346715ccae109e60a6d73ac460cc7c391fc",
+          "sources": 1,
+          "style": "italic",
+          "x": 114
+        },
+        {
+          "baseline": 17,
+          "label": "e",
+          "model_pixels": 14,
+          "raster_sha256": "b7bf6979735b7c724bab702bac2d3924b468b8693c0f39a76037101789e78f90",
+          "sources": 1,
+          "style": "unknown",
+          "x": 123
+        },
+        {
+          "baseline": 17,
+          "label": "r",
+          "model_pixels": 11,
+          "raster_sha256": "b05afad5c56810bc8909e3e658abdfaebc20a13829f7b153662db2d8aca98f1d",
+          "sources": 1,
+          "style": "unknown",
+          "x": 129
+        },
+        {
+          "baseline": 17,
+          "label": "¤",
+          "model_pixels": 10,
+          "raster_sha256": "0c9a73e251e7917131b29bf06f68be2aff23663e3f72923b6f01c810c523c1d1",
+          "sources": 3,
+          "style": "unknown",
+          "x": 138
+        },
+        {
+          "baseline": 17,
+          "label": "ä",
+          "model_pixels": 24,
+          "raster_sha256": "8e69fbc1b3c643ce3abe1c1a7a5c29828dc4066fbc544653044eeee580097a52",
+          "sources": 1,
+          "style": "unknown",
+          "x": 157
+        },
+        {
+          "baseline": 17,
+          "label": "n",
+          "model_pixels": 23,
+          "raster_sha256": "e05b61dccc4d08d2bc3cf87be3efbb41e56c12bbab6bf3bbb4580b512edd4d17",
+          "sources": 1,
+          "style": "unknown",
+          "x": 165
+        },
+        {
+          "baseline": 17,
+          "label": "e",
+          "model_pixels": 14,
+          "raster_sha256": "b7bf6979735b7c724bab702bac2d3924b468b8693c0f39a76037101789e78f90",
+          "sources": 1,
+          "style": "unknown",
+          "x": 175
+        },
+        {
+          "baseline": 17,
+          "label": "r",
+          "model_pixels": 12,
+          "raster_sha256": "bfd1ab68b574ac7a7af9584a33809ac39981eb79a6fe1f15b299625edf366140",
+          "sources": 1,
+          "style": "unknown",
+          "x": 181
+        },
+        {
+          "baseline": 17,
+          "label": "n",
+          "model_pixels": 23,
+          "raster_sha256": "e05b61dccc4d08d2bc3cf87be3efbb41e56c12bbab6bf3bbb4580b512edd4d17",
+          "sources": 1,
+          "style": "unknown",
+          "x": 187
+        }
+      ],
+      "needs_work": true,
+      "page": 64,
+      "row": 43,
+      "source_pixels": 285,
+      "text": "pres. -rinner ¤ änern",
+      "unreviewed_matches": 0
+    },
+    {
+      "baseline": 16,
+      "column": 0,
+      "covered_pixels": 126,
+      "crop_box": [
+        2,
+        503,
+        250,
+        522
+      ],
+      "fully_exact": false,
+      "matches": [
+        {
+          "baseline": 16,
+          "label": "¤",
+          "model_pixels": 10,
+          "raster_sha256": "0c9a73e251e7917131b29bf06f68be2aff23663e3f72923b6f01c810c523c1d1",
+          "sources": 3,
+          "style": "unknown",
+          "x": 64
+        },
+        {
+          "baseline": 16,
+          "label": "t",
+          "model_pixels": 11,
+          "raster_sha256": "c674b8e11ed89e646ce2663da0440387d0abf6233da876886c1645206ab207c0",
+          "sources": 3,
+          "style": "unknown",
+          "x": 72
+        },
+        {
+          "baseline": 16,
+          "label": "i",
+          "model_pixels": 10,
+          "raster_sha256": "e4babed00df2d968e2a2ba84eaccd70ab73187746c8c0c645849681650f6aed3",
+          "sources": 1,
+          "style": "unknown",
+          "x": 77
+        },
+        {
+          "baseline": 16,
+          "label": "l",
+          "model_pixels": 14,
+          "raster_sha256": "0efe22fc5dbf9ffbc3fee2ea8efa741d698af61374d2a8b0217a162947cba852",
+          "sources": 8,
+          "style": "unknown",
+          "x": 80
+        },
+        {
+          "baseline": 16,
+          "label": "l",
+          "model_pixels": 14,
+          "raster_sha256": "0efe22fc5dbf9ffbc3fee2ea8efa741d698af61374d2a8b0217a162947cba852",
+          "sources": 8,
+          "style": "unknown",
+          "x": 84
+        },
+        {
+          "baseline": 16,
+          "label": "v",
+          "model_pixels": 16,
+          "raster_sha256": "b0a92d0d31469432f76c1cb025c40941582e1c8b78d3aafa647d91a50d10c440",
+          "sources": 8,
+          "style": "unknown",
+          "x": 97
+        },
+        {
+          "baseline": 16,
+          "label": "a",
+          "model_pixels": 20,
+          "raster_sha256": "3a18ce66ba7f9a25fe6825d20b07acf3b1b30def1c2f0faadc6f89ef4aea6e8a",
+          "sources": 1,
+          "style": "italic",
+          "x": 105
+        },
+        {
+          "baseline": 16,
+          "label": "r",
+          "model_pixels": 11,
+          "raster_sha256": "b05afad5c56810bc8909e3e658abdfaebc20a13829f7b153662db2d8aca98f1d",
+          "sources": 1,
+          "style": "unknown",
+          "x": 113
+        },
+        {
+          "baseline": 16,
+          "label": "a",
+          "model_pixels": 20,
+          "raster_sha256": "3a18ce66ba7f9a25fe6825d20b07acf3b1b30def1c2f0faadc6f89ef4aea6e8a",
+          "sources": 1,
+          "style": "italic",
+          "x": 118
+        }
+      ],
+      "needs_work": true,
+      "page": 75,
+      "row": 24,
+      "source_pixels": 139,
+      "text": "¤ till vara",
+      "unreviewed_matches": 0
+    }
+  ]
+}
