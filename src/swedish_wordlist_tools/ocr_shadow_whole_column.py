@@ -9,6 +9,7 @@ from .ocr_left_edge_local_index import prepare_local_fingerprint_indexes
 from .ocr_review_page_pixel_array_glyphs_html import build_page_context_pixel_array
 from .ocr_row_split_left_support import row_start_geometry
 from .ocr_row_start_band_search import ranked_exact_row_start_band_hits
+from .ocr_row_start_prefix_fallback import exact_mature_prefix_row_starts
 from .ocr_whole_column_row_walk import walk_row_starts
 
 
@@ -101,6 +102,20 @@ def main() -> int:
         observation_right_slack=args.start_observation_right_slack,
     )
     print(f"shadow-column: exact-local-hits={len(hits)} search={perf_counter()-hits_started:.4f}s", flush=True)
+
+    fallback_started = perf_counter()
+    fallback_starts = exact_mature_prefix_row_starts(
+        black,
+        models,
+        start_ranges=start_ranges,
+        max_row_gap=1,
+    )
+    print(
+        f"shadow-column: mature-prefix-starts={len(fallback_starts)} "
+        f"search={perf_counter()-fallback_started:.4f}s",
+        flush=True,
+    )
+
     _left, _right, top, bottom = bounds
     shadow = walk_row_starts(
         hits,
@@ -111,6 +126,7 @@ def main() -> int:
         max_row_distance=args.max_row_distance,
         min_steps=args.min_steps,
         min_baseline_delta=args.min_baseline_delta,
+        fallback_starts=fallback_starts,
     )
     old_rows = (context["row_map"].get("columns") or [])[args.column].get("rows") or []
     matched_old: set[int] = set()
@@ -119,7 +135,13 @@ def main() -> int:
         if old_index is not None:
             matched_old.add(old_index)
         old_text = "none" if old_index is None else str(old_index)
-        print(f"shadow-row: new={row.index} old={old_text} search={row.search_from_y} top={row.start.top_y} baseline={row.start.baseline} next={row.next_search_y} start={row.start.label!r}/{row.start.style}@x{row.start.x} steps={row.start.steps}", flush=True)
+        print(
+            f"shadow-row: new={row.index} old={old_text} search={row.search_from_y} "
+            f"top={row.start.top_y} baseline={row.start.baseline} next={row.next_search_y} "
+            f"start={row.start.label!r}/{row.start.style}@x{row.start.x} steps={row.start.steps} "
+            f"source={row.source}",
+            flush=True,
+        )
     unmatched = [i for i in range(len(old_rows)) if i not in matched_old]
     print(f"shadow-summary: new_rows={len(shadow)} old_rows={len(old_rows)} matched_old={len(matched_old)} unmatched_old={len(unmatched)}", flush=True)
     for index in unmatched:
