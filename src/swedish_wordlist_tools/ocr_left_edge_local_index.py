@@ -27,6 +27,33 @@ class LocalIndexedGlyph:
     end_y: int
 
 
+@dataclass(frozen=True)
+class LocalExactHit:
+    """One exact glyph placement implied by a local contour fingerprint."""
+
+    indexed: LocalIndexedGlyph
+    source_anchor_y: int
+    source_anchor_x: int
+    steps: int
+    scan_x: int
+
+    @property
+    def model(self) -> GlyphModel:
+        return self.indexed.model
+
+    @property
+    def translate_x(self) -> int:
+        return self.source_anchor_x - self.indexed.anchor_x
+
+    @property
+    def translate_y(self) -> int:
+        return self.source_anchor_y - self.indexed.anchor_y
+
+    @property
+    def baseline(self) -> int:
+        return self.translate_y
+
+
 def occupied_left_rows(model: GlyphModel) -> tuple[tuple[int, int], ...]:
     """Return ``(y, leftmost_x)`` for every occupied raster row in a glyph."""
     by_y: dict[int, int] = {}
@@ -124,12 +151,15 @@ def source_local_signatures(
     *,
     steps: int,
     max_row_gap: int,
+    min_x: int | None = None,
 ) -> tuple[tuple[int, int, LocalSignature], ...]:
     """Read all local left-contour windows from source ink.
 
     Returns ``(anchor_y, anchor_x, signature)``.  Like the model index, gaps
     larger than ``max_row_gap`` break windows rather than creating a cross-gap
-    ``dx`` relation.
+    ``dx`` relation.  ``min_x`` permits cheap horizontal resynchronisation: on
+    each raster row only ink at or to the right of that x may define the local
+    left contour.
     """
     if steps <= 0:
         raise ValueError("steps must be positive")
@@ -138,6 +168,8 @@ def source_local_signatures(
 
     by_y: dict[int, int] = {}
     for x, y in black:
+        if min_x is not None and x < min_x:
+            continue
         previous = by_y.get(y)
         if previous is None or x < previous:
             by_y[y] = x
@@ -181,3 +213,88 @@ def derived_baseline_from_local(
 ) -> int:
     """Derive the model baseline from a local contour hit."""
     return int(source_anchor_y) - indexed.anchor_y
+
+
+def ranked_exact_local_hits(
+    black: set[tuple[int, int]],
+    models: Iterable[GlyphModel],
+    *,
+    max_steps: int = 8,
+    min_steps: int = 1,
+    max_row_gap: int = 1,
+    max_x: int | None = None,
+) -> tuple[LocalExactHit, ...]:
+    """Return exact local-contour placements, longest fingerprints first.
+
+    The source contour is cheap to recompute for each distinct possible
+    horizontal resynchronisation x.  Each fingerprint bucket already contains
+    a model-local anchor, so a bucket hit implies one concrete glyph placement;
+    there is no x/y sliding during exact verification.
+
+    Long windows are tried before short ones.  Consequently tiny punctuation,
+    which cannot supply many real contour relations, naturally falls to the end
+    instead of winning merely because empty surrounding raster rows happen to
+    fit.
+    """
+    if max_steps <= 0:
+        raise ValueError("max_steps must be positive")
+    if min_steps <= 0 or min_steps > max_steps:
+        raise ValueError("min_steps must be in 1..max_steps")
+    if max_row_gap <= 0:
+        raise ValueError("max_row_gap must be positive")
+    model_rows = tuple(models)
+    scan_xs = sorted({x for x, _y in black if max_x is None or x <= max_x})
+    indexes = {
+        steps: LocalLeftEdgeIndex(model_rows, steps=steps, max_row_gap=max_row_gap)
+        for steps in range(min_steps, max_steps + 1)
+    }
+
+    hits: list[LocalExactHit] = []
+    seen: set[tuple[int, int, int, int, int]] = set()
+    for steps in range(max_steps, min_steps - 1, -1):
+        index = indexes[steps]
+        for scan_x in scan_xs:
+            for source_y, source_x, signature in source_local_signatures(
+                black,
+                steps=steps,
+                max_row_gap=max_row_gap,
+                min_x=scan_x,
+            ):
+                for indexed in index.candidates(signature):
+                    tx = source_x - indexed.anchor_x
+                    ty = source_y - indexed.anchor_y
+                    # A longer window may contain a shorter one for the exact
+                    # same placement.  Keep only its strongest observation.
+                    placement_key = (id(indexed.model), tx, ty, indexed.anchor_y, indexed.anchor_x)
+                    if placement_key in seen:
+                        continue
+                    if not exact_local_model_at(
+                        black,
+                        indexed,
+                        source_anchor_y=source_y,
+                        source_anchor_x=source_x,
+                    ):
+                        continue
+                    seen.add(placement_key)
+                    hits.append(
+                        LocalExactHit(
+                            indexed=indexed,
+                            source_anchor_y=source_y,
+                            source_anchor_x=source_x,
+                            steps=steps,
+                            scan_x=scan_x,
+                        )
+                    )
+
+    hits.sort(
+        key=lambda hit: (
+            -hit.steps,
+            -len(hit.model.pixels),
+            hit.translate_x,
+            hit.translate_y,
+            hit.model.label,
+            hit.model.style,
+            hit.indexed.anchor_y,
+        )
+    )
+    return tuple(hits)
