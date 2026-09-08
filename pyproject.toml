@@ -10,7 +10,9 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [{name = "Mats Järgenstedt"}]
-dependencies = []
+dependencies = [
+    "Pillow>=10",
+]
 
 [project.scripts]
 saol14-download = "swedish_wordlist_tools.download:main"
