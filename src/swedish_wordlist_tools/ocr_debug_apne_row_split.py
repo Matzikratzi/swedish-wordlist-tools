@@ -8,9 +8,10 @@ from .ocr_glyph_matcher import load_facit
 from .ocr_group_baseline_fallback import _select_at_baseline
 from .ocr_left_edge_local_index import ranked_exact_local_hits
 from .ocr_prepare_sequential_page import _load_source_image, read_jsonl, source_for_page
+from .ocr_row_finder_one_at_a_time import first_known_row_start
 from .ocr_row_split_left_support import (
     baseline_row_compatibility,
-    first_plausible_candidate_downward,
+    conservative_split_repair_decision,
     row_start_geometry,
     split_left_support_decision,
 )
@@ -28,9 +29,8 @@ LOWER_BOTTOM = 559
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
-            "Diagnose the page-39 apne split by establishing the physical row "
-            "from the first known exact glyph at a typographically plausible "
-            "start, then treating whole-row decoding as a separate baseline probe."
+            "Diagnose page-39 apne both conservatively and as a one-row-at-a-time "
+            "next-row finder."
         )
     )
     ap.add_argument("jsonl", type=Path)
@@ -104,35 +104,22 @@ def main() -> int:
         max_x=geometry.late_start_limit_x,
         include_tiny_fallback=False,
     )
-    legal = [
-        hit
-        for hit in hits
-        if hit.translate_x <= geometry.late_start_limit_x
-        and hit.translate_y + hit.model.min_y <= args.max_row_distance
-    ]
-    print(
-        f"  indexed legal-zone exact-placements={len(legal)} "
-        f"all-indexed-hits={len(hits)}"
-    )
+    print(f"  indexed exact-hits={len(hits)}")
 
-    hit = first_plausible_candidate_downward(
-        legal,
-        start_x=lambda item: item.translate_x,
-        top_y=lambda item: item.translate_y + item.model.min_y,
+    found = first_known_row_start(
+        hits,
         geometry=geometry,
         previous_break_y=0,
         max_row_distance=args.max_row_distance,
-        strong_enough=lambda item: item.steps >= args.min_steps,
+        min_steps=args.min_steps,
     )
-    if hit is None:
-        print("  row-establishing-start: no known strong glyph in legal start zone")
+    if found is None:
+        print("  one-row-next: no known strong glyph in legal start zone")
         return 0
 
-    glyph_top = hit.translate_y + hit.model.min_y
     print(
-        f"  row-establishing-start glyph={hit.model.label!r}/{hit.model.style} "
-        f"steps={hit.steps} x={hit.translate_x} top_y={glyph_top} "
-        f"baseline={hit.baseline}"
+        f"  one-row-next glyph={found.label!r}/{found.style} steps={found.steps} "
+        f"x={found.x} top_y={found.top_y} baseline={found.baseline}"
     )
 
     selected = _select_at_baseline(
@@ -140,7 +127,7 @@ def main() -> int:
         combined_crop.width,
         combined_crop.height,
         models,
-        hit.baseline,
+        found.baseline,
     )
     covered = _covered(selected)
     min_relative_y = min(model.min_y for model in models)
@@ -148,7 +135,7 @@ def main() -> int:
     compatibility = baseline_row_compatibility(
         combined,
         covered,
-        baseline=hit.baseline,
+        baseline=found.baseline,
         min_relative_y=min_relative_y,
         max_relative_y=max_relative_y,
     )
@@ -162,6 +149,16 @@ def main() -> int:
         f"outside_baseline_band={compatibility.outside_baseline_band} "
         f"font_relative_y={min_relative_y}..{max_relative_y}"
     )
+
+    repair = conservative_split_repair_decision(
+        upper,
+        combined,
+        geometry=geometry,
+        establishing_start_x=found.x,
+        compatibility=compatibility,
+    )
+    print(f"  conservative-repair={repair.repair} reason={repair.reason}")
+
     unexplained = combined - covered
     if unexplained:
         xs = [x for x, _y in unexplained]
