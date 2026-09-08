@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import unittest
 
-from swedish_wordlist_tools.ocr_candidate_survival import glyph_left_profile, run_candidate_survival
+from swedish_wordlist_tools.ocr_candidate_survival import (
+    glyph_left_profile,
+    run_candidate_survival,
+    vertical_blank_columns,
+)
 from swedish_wordlist_tools.ocr_glyph_matcher import GlyphModel
 
 
@@ -16,8 +20,6 @@ def place(model: GlyphModel, *, x: int, baseline: int) -> set[tuple[int, int]]:
 
 class CandidateSurvivalTest(unittest.TestCase):
     def test_normalized_glyph_profile_can_go_negative_below_top(self):
-        # Same shape as Mats's observed SAOL a-profile: the first visible raster
-        # row is normalized to zero, while later rows can extend farther left.
         a = glyph(
             "a",
             {
@@ -32,6 +34,38 @@ class CandidateSurvivalTest(unittest.TestCase):
             },
         )
         self.assertEqual((0, -2, -1, 1, -2, -2, -2, -1), glyph_left_profile(a))
+
+    def test_vertical_gap_only_needs_to_be_blank_through_baseline(self):
+        black = {
+            (10, 5),
+            (10, 6),
+            (12, 5),
+            (12, 8),
+            (11, 9),  # below baseline: must not spoil x=11 as separator
+        }
+        self.assertEqual(
+            (11,),
+            vertical_blank_columns(
+                black,
+                start_x=10,
+                end_x=12,
+                top_y=5,
+                baseline=8,
+            ),
+        )
+
+    def test_vertical_gap_is_not_blank_if_baseline_pixel_exists(self):
+        black = {(11, 8), (11, 9)}
+        self.assertEqual(
+            (),
+            vertical_blank_columns(
+                black,
+                start_x=11,
+                end_x=11,
+                top_y=5,
+                baseline=8,
+            ),
+        )
 
     def test_wrong_left_edge_dies_when_profile_changes(self):
         straight = glyph("I", {(0, -3), (0, -2), (0, -1), (0, 0)})
@@ -54,8 +88,8 @@ class CandidateSurvivalTest(unittest.TestCase):
     def test_candidate_survives_when_another_glyph_owns_front_temporarily(self):
         model = glyph("x", {(2, -2), (0, -1), (1, 0)})
         black = place(model, x=57, baseline=20)
-        black.add((56, 19))  # another glyph is farther left on the middle row
-        black.add((70, 18))  # unrelated ink farther right on the top row
+        black.add((56, 19))
+        black.add((70, 18))
 
         result = run_candidate_survival(
             black,
