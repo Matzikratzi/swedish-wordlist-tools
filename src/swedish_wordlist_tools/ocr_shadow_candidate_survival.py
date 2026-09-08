@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 from time import perf_counter
 
-from .ocr_candidate_survival import run_candidate_survival
+from .ocr_candidate_survival import glyph_left_profile, run_candidate_survival
 from .ocr_canonical_facit import load_canonical_facit_with_typography
 from .ocr_review_page_pixel_array_glyphs_html import build_page_context_pixel_array
 from .ocr_row_split_left_support import row_start_geometry
@@ -13,7 +13,7 @@ from .ocr_shadow_whole_column import _black_pixels, _column_bounds, _start_searc
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Shadow experiment: create glyph hypotheses online and kill them one physical raster row at a time."
+        description="Shadow experiment: follow the whole-column left profile and kill glyph hypotheses one raster row at a time."
     )
     ap.add_argument("jsonl", type=Path)
     ap.add_argument("--facit", type=Path, required=True)
@@ -65,18 +65,22 @@ def main() -> int:
 
     if args.show_steps:
         for step in result.steps:
-            if step.born or step.died or step.completed:
+            if step.born or step.died or step.completed or step.profile_x is None:
+                profile = -1 if step.profile_x is None else step.profile_x
                 print(
-                    f"survival-step: y={step.y} born={step.born} before={step.before} "
+                    f"survival-step: y={step.y} profile={profile} born={step.born} before={step.before} "
                     f"after={step.after} died={step.died} completed={step.completed}",
                     flush=True,
                 )
 
     for i, hit in enumerate(result.completed[: max(0, args.show_completed)]):
+        profile = ",".join("_" if value is None else str(value) for value in glyph_left_profile(hit.model))
         print(
             f"survival-hit: n={i} seed={hit.seed_y} survived_to={hit.survived_to_y} "
             f"top={hit.top_y} baseline={hit.baseline} bottom={hit.bottom_y} "
-            f"start={hit.model.label!r}/{hit.model.style}@x{hit.x} glyph_pixels={len(hit.model.pixels)}",
+            f"start={hit.model.label!r}/{hit.model.style}@x{hit.x} "
+            f"front={hit.front_rows} hidden={hit.hidden_rows} profile=[{profile}] "
+            f"glyph_pixels={len(hit.model.pixels)}",
             flush=True,
         )
     return 0
