@@ -4,6 +4,7 @@ import unittest
 
 from swedish_wordlist_tools.ocr_glyph_matcher import GlyphModel
 from swedish_wordlist_tools.ocr_left_edge_local_index import LocalExactHit, LocalIndexedGlyph
+from swedish_wordlist_tools.ocr_row_finder_one_at_a_time import FoundRowStart
 from swedish_wordlist_tools.ocr_row_split_left_support import row_start_geometry
 from swedish_wordlist_tools.ocr_whole_column_row_walk import walk_row_starts
 
@@ -92,6 +93,57 @@ class WholeColumnRowWalkTest(unittest.TestCase):
         self.assertEqual(1, len(rows))
         self.assertEqual("a", rows[0].start.label)
         self.assertEqual(57, rows[0].start.x)
+
+    def test_ordinary_fingerprint_wins_before_fallback_in_same_window(self):
+        a = model("a")
+        geometry = row_start_geometry(46, 57, 68)
+        fallback = FoundRowStart(
+            x=66,
+            top_y=4,
+            bottom_y=5,
+            baseline=5,
+            label="~",
+            style="italic",
+            steps=1,
+        )
+        rows = walk_row_starts(
+            [hit(a, x=57, top_y=7, baseline=10, steps=7)],
+            models=[a],
+            geometry=geometry,
+            start_y=0,
+            end_y=20,
+            max_row_distance=16,
+            min_steps=3,
+            fallback_starts=[fallback],
+        )
+        self.assertEqual(1, len(rows))
+        self.assertEqual("a", rows[0].start.label)
+        self.assertEqual("fingerprint", rows[0].source)
+
+    def test_fallback_is_used_when_ordinary_search_has_no_start(self):
+        geometry = row_start_geometry(46, 57, 68)
+        fallback = FoundRowStart(
+            x=66,
+            top_y=7,
+            bottom_y=8,
+            baseline=8,
+            label="~",
+            style="italic",
+            steps=1,
+        )
+        rows = walk_row_starts(
+            [],
+            models=[],
+            geometry=geometry,
+            start_y=0,
+            end_y=20,
+            max_row_distance=16,
+            min_steps=3,
+            fallback_starts=[fallback],
+        )
+        self.assertEqual(1, len(rows))
+        self.assertEqual("~", rows[0].start.label)
+        self.assertEqual("mature-prefix", rows[0].source)
 
 
 if __name__ == "__main__":
