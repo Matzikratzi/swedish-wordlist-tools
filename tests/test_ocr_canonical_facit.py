@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -18,13 +17,19 @@ class CanonicalFacitTest(unittest.TestCase):
             store.mkdir()
             payload = {"format": "saol14-manual-glyph-facit-v2", "models": [{"id": "g000001"}]}
             aggregate.write_text("STALE", encoding="utf-8")
+            seen = {}
+
+            def parse(path):
+                seen["text"] = Path(path).read_text(encoding="utf-8")
+                return ["parsed"]
+
             with patch.object(canonical, "load_split_facit", return_value=payload) as split, patch.object(
-                canonical, "load_facit_with_typography", return_value=["parsed"]
-            ) as parser:
+                canonical, "load_facit_with_typography", side_effect=parse
+            ):
                 self.assertEqual(canonical.load_canonical_facit_with_typography(aggregate), ["parsed"])
             split.assert_called_once_with(store)
-            parsed_path = parser.call_args.args[0]
-            self.assertNotEqual(parsed_path, aggregate)
+            self.assertIn("g000001", seen["text"])
+            self.assertNotIn("STALE", seen["text"])
 
     def test_explicit_noncanonical_json_keeps_legacy_loader(self):
         with tempfile.TemporaryDirectory() as td:
