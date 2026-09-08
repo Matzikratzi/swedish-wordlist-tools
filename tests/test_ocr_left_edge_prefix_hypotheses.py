@@ -65,12 +65,20 @@ class LeftEdgePrefixHypothesesTest(unittest.TestCase):
         )
         index = build_prefix_index([glyph])
         rows = ((20, 60), (21, 60), (22, 60))
-        # Left contour is perfect, but the right-hand B pixel is absent.
+        # Left contour is perfect, but the right-hand B pixel is absent.  Since
+        # source fingerprints may start inside a glyph, the one-relation prefix
+        # also matures as a B whose first model row would lie above source row 0.
+        # Both placements are legitimate hypotheses and both must fail the full
+        # raster check.  The top-anchored placement matures one row later.
         black = {(60, 20), (60, 21), (60, 22)}
         runs = scan_prefix_candidate_lifetimes(rows, black=black, index=index)
         tests = [test for run in runs for test in run.mature_tests]
-        self.assertEqual(1, len(tests))
-        self.assertFalse(tests[0].exact)
+        self.assertEqual(2, len(tests))
+        self.assertTrue(all(not test.exact for test in tests))
+        top_anchored = [test for test in tests if test.model_start_row == 0]
+        self.assertEqual(1, len(top_anchored))
+        self.assertEqual(2, top_anchored[0].source_end_row)
+        self.assertEqual(20, top_anchored[0].baseline)
 
     def test_impossible_extension_drops_old_run_and_restarts_at_boundary(self):
         first = GlyphModel(
