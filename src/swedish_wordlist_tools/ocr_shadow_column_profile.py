@@ -35,7 +35,7 @@ def main() -> int:
     ap.add_argument("--start-x-tolerance", type=int, default=7)
     ap.add_argument("--profile-max-x", type=int, default=75)
     ap.add_argument("--min-profile-rows", type=int, default=2)
-    ap.add_argument("--max-profile-rows", type=int, default=8)
+    ap.add_argument("--max-profile-rows", type=int, default=20)
     ap.add_argument("--min-profile-ink-rows", type=int, default=2)
     ap.add_argument("--max-row-distance", type=int, default=20)
     ap.add_argument("--min-baseline-delta", type=int, default=8)
