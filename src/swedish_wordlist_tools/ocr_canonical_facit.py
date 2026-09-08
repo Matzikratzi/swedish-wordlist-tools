@@ -7,9 +7,9 @@ aggregate JSON remains a compatibility artefact for old command lines and
 editors; canonical project loads reconstruct their payload from the split store.
 """
 
-from pathlib import Path
 import json
 import tempfile
+from pathlib import Path
 
 from .ocr_glyph_facit_store import canonical_store_for_facit, load_split_facit
 from .ocr_glyph_review_delete import load_facit_with_typography
@@ -32,7 +32,9 @@ def load_canonical_facit_with_typography(facit_path: Path):
             f"{facit_path.name} is only a compatibility aggregate"
         )
     payload = load_split_facit(store)
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", encoding="utf-8") as tmp:
-        json.dump(payload, tmp, ensure_ascii=False)
-        tmp.flush()
-        return load_facit_with_typography(Path(tmp.name))
+    with tempfile.TemporaryDirectory() as td:
+        adapter = Path(td) / "facit.json"
+        adapter.write_text(
+            json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+        return load_facit_with_typography(adapter)
