@@ -231,6 +231,52 @@ def _profile_restart(
     return result, eligible, _pick_left_anchor(eligible)
 
 
+def _consumed_profile_restart(
+    black: set[tuple[int, int]],
+    consumed: set[tuple[int, int]],
+    models,
+    *,
+    current_left: int,
+    row_top: int,
+    baseline: int,
+    column_right: int,
+    column_bottom: int,
+):
+    """Restart the left-profile matcher after subtracting accepted glyph pixels.
+
+    This deliberately does not impose a straight vertical separator.  The next
+    glyph may overlap the previous glyph's x extent (italic/cursive overhang),
+    but textual progress still requires its physical left edge to be strictly
+    to the right of the previous glyph's physical left edge.  Baseline stays
+    locked because there was no verified vertical white separator.
+    """
+    remaining = set(black) - set(consumed)
+    lane_ink = {
+        (x, y)
+        for x, y in remaining
+        if current_left < x < column_right and row_top <= y <= baseline
+    }
+    if not lane_ink:
+        return None, [], None
+
+    result = run_candidate_survival(
+        remaining,
+        models,
+        start_y=row_top,
+        end_y=column_bottom - 1,
+        allowed_translate_x_ranges=((current_left + 1, column_right - 1),),
+    )
+    eligible = [
+        hit
+        for hit in result.completed
+        if hit.baseline == baseline
+        and hit.top_y <= baseline
+        and _hit_bounds(hit)[0] > current_left
+        and not _hit_pixels(hit).intersection(consumed)
+    ]
+    return result, eligible, _pick_left_anchor(eligible, baseline=baseline)
+
+
 def _next_row_boundary(row_pixels: set[tuple[int, int]], *, row_top: int) -> int:
     if not row_pixels:
         return row_top
@@ -309,7 +355,7 @@ def _walk_row(
 
     next_top: int | None = None
     for n in range(1, max_glyphs):
-        _left, right = _hit_bounds(current)
+        current_left, right = _hit_bounds(current)
         cursor = right + 1
         if cursor >= column_right:
             next_top = _next_row_boundary(row_pixels, row_top=row_top)
@@ -376,6 +422,38 @@ def _walk_row(
             labels.append(next_hit.model.label)
             continue
 
+        _consumed_result, consumed_eligible, consumed_hit = _consumed_profile_restart(
+            black,
+            row_pixels,
+            models,
+            current_left=current_left,
+            row_top=row_top,
+            baseline=baseline,
+            column_right=column_right,
+            column_bottom=column_bottom,
+        )
+        _print_profile_group(
+            f"{prefix}-walk-consumed-profile-group",
+            consumed_eligible,
+            baseline=baseline,
+        )
+        if consumed_hit is not None:
+            next_left, next_right = _hit_bounds(consumed_hit)
+            overlap = max(0, right - next_left + 1)
+            row_pixels.update(_hit_pixels(consumed_hit))
+            print(
+                f"{prefix}-walk-glyph: n={n} via=profile-consumed "
+                f"start={consumed_hit.model.label!r}/{consumed_hit.model.style} "
+                f"x={next_left}..{next_right} baseline={baseline} "
+                f"previous_x={current_left}..{right} overlap_x={overlap} "
+                f"front={consumed_hit.front_rows} hidden={consumed_hit.hidden_rows} "
+                f"glyph_pixels={len(consumed_hit.model.pixels)}",
+                flush=True,
+            )
+            current = consumed_hit
+            labels.append(consumed_hit.model.label)
+            continue
+
         horizontal = _baseline_locked_matches(
             black,
             models,
@@ -389,6 +467,7 @@ def _walk_row(
             maximal = [row for row, _subsets, supersets in _dominance(rows) if supersets == 0]
             print(
                 f"{prefix}-walk-stop: reason=connected-ambiguous x={cursor} "
+                f"consumed_candidates={len(consumed_eligible)} "
                 f"candidates={len(rows)} distinct_maximal={len({row[3] for row in maximal})} "
                 f"baseline={baseline}",
                 flush=True,
@@ -398,7 +477,7 @@ def _walk_row(
         model, tx, physical_right, placed = chosen
         row_pixels.update(placed)
         print(
-            f"{prefix}-walk-glyph: n={n} via=2d-connected "
+            f"{prefix}-walk-glyph: n={n} via=2d-connected-fallback "
             f"start={model.label!r}/{model.style} x={cursor}..{physical_right} "
             f"baseline={baseline} glyph_pixels={len(model.pixels)} sources={model.sources}",
             flush=True,
