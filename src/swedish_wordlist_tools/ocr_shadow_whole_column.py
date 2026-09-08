@@ -45,6 +45,24 @@ def _old_row_for_y(rows: list[dict], y: int) -> int | None:
     return None
 
 
+def _start_search_geometry(geometry, tolerance: int) -> tuple[tuple[int, ...], tuple[tuple[int, int], ...]]:
+    if tolerance < 0:
+        raise ValueError("start tolerance must be non-negative")
+    centers = (
+        int(geometry.homonym_start_x),
+        int(geometry.headword_start_x),
+        int(geometry.continuation_start_x),
+    )
+    # Only a few contour resynchronisation thresholds are needed per known
+    # typographic start. The hard translate-x gate below remains wider, because
+    # the first black raster column of different glyphs is not identical to the
+    # nominal typesetting origin.
+    offsets = (-3, 0, 3)
+    scan_xs = tuple(sorted({center + offset for center in centers for offset in offsets}))
+    ranges = tuple((center - tolerance, center + tolerance) for center in centers)
+    return scan_xs, ranges
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Shadow experiment: find rows one at a time from whole-column pixels; old segmentation is comparison only.")
     ap.add_argument("jsonl", type=Path)
@@ -55,6 +73,7 @@ def main() -> int:
     ap.add_argument("--homonym-x", type=int, default=46)
     ap.add_argument("--headword-x", type=int, default=57)
     ap.add_argument("--continuation-x", type=int, default=68)
+    ap.add_argument("--start-x-tolerance", type=int, default=7)
     ap.add_argument("--max-row-distance", type=int, default=24)
     ap.add_argument("--min-steps", type=int, default=3)
     args = ap.parse_args()
@@ -67,9 +86,24 @@ def main() -> int:
     bounds = _column_bounds(context, args.column)
     black = _black_pixels(context, bounds)
     geometry = row_start_geometry(args.homonym_x, args.headword_x, args.continuation_x)
-    print(f"shadow-column: page={args.page} column={args.column} bounds={bounds} black={len(black)} models={len(models)} geometry={geometry.homonym_start_x}/{geometry.headword_start_x}/{geometry.continuation_start_x} late_limit={geometry.late_start_limit_x}", flush=True)
+    scan_xs, start_ranges = _start_search_geometry(geometry, args.start_x_tolerance)
+    print(
+        f"shadow-column: page={args.page} column={args.column} bounds={bounds} black={len(black)} "
+        f"models={len(models)} geometry={geometry.homonym_start_x}/{geometry.headword_start_x}/"
+        f"{geometry.continuation_start_x} start_scan_xs={scan_xs} start_ranges={start_ranges}",
+        flush=True,
+    )
     hits_started = perf_counter()
-    hits = ranked_exact_local_hits(black, max_steps=8, min_steps=args.min_steps, max_row_gap=1, max_x=geometry.late_start_limit_x, include_tiny_fallback=False, prepared=prepared)
+    hits = ranked_exact_local_hits(
+        black,
+        max_steps=8,
+        min_steps=args.min_steps,
+        max_row_gap=1,
+        include_tiny_fallback=False,
+        prepared=prepared,
+        scan_xs=scan_xs,
+        allowed_translate_x_ranges=start_ranges,
+    )
     print(f"shadow-column: exact-local-hits={len(hits)} search={perf_counter()-hits_started:.4f}s", flush=True)
     _left, _right, top, bottom = bounds
     shadow = walk_row_starts(hits, models=models, geometry=geometry, start_y=top, end_y=bottom - 1, max_row_distance=args.max_row_distance, min_steps=args.min_steps)
