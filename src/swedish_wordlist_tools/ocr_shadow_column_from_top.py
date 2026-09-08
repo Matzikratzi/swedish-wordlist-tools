@@ -123,8 +123,14 @@ def _profile_restart(
     end_x: int,
     row_top: int,
     row_bottom: int,
-    baseline: int,
 ):
+    """Restart profile survival after a vertical separator.
+
+    A separator is the one place where a new baseline is allowed.  Therefore
+    the restarted profile search is deliberately not filtered by the previous
+    baseline; the chosen left anchor establishes the baseline for the new
+    horizontal run.
+    """
     right_black = {(x, y) for x, y in black if separator_x < x <= end_x}
     if not right_black:
         return None, None
@@ -135,7 +141,7 @@ def _profile_restart(
         end_y=row_bottom - 1,
         allowed_translate_x_ranges=((separator_x + 1, end_x),),
     )
-    return result, _pick_left_anchor(result.completed, baseline=baseline)
+    return result, _pick_left_anchor(result.completed)
 
 
 def _walk_first_row(
@@ -152,8 +158,9 @@ def _walk_first_row(
 
     Only the x column immediately following a completed glyph decides whether
     profile survival may restart.  We never skip over occupied ink in search of
-    a later separator.  The baseline established by the first anchor remains
-    fixed for the whole row.
+    a later separator.  Baseline is fixed while glyphs are connected, but a
+    vertical separator permits the restarted profile search to establish a new
+    baseline.
     """
     baseline = first_anchor.baseline
     current = first_anchor
@@ -178,8 +185,9 @@ def _walk_first_row(
                 for x, y in black
                 if x == cursor and baseline < y < row_bottom
             )
+            old_baseline = baseline
             print(
-                f"column-top-walk-separator: x={cursor} top={row_top} baseline={baseline} "
+                f"column-top-walk-separator: x={cursor} top={row_top} baseline={old_baseline} "
                 f"below_baseline_ink={below}",
                 flush=True,
             )
@@ -190,23 +198,25 @@ def _walk_first_row(
                 end_x=column_right - 1,
                 row_top=row_top,
                 row_bottom=row_bottom,
-                baseline=baseline,
             )
             if restart_result is None:
                 print(f"column-top-walk-stop: reason=no-ink-after-separator x={cursor}", flush=True)
                 break
             if next_hit is None:
                 print(
-                    f"column-top-walk-stop: reason=no-baseline-locked-profile-hit "
-                    f"separator={cursor} baseline={baseline} completed={len(restart_result.completed)}",
+                    f"column-top-walk-stop: reason=no-profile-hit-after-separator "
+                    f"separator={cursor} old_baseline={old_baseline} "
+                    f"completed={len(restart_result.completed)}",
                     flush=True,
                 )
                 break
             next_left, next_right = _hit_bounds(next_hit)
+            baseline = next_hit.baseline
             print(
                 f"column-top-walk-glyph: n={n} via=profile separator={cursor} "
                 f"start={next_hit.model.label!r}/{next_hit.model.style} "
-                f"x={next_left}..{next_right} baseline={next_hit.baseline} "
+                f"x={next_left}..{next_right} baseline={baseline} "
+                f"baseline_change={baseline-old_baseline:+d} "
                 f"front={next_hit.front_rows} hidden={next_hit.hidden_rows} "
                 f"glyph_pixels={len(next_hit.model.pixels)}",
                 flush=True,
@@ -217,7 +227,7 @@ def _walk_first_row(
 
         # No separator immediately after the accepted glyph.  This is the
         # connected/touching case: use exact full 2-D candidates at this exact
-        # physical x, never at a later x.
+        # physical x and keep the current baseline fixed.
         horizontal = _baseline_locked_matches(
             black,
             models,
@@ -231,7 +241,7 @@ def _walk_first_row(
             maximal = sum(1 for _row, _subsets, supersets in _dominance(rows) if supersets == 0)
             print(
                 f"column-top-walk-stop: reason=connected-ambiguous x={cursor} "
-                f"candidates={len(rows)} maximal={maximal}",
+                f"candidates={len(rows)} maximal={maximal} baseline={baseline}",
                 flush=True,
             )
             break
@@ -264,8 +274,9 @@ def main() -> int:
         description=(
             "Shadow experiment: start at the first row in a column, establish the "
             "left glyph and baseline with profile survival, then walk rightward. "
-            "An immediately blank vertical column restarts profile survival; an "
-            "occupied column invokes baseline-locked exact 2-D fallback."
+            "An immediately blank vertical column restarts profile survival and may "
+            "establish a new baseline; an occupied column invokes exact 2-D fallback "
+            "locked to the current baseline."
         )
     )
     ap.add_argument("jsonl", type=Path)
