@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from . import ocr_review_page_pixel_array_glyphs_html as pixel
+from .ocr_conservative_late_anchor import guarded_analyser
 
 
 QUEUE_FORMAT = "saol14-glyph-review-row-queue-v1"
@@ -123,6 +124,12 @@ def main() -> int:
     ap.add_argument("--port", type=int, default=8766)
     ap.add_argument("--no-browser", action="store_true")
     args = ap.parse_args()
+
+    # Use exactly the same conservative #2 baseline guard as the batch wrapper.
+    # The decision logic lives only in guarded_analyser/repair_late_baseline_anchor;
+    # this editor merely installs that shared analyser for its lifetime.
+    original_analyse = pixel.fast.analyse_row_exact
+    pixel.fast.analyse_row_exact = guarded_analyser(original_analyse)
 
     positions = load_queue(args.queue)
     page_contexts: dict[int, dict] = {}
@@ -253,6 +260,7 @@ def main() -> int:
     except KeyboardInterrupt:
         print("\nstopped")
     finally:
+        pixel.fast.analyse_row_exact = original_analyse
         server.server_close()
     return 0
 
