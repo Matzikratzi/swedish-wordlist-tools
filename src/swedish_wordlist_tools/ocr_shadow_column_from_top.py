@@ -13,12 +13,7 @@ from .ocr_shadow_whole_column import _black_pixels, _column_bounds, _start_searc
 
 
 def _row_page_span(context: dict, column: int, row_index: int) -> tuple[int, int]:
-    """Shadow-only bootstrap geometry for the first row.
-
-    The horizontal walk deliberately does not use the returned bottom.  It is
-    retained for the initial survival experiment until the column-top bootstrap
-    is made fully online as well.
-    """
+    """Shadow-only bootstrap geometry for the very first row."""
     columns = context["row_map"].get("columns") or []
     if not 0 <= column < len(columns):
         raise ValueError(f"column out of range: {column}")
@@ -36,6 +31,11 @@ def _row_page_span(context: dict, column: int, row_index: int) -> tuple[int, int
 def _model_x_bounds(model) -> tuple[int, int]:
     xs = [x for x, _y in model.pixels]
     return min(xs), max(xs)
+
+
+def _model_y_bounds(model) -> tuple[int, int]:
+    ys = [y for _x, y in model.pixels]
+    return min(ys), max(ys)
 
 
 def _placed_pixels(model, *, tx: int, baseline: int) -> frozenset[tuple[int, int]]:
@@ -193,13 +193,6 @@ def _ink_to_right_through_baseline(
     row_top: int,
     baseline: int,
 ) -> set[tuple[int, int]]:
-    """Unconsumed ink in the only y lanes we currently know belong to the row.
-
-    No lower row boundary is assumed.  Starting at the known upper boundary we
-    only need to follow the raster lanes down through the current baseline.  If
-    that whole rectangle is empty to the right, there cannot be another glyph
-    in the current row.
-    """
     return {
         (x, y)
         for x, y in black
@@ -207,18 +200,7 @@ def _ink_to_right_through_baseline(
     }
 
 
-def _profile_restart_candidates(
-    completed,
-    *,
-    previous_baseline: int,
-):
-    """Keep glyphs that start in the known lanes of the current row.
-
-    The survival engine may scan farther down the column so candidates can
-    finish below the baseline.  Glyphs belonging to a later text row start
-    below the current baseline and are excluded here.  The surviving glyph is
-    free to establish a different baseline after the vertical separator.
-    """
+def _profile_restart_candidates(completed, *, previous_baseline: int):
     return [hit for hit in completed if hit.top_y <= previous_baseline]
 
 
@@ -250,53 +232,96 @@ def _profile_restart(
 
 
 def _next_row_boundary(row_pixels: set[tuple[int, int]], *, row_top: int) -> int:
-    """First raster row strictly below every pixel assigned to this text row."""
     if not row_pixels:
         return row_top
     return max(y for _x, y in row_pixels) + 1
 
 
-def _walk_first_row(
+def _first_ink_y_at_or_below(
+    black: set[tuple[int, int]], *, row_top: int, column_bottom: int
+) -> int | None:
+    ys = [y for _x, y in black if row_top <= y < column_bottom]
+    return min(ys) if ys else None
+
+
+def _bootstrap_from_known_top(
     black: set[tuple[int, int]],
     models,
     *,
+    row_top: int,
+    column_bottom: int,
+    ranges,
+    bootstrap_bottom: int | None = None,
+):
+    """Find the first row anchor knowing only its upper boundary.
+
+    Row 0 may still use the old shadow bootstrap bottom.  Later rows use only
+    the derived row_top plus the glyph library's maximum raster height, starting
+    at the first ink row at or below row_top.
+    """
+    first_ink_y = _first_ink_y_at_or_below(
+        black, row_top=row_top, column_bottom=column_bottom
+    )
+    if first_ink_y is None:
+        return None, None, row_top
+
+    if bootstrap_bottom is None:
+        max_height = max(
+            (_model_y_bounds(model)[1] - _model_y_bounds(model)[0] + 1 for model in models),
+            default=1,
+        )
+        search_bottom = min(column_bottom, first_ink_y + max_height + 1)
+    else:
+        search_bottom = min(column_bottom, bootstrap_bottom)
+
+    result = run_candidate_survival(
+        black,
+        models,
+        start_y=row_top,
+        end_y=search_bottom - 1,
+        allowed_translate_x_ranges=ranges,
+    )
+    return result, _pick_left_anchor(result.completed), search_bottom
+
+
+def _walk_row(
+    black: set[tuple[int, int]],
+    models,
+    *,
+    row_index: int,
     first_anchor,
     row_top: int,
     column_right: int,
     column_bottom: int,
     max_glyphs: int = 80,
-):
+) -> tuple[int | None, str]:
+    prefix = f"column-row-{row_index}"
     baseline = first_anchor.baseline
     current = first_anchor
     labels = [first_anchor.model.label]
     row_pixels = set(_hit_pixels(first_anchor))
     print(
-        f"column-top-walk-glyph: n=0 via=initial start={first_anchor.model.label!r}/"
+        f"{prefix}-walk-glyph: n=0 via=initial start={first_anchor.model.label!r}/"
         f"{first_anchor.model.style} x={_hit_bounds(first_anchor)[0]}..{_hit_bounds(first_anchor)[1]} "
         f"baseline={baseline}",
         flush=True,
     )
 
+    next_top: int | None = None
     for n in range(1, max_glyphs):
         _left, right = _hit_bounds(current)
         cursor = right + 1
         if cursor >= column_right:
             next_top = _next_row_boundary(row_pixels, row_top=row_top)
-            print(f"column-top-walk-stop: reason=row-end-column x={cursor}", flush=True)
-            print(
-                f"column-top-next-row-boundary: y={next_top} "
-                f"assigned_bottom={next_top-1} assigned_pixels={len(row_pixels)}",
-                flush=True,
-            )
+            print(f"{prefix}-walk-stop: reason=row-end-column x={cursor}", flush=True)
             break
 
         if _blank_through_baseline(black, x=cursor, top_y=row_top, baseline=baseline):
             old_baseline = baseline
             print(
-                f"column-top-walk-separator: x={cursor} top={row_top} baseline={old_baseline}",
+                f"{prefix}-walk-separator: x={cursor} top={row_top} baseline={old_baseline}",
                 flush=True,
             )
-
             remaining = _ink_to_right_through_baseline(
                 black,
                 after_x=cursor,
@@ -307,18 +332,13 @@ def _walk_first_row(
             if not remaining:
                 next_top = _next_row_boundary(row_pixels, row_top=row_top)
                 print(
-                    f"column-top-walk-stop: reason=row-end-empty-through-baseline "
+                    f"{prefix}-walk-stop: reason=row-end-empty-through-baseline "
                     f"separator={cursor} row_y={row_top}..{baseline}",
-                    flush=True,
-                )
-                print(
-                    f"column-top-next-row-boundary: y={next_top} "
-                    f"assigned_bottom={next_top-1} assigned_pixels={len(row_pixels)}",
                     flush=True,
                 )
                 break
 
-            restart_result, eligible, next_hit = _profile_restart(
+            _restart_result, eligible, next_hit = _profile_restart(
                 black,
                 models,
                 separator_x=cursor,
@@ -327,20 +347,12 @@ def _walk_first_row(
                 previous_baseline=old_baseline,
                 column_bottom=column_bottom,
             )
-            if restart_result is None:
-                print(
-                    f"column-top-walk-stop: reason=profile-restart-no-right-ink "
-                    f"separator={cursor}",
-                    flush=True,
-                )
-                break
-
-            _print_profile_group("column-top-walk-profile-group", eligible)
+            _print_profile_group(f"{prefix}-walk-profile-group", eligible)
             if next_hit is None:
                 candidates, maximal = _left_profile_group(eligible)
                 distinct_maximal = len({_hit_pixels(hit) for hit in maximal})
                 print(
-                    f"column-top-walk-stop: reason=profile-ambiguous-after-separator "
+                    f"{prefix}-walk-stop: reason=profile-ambiguous-after-separator "
                     f"separator={cursor} old_baseline={old_baseline} "
                     f"lane_pixels={len(remaining)} candidates={len(candidates)} "
                     f"distinct_maximal={distinct_maximal}",
@@ -352,7 +364,7 @@ def _walk_first_row(
             baseline = next_hit.baseline
             row_pixels.update(_hit_pixels(next_hit))
             print(
-                f"column-top-walk-glyph: n={n} via=profile separator={cursor} "
+                f"{prefix}-walk-glyph: n={n} via=profile separator={cursor} "
                 f"start={next_hit.model.label!r}/{next_hit.model.style} "
                 f"x={next_left}..{next_right} baseline={baseline} "
                 f"baseline_change={baseline-old_baseline:+d} "
@@ -376,7 +388,7 @@ def _walk_first_row(
         if chosen is None:
             maximal = [row for row, _subsets, supersets in _dominance(rows) if supersets == 0]
             print(
-                f"column-top-walk-stop: reason=connected-ambiguous x={cursor} "
+                f"{prefix}-walk-stop: reason=connected-ambiguous x={cursor} "
                 f"candidates={len(rows)} distinct_maximal={len({row[3] for row in maximal})} "
                 f"baseline={baseline}",
                 flush=True,
@@ -386,7 +398,7 @@ def _walk_first_row(
         model, tx, physical_right, placed = chosen
         row_pixels.update(placed)
         print(
-            f"column-top-walk-glyph: n={n} via=2d-connected "
+            f"{prefix}-walk-glyph: n={n} via=2d-connected "
             f"start={model.label!r}/{model.style} x={cursor}..{physical_right} "
             f"baseline={baseline} glyph_pixels={len(model.pixels)} sources={model.sources}",
             flush=True,
@@ -402,9 +414,17 @@ def _walk_first_row(
         current = next_hit
         labels.append(model.label)
     else:
-        print(f"column-top-walk-stop: reason=max-glyphs n={max_glyphs}", flush=True)
+        print(f"{prefix}-walk-stop: reason=max-glyphs n={max_glyphs}", flush=True)
 
-    print(f"column-top-walk-text: {''.join(labels)!r}", flush=True)
+    text = "".join(labels)
+    if next_top is not None:
+        print(
+            f"{prefix}-next-row-boundary: y={next_top} "
+            f"assigned_bottom={next_top-1} assigned_pixels={len(row_pixels)}",
+            flush=True,
+        )
+    print(f"{prefix}-walk-text: {text!r}", flush=True)
+    return next_top, text
 
 
 def main() -> int:
@@ -413,131 +433,108 @@ def main() -> int:
     ap.add_argument("--facit", type=Path, required=True)
     ap.add_argument("--page", type=int, default=39)
     ap.add_argument("--column", type=int, default=0)
+    ap.add_argument("--rows", type=int, default=2)
     ap.add_argument("--threshold", type=int, default=210)
     ap.add_argument("--homonym-x", type=int, default=46)
     ap.add_argument("--headword-x", type=int, default=57)
     ap.add_argument("--continuation-x", type=int, default=68)
     ap.add_argument("--start-x-tolerance", type=int, default=7)
-    ap.add_argument("--show-steps", action="store_true")
-    ap.add_argument("--show-completed", type=int, default=80)
-    ap.add_argument("--show-horizontal", type=int, default=0)
+    ap.add_argument("--show-completed", type=int, default=20)
     args = ap.parse_args()
 
     models_started = perf_counter()
     models = tuple(load_canonical_facit_with_typography(args.facit))
-    print(f"column-top-models: models={len(models)} load={perf_counter()-models_started:.4f}s", flush=True)
+    print(
+        f"column-top-models: models={len(models)} load={perf_counter()-models_started:.4f}s",
+        flush=True,
+    )
 
     context = build_page_context_pixel_array(args.jsonl, args.page, args.threshold)
     bounds = _column_bounds(context, args.column)
     black = _black_pixels(context, bounds)
+    _column_left, column_right, _column_top, column_bottom = bounds
 
-    # Shadow bootstrap only: row_top is the state the real sequential column
-    # walk will already know.  bootstrap_bottom is used only to obtain the very
-    # first anchor in this experiment; the horizontal algorithm below never
-    # treats it as a known row boundary.
-    row_top, bootstrap_bottom = _row_page_span(context, args.column, 0)
-
+    row_top, first_bootstrap_bottom = _row_page_span(context, args.column, 0)
     geometry = row_start_geometry(args.homonym_x, args.headword_x, args.continuation_x)
     ranges = _start_search_ranges(geometry, args.start_x_tolerance)
 
     print(
-        f"column-top-row: page={args.page} column={args.column} row=0 "
-        f"top={row_top} bootstrap_bottom={bootstrap_bottom} "
-        f"bounds={bounds} ranges={ranges}", flush=True,
+        f"column-top-start: page={args.page} column={args.column} row_top={row_top} "
+        f"first_bootstrap_bottom={first_bootstrap_bottom} bounds={bounds} ranges={ranges}",
+        flush=True,
     )
 
-    started = perf_counter()
-    result = run_candidate_survival(
-        black, models, start_y=row_top, end_y=bootstrap_bottom - 1,
-        allowed_translate_x_ranges=ranges,
-    )
-    seconds = perf_counter() - started
+    for row_index in range(max(0, args.rows)):
+        bootstrap_bottom = first_bootstrap_bottom if row_index == 0 else None
+        started = perf_counter()
+        result, anchor, search_bottom = _bootstrap_from_known_top(
+            black,
+            models,
+            row_top=row_top,
+            column_bottom=column_bottom,
+            ranges=ranges,
+            bootstrap_bottom=bootstrap_bottom,
+        )
+        seconds = perf_counter() - started
+        if result is None:
+            print(f"column-row-{row_index}-bootstrap: no-ink row_top={row_top}", flush=True)
+            break
 
-    total_died = sum(step.died for step in result.steps)
-    total_completed = sum(step.completed for step in result.steps)
-    peak_live = max((step.after for step in result.steps), default=0)
-    print(
-        f"column-top-summary: seeded={result.seeded} completed={len(result.completed)} "
-        f"completed_events={total_completed} died={total_died} peak_live={peak_live} "
-        f"steps={len(result.steps)} search={seconds:.4f}s", flush=True,
-    )
-
-    baseline_counts = Counter(hit.baseline for hit in result.completed)
-    for baseline, count in sorted(baseline_counts.items(), key=lambda item: (-item[1], item[0])):
-        print(f"column-top-baseline: y={baseline} hits={count}", flush=True)
-
-    if args.show_steps:
-        for step in result.steps:
-            profile = -1 if step.profile_x is None else step.profile_x
-            print(
-                f"column-top-step: y={step.y} profile={profile} born={step.born} "
-                f"before={step.before} after={step.after} died={step.died} "
-                f"completed={step.completed}", flush=True,
-            )
-
-    for i, hit in enumerate(result.completed[: max(0, args.show_completed)]):
-        profile = ",".join("_" if value is None else str(value) for value in glyph_left_profile(hit.model))
+        total_died = sum(step.died for step in result.steps)
+        peak_live = max((step.after for step in result.steps), default=0)
         print(
-            f"column-top-hit: n={i} seed={hit.seed_y} top={hit.top_y} "
-            f"baseline={hit.baseline} bottom={hit.bottom_y} "
-            f"start={hit.model.label!r}/{hit.model.style}@x{hit.x} "
-            f"front={hit.front_rows} hidden={hit.hidden_rows} "
-            f"profile=[{profile}] glyph_pixels={len(hit.model.pixels)}", flush=True,
+            f"column-row-{row_index}-bootstrap: top={row_top} search_bottom={search_bottom} "
+            f"seeded={result.seeded} completed={len(result.completed)} died={total_died} "
+            f"peak_live={peak_live} steps={len(result.steps)} search={seconds:.4f}s",
+            flush=True,
         )
-
-    _print_profile_group("column-top-anchor-group", result.completed)
-    anchor = _pick_left_anchor(result.completed)
-    if anchor is None:
-        print("column-top-anchor: ambiguous", flush=True)
-        return 0
-
-    anchor_left, anchor_right = _hit_bounds(anchor)
-    print(
-        f"column-top-anchor: start={anchor.model.label!r}/{anchor.model.style} "
-        f"x={anchor_left}..{anchor_right} baseline={anchor.baseline} "
-        f"front={anchor.front_rows} hidden={anchor.hidden_rows} "
-        f"glyph_pixels={len(anchor.model.pixels)}", flush=True,
-    )
-
-    _column_left, column_right, _column_top, column_bottom = bounds
-    _walk_first_row(
-        black,
-        models,
-        first_anchor=anchor,
-        row_top=row_top,
-        column_right=column_right,
-        column_bottom=column_bottom,
-    )
-
-    if args.show_horizontal > 0:
-        horizontal = _baseline_locked_matches(
-            black, models, baseline=anchor.baseline,
-            start_x=anchor_right + 1, end_x=column_right - 1,
-        )
-        printed = 0
-        for physical_left, rows in horizontal.items():
-            dominance_rows = _dominance(rows)
-            maximal = sum(1 for _row, _subsets, supersets in dominance_rows if supersets == 0)
+        baseline_counts = Counter(hit.baseline for hit in result.completed)
+        for baseline, count in sorted(baseline_counts.items(), key=lambda item: (-item[1], item[0])):
             print(
-                f"column-top-horizontal-group: left={physical_left} candidates={len(rows)} maximal={maximal}",
+                f"column-row-{row_index}-baseline: y={baseline} hits={count}",
                 flush=True,
             )
-            for (model, tx, physical_right, _placed), dominates, dominated_by in dominance_rows:
-                if printed >= args.show_horizontal:
-                    break
-                print(
-                    f"column-top-horizontal: left={physical_left} right={physical_right} "
-                    f"start={model.label!r}/{model.style}@x{tx} baseline={anchor.baseline} "
-                    f"glyph_pixels={len(model.pixels)} sources={model.sources} "
-                    f"dominates={dominates} dominated_by={dominated_by}", flush=True,
-                )
-                printed += 1
-            if printed >= args.show_horizontal:
-                break
+
+        for i, hit in enumerate(result.completed[: max(0, args.show_completed)]):
+            profile = ",".join(
+                "_" if value is None else str(value)
+                for value in glyph_left_profile(hit.model)
+            )
+            print(
+                f"column-row-{row_index}-hit: n={i} seed={hit.seed_y} top={hit.top_y} "
+                f"baseline={hit.baseline} bottom={hit.bottom_y} "
+                f"start={hit.model.label!r}/{hit.model.style}@x{hit.x} "
+                f"front={hit.front_rows} hidden={hit.hidden_rows} "
+                f"profile=[{profile}] glyph_pixels={len(hit.model.pixels)}",
+                flush=True,
+            )
+
+        _print_profile_group(f"column-row-{row_index}-anchor-group", result.completed)
+        if anchor is None:
+            print(f"column-row-{row_index}-anchor: ambiguous", flush=True)
+            break
+
+        anchor_left, anchor_right = _hit_bounds(anchor)
         print(
-            f"column-top-horizontal-summary: positions={len(horizontal)} printed={printed} "
-            f"search_x={anchor_right + 1}..{column_right - 1}", flush=True,
+            f"column-row-{row_index}-anchor: start={anchor.model.label!r}/{anchor.model.style} "
+            f"x={anchor_left}..{anchor_right} baseline={anchor.baseline} "
+            f"front={anchor.front_rows} hidden={anchor.hidden_rows} "
+            f"glyph_pixels={len(anchor.model.pixels)}",
+            flush=True,
         )
+
+        next_top, _text = _walk_row(
+            black,
+            models,
+            row_index=row_index,
+            first_anchor=anchor,
+            row_top=row_top,
+            column_right=column_right,
+            column_bottom=column_bottom,
+        )
+        if next_top is None or next_top <= row_top:
+            break
+        row_top = next_top
 
     return 0
 
