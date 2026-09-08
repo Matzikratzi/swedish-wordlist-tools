@@ -97,6 +97,30 @@ def _baseline_locked_matches(
     return dict(sorted(by_left.items()))
 
 
+def _dominance(rows):
+    """Describe strict pixel-set dominance among candidates at one physical x.
+
+    If a full glyph is present, shorter lookalikes can also fit because their
+    model pixels are strict subsets of the larger glyph.  This helper does not
+    choose a glyph; it only makes that relation explicit in shadow output.
+    """
+    out = []
+    for row in rows:
+        model, tx, physical_right, placed = row
+        strict_subsets = [
+            other
+            for other in rows
+            if other is not row and other[3] < placed
+        ]
+        strict_supersets = [
+            other
+            for other in rows
+            if other is not row and placed < other[3]
+        ]
+        out.append((row, len(strict_subsets), len(strict_supersets)))
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
@@ -220,14 +244,21 @@ def main() -> int:
     )
     printed = 0
     for physical_left, rows in horizontal.items():
-        for model, tx, physical_right, _placed in rows:
+        dominance_rows = _dominance(rows)
+        maximal = sum(1 for _row, _subsets, supersets in dominance_rows if supersets == 0)
+        print(
+            f"column-top-horizontal-group: left={physical_left} candidates={len(rows)} "
+            f"maximal={maximal}",
+            flush=True,
+        )
+        for (model, tx, physical_right, _placed), dominates, dominated_by in dominance_rows:
             if printed >= max(0, args.show_horizontal):
                 break
             print(
                 f"column-top-horizontal: left={physical_left} right={physical_right} "
                 f"start={model.label!r}/{model.style}@x{tx} "
                 f"baseline={anchor.baseline} glyph_pixels={len(model.pixels)} "
-                f"sources={model.sources}",
+                f"sources={model.sources} dominates={dominates} dominated_by={dominated_by}",
                 flush=True,
             )
             printed += 1
