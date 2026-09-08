@@ -5,9 +5,10 @@ from pathlib import Path
 from time import perf_counter
 
 from .ocr_canonical_facit import load_canonical_facit_with_typography
-from .ocr_left_edge_local_index import prepare_local_fingerprint_indexes, ranked_exact_local_hits
+from .ocr_left_edge_local_index import prepare_local_fingerprint_indexes
 from .ocr_review_page_pixel_array_glyphs_html import build_page_context_pixel_array
 from .ocr_row_split_left_support import row_start_geometry
+from .ocr_row_start_band_search import ranked_exact_row_start_band_hits
 from .ocr_whole_column_row_walk import walk_row_starts
 
 
@@ -45,7 +46,7 @@ def _old_row_for_y(rows: list[dict], y: int) -> int | None:
     return None
 
 
-def _start_search_geometry(geometry, tolerance: int) -> tuple[tuple[int, ...], tuple[tuple[int, int], ...]]:
+def _start_search_ranges(geometry, tolerance: int) -> tuple[tuple[int, int], ...]:
     if tolerance < 0:
         raise ValueError("start tolerance must be non-negative")
     centers = (
@@ -53,13 +54,7 @@ def _start_search_geometry(geometry, tolerance: int) -> tuple[tuple[int, ...], t
         int(geometry.headword_start_x),
         int(geometry.continuation_start_x),
     )
-    ranges = tuple((center - tolerance, center + tolerance) for center in centers)
-    # Resynchronisation thresholds are dense *inside* the only x-regions where
-    # a row-start glyph may actually be placed. This preserves italic/inset
-    # starts that require a threshold near the glyph itself (for example x=74)
-    # without returning to scanning every x from the column edge to late_limit.
-    scan_xs = tuple(sorted({x for lo, hi in ranges for x in range(lo, hi + 1)}))
-    return scan_xs, ranges
+    return tuple((center - tolerance, center + tolerance) for center in centers)
 
 
 def main() -> int:
@@ -73,6 +68,7 @@ def main() -> int:
     ap.add_argument("--headword-x", type=int, default=57)
     ap.add_argument("--continuation-x", type=int, default=68)
     ap.add_argument("--start-x-tolerance", type=int, default=7)
+    ap.add_argument("--start-observation-right-slack", type=int, default=12)
     ap.add_argument("--max-row-distance", type=int, default=24)
     ap.add_argument("--min-steps", type=int, default=3)
     ap.add_argument("--min-baseline-delta", type=int, default=8)
@@ -86,23 +82,23 @@ def main() -> int:
     bounds = _column_bounds(context, args.column)
     black = _black_pixels(context, bounds)
     geometry = row_start_geometry(args.homonym_x, args.headword_x, args.continuation_x)
-    scan_xs, start_ranges = _start_search_geometry(geometry, args.start_x_tolerance)
+    start_ranges = _start_search_ranges(geometry, args.start_x_tolerance)
     print(
         f"shadow-column: page={args.page} column={args.column} bounds={bounds} black={len(black)} "
         f"models={len(models)} geometry={geometry.homonym_start_x}/{geometry.headword_start_x}/"
-        f"{geometry.continuation_start_x} start_scan_xs={scan_xs} start_ranges={start_ranges}",
+        f"{geometry.continuation_start_x} start_ranges={start_ranges} "
+        f"observation_right_slack={args.start_observation_right_slack}",
         flush=True,
     )
     hits_started = perf_counter()
-    hits = ranked_exact_local_hits(
+    hits = ranked_exact_row_start_band_hits(
         black,
-        max_steps=8,
-        min_steps=args.min_steps,
-        max_row_gap=1,
-        include_tiny_fallback=False,
         prepared=prepared,
-        scan_xs=scan_xs,
-        allowed_translate_x_ranges=start_ranges,
+        start_ranges=start_ranges,
+        min_steps=args.min_steps,
+        max_steps=8,
+        max_row_gap=1,
+        observation_right_slack=args.start_observation_right_slack,
     )
     print(f"shadow-column: exact-local-hits={len(hits)} search={perf_counter()-hits_started:.4f}s", flush=True)
     _left, _right, top, bottom = bounds
