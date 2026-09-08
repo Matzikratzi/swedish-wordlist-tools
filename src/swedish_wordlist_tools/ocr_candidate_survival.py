@@ -99,6 +99,33 @@ def column_left_profile(
     )
 
 
+def vertical_blank_columns(
+    black: set[tuple[int, int]],
+    *,
+    start_x: int,
+    end_x: int,
+    top_y: int,
+    baseline: int,
+) -> tuple[int, ...]:
+    """Columns empty from the row top through baseline, inclusive.
+
+    Pixels below baseline are intentionally ignored.  This is the hypothesis we
+    want to test for glyph separation: a descender or other ink below baseline
+    must not prevent an otherwise useful vertical separator.
+    """
+    if end_x < start_x:
+        return ()
+    if baseline < top_y:
+        raise ValueError("baseline must be >= top_y")
+
+    occupied = {
+        x
+        for x, y in black
+        if start_x <= x <= end_x and top_y <= y <= baseline
+    }
+    return tuple(x for x in range(start_x, end_x + 1) if x not in occupied)
+
+
 def _model_x_span(model: GlyphModel, tx: int) -> tuple[int, int]:
     xs = [x for x, _y in model.pixels]
     return tx + min(xs), tx + max(xs)
@@ -156,9 +183,6 @@ def _row_profile_relation(
         return None
     observed_left = observed_row[0]
 
-    # If the whole column starts to the right of a pixel the candidate says
-    # must exist, the candidate is impossible. If it starts farther left, some
-    # other glyph owns the front on this y and this candidate remains possible.
     if observed_left > expected_left:
         return None
     if observed_left == expected_left:
@@ -212,8 +236,6 @@ def _seed_at_y(
         if not top_row:
             continue
 
-        # Glyph profiles are normalized so their first visible row is zero.
-        # Therefore the current whole-column profile fixes translation directly.
         top_left = min(top_row)
         tx = observed_left - top_left
         if not _translate_x_allowed(tx, ranges):
@@ -233,9 +255,6 @@ def _seed_at_y(
         if relation != "front":
             continue
 
-        # Do not restart the same vertical object one raster row lower. Only
-        # the candidate's own horizontal span must be clear above it; unrelated
-        # ink farther right is allowed.
         x0, x1 = _model_x_span(model, tx)
         if _has_ink_in_span(black_by_y, y=y - 1, x0=x0, x1=x1):
             continue
