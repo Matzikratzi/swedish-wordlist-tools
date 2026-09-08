@@ -6,25 +6,16 @@ The per-model ``facit-v2`` store is the durable source of truth. The historical
 aggregate JSON remains a compatibility artefact for old command lines and
 editors; canonical project loads reconstruct their payload from the split store.
 """
-
-import json
-import tempfile
+import json,tempfile
 from pathlib import Path
-
-from .ocr_glyph_facit_store import canonical_store_for_facit, load_split_facit
+from .ocr_glyph_facit_store import canonical_store_for_facit,load_split_facit
 from .ocr_glyph_review_delete import load_facit_with_typography
 
-
-def load_canonical_facit_with_typography(facit_path: Path):
-    """Load split-store truth for the canonical v2 aggregate path.
-
-    Explicit non-canonical JSON paths retain legacy semantics so frozen fixtures
-    remain usable. The temporary JSON is only an adapter into the established
-    model parser; its bytes come solely from the split store.
-    """
-    facit_path=Path(facit_path); store=canonical_store_for_facit(facit_path)
-    if store is None: return load_facit_with_typography(facit_path)
-    if not store.is_dir(): raise FileNotFoundError(f"canonical facit store is missing: {store}; {facit_path.name} is only a compatibility aggregate")
-    payload=load_split_facit(store)
-    with tempfile.TemporaryDirectory() as td:
-        adapter=Path(td)/"facit.json"; adapter.write_text(json.dumps(payload,ensure_ascii=False)+"\n",encoding="utf-8"); return load_facit_with_typography(adapter)
+def load_canonical_facit_with_typography(facit_path:Path):
+ """Load split-store truth for canonical v2; explicit fixture JSON stays legacy."""
+ facit_path=Path(facit_path);store=canonical_store_for_facit(facit_path)
+ if store is None:return load_facit_with_typography(facit_path)
+ if not store.is_dir():raise FileNotFoundError(f"canonical facit store is missing: {store}; {facit_path.name} is only a compatibility aggregate")
+ payload=load_split_facit(store)
+ with tempfile.TemporaryDirectory() as td:
+  adapter=Path(td)/"facit.json";adapter.write_text(json.dumps(payload,ensure_ascii=False)+"\n",encoding="utf-8");return load_facit_with_typography(adapter)
