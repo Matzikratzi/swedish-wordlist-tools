@@ -42,6 +42,29 @@ class WholeColumnRowWalkTest(unittest.TestCase):
         rows = walk_row_starts([hit(a, x=57, top_y=7, baseline=10), hit(same, x=68, top_y=9, baseline=10), hit(b, x=57, top_y=24, baseline=27)], models=[a, same, b], geometry=geometry, start_y=0, end_y=40, max_row_distance=24, min_steps=3)
         self.assertEqual([10, 27], [row.start.baseline for row in rows])
 
+    def test_fake_lower_baseline_inside_establishing_glyph_extent_is_suppressed(self):
+        a = model("a", min_y=-7, max_y=2)
+        accent = model("accent", min_y=-9, max_y=-6)
+        b = model("b", min_y=-7, max_y=2)
+        geometry = row_start_geometry(46, 57, 68)
+        rows = walk_row_starts(
+            [
+                hit(a, x=59, top_y=86, baseline=93, steps=7),
+                hit(accent, x=68, top_y=87, baseline=96, steps=3),
+                hit(b, x=58, top_y=101, baseline=108, steps=8),
+            ],
+            models=[a, accent, b],
+            geometry=geometry,
+            start_y=82,
+            end_y=120,
+            max_row_distance=24,
+            min_steps=3,
+            vertical_slack=1,
+        )
+        self.assertEqual([93, 108], [row.start.baseline for row in rows])
+        self.assertGreater(rows[0].next_search_y, 87)
+        self.assertLessEqual(rows[0].next_search_y, 101)
+
     def test_late_apne_fragment_does_not_create_shadow_row(self):
         mark = model("mark")
         a = model("a")
