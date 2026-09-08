@@ -87,6 +87,23 @@ class RowSplitLeftSupportTests(unittest.TestCase):
         )
         self.assertEqual(Candidate(57, 5, 6, "a"), hit)
 
+    def test_same_row_prefers_leftmost_start_over_stronger_later_glyph(self) -> None:
+        geometry = row_start_geometry(46, 57, 68)
+        candidates = [
+            Candidate(65, 4, 10, "p"),
+            Candidate(57, 4, 7, "a"),
+        ]
+        hit = first_plausible_candidate_downward(
+            candidates,
+            start_x=lambda c: c.x,
+            top_y=lambda c: c.y,
+            geometry=geometry,
+            previous_break_y=0,
+            max_row_distance=15,
+            strong_enough=lambda c: c.steps >= 3,
+        )
+        self.assertEqual(Candidate(57, 4, 7, "a"), hit)
+
     def test_downward_search_keeps_low_continuation_before_headword(self) -> None:
         geometry = row_start_geometry(46, 57, 68)
         candidates = [Candidate(68, 3, 4, "r"), Candidate(57, 9, 10, "b")]
