@@ -215,6 +215,18 @@ def derived_baseline_from_local(
     return int(source_anchor_y) - indexed.anchor_y
 
 
+def _tiny_model_anchor(model: GlyphModel) -> LocalIndexedGlyph:
+    rows = occupied_left_rows(model)
+    y, x = rows[0]
+    return LocalIndexedGlyph(
+        model=model,
+        signature=(),
+        anchor_y=y,
+        anchor_x=x,
+        end_y=y,
+    )
+
+
 def ranked_exact_local_hits(
     black: set[tuple[int, int]],
     models: Iterable[GlyphModel],
@@ -223,6 +235,7 @@ def ranked_exact_local_hits(
     min_steps: int = 1,
     max_row_gap: int = 1,
     max_x: int | None = None,
+    include_tiny_fallback: bool = True,
 ) -> tuple[LocalExactHit, ...]:
     """Return exact local-contour placements, longest fingerprints first.
 
@@ -231,10 +244,11 @@ def ranked_exact_local_hits(
     a model-local anchor, so a bucket hit implies one concrete glyph placement;
     there is no x/y sliding during exact verification.
 
-    Long windows are tried before short ones.  Consequently tiny punctuation,
-    which cannot supply many real contour relations, naturally falls to the end
-    instead of winning merely because empty surrounding raster rows happen to
-    fit.
+    Long windows are tried before short ones.  Tiny glyphs with fewer than two
+    occupied rows cannot contribute even one dx relation; when requested they
+    are tested only after all real fingerprint hits, by aligning their first
+    left contour pixel with source ink.  Thus punctuation cannot win merely
+    because empty raster around it happens to fit.
     """
     if max_steps <= 0:
         raise ValueError("max_steps must be positive")
@@ -250,7 +264,7 @@ def ranked_exact_local_hits(
     }
 
     hits: list[LocalExactHit] = []
-    seen: set[tuple[int, int, int, int, int]] = set()
+    seen: set[tuple[int, int, int]] = set()
     for steps in range(max_steps, min_steps - 1, -1):
         index = indexes[steps]
         for scan_x in scan_xs:
@@ -263,9 +277,7 @@ def ranked_exact_local_hits(
                 for indexed in index.candidates(signature):
                     tx = source_x - indexed.anchor_x
                     ty = source_y - indexed.anchor_y
-                    # A longer window may contain a shorter one for the exact
-                    # same placement.  Keep only its strongest observation.
-                    placement_key = (id(indexed.model), tx, ty, indexed.anchor_y, indexed.anchor_x)
+                    placement_key = (id(indexed.model), tx, ty)
                     if placement_key in seen:
                         continue
                     if not exact_local_model_at(
@@ -285,6 +297,38 @@ def ranked_exact_local_hits(
                             scan_x=scan_x,
                         )
                     )
+
+    if include_tiny_fallback:
+        tiny_models = [model for model in model_rows if len(occupied_left_rows(model)) == 1]
+        source_points = sorted(
+            ((x, y) for x, y in black if max_x is None or x <= max_x),
+            key=lambda point: (point[0], point[1]),
+        )
+        for model in tiny_models:
+            indexed = _tiny_model_anchor(model)
+            for source_x, source_y in source_points:
+                tx = source_x - indexed.anchor_x
+                ty = source_y - indexed.anchor_y
+                placement_key = (id(model), tx, ty)
+                if placement_key in seen:
+                    continue
+                if not exact_local_model_at(
+                    black,
+                    indexed,
+                    source_anchor_y=source_y,
+                    source_anchor_x=source_x,
+                ):
+                    continue
+                seen.add(placement_key)
+                hits.append(
+                    LocalExactHit(
+                        indexed=indexed,
+                        source_anchor_y=source_y,
+                        source_anchor_x=source_x,
+                        steps=0,
+                        scan_x=source_x,
+                    )
+                )
 
     hits.sort(
         key=lambda hit: (
