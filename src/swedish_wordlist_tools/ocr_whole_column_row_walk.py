@@ -15,6 +15,26 @@ class ShadowRow:
     start: FoundRowStart
     search_from_y: int
     next_search_y: int
+    source: str = "fingerprint"
+
+
+def _first_fallback_start(
+    starts: Iterable[FoundRowStart],
+    *,
+    search_y: int,
+    limit_y: int,
+    minimum_baseline: int | None,
+) -> FoundRowStart | None:
+    legal = [
+        start
+        for start in starts
+        if search_y <= start.top_y <= limit_y
+        and (minimum_baseline is None or start.baseline >= minimum_baseline)
+    ]
+    if not legal:
+        return None
+    legal.sort(key=lambda start: (start.top_y, start.x, -start.steps, start.label, start.style))
+    return legal[0]
 
 
 def walk_row_starts(
@@ -28,15 +48,15 @@ def walk_row_starts(
     min_steps: int = 3,
     vertical_slack: int = 1,
     min_baseline_delta: int = 8,
+    fallback_starts: Iterable[FoundRowStart] = (),
 ) -> tuple[ShadowRow, ...]:
     """Walk a column top-to-bottom without pre-segmented row boxes.
 
-    A row is established by the first exact known glyph at a legal typographic
-    start. The next search begins just below the actual raster extent of that
-    establishing glyph. In addition, a following row must have a baseline at
-    least ``min_baseline_delta`` pixels lower than the previous accepted row.
-    This rejects alternate punctuation/accent placements a few pixels below the
-    same physical row while remaining well below the observed SAOL line pitch.
+    The ordinary path establishes a row from a known exact glyph with a strong
+    left-edge fingerprint at a legal typographic start.  If that path has no
+    candidate in the current physical search window, an independently
+    full-raster-verified mature-prefix start may establish the row instead.
+    This keeps shallow starts such as ``~e`` out of the normal min-steps logic.
     """
     if end_y < start_y:
         raise ValueError("end_y must be >= start_y")
@@ -46,14 +66,15 @@ def walk_row_starts(
         raise ValueError("min_baseline_delta must be positive")
     tuple(models)  # keep API stable; no global facit extent is used
     remaining = tuple(hits)
+    fallback = tuple(fallback_starts)
     out: list[ShadowRow] = []
     search_y = int(start_y)
     previous_baseline: int | None = None
     index = 0
     while search_y <= end_y:
+        minimum_baseline = None if previous_baseline is None else previous_baseline + min_baseline_delta
         eligible = remaining
-        if previous_baseline is not None:
-            minimum_baseline = previous_baseline + min_baseline_delta
+        if minimum_baseline is not None:
             eligible = tuple(hit for hit in remaining if hit.baseline >= minimum_baseline)
         found = first_known_row_start(
             eligible,
@@ -62,6 +83,15 @@ def walk_row_starts(
             max_row_distance=max_row_distance,
             min_steps=min_steps,
         )
+        source = "fingerprint"
+        if found is None:
+            found = _first_fallback_start(
+                fallback,
+                search_y=search_y,
+                limit_y=search_y + max_row_distance,
+                minimum_baseline=minimum_baseline,
+            )
+            source = "mature-prefix"
         if found is None or found.top_y > end_y:
             break
         next_y = max(search_y + 1, found.bottom_y + 1 + vertical_slack)
@@ -71,6 +101,7 @@ def walk_row_starts(
                 start=found,
                 search_from_y=search_y,
                 next_search_y=next_y,
+                source=source,
             )
         )
         index += 1
