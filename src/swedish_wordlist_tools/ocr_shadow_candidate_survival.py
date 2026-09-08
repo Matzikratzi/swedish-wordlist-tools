@@ -13,7 +13,7 @@ from .ocr_shadow_whole_column import _black_pixels, _column_bounds, _start_searc
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Shadow experiment: walk physical raster rows and kill glyph candidates as soon as they contradict the bitmap."
+        description="Shadow experiment: create glyph hypotheses online and kill them one physical raster row at a time."
     )
     ap.add_argument("jsonl", type=Path)
     ap.add_argument("--facit", type=Path, required=True)
@@ -53,18 +53,22 @@ def main() -> int:
     )
     seconds = perf_counter() - started
     total_died = sum(step.died for step in result.steps)
+    total_completed = sum(step.completed for step in result.steps)
+    peak_live = max((step.after for step in result.steps), default=0)
     print(
         f"survival-summary: page={args.page} column={args.column} y={start_y}..{end_y} "
         f"bounds={bounds} black={len(black)} ranges={ranges} seeded={result.seeded} "
-        f"completed={len(result.completed)} died={total_died} steps={len(result.steps)} search={seconds:.4f}s",
+        f"completed={len(result.completed)} completed_events={total_completed} "
+        f"died={total_died} peak_live={peak_live} steps={len(result.steps)} search={seconds:.4f}s",
         flush=True,
     )
 
     if args.show_steps:
         for step in result.steps:
-            if step.died or step.before != step.after:
+            if step.born or step.died or step.completed:
                 print(
-                    f"survival-step: y={step.y} before={step.before} after={step.after} died={step.died}",
+                    f"survival-step: y={step.y} born={step.born} before={step.before} "
+                    f"after={step.after} died={step.died} completed={step.completed}",
                     flush=True,
                 )
 
