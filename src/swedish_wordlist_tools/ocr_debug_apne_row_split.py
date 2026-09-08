@@ -10,6 +10,7 @@ from .ocr_left_edge_local_index import ranked_exact_local_hits
 from .ocr_prepare_sequential_page import _load_source_image, read_jsonl, source_for_page
 from .ocr_row_split_left_support import (
     baseline_row_compatibility,
+    first_plausible_candidate_downward,
     row_start_geometry,
     split_left_support_decision,
 )
@@ -27,8 +28,9 @@ LOWER_BOTTOM = 559
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
-            "Diagnose the page-39 apne split with the typographic start gate, "
-            "multi-step local contour index and baseline-compatible unknown ink."
+            "Diagnose the page-39 apne split by establishing the physical row "
+            "from the first known exact glyph at a typographically plausible "
+            "start, then treating whole-row decoding as a separate baseline probe."
         )
     )
     ap.add_argument("jsonl", type=Path)
@@ -108,26 +110,27 @@ def main() -> int:
         if hit.translate_x <= geometry.late_start_limit_x
         and hit.translate_y + hit.model.min_y <= args.max_row_distance
     ]
-    legal.sort(
-        key=lambda hit: (
-            hit.translate_y + hit.model.min_y,
-            -hit.steps,
-            hit.translate_x,
-            -len(hit.model.pixels),
-        )
-    )
     print(
         f"  indexed legal-zone exact-placements={len(legal)} "
         f"all-indexed-hits={len(hits)}"
     )
-    if not legal:
-        print("  downward-start: no known strong glyph in legal start zone")
+
+    hit = first_plausible_candidate_downward(
+        legal,
+        start_x=lambda item: item.translate_x,
+        top_y=lambda item: item.translate_y + item.model.min_y,
+        geometry=geometry,
+        previous_break_y=0,
+        max_row_distance=args.max_row_distance,
+        strong_enough=lambda item: item.steps >= args.min_steps,
+    )
+    if hit is None:
+        print("  row-establishing-start: no known strong glyph in legal start zone")
         return 0
 
-    hit = legal[0]
     glyph_top = hit.translate_y + hit.model.min_y
     print(
-        f"  downward-start glyph={hit.model.label!r}/{hit.model.style} "
+        f"  row-establishing-start glyph={hit.model.label!r}/{hit.model.style} "
         f"steps={hit.steps} x={hit.translate_x} top_y={glyph_top} "
         f"baseline={hit.baseline}"
     )
@@ -150,7 +153,7 @@ def main() -> int:
         max_relative_y=max_relative_y,
     )
     print(
-        f"  whole-since-break coverage={len(covered)}/{len(combined)} "
+        f"  whole-row-baseline-probe coverage={len(covered)}/{len(combined)} "
         f"fully_exact={len(covered) == len(combined)} text={_selected_text(selected)!r}"
     )
     print(
