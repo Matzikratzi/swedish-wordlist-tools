@@ -1,8 +1,22 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import unittest
 
-from swedish_wordlist_tools.ocr_row_split_left_support import split_left_support_decision
+from swedish_wordlist_tools.ocr_row_split_left_support import (
+    first_plausible_candidate_downward,
+    row_start_geometry,
+    row_start_is_typographically_plausible,
+    split_left_support_decision,
+)
+
+
+@dataclass(frozen=True)
+class Candidate:
+    x: int
+    y: int
+    steps: int
+    label: str
 
 
 class RowSplitLeftSupportTests(unittest.TestCase):
@@ -24,8 +38,6 @@ class RowSplitLeftSupportTests(unittest.TestCase):
         self.assertTrue(decision.looks_like_late_upper_fragment)
 
     def test_low_continuation_row_with_own_left_support_is_preserved(self) -> None:
-        # A deliberately low continuation row: only four raster rows high, but
-        # it starts at the left margin and has real multi-row glyph structure.
         upper = {
             (58, 0), (59, 0), (60, 0),
             (58, 1), (60, 1), (61, 1),
@@ -59,6 +71,72 @@ class RowSplitLeftSupportTests(unittest.TestCase):
         self.assertEqual(11, decision.start_delta)
         self.assertTrue(decision.upper_has_own_left_support)
         self.assertFalse(decision.looks_like_late_upper_fragment)
+
+    def test_half_indent_beyond_continuation_is_hard_start_limit(self) -> None:
+        geometry = row_start_geometry(46, 57, 68)
+
+        self.assertEqual(74, geometry.late_start_limit_x)
+        self.assertTrue(row_start_is_typographically_plausible(74, geometry))
+        self.assertFalse(row_start_is_typographically_plausible(75, geometry))
+        self.assertFalse(row_start_is_typographically_plausible(83, geometry))
+
+    def test_downward_search_skips_apne_like_late_mark_and_finds_real_start(self) -> None:
+        geometry = row_start_geometry(46, 57, 68)
+        candidates = [
+            Candidate(83, 1, 1, "."),
+            Candidate(57, 5, 6, "a"),
+            Candidate(58, 18, 9, "A"),
+        ]
+
+        hit = first_plausible_candidate_downward(
+            candidates,
+            start_x=lambda c: c.x,
+            top_y=lambda c: c.y,
+            geometry=geometry,
+            previous_break_y=0,
+            max_row_distance=15,
+            strong_enough=lambda c: c.steps >= 3,
+        )
+
+        self.assertEqual(Candidate(57, 5, 6, "a"), hit)
+
+    def test_downward_search_keeps_low_continuation_before_headword(self) -> None:
+        geometry = row_start_geometry(46, 57, 68)
+        candidates = [
+            Candidate(68, 3, 4, "r"),
+            Candidate(57, 9, 10, "b"),
+        ]
+
+        hit = first_plausible_candidate_downward(
+            candidates,
+            start_x=lambda c: c.x,
+            top_y=lambda c: c.y,
+            geometry=geometry,
+            previous_break_y=0,
+            max_row_distance=15,
+            strong_enough=lambda c: c.steps >= 3,
+        )
+
+        self.assertEqual(Candidate(68, 3, 4, "r"), hit)
+
+    def test_downward_search_does_not_reach_next_row_beyond_distance(self) -> None:
+        geometry = row_start_geometry(46, 57, 68)
+        candidates = [
+            Candidate(83, 1, 1, "."),
+            Candidate(57, 17, 10, "b"),
+        ]
+
+        hit = first_plausible_candidate_downward(
+            candidates,
+            start_x=lambda c: c.x,
+            top_y=lambda c: c.y,
+            geometry=geometry,
+            previous_break_y=0,
+            max_row_distance=15,
+            strong_enough=lambda c: c.steps >= 3,
+        )
+
+        self.assertIsNone(hit)
 
 
 if __name__ == "__main__":
