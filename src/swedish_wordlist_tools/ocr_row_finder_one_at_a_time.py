@@ -11,6 +11,7 @@ from .ocr_row_split_left_support import RowStartGeometry, row_start_is_typograph
 class FoundRowStart:
     x: int
     top_y: int
+    bottom_y: int
     baseline: int
     label: str
     style: str
@@ -76,6 +77,7 @@ def first_known_row_start(
     return FoundRowStart(
         x=hit.translate_x,
         top_y=hit.translate_y + hit.model.min_y,
+        bottom_y=hit.translate_y + hit.model.max_y,
         baseline=hit.baseline,
         label=hit.model.label,
         style=hit.model.style,
