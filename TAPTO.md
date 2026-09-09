@@ -6,14 +6,15 @@ Kvällsöverlämning och praktisk kommandoreferens för SAOL14-OCR-arbetet. Näs
 
 - Stabil `master`: `6666de3eb8454a6d2827194a3ee8ea1ccf9ba5a5` — merge av PR #25, **Merge OCR split facit benchmark improvements**.
 - Aktiv experimentbranch: `agent/ocr-whole-column-shadow`.
-- Branch-head vid denna TAPTO: `bb85ebed2b882217d9b4ef148336a9b751695904` — **Test tolerant small glyph profile holes**.
-- Branchen ligger långt framför master och är experimentell. Merge först när Mats uttryckligen säger `Merga!` efter lokal test.
-- Fruset checkpoint-läge finns på `checkpoint/ocr-baseline-pole-position`, commit `1d7c9f3424a91efa04e34052e7894e43d7c07811`.
-- Facit är fruset på **428 glyphmodeller** för baseline-/shadow-arbetet.
+- Branch-head före denna TAPTO-commit: `d329e181758418e3f912c1feb1a952dabb3ec283` — **Allow writing a selected cluster glyph candidate**.
+- Branchen är experimentell och ligger långt framför master. Merge först när Mats uttryckligen säger `Merga!` efter lokal test.
+- Fruset checkpoint-läge: `checkpoint/ocr-baseline-pole-position` vid `1d7c9f3424a91efa04e34052e7894e43d7c07811`.
+- Den frusna konservativa referensen använder **428 glyphmodeller**.
+- Det finns fortfarande ingen PR för `agent/ocr-whole-column-shadow`.
 
-## Senaste gröna verifierade regression
+## Senaste gröna verifierade regression och scope
 
-Den breda verifierade referensen är den frusna konservativa körningen över sida 1–100:
+Den senaste breda, explicit verifierade gröna stabilitetspunkten är fortfarande den frusna konservativa körningen sida 1–100:
 
 ```text
 pages=100
@@ -23,121 +24,143 @@ needs_work=7
 facit_models=428
 ```
 
-De sju återstående raderna är avsiktligt kvar som konservativa fel; de ska inte "fixas" med extra facit bara för att få grönt.
-
-Efter omläggning till `facit-v2` som kanonisk källa kördes samma 15 858 rader igen och exakt baseline-jämförelse gav:
+Efter att `facit-v2` gjordes till kanonisk källa kördes samma 15 858 rader igen och exakt jämförelse mot frusen radoutput gav:
 
 ```text
 baseline-diff: differences=0
 ```
 
-Det är den viktiga stabilitetspunkten: facit-loader-refaktorn ändrade **ingen** sparad rad-output.
+De sju kvarvarande konservativa felen är avsiktligt frusna och ska inte fyllas igen med extra facit bara för att få grönt.
 
-Aktuellt branch-head `bb85ebed...` har ingen GitHub CI/status registrerad. De allra senaste whole-column/profile-ändringarna ska därför testas lokalt innan de räknas som verifierade.
+Branch-head `d329e181...` har **ingen GitHub CI/status** registrerad. Dagens nya directional/profile/cluster-kod har omfattande unit-testfiler, men ska inte beskrivas som bred verifierad regression förrän Mats kört den fokuserade regressionssviten lokalt på aktuellt head.
+
+Senaste incheckade branch-specifika regressionsscope omfattar särskilt:
+
+```text
+tests/test_ocr_column_left_profile.py
+tests/test_ocr_page_start_geometry.py
+tests/test_ocr_row_directional.py
+tests/test_ocr_baseline_up.py
+tests/test_ocr_live_profile_candidates.py
+tests/test_ocr_candidate_survival.py
+tests/test_ocr_build_cluster_glyph.py
+```
 
 ## Arkitekturen vi går mot
 
-Vi gör oss av med försegmenterade rader som primär sanning.
+Försegmenterade rader ska inte vara primär sanning. OCR:n ska gå sekventiellt genom hela kolumnens verkliga raster:
 
-Målet är:
+1. börja vid en känd/säker radstart,
+2. hitta första glyphen uppifrån genom vänsterprofil/radstartsgeometri,
+3. låt exakt glyph ge baseline,
+4. hitta följande glyphar från baseline och kvarvarande bläck,
+5. konsumera endast exakt förklarade pixlar,
+6. härled nästa radstart från den faktiskt förklarade vertikala utsträckningen,
+7. fortsätt rad för rad.
 
-1. börja vid föregående säker radgräns,
-2. leta nedåt efter första trovärdiga radstart,
-3. låta en exakt känd glyph på legitim typografisk x-position etablera baseline,
-4. tolka just den fysiska raden,
-5. bestäm radens nedre gräns,
-6. fortsätt därifrån till nästa rad.
+`row_map` får fortfarande användas i benchmark/shadow för kalibrering, antal referensrader och jämförelse, men inte som sanningen som styr den nya radtolkningen.
 
-Gamla `row_map` används under shadow-arbetet endast för yttre kolumngränser och jämförelse, inte för att hitta de nya raderna.
-
-Page 39 / column 0 är huvudexperimentet. Den gamla felaktiga APNE-pseudoraden (`old=26`, y≈543..546) ska **inte** bli en ny rad; walkern ska direkt åter-synka till nästa verkliga rad.
-
-## Frusen konservativ referens — använd den, gissa inte
-
-Den gamla tolkens faktiska output finns sparad här:
+Den frusna konservativa outputen är referens för vad gamla tolken faktiskt tyckte. När ett konkret gammalt radresultat behövs ska det läsas ur:
 
 ```text
-tests/reference/saol14-ocr/conservative-v1/manifest.json
 tests/reference/saol14-ocr/conservative-v1/rows.jsonl
-tests/reference/saol14-ocr/conservative-v1/problems.json
-tests/reference/saol14-ocr/conservative-v1/summary.json
 ```
 
-När vi undrar "vad tyckte gamla tolken att den här raden innehöll?" ska svaret tas ur `rows.jsonl`, inte rekonstrueras från shadow-logg eller synintryck.
+inte gissas från bild eller shadow-logg.
 
-Det gäller särskilt page 39 / column 0 / old row 32 (`y=631..648`): nästa arbetspass ska först läsa den sparade baseline-raden och fastställa exakt glyphsekvens, positioner/baseline och eventuella restpixlar. Vi tror att vänsterkanten är `~e`, men den frusna outputen är sanningskällan.
+## Genomfört idag — 2026-09-09
 
-## Dagens genomförda arbete
+Sedan föregående TAPTO (`bb85ebed...`) har branchen flyttat **95 commits** framåt.
 
-### 1. Konservativ baseline fryst och bevisad
+### 1. Directional top-down / baseline-up OCR
 
-- APNE-reparationen kompakterar geometri och pixelägande atomärt.
-- Sammanfogade två-baseline-rader kan delas konservativt när de två exakta baseline-täckningarna tillsammans täcker hela raden.
-- Late-anchor-guard infördes för fall där en hög/sen glyph annars blev fel baseline-ankare.
-- Resultatet frystes på sida 1–100 med 428 modeller.
-- `facit-v2` gjordes till kanonisk källa; kompatibilitets-JSON kan regenereras från split-store.
-- Exakt baseline-comparator bevisade `differences=0` efter loader-refaktorn.
+Det gamla whole-column profile-spåret har utvecklats till en sekventiell directional matcher:
 
-### 2. Whole-column row walk
+- `ocr_row_directional.py` hittar första glyphen uppifrån i legal radstartszon.
+- `ocr_baseline_up.py` använder etablerad baseline för att hitta nästa glyph i kvarvarande bläck.
+- `ocr_directional_page_benchmark.py` kör rader sekventiellt, konsumerar accepterade glyphpixlar och härleder nästa radstart från den förklarade pixelutsträckningen.
+- `ocr_page_start_geometry.py` infererar legitima radstartszoner för sidan.
+- Benchmarken har explicit invariant: innan `next_row_top` lämnas vidare får det inte finnas oförklarade svarta pixlar ovanför den gränsen.
 
-Ny shadow-walker arbetar på hela kolumnens pixlar och går uppifrån och ned en rad i taget.
+Detta är närmare slutarkitekturen än den tidigare globala kandidatlistan: vi tolkar nu vad som faktiskt händer i aktuell fysisk rad och låter resultatet styra var nästa rad börjar.
 
-Page 39 / column 0 visade den viktiga APNE-egenskapen:
+### 2. Live profile candidates / candidate survival
+
+Nya `ocr_live_profile_candidates.py` och `ocr_candidate_survival.py` formaliserar kandidatlivscykeln längs hela kolumnens vänsterprofil:
+
+- kandidater föds när deras topp kan äga aktuell vänsterkant,
+- varje rasterrad kan behålla eller döda kandidaten,
+- glyphens egna exakta pixlar måste finnas,
+- annan bläck längre vänster får dölja kandidaten utan att göra den falsk,
+- interna tomrader i t.ex. prick/stam-glyphar hanteras explicit,
+- terminalhändelser krävs bara där den tidigare kända utsträckningen faktiskt ger information.
+
+Senaste terminal-event-regressionen (`156fea96...`) verifierar bland annat att en kandidat som når känd `row_top` inte kräver en fiktiv uppåt-händelse och att nedåt-terminal bara får krävas inom tidigare känd botten.
+
+En framtidsidé är sparad i `notes/ocr-profile-diff-followup-2026-09-09.md`: eventuellt ska långa `dx=0`-sträckor aggregeras och matchning främst ske på meningsfulla profiländringar/boundary-events. **Det är sparat för senare och ska inte implementeras före nuvarande directional/cluster-arbete.**
+
+### 3. Syntetiska klusterglyphar
+
+Dagens senaste spår hanterar fall där två tecken rastermässigt går ihop och därför kan behöva representeras som en enda exakt klusterglyph.
+
+Relevanta commits:
 
 ```text
-... old=25
-... old=27
+156fea9  Test terminal events only inside previously known extent
+fa5aa48  Add synthetic cluster glyph builder
+1e29f5f  Test synthetic cluster glyph geometry
+d329e18  Allow writing a selected cluster glyph candidate
 ```
 
-alltså: gamla `old=26` ignorerades och nästa riktiga rad hittades direkt.
+`ocr_build_cluster_glyph.py` kan kombinera två granskade komponentglyphar på samma baseline och söker endast placeringar som:
 
-Ordinarie vänsterkontur/fingerprint-sökning blev korrekt men dyr när alla x-trösklar 39..75 skannades. Reusable threshold contours och senare prefixhypoteser infördes för att behålla träffsäkerheten utan att reskanna alla svarta pixlar.
+- inte överlappar svarta pixlar,
+- har begärt antal ortogonala kontakter,
+- skapar ett nytt inneslutet vitt hål,
+- behåller gemensam stil när komponenterna har samma stil.
 
-### 3. Mature-prefix-hypoteser
+Nuvarande standardfall i verktyget är `f` + `r` -> `fr`.
 
-Fingerprint får nu börja mitt i en glyph. Kandidater följs tills deras egen vertikala kontur tar slut; då full-raster-verifieras hela glyphen, även pixlar ovanför fingerprintets start.
+`ocr_write_cluster_candidate.py` kan välja en explicit kandidat när geometrin inte ger exakt en unik placering.
 
-Detta ger en generell mekanism för exempel som `~e`, `-l`, `-B` och `: n` utan teckenspecifika specialfall.
+### 4. Viktig persistensrisk upptäckt vid TAPTO-genomgången
 
-På page 39 / column 0 / y≈631..648 hittade diagnostiken bland annat exakt `~` vid x=66, baseline=643 och en exakt `e` vid x=75 med samma baseline. Senare glyphar längre åt höger ska inte få etablera rad eftersom de ligger utanför legitima radstartszoner.
+**Använd inte `--write` på det riktiga facit ännu.**
 
-Första globala mature-prefix-sökningen var för dyr (~36,6 s), och prioriteringen gjorde dessutom att en senare vanlig träff kunde hoppa över en tidigare prefixrad. Koden ändrades därför så fysisk radordning styr och prefixsökning kan begränsas till aktuellt radfönster.
+Den senaste `ocr_write_cluster_candidate.py` skriver just nu direkt till den JSON-fil som ges som `facit`:
 
-### 4. Whole-column profile-spåret
+```python
+args.facit.write_text(...)
+```
 
-Det senaste spåret bygger **en tät vänsterprofil för hela kolumnen**: vänstra svarta x för varje fysisk y-rad, inklusive `None` för tomma rasterrader. Partiella facit-profiler indexeras, kandidater filtreras i 1D och hela glyphens 2D-raster verifieras därefter.
-
-Senaste relevanta commits:
+men projektets fastställda arkitektur är att:
 
 ```text
-d28e428  Test whole-column profile matching
-c42fee5  Use twenty-row whole-column profile fragments
-b706a89  Scan twenty-row profile fragments by default
-a508557  Resolve profile baseline aliases by combined evidence
-d0795b5  Allow small internal holes in column profile matching
-bb85ebe  Test tolerant small glyph profile holes
+glyphs/facit-v2
 ```
 
-Baseline-aliaser inom mindre än normal radpitch löses genom samlad evidens från verifierade glyphpixlar och separata x-ankare, i stället för att automatiskt välja första vertikala submatchen.
+är kanonisk split-store och aggregate-filen
 
-Små interna hål i glyphprofilen, t.ex. mellan prick och stam i `i`/`j` eller andra lösa diakritiska delar, kan nu vara wildcard i 1D-profilen. Den slutliga 2D-verifieringen är fortfarande exakt: alla verkliga facitpixlar måste finnas.
+```text
+glyphs/saol14-manual-glyph-facit-v2.json
+```
 
-Det finns ännu ingen PR för `agent/ocr-whole-column-shadow`.
+är kompatibilitetsformat som ska regenereras från den kanoniska källan. Direkt skrivning till aggregate kan därför skapa divergens eller försvinna vid nästa regenerering.
 
 ## Exakt nästa tekniska steg
 
-1. **Läs först frusen baseline för page 39 / column 0 / old row 32** ur `conservative-v1/rows.jsonl`. Dokumentera vilka glyphar gamla konservativa tolken faktiskt identifierade, deras x/y/baseline och restpixlar. Gissa inte från bilden.
-2. Kör fokuserade unit tests för whole-column/profile-mekanismen på aktuellt branch-head.
-3. Kör `ocr_shadow_column_profile` på page 39 / column 0 och jämför fysisk radföljd mot den frusna referensen.
-4. Kontrollera uttryckligen att:
-   - APNE old26 fortfarande försvinner,
-   - old32 (`~e`-området) etableras före old33,
-   - old39 inte tappas,
-   - efter en reparerad/missad rad åter-synkar nästa rad omedelbart,
-   - söktiden ligger nära profile-spårets avsedda billiga 1D-sökning och inte tillbaka på tiotals sekunder.
-5. Om old32 fortfarande missas: felsök **profilfragmentet och dess små interna hål/överlappande vänsterbläck**, inte gammal radsegmentering och inte ett `~`-specialfall.
+**Nästa kodändring ska vara att göra cluster-writern canonical-store-säker innan någon riktig `fr`-glyph skrivs.**
 
-## Viktiga lokala sökvägar — skriv inte över
+1. Ändra `ocr_write_cluster_candidate.py` så att den inte skriver aggregate-JSON direkt.
+2. Återanvänd befintlig canonical facit-persistens (`ocr_glyph_facit_store.py` / `persist_facit_payload`) så att split-store skrivs först och aggregate regenereras från den.
+3. Lägg regression som bevisar att en vald syntetisk klusterglyph får stabilt nytt `model_id`, hamnar i `glyphs/facit-v2` och återkommer identiskt i regenererad aggregate.
+4. Kör fokuserad directional/profile/cluster-regression lokalt.
+5. Först därefter: kör cluster-builder/writer i **dry-run**, välj rätt faktisk `fr`-kandidat och skriv den endast efter explicit kontroll.
+6. Efter eventuell facitändring: rerun relevant directional page benchmark och kontrollera att den löser det konkreta klusterfallet utan att försämra tidigare rader.
+
+Börja alltså **inte** nästa pass med att lägga `--write` på `glyphs/saol14-manual-glyph-facit-v2.json`.
+
+## Viktiga lokala filer — skriv inte över
 
 Vanlig checkout:
 
@@ -145,71 +168,98 @@ Vanlig checkout:
 cd ~/proj/saol14-fast-forward-test
 ```
 
-Data/facit/referens:
+Skyddsvärda data/facit/referenser:
 
 ```text
 /home/matsj/proj/saol14-faksimil.jsonl
-glyphs/saol14-manual-glyph-facit-v2.json
 glyphs/facit-v2
+glyphs/saol14-manual-glyph-facit-v2.json
 /home/matsj/proj/saol14-conservative-rebuild/tests/reference/saol14-ocr
+tests/reference/saol14-ocr/conservative-v1
 ```
 
-**Viktigt:** det lokalt granskade facit får inte skrivas över av `checkout`, `reset`, kopiering eller regenerering i fel riktning. `glyphs/facit-v2` är den kanoniska split-store-källan för v2; aggregate-JSON är kompatibilitetsformat.
+Regler:
 
-Rör inte heller lokala review-köer/loggar i `glyphs/` eller `/tmp` annat än när det är avsiktligt.
+- `glyphs/facit-v2` är den kanoniska v2-källan. Skriv inte över den via checkout/reset/kopiering.
+- Aggregate-JSON får inte bli en konkurrerande källa; regenerera i rätt riktning från split-store.
+- Skriv inte över `conservative-v1`; skapa nya baseline-körningar i `/tmp` om inte en ny frusen baseline uttryckligen beslutas.
+- Rör inte lokala review-köer och användarens ej incheckade filer i `glyphs/` eller `/tmp` annat än avsiktligt.
+- Nuvarande `ocr_write_cluster_candidate --write` ska betraktas som **osäker för canonical facit** tills nästa persistensfix är gjord.
 
 ## Praktiska återanvändbara kommandon
 
-### Pull + fokuserad regression för nuvarande whole-column-spår
+### Pull + aktuell fokuserad regression
 
 ```bash
 cd ~/proj/saol14-fast-forward-test
 git pull
 
 PYTHONPATH=src python -m unittest \
-  tests/test_ocr_left_edge_prefix_hypotheses.py \
-  tests/test_ocr_left_edge_local_index.py \
-  tests/test_ocr_row_start_band_search.py \
-  tests/test_ocr_row_start_prefix_fallback.py \
-  tests/test_ocr_whole_column_row_walk.py \
-  tests/test_ocr_whole_column_profile.py
+  tests/test_ocr_column_left_profile.py \
+  tests/test_ocr_page_start_geometry.py \
+  tests/test_ocr_row_directional.py \
+  tests/test_ocr_baseline_up.py \
+  tests/test_ocr_live_profile_candidates.py \
+  tests/test_ocr_candidate_survival.py \
+  tests/test_ocr_build_cluster_glyph.py
 ```
 
-### Whole-column/profile shadow — huvudexperiment
+### Directional page benchmark — primär nuvarande benchmark
 
 ```bash
 /usr/bin/time -f 'TOTALT: %e s' \
   env PYTHONPATH=src \
-  python -m swedish_wordlist_tools.ocr_shadow_column_profile \
+  python -m swedish_wordlist_tools.ocr_directional_page_benchmark \
     /home/matsj/proj/saol14-faksimil.jsonl \
     --facit glyphs/saol14-manual-glyph-facit-v2.json \
-    --page 39 \
-    --column 0 \
-    --homonym-x 46 \
-    --headword-x 57 \
-    --continuation-x 68 \
-  2>&1 | tee /tmp/saol14-profile-shadow-page39-c0.log
+    --page 30 \
+    --column 0
 ```
 
-### Äldre whole-column fingerprint/prefix shadow — jämförelseväg
+För en återkommande riktad felsökning av en rad kan `--trace-row N` läggas till; behåll grundkommandot ovan som benchmarkreferens.
+
+### Candidate-survival shadow
 
 ```bash
 /usr/bin/time -f 'TOTALT: %e s' \
   env PYTHONPATH=src \
-  python -m swedish_wordlist_tools.ocr_shadow_whole_column \
+  python -m swedish_wordlist_tools.ocr_shadow_candidate_survival \
     /home/matsj/proj/saol14-faksimil.jsonl \
     --facit glyphs/saol14-manual-glyph-facit-v2.json \
     --page 39 \
-    --column 0 \
-    --homonym-x 46 \
-    --headword-x 57 \
-    --continuation-x 68 \
-  2>&1 | tee /tmp/saol14-shadow-page39-c0.log
+    --column 0
 ```
 
-### Fånga konservativ baseline
+Använd `--show-steps` bara vid kandidatlivscykel-felsökning; det är inte normal benchmarkoutput.
 
-Kör bara när en ny uttrycklig baseline ska skapas; skriv inte över `conservative-v1` slentrianmässigt.
+### Bygg syntetiska klusterglyph-kandidater — dry-run
+
+```bash
+env PYTHONPATH=src \
+  python -m swedish_wordlist_tools.ocr_build_cluster_glyph \
+    glyphs/saol14-manual-glyph-facit-v2.json \
+    --left-label f \
+    --right-label r \
+    --label fr
+```
+
+Detta är säkert så länge `--write` **inte** anges.
+
+### Explicit vald klusterkandidat — endast dry-run tills canonical-store-fixen är klar
+
+```bash
+env PYTHONPATH=src \
+  python -m swedish_wordlist_tools.ocr_write_cluster_candidate \
+    glyphs/saol14-manual-glyph-facit-v2.json \
+    --candidate N \
+    --left-label f \
+    --right-label r \
+    --label fr
+```
+
+**Lägg inte till `--write` ännu.**
+
+### Fånga konservativ baseline i temporär katalog
 
 ```bash
 /usr/bin/time -f 'TOTALT: %e s' \
@@ -222,7 +272,7 @@ Kör bara när en ny uttrycklig baseline ska skapas; skriv inte över `conservat
     --output-dir /tmp/saol14-conservative-baseline
 ```
 
-### Jämför ny baseline mot frusen referens
+### Jämför mot frusen konservativ referens
 
 ```bash
 env PYTHONPATH=src \
@@ -231,7 +281,7 @@ env PYTHONPATH=src \
     /tmp/saol14-conservative-baseline/rows.jsonl
 ```
 
-För loader-/resultatneutralitet är målet:
+Resultatneutralitet betyder:
 
 ```text
 baseline-diff: differences=0
@@ -251,19 +301,9 @@ PYTHONPATH=src python -m swedish_wordlist_tools.ocr_review_page_pixel_array_glyp
 
 Använd inte `ocr_review_row_glyphs_html` som standard.
 
-### Review-kö med samma pixel-array-editor
-
-```bash
-PYTHONPATH=src python -m swedish_wordlist_tools.ocr_review_page_pixel_array_glyphs_queue_html \
-  /home/matsj/proj/saol14-faksimil.jsonl \
-  --facit glyphs/saol14-manual-glyph-facit-v2.json \
-  --queue /tmp/saol14-conservative-problem-pages.json \
-  --port 8766
-```
-
 ## Kända frusna konservativa fel
 
-Dessa sju är medvetet kvar i baseline:
+Dessa sju hör till den konservativa baselinen, inte det nya directional-spåret:
 
 - p39 c2 r2 — 6 restpixlar
 - p48 c1 r13 — sannolikt ännu saknad kursiv glyph/stil
@@ -272,8 +312,6 @@ Dessa sju är medvetet kvar i baseline:
 - p61 c2 r25 — följdfel
 - p64 c0 r43 — 26 restpixlar
 - p75 c0 r24 — 13 restpixlar
-
-De ska inte blandas ihop med whole-column-radstartsproblemen.
 
 ## Git-flöde
 
@@ -292,4 +330,4 @@ git rev-parse --short HEAD
 
 ## TAPTO-rutin
 
-Vid dagens slut uppdateras denna fil med stabil master-commit, aktiv branch/head, senaste gröna regression och omfattning, praktiska nya kommandon, relevanta commits/PR, dagens färdiga arbete, exakt nästa steg och filer som inte får skrivas över. Håll kommandodelen återanvändbar; lägg inte in engångsdiagnostik om den inte blivit en återkommande del av arbetsflödet.
+Vid dagens slut uppdateras denna fil med stabil master-commit, aktiv branch/head, senaste gröna regression och omfattning, praktiska återanvändbara kommandon, relevanta commits/PR, dagens färdiga arbete, exakt nästa steg och lokala filer som inte får skrivas över. Undvik engångsdiagnostik i kommandoreferensen.
