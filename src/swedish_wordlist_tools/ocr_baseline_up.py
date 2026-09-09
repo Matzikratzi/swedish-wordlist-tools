@@ -362,6 +362,7 @@ def _pick_with_live_profile(
     remaining_by_y: Mapping[int, Iterable[int]],
     *,
     row_top: int,
+    known_bottom_before: int,
     after_left: int,
     column_right: int,
     stats: BaselineUpStats | None,
@@ -379,6 +380,7 @@ def _pick_with_live_profile(
         after_left=after_left,
         column_right=column_right,
         row_top=row_top,
+        known_bottom_before=known_bottom_before,
     )
     survivors = tuple(check.candidate for check in checks)
     if stats is not None:
@@ -402,13 +404,14 @@ def find_next_baseline_up(
 ) -> tuple[BaselineMatch | None, tuple[BaselineMatch, ...]]:
     if profile_bottom is None:
         profile_bottom = baseline
+    known_bottom_before = int(profile_bottom)
     candidates = baseline_up_candidates(
         remaining,
         remaining_by_y,
         library,
         baseline=baseline,
         row_top=row_top,
-        profile_bottom=profile_bottom,
+        profile_bottom=known_bottom_before,
         after_left=after_left,
         column_right=column_right,
         stats=stats,
@@ -417,6 +420,7 @@ def find_next_baseline_up(
         candidates,
         remaining_by_y,
         row_top=row_top,
+        known_bottom_before=known_bottom_before,
         after_left=after_left,
         column_right=column_right,
         stats=stats,
@@ -442,6 +446,7 @@ def find_next_baseline_up(
         downward,
         remaining_by_y,
         row_top=row_top,
+        known_bottom_before=known_bottom_before,
         after_left=after_left,
         column_right=column_right,
         stats=stats,
