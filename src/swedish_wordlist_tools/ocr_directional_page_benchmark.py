@@ -13,25 +13,16 @@ from .ocr_row_directional import first_glyph_top_down
 from .ocr_shadow_whole_column import _black_pixels, _column_bounds
 
 
-def _row_black(page_rows: dict[int, set[int]], *, top: int, bottom: int) -> set[tuple[int, int]]:
-    return {
-        (x, y)
-        for y in range(top, bottom)
-        for x in page_rows.get(y, ())
-    }
-
-
-def _relevant_residual(
+def _pixels_between_rows(
     residual: ResidualInk,
     *,
-    after_left: int,
-    row_top: int,
-    row_bottom: int,
+    top: int,
+    bottom: int,
 ) -> set[tuple[int, int]]:
     return {
         (x, y)
         for x, y in residual.pixels
-        if x > after_left and row_top <= y < row_bottom
+        if top <= y < bottom
     }
 
 
@@ -43,13 +34,32 @@ def _match_summary(hit: BaselineMatch) -> str:
     )
 
 
+def _print_unexplained_row_check(
+    *,
+    row_index: int,
+    row_top: int,
+    next_row_top: int,
+    unexplained: set[tuple[int, int]],
+) -> None:
+    if not unexplained:
+        return
+    ordered = sorted(unexplained, key=lambda pixel: (pixel[1], pixel[0]))
+    first_x, first_y = ordered[0]
+    print(
+        f"directional-row-check: row={row_index} "
+        f"status=UNEXPLAINED-BEFORE-NEXT-ROW row_top={row_top} "
+        f"next_row_top={next_row_top} unexplained_pixels={len(unexplained)} "
+        f"first_unexplained=({first_x},{first_y})",
+        flush=True,
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
-            "Benchmark directional OCR: build one whole-column left profile, "
-            "find first glyphs top-down from that profile, and find later glyphs "
-            "from the dynamically maintained residual left profile. The old "
-            "row map is used only to provide benchmark row boundaries."
+            "Benchmark sequential directional OCR. The first row top is known; "
+            "every following row top is derived only from accepted glyph pixels. "
+            "Reference row bottoms are diagnostics and never constrain matching."
         )
     )
     ap.add_argument("jsonl", type=Path)
@@ -81,13 +91,13 @@ def main() -> int:
     context = build_page_context_pixel_array(args.jsonl, args.page, args.threshold)
     bounds = _column_bounds(context, args.column)
     black = _black_pixels(context, bounds)
-    page_residual = ResidualInk(black)
+    residual = ResidualInk(black)
     page_seconds = perf_counter() - page_started
 
     column_left, column_right, column_top, column_bottom = bounds
     profile_started = perf_counter()
     left_profile = build_column_left_profile(
-        page_residual.rows,
+        residual.rows,
         top=column_top,
         bottom=column_bottom,
         left=column_left,
@@ -102,7 +112,12 @@ def main() -> int:
     reference_rows = columns[args.column].get("rows") or []
     if args.rows > 0:
         reference_rows = reference_rows[: args.rows]
+    if not reference_rows:
+        raise ValueError("no reference rows available for benchmark")
 
+    # The reference row map is still useful to calibrate the page's legal
+    # row-start x intervals and to tell this benchmark how many rows to attempt.
+    # Its lower row boundaries do not participate in OCR.
     geometry_started = perf_counter()
     inferred = infer_page_start_geometry(
         left_profile,
@@ -114,13 +129,15 @@ def main() -> int:
         raise ValueError("could not infer row-start x ranges from this page")
     ranges = inferred.ranges
 
+    row_top = int(reference_rows[0]["page_top"])
+
     print(
         f"directional-page-start: page={args.page} column={args.column} rows={len(reference_rows)} "
         f"models={len(models)} model_compile={models_seconds:.4f}s page_prepare={page_seconds:.4f}s "
         f"profile_build={profile_seconds:.6f}s geometry={geometry_seconds:.6f}s "
         f"profile_rows={len(left_profile.values)} profile_events={len(profile_events)} "
         f"black={len(black)} bounds={bounds} start_centers={inferred.centers} ranges={ranges} "
-        f"start_observations={len(inferred.observations)}",
+        f"start_observations={len(inferred.observations)} initial_row_top={row_top}",
         flush=True,
     )
 
@@ -139,17 +156,14 @@ def main() -> int:
     baseline_misses = 0
     baseline_stats = BaselineUpStats()
 
-    for row_index, row in enumerate(reference_rows):
+    for row_index, reference_row in enumerate(reference_rows):
         row_started = perf_counter()
-        row_top = int(row["page_top"])
-        row_bottom = int(row["page_bottom"])
-        scan_bottom = min(column_bottom, row_bottom + library.max_down + 1)
+        reference_top = int(reference_row["page_top"])
+        reference_bottom = int(reference_row["page_bottom"])
         trace = row_index in trace_rows
 
         phase_started = perf_counter()
-        row_black = _row_black(page_residual.rows, top=row_top, bottom=row_bottom)
-        lookahead_black = _row_black(page_residual.rows, top=row_bottom, bottom=scan_bottom)
-        residual = ResidualInk(row_black)
+        pixels_at_start = len(residual.pixels)
         row_setup = perf_counter() - phase_started
         setup_total += row_setup
 
@@ -159,7 +173,6 @@ def main() -> int:
             residual.rows,
             library,
             row_top=row_top,
-            row_bottom=row_bottom,
             allowed_translate_x_ranges=ranges,
             left_profile=left_profile,
         )
@@ -171,14 +184,22 @@ def main() -> int:
             row_seconds = perf_counter() - row_started
             row_other = max(0.0, row_seconds - row_setup - row_first)
             print(
-                f"directional-row: row={row_index} y={row_top}..{row_bottom-1} scan_bottom={scan_bottom-1} "
+                f"directional-row: row={row_index} y={row_top}..? "
+                f"reference_y={reference_top}..{reference_bottom-1} "
                 f"status=unresolved-first first_y={first_search.y} "
-                f"candidates={len(first_search.candidates)} pixels={len(row_black)} "
-                f"time={row_seconds:.4f}s setup={row_setup:.6f}s first={row_first:.6f}s "
+                f"candidates={len(first_search.candidates)} pixels_at_start={pixels_at_start} "
+                f"next_row_top={row_top} time={row_seconds:.4f}s "
+                f"setup={row_setup:.6f}s first={row_first:.6f}s "
                 f"baseline=0.000000s consume=0.000000s residual=0.000000s other={row_other:.6f}s",
                 flush=True,
             )
-            continue
+            # With no accepted glyph there is no safe lower boundary to derive.
+            # Continuing would simply rediscover the same start event.
+            print(
+                f"directional-page-stop: row={row_index} reason=no-safe-next-row-top row_top={row_top}",
+                flush=True,
+            )
+            break
 
         labels = [first.model.label]
         phase_started = perf_counter()
@@ -205,19 +226,12 @@ def main() -> int:
 
         while glyphs < args.max_glyphs:
             phase_started = perf_counter()
-            # Candidate births come only from residual.rows, which contains the
-            # current row proper.  Pixels below the old row boundary are exposed
-            # only to exact 2D verification, so a glyph born in the current row
-            # may finish below it, while the next text row cannot start a new
-            # candidate here.
-            verification_pixels = residual.pixels | lookahead_black
             hit, candidates = find_next_baseline_up(
-                verification_pixels,
+                residual.pixels,
                 residual.rows,
                 library,
                 baseline=baseline,
                 row_top=row_top,
-                row_bottom=row_bottom,
                 profile_bottom=explained_bottom,
                 after_left=current_left,
                 column_right=column_right,
@@ -245,19 +259,9 @@ def main() -> int:
 
             if hit is None:
                 baseline_misses += 1
-                phase_started = perf_counter()
-                rest = _relevant_residual(
-                    residual,
-                    after_left=current_left,
-                    row_top=row_top,
-                    row_bottom=row_bottom,
-                )
-                elapsed = perf_counter() - phase_started
-                row_residual += elapsed
-                residual_total += elapsed
-                if rest:
+                stop_candidates = len(candidates)
+                if candidates:
                     status = "unresolved"
-                    stop_candidates = len(candidates)
                 break
 
             baseline_hits += 1
@@ -268,31 +272,40 @@ def main() -> int:
             row_consume += elapsed
             consume_total += elapsed
             current_left = hit.left
+            # Baseline is a strong search prior, not a permanent constraint.
+            baseline = hit.baseline
             explained_bottom = max(explained_bottom, max(y for _x, y in hit.pixels))
             glyphs += 1
         else:
             status = "max-glyphs"
 
-        glyphs_total += glyphs
-        if status == "complete":
-            solved += 1
-        else:
-            unresolved += 1
+        next_row_top = explained_bottom + 1
 
+        # Final row invariant: before handing next_row_top to the next row, every
+        # black pixel above it must already have an explanation.  No horizontal
+        # white separator is required; adjacent rows may touch diagonally or even
+        # vertically as long as their y extents do not overlap.
         phase_started = perf_counter()
-        remaining = _relevant_residual(
+        unexplained_above_boundary = _pixels_between_rows(
             residual,
-            after_left=current_left,
-            row_top=row_top,
-            row_bottom=row_bottom,
+            top=row_top,
+            bottom=next_row_top,
         )
         elapsed = perf_counter() - phase_started
         row_residual += elapsed
         residual_total += elapsed
+        if unexplained_above_boundary:
+            status = "unresolved"
+        _print_unexplained_row_check(
+            row_index=row_index,
+            row_top=row_top,
+            next_row_top=next_row_top,
+            unexplained=unexplained_above_boundary,
+        )
 
-        if trace and remaining:
+        if trace and unexplained_above_boundary:
             by_y: dict[int, list[int]] = {}
-            for x, y in sorted(remaining, key=lambda pixel: (pixel[1], pixel[0])):
+            for x, y in sorted(unexplained_above_boundary, key=lambda pixel: (pixel[1], pixel[0])):
                 by_y.setdefault(y, []).append(x)
             for y, xs in by_y.items():
                 print(
@@ -301,19 +314,31 @@ def main() -> int:
                     flush=True,
                 )
 
+        glyphs_total += glyphs
+        if status == "complete":
+            solved += 1
+        else:
+            unresolved += 1
+
         row_seconds = perf_counter() - row_started
         row_accounted = row_setup + row_first + row_baseline + row_consume + row_residual
         row_other = max(0.0, row_seconds - row_accounted)
         print(
-            f"directional-row: row={row_index} y={row_top}..{row_bottom-1} scan_bottom={scan_bottom-1} "
-            f"status={status} first_y={first_search.y} baseline={baseline} profile_bottom={explained_bottom} "
-            f"next_row_top={explained_bottom + 1} glyphs={glyphs} text={''.join(labels)!r} remaining={len(remaining)} "
-            f"stop_candidates={stop_candidates} time={row_seconds:.4f}s "
-            f"setup={row_setup:.6f}s first={row_first:.6f}s "
+            f"directional-row: row={row_index} y={row_top}..{explained_bottom} "
+            f"reference_y={reference_top}..{reference_bottom-1} "
+            f"status={status} first_y={first_search.y} baseline={baseline} "
+            f"profile_bottom={explained_bottom} next_row_top={next_row_top} "
+            f"glyphs={glyphs} text={''.join(labels)!r} "
+            f"remaining={len(unexplained_above_boundary)} stop_candidates={stop_candidates} "
+            f"time={row_seconds:.4f}s setup={row_setup:.6f}s first={row_first:.6f}s "
             f"baseline={row_baseline:.6f}s/{row_baseline_calls}calls "
             f"consume={row_consume:.6f}s residual={row_residual:.6f}s other={row_other:.6f}s",
             flush=True,
         )
+
+        row_top = next_row_top
+        if row_top >= column_bottom:
+            break
 
     matching_seconds = perf_counter() - matching_started
     accounted = setup_total + first_total + baseline_total + consume_total + residual_total
@@ -336,8 +361,9 @@ def main() -> int:
         flush=True,
     )
     print(
-        f"directional-page-done: rows={len(reference_rows)} solved={solved} unresolved={unresolved} "
-        f"glyphs={glyphs_total} matching={matching_seconds:.4f}s total={perf_counter()-total_started:.4f}s",
+        f"directional-page-done: requested_rows={len(reference_rows)} solved={solved} unresolved={unresolved} "
+        f"glyphs={glyphs_total} matching={matching_seconds:.4f}s total={perf_counter()-total_started:.4f}s "
+        f"final_row_top={row_top}",
         flush=True,
     )
     return 0
