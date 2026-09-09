@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from .ocr_glyph_matcher import GlyphModel
 
@@ -42,7 +42,7 @@ class BaselineMatch:
 class CompiledGlyphLibrary:
     """Geometry compiled once for cheap repeated row matching.
 
-    ``by_rel_y`` is the important index for the baseline-up walk.  At a page
+    ``by_rel_y`` is the important index for the baseline-up walk. At a page
     raster y and known baseline we know rel_y immediately, so only models that
     actually contain ink on that relative glyph row need to be considered.
     """
@@ -72,6 +72,32 @@ class CompiledGlyphLibrary:
         self.max_down = max((item.model.max_y for item in compiled), default=0)
 
 
+class ResidualInk:
+    """Mutable residual pixels with a page-y index maintained incrementally."""
+
+    def __init__(self, black: Iterable[Pixel]):
+        self.pixels: set[Pixel] = set(black)
+        rows: dict[int, set[int]] = defaultdict(set)
+        for x, y in self.pixels:
+            rows[y].add(x)
+        self.rows: dict[int, set[int]] = dict(rows)
+
+    def consume(self, pixels: Iterable[Pixel]) -> None:
+        for x, y in pixels:
+            if (x, y) not in self.pixels:
+                continue
+            self.pixels.remove((x, y))
+            row = self.rows.get(y)
+            if row is None:
+                continue
+            row.discard(x)
+            if not row:
+                del self.rows[y]
+
+    def row(self, y: int) -> set[int]:
+        return self.rows.get(y, set())
+
+
 def black_by_y(black: Iterable[Pixel]) -> dict[int, tuple[int, ...]]:
     rows: dict[int, list[int]] = defaultdict(list)
     for x, y in black:
@@ -89,7 +115,7 @@ def _candidate_key(item: CompiledGlyph, tx: int, baseline: int) -> tuple[int, in
 
 def baseline_up_candidates(
     remaining: set[Pixel],
-    remaining_by_y: dict[int, tuple[int, ...]],
+    remaining_by_y: Mapping[int, Iterable[int]],
     library: CompiledGlyphLibrary,
     *,
     baseline: int,
@@ -99,16 +125,14 @@ def baseline_up_candidates(
 ) -> tuple[BaselineMatch, ...]:
     """Find exact next-glyph candidates by walking upward from the baseline.
 
-    We do not scan candidate x translations across the column.  A translation
-    is proposed only when an actual residual page pixel can coincide with an
-    actual model pixel on the corresponding relative raster row.  Every proposal
+    No candidate x translation is scanned across the column. A translation is
+    proposed only when an actual residual page pixel can coincide with an
+    actual model pixel on the corresponding relative raster row. Every proposal
     is then verified as an exact pixel subset of ``remaining``.
 
     The whole short baseline..row_top interval is visited before choosing a
-    winner.  That matters for glyphs such as punctuation/detached marks that may
-    have no pixel on the baseline: seeing a farther-right later glyph at the
-    baseline must not make us skip an earlier glyph whose first evidence is
-    encountered a few raster rows upward.
+    winner. That keeps an earlier punctuation/detached glyph from being skipped
+    merely because a farther-right glyph has ink on the baseline.
     """
     if baseline < row_top:
         return ()
@@ -119,8 +143,6 @@ def baseline_up_candidates(
     stop_y = max(row_top, baseline - library.max_up)
     for page_y in range(baseline, stop_y - 1, -1):
         observed_xs = remaining_by_y.get(page_y, ())
-        if not observed_xs:
-            continue
         rel_y = page_y - baseline
         possible_models = library.by_rel_y.get(rel_y, ())
         if not possible_models:
@@ -130,7 +152,7 @@ def baseline_up_candidates(
             model_row = item.rows[rel_y]
             for observed_x in observed_xs:
                 if observed_x >= column_right:
-                    break
+                    continue
                 for model_x in model_row:
                     tx = observed_x - model_x
                     physical_left = tx + item.min_x
@@ -193,7 +215,7 @@ def pick_leftmost_unique_maximal(candidates: Iterable[BaselineMatch]) -> Baselin
 
 def find_next_baseline_up(
     remaining: set[Pixel],
-    remaining_by_y: dict[int, tuple[int, ...]],
+    remaining_by_y: Mapping[int, Iterable[int]],
     library: CompiledGlyphLibrary,
     *,
     baseline: int,
