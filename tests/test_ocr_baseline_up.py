@@ -12,11 +12,7 @@ from swedish_wordlist_tools.ocr_glyph_matcher import GlyphModel
 
 class BaselineUpTests(unittest.TestCase):
     def test_finds_next_glyph_with_overlapping_x_extent(self) -> None:
-        # Previous glyph owns x=10..14.  Its bbox overlaps the next glyph at
-        # x=14, but the two glyphs do not share an actual black pixel.
         previous = frozenset({(10, 8), (11, 9), (12, 10), (14, 7)})
-        # Next glyph begins at physical x=14, i.e. one x-column overlaps the
-        # previous glyph's bounding box, but no actual black pixel is shared.
         model = GlyphModel(
             label="r",
             style="italic",
@@ -47,9 +43,6 @@ class BaselineUpTests(unittest.TestCase):
         self.assertEqual(len(candidates), 1)
 
     def test_does_not_skip_left_glyph_without_baseline_pixel(self) -> None:
-        # A detached mark at x=12 has no baseline pixel. A later glyph at x=20
-        # does. Walking baseline-up must still choose the physically leftmost
-        # exact glyph after the whole short vertical interval has been checked.
         dot = GlyphModel(
             label="·",
             style="roman",
@@ -82,6 +75,39 @@ class BaselineUpTests(unittest.TestCase):
         self.assertEqual(hit.model.label, "·")
         self.assertEqual(hit.left, 12)
         self.assertGreaterEqual(len(candidates), 2)
+
+    def test_equivalent_geometry_variants_do_not_create_false_ambiguity(self) -> None:
+        short = GlyphModel(
+            label="f",
+            style="roman",
+            pixels=frozenset({(0, -2), (0, -1), (0, 0)}),
+            sources=1,
+        )
+        rich = GlyphModel(
+            label="f",
+            style="roman",
+            pixels=frozenset({(0, -2), (1, -2), (0, -1), (0, 0)}),
+            sources=1,
+        )
+        placed = frozenset({(12 + x, 10 + y) for x, y in rich.pixels})
+        residual = ResidualInk(placed)
+        library = CompiledGlyphLibrary([short, rich])
+
+        hit, candidates = find_next_baseline_up(
+            residual.pixels,
+            residual.rows,
+            library,
+            baseline=10,
+            row_top=7,
+            after_left=5,
+            column_right=40,
+        )
+
+        self.assertEqual(len(candidates), 2)
+        self.assertIsNotNone(hit)
+        assert hit is not None
+        self.assertEqual(hit.model.label, "f")
+        self.assertEqual(hit.pixels, placed)
 
     def test_consume_updates_only_residual_rows(self) -> None:
         residual = ResidualInk({(1, 1), (2, 1), (3, 2)})
