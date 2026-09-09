@@ -138,9 +138,6 @@ class LiveProfileCandidateTests(unittest.TestCase):
         self.assertEqual(10, check.contradiction_y)
 
     def test_short_candidate_dies_when_front_continues_above_its_top(self) -> None:
-        # The short candidate explains y=9..10, but the same residual left front
-        # continues at x=20 on y=8.  Its top edge therefore never occurred as a
-        # profile event.  A taller candidate can still explain that continuation.
         short = model("r", {(0, -1), (1, 0)})
         candidate = hit(short, tx=20, baseline=10)
         residual = set(candidate.pixels)
@@ -157,7 +154,7 @@ class LiveProfileCandidateTests(unittest.TestCase):
         self.assertFalse(check.alive)
         self.assertEqual(8, check.contradiction_y)
 
-    def test_short_candidate_can_end_when_front_moves_outside_its_span(self) -> None:
+    def test_short_candidate_can_end_when_front_moves_right_of_its_span(self) -> None:
         short = model("r", {(0, -1), (1, 0)})
         candidate = hit(short, tx=20, baseline=10)
         residual = set(candidate.pixels)
@@ -169,6 +166,77 @@ class LiveProfileCandidateTests(unittest.TestCase):
             after_left=10,
             column_right=40,
             row_top=7,
+        )
+
+        self.assertTrue(check.alive)
+
+    def test_candidate_touching_row_top_needs_no_upward_terminal_event(self) -> None:
+        glyph = model("top", {(0, -2), (1, -1), (0, 0)})
+        candidate = hit(glyph, tx=20, baseline=10)
+        residual = set(candidate.pixels)
+        # This would contradict an upward terminal event, but y=7 is above the
+        # known row boundary because candidate_top == row_top == 8.
+        residual.add((20, 7))
+
+        check = check_live_candidate(
+            candidate,
+            rows(residual),
+            after_left=10,
+            column_right=40,
+            row_top=8,
+        )
+
+        self.assertTrue(check.alive)
+
+    def test_candidate_ending_inside_known_bottom_requires_downward_terminal_event(self) -> None:
+        glyph = model("short", {(0, -1), (2, 0)})
+        candidate = hit(glyph, tx=20, baseline=10)
+        residual = set(candidate.pixels)
+        # Candidate ends at y=10, but y=11 was already known. Its next profile
+        # pixel stays inside x=20..22 instead of moving right of the glyph.
+        residual.add((21, 11))
+
+        check = check_live_candidate(
+            candidate,
+            rows(residual),
+            after_left=10,
+            column_right=40,
+            known_bottom_before=12,
+        )
+
+        self.assertFalse(check.alive)
+        self.assertEqual(11, check.contradiction_y)
+
+    def test_candidate_reaching_old_bottom_needs_no_downward_terminal_event(self) -> None:
+        glyph = model("deep", {(0, -1), (2, 0)})
+        candidate = hit(glyph, tx=20, baseline=10)
+        residual = set(candidate.pixels)
+        # y=11 is newly exposed territory. It must not be used to demand a
+        # terminal event because the previous known bottom was only y=10.
+        residual.add((21, 11))
+
+        check = check_live_candidate(
+            candidate,
+            rows(residual),
+            after_left=10,
+            column_right=40,
+            known_bottom_before=10,
+        )
+
+        self.assertTrue(check.alive)
+
+    def test_known_downward_terminal_event_can_move_right(self) -> None:
+        glyph = model("short", {(0, -1), (2, 0)})
+        candidate = hit(glyph, tx=20, baseline=10)
+        residual = set(candidate.pixels)
+        residual.add((25, 11))
+
+        check = check_live_candidate(
+            candidate,
+            rows(residual),
+            after_left=10,
+            column_right=40,
+            known_bottom_before=12,
         )
 
         self.assertTrue(check.alive)
