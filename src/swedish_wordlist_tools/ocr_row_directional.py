@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Iterable, Mapping
 
 from .ocr_baseline_up import BaselineMatch, CompiledGlyph, CompiledGlyphLibrary, Pixel
+from .ocr_column_left_profile import ColumnLeftProfile
 
 
 TranslateXRange = tuple[int, int]
@@ -48,29 +49,38 @@ def first_glyph_top_down(
     row_top: int,
     row_bottom: int,
     allowed_translate_x_ranges: Iterable[TranslateXRange],
+    left_profile: ColumnLeftProfile | None = None,
 ) -> tuple[BaselineMatch | None, FirstGlyphSearch]:
     """Find the textual first glyph while scanning passively top-down.
 
+    With a prebuilt whole-column left profile, only the one leftmost page x for
+    each nonblank raster row is used to *propose* placements.  Candidates are
+    still verified against the complete 2D black-pixel set.  This keeps the
+    profile as the cheap page-wide directional signal while exact pixels remain
+    authoritative.
+
     A later textual glyph may have an ascender and therefore be the first glyph
     that becomes visible when the raster is scanned from the row boundary.  We
-    must not commit to that first *visible* glyph.  Instead we stay stateless,
-    collect exact row-start candidates as their own first visible rows are
-    encountered, and only after the short row span has been inspected choose
-    the physically leftmost valid glyph.
-
-    Nothing is born or killed while observed pixels cannot correspond to a
-    glyph origin in one of the allowed row-start x ranges.  A proposal is made
-    only from an actual pixel on the model's top visible raster row, and every
-    proposal is verified against the complete page bitmap.
+    therefore collect exact row-start candidates over the short row span and
+    choose the physically leftmost valid glyph only after all relevant y rows
+    have had a chance to contribute.
     """
     ranges = tuple((int(lo), int(hi)) for lo, hi in allowed_translate_x_ranges)
     if not ranges or row_bottom <= row_top:
         return None, FirstGlyphSearch(y=None, candidates=())
 
     proposals: dict[tuple[int, int, int], BaselineMatch] = {}
+    if left_profile is None:
+        scan_y: Iterable[int] = range(row_top, row_bottom)
+    else:
+        scan_y = left_profile.nonblank_y(row_top, row_bottom)
 
-    for page_y in range(row_top, row_bottom):
-        observed_xs = tuple(black_by_y.get(page_y, ()))
+    for page_y in scan_y:
+        if left_profile is None:
+            observed_xs = tuple(black_by_y.get(page_y, ()))
+        else:
+            left_x = left_profile.at(page_y)
+            observed_xs = () if left_x is None else (left_x,)
         if not observed_xs:
             continue
 
@@ -90,9 +100,6 @@ def first_glyph_top_down(
                     if not placed.issubset(black):
                         continue
 
-                    # This candidate says page_y is its first visible raster
-                    # row. Reject it when the immediately preceding row already
-                    # contains ink inside the candidate's physical x span.
                     physical_left = tx + item.min_x
                     physical_right = tx + item.max_x
                     previous = black_by_y.get(page_y - 1, ())
