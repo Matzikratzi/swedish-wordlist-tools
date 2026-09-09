@@ -6,6 +6,7 @@ from time import perf_counter
 
 from .ocr_baseline_up import CompiledGlyphLibrary, ResidualInk, find_next_baseline_up
 from .ocr_canonical_facit import load_canonical_facit_with_typography
+from .ocr_column_left_profile import build_column_left_profile
 from .ocr_page_start_geometry import infer_page_start_geometry
 from .ocr_review_page_pixel_array_glyphs_html import build_page_context_pixel_array
 from .ocr_row_directional import first_glyph_top_down
@@ -37,7 +38,8 @@ def _relevant_residual(
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
-            "Benchmark directional OCR: first glyph top-down, later glyphs "
+            "Benchmark directional OCR: build one whole-column left profile, "
+            "find first glyphs top-down from that profile, and find later glyphs "
             "baseline-up on incrementally maintained residual pixels. The old "
             "row map is used only to provide benchmark row boundaries."
         )
@@ -66,6 +68,18 @@ def main() -> int:
     page_residual = ResidualInk(black)
     page_seconds = perf_counter() - page_started
 
+    column_left, column_right, column_top, column_bottom = bounds
+    profile_started = perf_counter()
+    left_profile = build_column_left_profile(
+        page_residual.rows,
+        top=column_top,
+        bottom=column_bottom,
+        left=column_left,
+        right=column_right,
+    )
+    profile_seconds = perf_counter() - profile_started
+    profile_events = left_profile.changes()
+
     columns = context["row_map"].get("columns") or []
     if not 0 <= args.column < len(columns):
         raise ValueError(f"column out of range: {args.column}")
@@ -74,19 +88,20 @@ def main() -> int:
         reference_rows = reference_rows[: args.rows]
 
     inferred = infer_page_start_geometry(
-        page_residual.rows,
+        left_profile,
         reference_rows,
         tolerance=args.start_x_tolerance,
     )
     if not inferred.ranges:
         raise ValueError("could not infer row-start x ranges from this page")
     ranges = inferred.ranges
-    _column_left, column_right, _column_top, _column_bottom = bounds
 
     print(
         f"directional-page-start: page={args.page} column={args.column} rows={len(reference_rows)} "
         f"models={len(models)} model_compile={models_seconds:.4f}s page_prepare={page_seconds:.4f}s "
-        f"black={len(black)} bounds={bounds} start_centers={inferred.centers} ranges={ranges} "
+        f"profile_build={profile_seconds:.6f}s profile_rows={len(left_profile.values)} "
+        f"profile_events={len(profile_events)} black={len(black)} bounds={bounds} "
+        f"start_centers={inferred.centers} ranges={ranges} "
         f"start_observations={len(inferred.observations)}",
         flush=True,
     )
@@ -110,6 +125,7 @@ def main() -> int:
             row_top=row_top,
             row_bottom=row_bottom,
             allowed_translate_x_ranges=ranges,
+            left_profile=left_profile,
         )
         if first is None:
             unresolved += 1
