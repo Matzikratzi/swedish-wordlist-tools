@@ -12,8 +12,9 @@ from swedish_wordlist_tools.ocr_glyph_matcher import GlyphModel
 
 class BaselineUpTests(unittest.TestCase):
     def test_finds_next_glyph_with_overlapping_x_extent(self) -> None:
-        # Previous glyph owns x=10..14 but only these pixels remain consumed.
-        previous = frozenset({(10, 8), (11, 9), (12, 10), (14, 10)})
+        # Previous glyph owns x=10..14.  Its bbox overlaps the next glyph at
+        # x=14, but the two glyphs do not share an actual black pixel.
+        previous = frozenset({(10, 8), (11, 9), (12, 10), (14, 7)})
         # Next glyph begins at physical x=14, i.e. one x-column overlaps the
         # previous glyph's bounding box, but no actual black pixel is shared.
         model = GlyphModel(
