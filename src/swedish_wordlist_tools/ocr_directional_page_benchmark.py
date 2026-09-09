@@ -6,10 +6,10 @@ from time import perf_counter
 
 from .ocr_baseline_up import CompiledGlyphLibrary, ResidualInk, find_next_baseline_up
 from .ocr_canonical_facit import load_canonical_facit_with_typography
+from .ocr_page_start_geometry import infer_page_start_geometry
 from .ocr_review_page_pixel_array_glyphs_html import build_page_context_pixel_array
 from .ocr_row_directional import first_glyph_top_down
-from .ocr_row_split_left_support import row_start_geometry
-from .ocr_shadow_whole_column import _black_pixels, _column_bounds, _start_search_ranges
+from .ocr_shadow_whole_column import _black_pixels, _column_bounds
 
 
 def _row_black(page_rows: dict[int, set[int]], *, top: int, bottom: int) -> set[tuple[int, int]]:
@@ -49,9 +49,6 @@ def main() -> int:
     ap.add_argument("--rows", type=int, default=0, help="0 means all reference rows in the column")
     ap.add_argument("--max-glyphs", type=int, default=100)
     ap.add_argument("--threshold", type=int, default=210)
-    ap.add_argument("--homonym-x", type=int, default=46)
-    ap.add_argument("--headword-x", type=int, default=57)
-    ap.add_argument("--continuation-x", type=int, default=68)
     ap.add_argument("--start-x-tolerance", type=int, default=7)
     args = ap.parse_args()
 
@@ -76,14 +73,21 @@ def main() -> int:
     if args.rows > 0:
         reference_rows = reference_rows[: args.rows]
 
-    geometry = row_start_geometry(args.homonym_x, args.headword_x, args.continuation_x)
-    ranges = _start_search_ranges(geometry, args.start_x_tolerance)
+    inferred = infer_page_start_geometry(
+        page_residual.rows,
+        reference_rows,
+        tolerance=args.start_x_tolerance,
+    )
+    if not inferred.ranges:
+        raise ValueError("could not infer row-start x ranges from this page")
+    ranges = inferred.ranges
     _column_left, column_right, _column_top, _column_bottom = bounds
 
     print(
         f"directional-page-start: page={args.page} column={args.column} rows={len(reference_rows)} "
         f"models={len(models)} model_compile={models_seconds:.4f}s page_prepare={page_seconds:.4f}s "
-        f"black={len(black)} bounds={bounds} ranges={ranges}",
+        f"black={len(black)} bounds={bounds} start_centers={inferred.centers} ranges={ranges} "
+        f"start_observations={len(inferred.observations)}",
         flush=True,
     )
 
