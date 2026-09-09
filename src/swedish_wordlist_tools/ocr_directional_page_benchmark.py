@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 from time import perf_counter
 
-from .ocr_baseline_up import CompiledGlyphLibrary, ResidualInk, find_next_baseline_up
+from .ocr_baseline_up import BaselineUpStats, CompiledGlyphLibrary, ResidualInk, find_next_baseline_up
 from .ocr_canonical_facit import load_canonical_facit_with_typography
 from .ocr_column_left_profile import build_column_left_profile
 from .ocr_page_start_geometry import infer_page_start_geometry
@@ -40,7 +40,7 @@ def main() -> int:
         description=(
             "Benchmark directional OCR: build one whole-column left profile, "
             "find first glyphs top-down from that profile, and find later glyphs "
-            "baseline-up on incrementally maintained residual pixels. The old "
+            "from the dynamically maintained residual left profile. The old "
             "row map is used only to provide benchmark row boundaries."
         )
     )
@@ -121,6 +121,7 @@ def main() -> int:
     baseline_calls = 0
     baseline_hits = 0
     baseline_misses = 0
+    baseline_stats = BaselineUpStats()
 
     for row_index, row in enumerate(reference_rows):
         row_started = perf_counter()
@@ -170,6 +171,7 @@ def main() -> int:
         row_baseline_calls = 0
         current_left = first.left
         baseline = first.baseline
+        explained_bottom = max(y for _x, y in first.pixels)
         glyphs = 1
         status = "complete"
         stop_candidates = 0
@@ -182,8 +184,10 @@ def main() -> int:
                 library,
                 baseline=baseline,
                 row_top=row_top,
+                profile_bottom=explained_bottom,
                 after_left=current_left,
                 column_right=column_right,
+                stats=baseline_stats,
             )
             elapsed = perf_counter() - phase_started
             row_baseline += elapsed
@@ -216,6 +220,7 @@ def main() -> int:
             row_consume += elapsed
             consume_total += elapsed
             current_left = hit.left
+            explained_bottom = max(explained_bottom, max(y for _x, y in hit.pixels))
             glyphs += 1
         else:
             status = "max-glyphs"
@@ -242,7 +247,7 @@ def main() -> int:
         row_other = max(0.0, row_seconds - row_accounted)
         print(
             f"directional-row: row={row_index} y={row_top}..{row_bottom-1} "
-            f"status={status} first_y={first_search.y} baseline={baseline} "
+            f"status={status} first_y={first_search.y} baseline={baseline} profile_bottom={explained_bottom} "
             f"glyphs={glyphs} text={''.join(labels)!r} remaining={len(remaining)} "
             f"stop_candidates={stop_candidates} time={row_seconds:.4f}s "
             f"setup={row_setup:.6f}s first={row_first:.6f}s "
@@ -261,6 +266,14 @@ def main() -> int:
         f"baseline={baseline_total:.6f}s calls={baseline_calls} hits={baseline_hits} misses={baseline_misses} "
         f"avg_baseline_call={average_baseline:.6f}s baseline_per_hit={average_hit:.6f}s "
         f"consume={consume_total:.6f}s residual={residual_total:.6f}s other={other_total:.6f}s",
+        flush=True,
+    )
+    print(
+        f"directional-baseline-stats: calls={baseline_stats.calls} y_rows={baseline_stats.y_rows} "
+        f"profile_points={baseline_stats.observed_pixels} model_visits={baseline_stats.model_visits} "
+        f"raw_tx={baseline_stats.raw_tx_proposals} in_bounds_tx={baseline_stats.in_bounds_tx} "
+        f"duplicate_tx={baseline_stats.duplicate_tx} unique_tx={baseline_stats.unique_tx} "
+        f"subset_checks={baseline_stats.subset_checks} exact_hits={baseline_stats.exact_hits}",
         flush=True,
     )
     print(
