@@ -122,10 +122,6 @@ class LiveProfileCandidateTests(unittest.TestCase):
         self.assertEqual(["f"], [check.candidate.model.label for check in survivors])
 
     def test_candidate_dies_when_required_profile_change_never_happens(self) -> None:
-        # r expects the front to move from x=20 to x=21. Residual ink stays at
-        # x=20 inside r's own horizontal span, so this cannot be blamed on some
-        # other glyph hiding r from the left: the required profile change simply
-        # did not happen.
         r_glyph = model("r", {(0, -1), (1, 0)})
         r_hit = hit(r_glyph, tx=20, baseline=10)
         residual = set(r_hit.pixels)
@@ -140,6 +136,42 @@ class LiveProfileCandidateTests(unittest.TestCase):
 
         self.assertFalse(check.alive)
         self.assertEqual(10, check.contradiction_y)
+
+    def test_short_candidate_dies_when_front_continues_above_its_top(self) -> None:
+        # The short candidate explains y=9..10, but the same residual left front
+        # continues at x=20 on y=8.  Its top edge therefore never occurred as a
+        # profile event.  A taller candidate can still explain that continuation.
+        short = model("r", {(0, -1), (1, 0)})
+        candidate = hit(short, tx=20, baseline=10)
+        residual = set(candidate.pixels)
+        residual.add((20, 8))
+
+        check = check_live_candidate(
+            candidate,
+            rows(residual),
+            after_left=10,
+            column_right=40,
+            row_top=7,
+        )
+
+        self.assertFalse(check.alive)
+        self.assertEqual(8, check.contradiction_y)
+
+    def test_short_candidate_can_end_when_front_moves_outside_its_span(self) -> None:
+        short = model("r", {(0, -1), (1, 0)})
+        candidate = hit(short, tx=20, baseline=10)
+        residual = set(candidate.pixels)
+        residual.add((25, 8))
+
+        check = check_live_candidate(
+            candidate,
+            rows(residual),
+            after_left=10,
+            column_right=40,
+            row_top=7,
+        )
+
+        self.assertTrue(check.alive)
 
 
 if __name__ == "__main__":
