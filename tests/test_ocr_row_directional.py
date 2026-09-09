@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from swedish_wordlist_tools.ocr_baseline_up import CompiledGlyphLibrary, ResidualInk
+from swedish_wordlist_tools.ocr_column_left_profile import build_column_left_profile
 from swedish_wordlist_tools.ocr_glyph_matcher import GlyphModel
 from swedish_wordlist_tools.ocr_row_directional import first_glyph_top_down
 
@@ -45,8 +46,6 @@ class RowDirectionalTests(unittest.TestCase):
             sources=1,
         )
         placed = frozenset({(20 + x, 12 + y) for x, y in model.pixels})
-        # Early ink is close in page x but cannot produce tx=20 for the model's
-        # top row, so it must not create a live candidate.
         black = {(19, 4), (19, 5)} | set(placed)
         rows = ResidualInk(black).rows
         library = CompiledGlyphLibrary([model])
@@ -81,16 +80,18 @@ class RowDirectionalTests(unittest.TestCase):
         first_pixels = frozenset({(10 + x, 12 + y) for x, y in first.pixels})
         later_pixels = frozenset({(20 + x, 12 + y) for x, y in later.pixels})
         black = set(first_pixels | later_pixels)
-        rows = ResidualInk(black).rows
+        residual = ResidualInk(black)
         library = CompiledGlyphLibrary([first, later])
+        profile = build_column_left_profile(residual.rows, top=6, bottom=14)
 
         hit, search = first_glyph_top_down(
             black,
-            rows,
+            residual.rows,
             library,
             row_top=6,
             row_bottom=14,
             allowed_translate_x_ranges=((8, 22),),
+            left_profile=profile,
         )
 
         self.assertIsNotNone(hit)
