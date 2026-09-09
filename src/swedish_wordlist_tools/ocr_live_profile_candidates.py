@@ -44,6 +44,35 @@ def _residual_row(
     )
 
 
+def _terminal_event_holds(
+    remaining_by_y: Mapping[int, Iterable[int]],
+    page_ys: Iterable[int],
+    *,
+    after_left: int,
+    column_right: int,
+    span_right: int,
+) -> tuple[bool, int | None]:
+    """Check the first next profile pixel across a known candidate edge.
+
+    A glyph ending at ``span_right`` requires the next observed residual profile
+    pixel to have moved strictly to the right of the glyph. Blank raster rows do
+    not decide the event; they are skipped until the next profile pixel. If the
+    already-known extent contains no next profile pixel, there is not enough
+    evidence to reject the candidate.
+    """
+    for page_y in page_ys:
+        residual_xs = _residual_row(
+            remaining_by_y,
+            page_y,
+            after_left=after_left,
+            column_right=column_right,
+        )
+        if not residual_xs:
+            continue
+        return residual_xs[0] > span_right, page_y
+    return True, None
+
+
 def check_live_candidate(
     candidate: BaselineMatch,
     remaining_by_y: Mapping[int, Iterable[int]],
@@ -51,6 +80,7 @@ def check_live_candidate(
     after_left: int,
     column_right: int,
     row_top: int | None = None,
+    known_bottom_before: int | None = None,
 ) -> LiveCandidateCheck:
     """Verify one placed glyph against the dynamic residual left profile.
 
@@ -66,13 +96,13 @@ def check_live_candidate(
     * residual front farther right, or no residual row, contradicts expected ink;
     * an internal horizontal gap must be blank inside the candidate's own x span.
 
-    If ``row_top`` is supplied, the upward profile walk does not stop merely
-    because a short candidate has reached its own top.  We continue toward the
-    known row top.  Residual front ink still inside the candidate's horizontal
-    span above its claimed top means the candidate's required end/change event
-    never happened, so the short interpretation dies.  This is what separates
-    e.g. a short ``r`` interpretation from a taller ``f`` when their lower
-    profile is temporarily compatible.
+    Candidate edges are terminal profile events only against raster extent that
+    was known before this candidate was tried.  At the top, ``row_top`` is the
+    known row boundary: if the candidate touches it, no upward terminal event is
+    required.  At the bottom, ``known_bottom_before`` is the previous temporary
+    lower extent: if the candidate reaches or extends beyond it, no downward
+    terminal event is required.  Otherwise the first next profile pixel across
+    that known edge must be strictly to the right of the candidate's x span.
 
     Ink farther right is irrelevant. Ink farther left can belong to another
     overlapping glyph only when it lies outside this candidate's own span.
@@ -153,10 +183,6 @@ def check_live_candidate(
             front_rows += 1
             continue
 
-        # The profile is farther left than this model expects. That is only a
-        # legitimate hidden row if the owning ink lies completely to the left
-        # of this glyph's own horizontal span. If it is still inside the span,
-        # the model predicted a left-edge change that the raster did not make.
         if observed_left >= span_left:
             return LiveCandidateCheck(
                 candidate=candidate,
@@ -168,35 +194,51 @@ def check_live_candidate(
             )
         hidden_rows += 1
 
-    # A candidate's top edge is itself a profile event.  When matching upward,
-    # a short glyph cannot be declared complete if the residual left front
-    # simply continues through that event inside the glyph's own x span.
-    if row_top is not None:
-        candidate_top = candidate.baseline + rel_top
-        for page_y in range(candidate_top - 1, int(row_top) - 1, -1):
-            residual_xs = _residual_row(
-                remaining_by_y,
-                page_y,
-                after_left=after_left,
-                column_right=column_right,
+    candidate_top = candidate.baseline + rel_top
+    candidate_bottom = candidate.baseline + rel_bottom
+
+    # The upper edge is testable only if there was already known row extent
+    # above it. A glyph touching row_top can have arrived directly from geometry
+    # in the preceding row, so there is no required upward terminal event.
+    if row_top is not None and candidate_top > int(row_top):
+        terminal_ok, event_y = _terminal_event_holds(
+            remaining_by_y,
+            range(candidate_top - 1, int(row_top) - 1, -1),
+            after_left=after_left,
+            column_right=column_right,
+            span_right=span_right,
+        )
+        if not terminal_ok:
+            return LiveCandidateCheck(
+                candidate=candidate,
+                alive=False,
+                front_rows=front_rows,
+                hidden_rows=hidden_rows,
+                gap_rows=gap_rows,
+                contradiction_y=event_y,
             )
-            if not residual_xs:
-                continue
-            observed_left = residual_xs[0]
-            if span_left <= observed_left <= span_right:
-                return LiveCandidateCheck(
-                    candidate=candidate,
-                    alive=False,
-                    front_rows=front_rows,
-                    hidden_rows=hidden_rows,
-                    gap_rows=gap_rows,
-                    contradiction_y=page_y,
-                )
-            # Once the residual front has moved genuinely outside this glyph's
-            # span, its top/end event has happened; rows farther upward belong
-            # to other geometry and need not be charged to this candidate.
-            if observed_left < span_left or observed_left > span_right:
-                break
+
+    # Symmetrically, the lower edge is testable only inside the extent that was
+    # already known before this candidate. A candidate that reaches or extends
+    # below the previous temporary bottom is itself discovering that territory,
+    # so it must not be rejected for lacking a downward terminal event there.
+    if known_bottom_before is not None and candidate_bottom < int(known_bottom_before):
+        terminal_ok, event_y = _terminal_event_holds(
+            remaining_by_y,
+            range(candidate_bottom + 1, int(known_bottom_before) + 1),
+            after_left=after_left,
+            column_right=column_right,
+            span_right=span_right,
+        )
+        if not terminal_ok:
+            return LiveCandidateCheck(
+                candidate=candidate,
+                alive=False,
+                front_rows=front_rows,
+                hidden_rows=hidden_rows,
+                gap_rows=gap_rows,
+                contradiction_y=event_y,
+            )
 
     return LiveCandidateCheck(
         candidate=candidate,
@@ -214,6 +256,7 @@ def live_survivors(
     after_left: int,
     column_right: int,
     row_top: int | None = None,
+    known_bottom_before: int | None = None,
 ) -> tuple[LiveCandidateCheck, ...]:
     checks = [
         check_live_candidate(
@@ -222,6 +265,7 @@ def live_survivors(
             after_left=after_left,
             column_right=column_right,
             row_top=row_top,
+            known_bottom_before=known_bottom_before,
         )
         for candidate in candidates
     ]
@@ -248,21 +292,16 @@ def pick_unique_live_semantic(
     after_left: int,
     column_right: int,
     row_top: int | None = None,
+    known_bottom_before: int | None = None,
 ) -> tuple[BaselineMatch | None, tuple[LiveCandidateCheck, ...]]:
-    """Return a glyph only when one leftmost semantic interpretation survives.
-
-    Raster variants with the same label/style/translation/baseline are one
-    semantic interpretation. If several different glyph interpretations are
-    still live, the result is deliberately unresolved; the caller must continue
-    gathering evidence rather than choosing a temporarily complete short glyph.
-    Front-row counts are diagnostic only.
-    """
+    """Return a glyph only when one leftmost semantic interpretation survives."""
     survivors = live_survivors(
         candidates,
         remaining_by_y,
         after_left=after_left,
         column_right=column_right,
         row_top=row_top,
+        known_bottom_before=known_bottom_before,
     )
     if not survivors:
         return None, survivors
