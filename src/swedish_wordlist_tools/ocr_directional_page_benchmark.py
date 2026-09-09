@@ -143,10 +143,11 @@ def main() -> int:
         row_started = perf_counter()
         row_top = int(row["page_top"])
         row_bottom = int(row["page_bottom"])
+        scan_bottom = min(column_bottom, row_bottom + library.max_down + 1)
         trace = row_index in trace_rows
 
         phase_started = perf_counter()
-        row_black = _row_black(page_residual.rows, top=row_top, bottom=row_bottom)
+        row_black = _row_black(page_residual.rows, top=row_top, bottom=scan_bottom)
         residual = ResidualInk(row_black)
         row_setup = perf_counter() - phase_started
         setup_total += row_setup
@@ -169,7 +170,7 @@ def main() -> int:
             row_seconds = perf_counter() - row_started
             row_other = max(0.0, row_seconds - row_setup - row_first)
             print(
-                f"directional-row: row={row_index} y={row_top}..{row_bottom-1} "
+                f"directional-row: row={row_index} y={row_top}..{row_bottom-1} scan_bottom={scan_bottom-1} "
                 f"status=unresolved-first first_y={first_search.y} "
                 f"candidates={len(first_search.candidates)} pixels={len(row_black)} "
                 f"time={row_seconds:.4f}s setup={row_setup:.6f}s first={row_first:.6f}s "
@@ -209,7 +210,7 @@ def main() -> int:
                 library,
                 baseline=baseline,
                 row_top=row_top,
-                row_bottom=row_bottom,
+                row_bottom=scan_bottom,
                 profile_bottom=explained_bottom,
                 after_left=current_left,
                 column_right=column_right,
@@ -242,7 +243,7 @@ def main() -> int:
                     residual,
                     after_left=current_left,
                     row_top=row_top,
-                    row_bottom=row_bottom,
+                    row_bottom=scan_bottom,
                 )
                 elapsed = perf_counter() - phase_started
                 row_residual += elapsed
@@ -260,6 +261,7 @@ def main() -> int:
             row_consume += elapsed
             consume_total += elapsed
             current_left = hit.left
+            baseline = hit.baseline
             explained_bottom = max(explained_bottom, max(y for _x, y in hit.pixels))
             glyphs += 1
         else:
@@ -276,7 +278,7 @@ def main() -> int:
             residual,
             after_left=current_left,
             row_top=row_top,
-            row_bottom=row_bottom,
+            row_bottom=scan_bottom,
         )
         elapsed = perf_counter() - phase_started
         row_residual += elapsed
@@ -297,9 +299,9 @@ def main() -> int:
         row_accounted = row_setup + row_first + row_baseline + row_consume + row_residual
         row_other = max(0.0, row_seconds - row_accounted)
         print(
-            f"directional-row: row={row_index} y={row_top}..{row_bottom-1} "
+            f"directional-row: row={row_index} y={row_top}..{row_bottom-1} scan_bottom={scan_bottom-1} "
             f"status={status} first_y={first_search.y} baseline={baseline} profile_bottom={explained_bottom} "
-            f"glyphs={glyphs} text={''.join(labels)!r} remaining={len(remaining)} "
+            f"next_row_top={explained_bottom + 1} glyphs={glyphs} text={''.join(labels)!r} remaining={len(remaining)} "
             f"stop_candidates={stop_candidates} time={row_seconds:.4f}s "
             f"setup={row_setup:.6f}s first={row_first:.6f}s "
             f"baseline={row_baseline:.6f}s/{row_baseline_calls}calls "
