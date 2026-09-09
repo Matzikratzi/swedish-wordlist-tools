@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from swedish_wordlist_tools.ocr_baseline_up import (
+    BaselineUpStats,
     CompiledGlyphLibrary,
     ResidualInk,
     find_next_baseline_up,
@@ -108,6 +109,51 @@ class BaselineUpTests(unittest.TestCase):
         assert hit is not None
         self.assertEqual(hit.model.label, "f")
         self.assertEqual(hit.pixels, placed)
+
+    def test_ambiguous_exact_candidates_are_filtered_by_full_live_profile(self) -> None:
+        good = GlyphModel(
+            label="L",
+            style="roman",
+            pixels=frozenset({(0, -2), (0, -1), (1, 0)}),
+            sources=1,
+        )
+        bad = GlyphModel(
+            label="I",
+            style="roman",
+            pixels=frozenset({(0, -2), (0, -1), (0, 0)}),
+            sources=1,
+        )
+        # Both models are exact subsets, but on the baseline the residual front
+        # lies at x=13.  I would require x=12 there and therefore contradicts
+        # the full left profile; L survives.
+        black = {
+            (12, 8),
+            (12, 9),
+            (13, 10),
+            (20, 10),
+        }
+        residual = ResidualInk(black)
+        library = CompiledGlyphLibrary([good, bad])
+        stats = BaselineUpStats()
+
+        hit, candidates = find_next_baseline_up(
+            residual.pixels,
+            residual.rows,
+            library,
+            baseline=10,
+            row_top=8,
+            profile_bottom=10,
+            after_left=5,
+            column_right=40,
+            stats=stats,
+        )
+
+        self.assertIsNotNone(hit)
+        assert hit is not None
+        self.assertEqual(hit.model.label, "L")
+        self.assertEqual([candidate.model.label for candidate in candidates], ["L"])
+        self.assertEqual(stats.live_filter_calls, 1)
+        self.assertEqual(stats.live_survivors, 1)
 
     def test_consume_updates_only_residual_rows(self) -> None:
         residual = ResidualInk({(1, 1), (2, 1), (3, 2)})
