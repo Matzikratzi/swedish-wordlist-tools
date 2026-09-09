@@ -37,17 +37,20 @@ def check_live_candidate(
 ) -> LiveCandidateCheck:
     """Verify one placed glyph against the dynamic residual left profile.
 
-    The candidate already has an absolute placement.  We now walk every raster
-    row in its own vertical extent and apply the left-dominance rules:
+    The candidate already has an absolute placement. We walk every raster row
+    in its own vertical extent and apply left-dominance rules:
 
     * expected glyph pixels must exist;
     * residual front == expected left edge => ``front``;
-    * residual front farther left => candidate is temporarily ``hidden``;
+    * residual front genuinely left of the candidate's own x span => ``hidden``;
+    * residual front inside the candidate span but left of the expected edge is
+      a contradiction: the candidate required a profile change that did not
+      happen;
     * residual front farther right, or no residual row, contradicts expected ink;
     * an internal horizontal gap must be blank inside the candidate's own x span.
 
-    Ink farther right is irrelevant, and ink farther left is allowed because it
-    can belong to another overlapping glyph.
+    Ink farther right is irrelevant. Ink farther left can belong to another
+    overlapping glyph only when it lies outside this candidate's own span.
     """
     rows = _model_rows(candidate)
     rel_top = candidate.model.min_y
@@ -124,8 +127,22 @@ def check_live_candidate(
             )
         if observed_left == expected_left:
             front_rows += 1
-        else:
-            hidden_rows += 1
+            continue
+
+        # The profile is farther left than this model expects. That is only a
+        # legitimate hidden row if the owning ink lies completely to the left
+        # of this glyph's own horizontal span. If it is still inside the span,
+        # the model predicted a left-edge change that the raster did not make.
+        if observed_left >= span_left:
+            return LiveCandidateCheck(
+                candidate=candidate,
+                alive=False,
+                front_rows=front_rows,
+                hidden_rows=hidden_rows,
+                gap_rows=gap_rows,
+                contradiction_y=page_y,
+            )
+        hidden_rows += 1
 
     return LiveCandidateCheck(
         candidate=candidate,
@@ -178,11 +195,10 @@ def pick_unique_live_semantic(
     """Return a glyph only when one leftmost semantic interpretation survives.
 
     Raster variants with the same label/style/translation/baseline are one
-    semantic interpretation.  If several different glyph interpretations are
+    semantic interpretation. If several different glyph interpretations are
     still live, the result is deliberately unresolved; the caller must continue
     gathering evidence rather than choosing a temporarily complete short glyph.
-    Front-row counts are diagnostic only: more owned front rows are not proof
-    that competing candidates are impossible.
+    Front-row counts are diagnostic only.
     """
     survivors = live_survivors(
         candidates,
