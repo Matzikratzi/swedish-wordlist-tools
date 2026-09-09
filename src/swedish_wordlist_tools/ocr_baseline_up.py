@@ -179,11 +179,12 @@ def baseline_up_candidates(
     used to propose placements. The complete glyph is still verified against
     the full 2D residual bitmap.
 
-    This is deliberately different from scanning every residual pixel to the
-    right. Ownership may move left/right between raster rows, so the profile is
-    jagged, but each row contributes at most one observed x. Once OCR has safely
-    crossed a true vertical white gap, the same mechanism can be restarted with
-    a larger left boundary and thereby form a new local profile.
+    A profile point contributes at most one translation per model. If this
+    profile point belongs to the candidate glyph, its leftmost pixel on this
+    relative raster row must coincide with the residual profile front. If the
+    front actually belongs to a later overlapping glyph, that proposal simply
+    fails exact 2D verification and another raster row can still anchor the
+    correct placement.
     """
     if stats is not None:
         stats.calls += 1
@@ -194,8 +195,6 @@ def baseline_up_candidates(
     seen: set[tuple[int, int, int]] = set()
     found: list[BaselineMatch] = []
 
-    # Build the current residual profile without copying the whole page bitmap.
-    # Only y rows in the already-established physical row height participate.
     for page_y in range(profile_bottom, row_top - 1, -1):
         if stats is not None:
             stats.y_rows += 1
@@ -218,39 +217,38 @@ def baseline_up_candidates(
 
         for item in possible_models:
             model_row = item.rows[rel_y]
-            for model_x in model_row:
+            if stats is not None:
+                stats.raw_tx_proposals += 1
+            tx = observed_x - model_row[0]
+            physical_left = tx + item.min_x
+            physical_right = tx + item.max_x
+            if physical_left <= after_left or physical_right >= column_right:
+                continue
+            if stats is not None:
+                stats.in_bounds_tx += 1
+            key = _candidate_key(item, tx, baseline)
+            if key in seen:
                 if stats is not None:
-                    stats.raw_tx_proposals += 1
-                tx = observed_x - model_x
-                physical_left = tx + item.min_x
-                physical_right = tx + item.max_x
-                if physical_left <= after_left or physical_right >= column_right:
-                    continue
+                    stats.duplicate_tx += 1
+                continue
+            seen.add(key)
+            if stats is not None:
+                stats.unique_tx += 1
+            placed = _placed_pixels(item, tx=tx, baseline=baseline)
+            if stats is not None:
+                stats.subset_checks += 1
+            if placed.issubset(remaining):
                 if stats is not None:
-                    stats.in_bounds_tx += 1
-                key = _candidate_key(item, tx, baseline)
-                if key in seen:
-                    if stats is not None:
-                        stats.duplicate_tx += 1
-                    continue
-                seen.add(key)
-                if stats is not None:
-                    stats.unique_tx += 1
-                placed = _placed_pixels(item, tx=tx, baseline=baseline)
-                if stats is not None:
-                    stats.subset_checks += 1
-                if placed.issubset(remaining):
-                    if stats is not None:
-                        stats.exact_hits += 1
-                    found.append(
-                        BaselineMatch(
-                            model=item.model,
-                            tx=tx,
-                            baseline=baseline,
-                            pixels=placed,
-                            discovered_y=page_y,
-                        )
+                    stats.exact_hits += 1
+                found.append(
+                    BaselineMatch(
+                        model=item.model,
+                        tx=tx,
+                        baseline=baseline,
+                        pixels=placed,
+                        discovered_y=page_y,
                     )
+                )
 
     return tuple(
         sorted(
