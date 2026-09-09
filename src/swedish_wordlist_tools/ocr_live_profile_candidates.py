@@ -168,47 +168,6 @@ def live_survivors(
     )
 
 
-def _front_signature(check: LiveCandidateCheck) -> frozenset[int]:
-    """Raster rows on which this candidate itself owns the residual front."""
-    candidate = check.candidate
-    rows = _model_rows(candidate)
-    owned: set[int] = set()
-    for rel_y, model_xs in rows.items():
-        page_y = candidate.baseline + rel_y
-        expected_left = candidate.tx + min(model_xs)
-        # check_live_candidate has already established that the candidate is
-        # alive.  Reconstructing ownership from its counters is impossible, so
-        # callers that need dominance use this helper only through the explicit
-        # residual map in _front_dominant_semantics below.
-        owned.add(page_y if expected_left >= candidate.left else page_y)
-    return frozenset(owned)
-
-
-def _front_dominant_semantics(
-    checks: tuple[LiveCandidateCheck, ...],
-) -> tuple[LiveCandidateCheck, ...]:
-    """Keep a unique interpretation only when it has strictly more front evidence.
-
-    This is deliberately conservative: a larger glyph is not preferred merely
-    because it contains more pixels.  It must own the residual left edge on more
-    raster rows than every competing semantic interpretation.  A tie remains
-    unresolved and will require sequence lookahead.
-    """
-    if len(checks) < 2:
-        return checks
-    best_front = max(check.front_rows for check in checks)
-    best = tuple(check for check in checks if check.front_rows == best_front)
-    if len(best) != 1:
-        return checks
-    runner_up = max(
-        (check.front_rows for check in checks if check is not best[0]),
-        default=-1,
-    )
-    if best_front <= runner_up:
-        return checks
-    return best
-
-
 def pick_unique_live_semantic(
     candidates: Iterable[BaselineMatch],
     remaining_by_y: Mapping[int, Iterable[int]],
@@ -220,10 +179,10 @@ def pick_unique_live_semantic(
 
     Raster variants with the same label/style/translation/baseline are one
     semantic interpretation.  If several different glyph interpretations are
-    still live, first ask whether exactly one of them owns strictly more rows of
-    the residual left edge.  This is stronger evidence than pixel count: it is
-    the whole-column profile itself.  Equal front evidence remains unresolved
-    for sequence lookahead.
+    still live, the result is deliberately unresolved; the caller must continue
+    gathering evidence rather than choosing a temporarily complete short glyph.
+    Front-row counts are diagnostic only: more owned front rows are not proof
+    that competing candidates are impossible.
     """
     survivors = live_survivors(
         candidates,
@@ -246,22 +205,7 @@ def pick_unique_live_semantic(
         ).append(check)
 
     if len(semantics) != 1:
-        representatives = tuple(
-            max(
-                checks,
-                key=lambda check: (
-                    check.front_rows,
-                    len(check.candidate.pixels),
-                    check.candidate.model.sources,
-                    -check.hidden_rows,
-                ),
-            )
-            for checks in semantics.values()
-        )
-        dominant = _front_dominant_semantics(representatives)
-        if len(dominant) != 1:
-            return None, left_group
-        return dominant[0].candidate, left_group
+        return None, left_group
 
     only = next(iter(semantics.values()))
     best = max(
