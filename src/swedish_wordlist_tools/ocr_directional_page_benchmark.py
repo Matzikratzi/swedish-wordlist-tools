@@ -209,6 +209,7 @@ def main() -> int:
                 library,
                 baseline=baseline,
                 row_top=row_top,
+                row_bottom=row_bottom,
                 profile_bottom=explained_bottom,
                 after_left=current_left,
                 column_right=column_right,
