@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import Counter
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
@@ -30,58 +29,46 @@ def _row_leftmosts(
     return starts
 
 
-def _smoothed_votes(values: Iterable[int], *, radius: int = 2) -> Counter[int]:
-    raw = Counter(int(v) for v in values)
-    if not raw:
-        return Counter()
-    lo = min(raw)
-    hi = max(raw)
-    out: Counter[int] = Counter()
-    for x in range(lo, hi + 1):
-        out[x] = sum(raw.get(xx, 0) for xx in range(x - radius, x + radius + 1))
-    return out
+def _merge_start_intervals(values: Iterable[int], *, tolerance: int) -> tuple[tuple[int, int], ...]:
+    intervals = sorted((int(x) - tolerance, int(x) + tolerance) for x in values)
+    if not intervals:
+        return ()
 
-
-def _pick_peaks(votes: Counter[int], *, count: int = 3, min_separation: int = 7) -> list[int]:
-    peaks: list[int] = []
-    for x, score in sorted(votes.items(), key=lambda item: (-item[1], item[0])):
-        if score <= 0:
-            break
-        if any(abs(x - old) < min_separation for old in peaks):
-            continue
-        peaks.append(x)
-        if len(peaks) >= count:
-            break
-    return sorted(peaks)
+    merged: list[list[int]] = []
+    for lo, hi in intervals:
+        if not merged or lo > merged[-1][1] + 1:
+            merged.append([lo, hi])
+        else:
+            merged[-1][1] = max(merged[-1][1], hi)
+    return tuple((lo, hi) for lo, hi in merged)
 
 
 def infer_page_start_geometry(
     page_rows: Mapping[int, Iterable[int]],
     reference_rows: Iterable[dict],
     *,
-    tolerance: int = 7,
-    peak_radius: int = 2,
-    min_peak_separation: int = 7,
+    tolerance: int = 4,
 ) -> InferredStartGeometry:
-    """Infer typographic row-start x bands from the current page itself.
+    """Infer legal row-start x regions from this page's own raster.
 
-    The input rows are used only as vertical sampling windows. Horizontal start
-    positions are measured from the page raster, so even/odd pages and shifted
-    columns get their own geometry rather than inheriting global x constants.
+    There is deliberately no assumption that a page contains homonym starts,
+    headword starts, continuation starts, or any fixed number of typographic
+    start classes. We simply measure the physical leftmost row ink for every
+    usable row on the current page, place a small x tolerance around each
+    observed start, and merge overlapping intervals.
 
-    We smooth the histogram of physical leftmost row ink and select up to three
-    separated modes. The ranges are deliberately tolerant because the physical
-    leftmost ink can differ a few pixels from the glyph translation x depending
-    on the first glyph shape/overhang.
+    Thus a page may naturally produce one, two, three, or more legal start
+    regions. Even/odd pages and shifted columns are handled independently.
     """
     if tolerance < 0:
         raise ValueError("tolerance must be non-negative")
+
     observations = _row_leftmosts(page_rows, reference_rows)
     if not observations:
         return InferredStartGeometry(centers=(), ranges=(), observations=())
-    votes = _smoothed_votes(observations, radius=peak_radius)
-    centers = tuple(_pick_peaks(votes, count=3, min_separation=min_peak_separation))
-    ranges = tuple((center - tolerance, center + tolerance) for center in centers)
+
+    ranges = _merge_start_intervals(observations, tolerance=tolerance)
+    centers = tuple((lo + hi) // 2 for lo, hi in ranges)
     return InferredStartGeometry(
         centers=centers,
         ranges=ranges,
