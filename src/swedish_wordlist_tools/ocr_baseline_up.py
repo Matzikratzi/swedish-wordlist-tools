@@ -39,6 +39,20 @@ class BaselineMatch:
         return max(x for x, _y in self.pixels)
 
 
+@dataclass
+class BaselineUpStats:
+    calls: int = 0
+    y_rows: int = 0
+    observed_pixels: int = 0
+    model_visits: int = 0
+    raw_tx_proposals: int = 0
+    in_bounds_tx: int = 0
+    duplicate_tx: int = 0
+    unique_tx: int = 0
+    subset_checks: int = 0
+    exact_hits: int = 0
+
+
 class CompiledGlyphLibrary:
     """Geometry compiled once for cheap repeated row matching.
 
@@ -122,6 +136,7 @@ def baseline_up_candidates(
     row_top: int,
     after_left: int,
     column_right: int,
+    stats: BaselineUpStats | None = None,
 ) -> tuple[BaselineMatch, ...]:
     """Find exact next-glyph candidates by walking upward from the baseline.
 
@@ -134,6 +149,8 @@ def baseline_up_candidates(
     winner. That keeps an earlier punctuation/detached glyph from being skipped
     merely because a farther-right glyph has ink on the baseline.
     """
+    if stats is not None:
+        stats.calls += 1
     if baseline < row_top:
         return ()
 
@@ -142,9 +159,14 @@ def baseline_up_candidates(
 
     stop_y = max(row_top, baseline - library.max_up)
     for page_y in range(baseline, stop_y - 1, -1):
+        if stats is not None:
+            stats.y_rows += 1
         observed_xs = remaining_by_y.get(page_y, ())
         rel_y = page_y - baseline
         possible_models = library.by_rel_y.get(rel_y, ())
+        if stats is not None:
+            stats.observed_pixels += len(observed_xs)
+            stats.model_visits += len(possible_models)
         if not possible_models:
             continue
 
@@ -154,17 +176,29 @@ def baseline_up_candidates(
                 if observed_x >= column_right:
                     continue
                 for model_x in model_row:
+                    if stats is not None:
+                        stats.raw_tx_proposals += 1
                     tx = observed_x - model_x
                     physical_left = tx + item.min_x
                     physical_right = tx + item.max_x
                     if physical_left <= after_left or physical_right >= column_right:
                         continue
+                    if stats is not None:
+                        stats.in_bounds_tx += 1
                     key = _candidate_key(item, tx, baseline)
                     if key in seen:
+                        if stats is not None:
+                            stats.duplicate_tx += 1
                         continue
                     seen.add(key)
+                    if stats is not None:
+                        stats.unique_tx += 1
                     placed = _placed_pixels(item, tx=tx, baseline=baseline)
+                    if stats is not None:
+                        stats.subset_checks += 1
                     if placed.issubset(remaining):
+                        if stats is not None:
+                            stats.exact_hits += 1
                         found.append(
                             BaselineMatch(
                                 model=item.model,
@@ -222,6 +256,7 @@ def find_next_baseline_up(
     row_top: int,
     after_left: int,
     column_right: int,
+    stats: BaselineUpStats | None = None,
 ) -> tuple[BaselineMatch | None, tuple[BaselineMatch, ...]]:
     candidates = baseline_up_candidates(
         remaining,
@@ -231,5 +266,6 @@ def find_next_baseline_up(
         row_top=row_top,
         after_left=after_left,
         column_right=column_right,
+        stats=stats,
     )
     return pick_leftmost_unique_maximal(candidates), candidates
