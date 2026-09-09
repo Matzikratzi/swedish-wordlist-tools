@@ -49,7 +49,7 @@ def main() -> int:
     ap.add_argument("--rows", type=int, default=0, help="0 means all reference rows in the column")
     ap.add_argument("--max-glyphs", type=int, default=100)
     ap.add_argument("--threshold", type=int, default=210)
-    ap.add_argument("--start-x-tolerance", type=int, default=7)
+    ap.add_argument("--start-x-tolerance", type=int, default=4)
     args = ap.parse_args()
 
     total_started = perf_counter()
