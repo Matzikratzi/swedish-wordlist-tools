@@ -121,6 +121,26 @@ class LiveProfileCandidateTests(unittest.TestCase):
         self.assertEqual("f", selected.model.label)
         self.assertEqual(["f"], [check.candidate.model.label for check in survivors])
 
+    def test_candidate_dies_when_required_profile_change_never_happens(self) -> None:
+        # r expects the front to move from x=20 to x=21. Residual ink stays at
+        # x=20 inside r's own horizontal span, so this cannot be blamed on some
+        # other glyph hiding r from the left: the required profile change simply
+        # did not happen.
+        r_glyph = model("r", {(0, -1), (1, 0)})
+        r_hit = hit(r_glyph, tx=20, baseline=10)
+        residual = set(r_hit.pixels)
+        residual.add((20, 10))
+
+        check = check_live_candidate(
+            r_hit,
+            rows(residual),
+            after_left=10,
+            column_right=40,
+        )
+
+        self.assertFalse(check.alive)
+        self.assertEqual(10, check.contradiction_y)
+
 
 if __name__ == "__main__":
     unittest.main()
