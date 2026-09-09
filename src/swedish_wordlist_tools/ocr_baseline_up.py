@@ -274,17 +274,12 @@ def residual_downward_candidates(
     after_left: int,
     column_right: int,
 ) -> tuple[BaselineMatch, ...]:
-    """Try to explain a final residual cluster by allowing a lower baseline.
+    """Try the residual immediately below the current baseline.
 
-    This is deliberately a fallback, used only after the normal locked-baseline
-    search produced no candidates at all. It implements the end-of-row check:
-    before declaring the row finished, keep walking downward and allow the next
-    glyph to establish a baseline at or below the current one. Placements must
-    remain completely inside the current row and must exactly use existing
-    residual pixels.
-
-    The leftmost residual x anchors the candidate's physical left edge. That
-    keeps the fallback cheap and prevents it from jumping over unexplained ink.
+    This is deliberately local glyph lookahead, not a text-row boundary.  The
+    caller normally supplies ``baseline + library.max_down + 1`` as the bottom
+    limit, so candidates may establish a lower baseline or contain descenders
+    without allowing the search to wander arbitrarily into following rows.
     """
     eligible = {
         (x, y)
@@ -401,15 +396,12 @@ def find_next_baseline_up(
     if hit is not None or candidates:
         return hit, candidates
 
+    # No pre-known lower text-row boundary is needed.  Search downward only as
+    # far as a single canonical glyph can require from the current baseline.
     if row_bottom is None:
-        residual_ys = [
-            y
-            for x, y in remaining
-            if after_left < x < column_right and y >= row_top
-        ]
-        if not residual_ys:
-            return None, ()
-        row_bottom = max(residual_ys) + 1
+        row_bottom = baseline + library.max_down + 1
+    else:
+        row_bottom = int(row_bottom)
 
     downward = residual_downward_candidates(
         remaining,
