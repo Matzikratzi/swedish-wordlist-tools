@@ -277,13 +277,13 @@ def residual_downward_candidates(
     """Try to explain a final residual cluster by allowing a lower baseline.
 
     This is deliberately a fallback, used only after the normal locked-baseline
-    search produced no candidates at all.  It implements the end-of-row check:
+    search produced no candidates at all. It implements the end-of-row check:
     before declaring the row finished, keep walking downward and allow the next
-    glyph to establish a baseline at or below the current one.  Placements must
+    glyph to establish a baseline at or below the current one. Placements must
     remain completely inside the current row and must exactly use existing
     residual pixels.
 
-    The leftmost residual x anchors the candidate's physical left edge.  That
+    The leftmost residual x anchors the candidate's physical left edge. That
     keeps the fallback cheap and prevents it from jumping over unexplained ink.
     """
     eligible = {
@@ -398,8 +398,18 @@ def find_next_baseline_up(
         stats=stats,
     )
     hit = pick_leftmost_unique_maximal(candidates)
-    if hit is not None or candidates or row_bottom is None:
+    if hit is not None or candidates:
         return hit, candidates
+
+    if row_bottom is None:
+        residual_ys = [
+            y
+            for x, y in remaining
+            if after_left < x < column_right and y >= row_top
+        ]
+        if not residual_ys:
+            return None, ()
+        row_bottom = max(residual_ys) + 1
 
     downward = residual_downward_candidates(
         remaining,
