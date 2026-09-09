@@ -147,7 +147,8 @@ def main() -> int:
         trace = row_index in trace_rows
 
         phase_started = perf_counter()
-        row_black = _row_black(page_residual.rows, top=row_top, bottom=scan_bottom)
+        row_black = _row_black(page_residual.rows, top=row_top, bottom=row_bottom)
+        lookahead_black = _row_black(page_residual.rows, top=row_bottom, bottom=scan_bottom)
         residual = ResidualInk(row_black)
         row_setup = perf_counter() - phase_started
         setup_total += row_setup
@@ -204,13 +205,19 @@ def main() -> int:
 
         while glyphs < args.max_glyphs:
             phase_started = perf_counter()
+            # Candidate births come only from residual.rows, which contains the
+            # current row proper.  Pixels below the old row boundary are exposed
+            # only to exact 2D verification, so a glyph born in the current row
+            # may finish below it, while the next text row cannot start a new
+            # candidate here.
+            verification_pixels = residual.pixels | lookahead_black
             hit, candidates = find_next_baseline_up(
-                residual.pixels,
+                verification_pixels,
                 residual.rows,
                 library,
                 baseline=baseline,
                 row_top=row_top,
-                row_bottom=scan_bottom,
+                row_bottom=row_bottom,
                 profile_bottom=explained_bottom,
                 after_left=current_left,
                 column_right=column_right,
@@ -243,7 +250,7 @@ def main() -> int:
                     residual,
                     after_left=current_left,
                     row_top=row_top,
-                    row_bottom=scan_bottom,
+                    row_bottom=row_bottom,
                 )
                 elapsed = perf_counter() - phase_started
                 row_residual += elapsed
@@ -261,7 +268,6 @@ def main() -> int:
             row_consume += elapsed
             consume_total += elapsed
             current_left = hit.left
-            baseline = hit.baseline
             explained_bottom = max(explained_bottom, max(y for _x, y in hit.pixels))
             glyphs += 1
         else:
@@ -278,7 +284,7 @@ def main() -> int:
             residual,
             after_left=current_left,
             row_top=row_top,
-            row_bottom=scan_bottom,
+            row_bottom=row_bottom,
         )
         elapsed = perf_counter() - phase_started
         row_residual += elapsed
