@@ -51,15 +51,12 @@ class BaselineUpStats:
     unique_tx: int = 0
     subset_checks: int = 0
     exact_hits: int = 0
+    live_filter_calls: int = 0
+    live_survivors: int = 0
 
 
 class CompiledGlyphLibrary:
-    """Geometry compiled once for cheap repeated row matching.
-
-    ``by_rel_y`` is the important index for the residual-profile walk. With a
-    known baseline, every page y maps immediately to a glyph-relative y, so we
-    only inspect models that actually contain ink on that relative raster row.
-    """
+    """Geometry compiled once for cheap repeated row matching."""
 
     def __init__(self, models: Iterable[GlyphModel]):
         compiled: list[CompiledGlyph] = []
@@ -119,13 +116,6 @@ class ResidualInk:
         min_x_exclusive: int | None = None,
         max_x_exclusive: int | None = None,
     ) -> dict[int, int]:
-        """Return the leftmost still-unexplained x on each raster row.
-
-        This is the dynamic residual profile used after one or more glyphs have
-        been consumed. It is intentionally jagged: every raster row owns its own
-        leftmost unexplained x. A later white-gap recovery can restart the same
-        profile to the right simply by supplying ``min_x_exclusive``.
-        """
         result: dict[int, int] = {}
         for y in range(top, bottom):
             xs = self.rows.get(y)
@@ -172,7 +162,7 @@ def baseline_up_candidates(
     column_right: int,
     stats: BaselineUpStats | None = None,
 ) -> tuple[BaselineMatch, ...]:
-    """Find exact next-glyph candidates from the residual left profile."""
+    """Find exact next-glyph placements proposed by the residual left profile."""
     if stats is not None:
         stats.calls += 1
     if baseline < row_top:
@@ -323,13 +313,6 @@ def residual_downward_candidates(
 
 
 def _collapse_semantic_variants(candidates: Iterable[BaselineMatch]) -> list[BaselineMatch]:
-    """Collapse exact raster variants that mean the same placed glyph.
-
-    The facit can contain more than one exact bitmap for the same semantic glyph
-    at the same translation/baseline.  Those are geometry alternatives for one
-    OCR interpretation, not competing letters.  Keep one representative so
-    such variants cannot create a false ambiguity by themselves.
-    """
     groups: dict[tuple[str, str, int, int], list[BaselineMatch]] = defaultdict(list)
     for hit in candidates:
         groups[(hit.model.label, hit.model.style, hit.tx, hit.baseline)].append(hit)
@@ -374,6 +357,40 @@ def pick_leftmost_unique_maximal(candidates: Iterable[BaselineMatch]) -> Baselin
     )
 
 
+def _pick_with_live_profile(
+    candidates: tuple[BaselineMatch, ...],
+    remaining_by_y: Mapping[int, Iterable[int]],
+    *,
+    after_left: int,
+    column_right: int,
+    stats: BaselineUpStats | None,
+) -> tuple[BaselineMatch | None, tuple[BaselineMatch, ...]]:
+    """Filter genuine ambiguity through the whole placed glyph profile.
+
+    The fast exact matcher proposes placements from individual profile rows.
+    When those placements are ambiguous, run the full residual left-dominance
+    check over each candidate's vertical extent.  Import locally to avoid a
+    module cycle: the live checker intentionally works with BaselineMatch.
+    """
+    hit = pick_leftmost_unique_maximal(candidates)
+    if hit is not None or not candidates:
+        return hit, candidates
+
+    from .ocr_live_profile_candidates import pick_unique_live_semantic
+
+    live_hit, checks = pick_unique_live_semantic(
+        candidates,
+        remaining_by_y,
+        after_left=after_left,
+        column_right=column_right,
+    )
+    survivors = tuple(check.candidate for check in checks)
+    if stats is not None:
+        stats.live_filter_calls += 1
+        stats.live_survivors += len(survivors)
+    return live_hit, survivors
+
+
 def find_next_baseline_up(
     remaining: set[Pixel],
     remaining_by_y: Mapping[int, Iterable[int]],
@@ -400,9 +417,15 @@ def find_next_baseline_up(
         column_right=column_right,
         stats=stats,
     )
-    hit = pick_leftmost_unique_maximal(candidates)
-    if hit is not None or candidates:
-        return hit, candidates
+    hit, filtered = _pick_with_live_profile(
+        candidates,
+        remaining_by_y,
+        after_left=after_left,
+        column_right=column_right,
+        stats=stats,
+    )
+    if hit is not None or filtered:
+        return hit, filtered
 
     if row_bottom is None:
         row_bottom = baseline + library.max_down + 1
@@ -418,4 +441,10 @@ def find_next_baseline_up(
         after_left=after_left,
         column_right=column_right,
     )
-    return pick_leftmost_unique_maximal(downward), downward
+    return _pick_with_live_profile(
+        downward,
+        remaining_by_y,
+        after_left=after_left,
+        column_right=column_right,
+        stats=stats,
+    )
