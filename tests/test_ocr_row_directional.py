@@ -136,6 +136,43 @@ class RowDirectionalTests(unittest.TestCase):
         self.assertEqual(hit.left, 60)
         self.assertEqual(search.y, 20)
 
+    def test_first_match_only_sets_horizon_then_lower_dash_can_win(self) -> None:
+        dash = GlyphModel(
+            label="-",
+            style="roman",
+            pixels=frozenset({(0, 0), (1, 0), (2, 0), (3, 0)}),
+            sources=1,
+        )
+        later = GlyphModel(
+            label="k",
+            style="roman",
+            pixels=frozenset({(0, -7), (0, -6), (0, -5), (0, -4), (0, -3), (0, -2), (1, -1), (2, 0)}),
+            sources=1,
+        )
+        dash_pixels = frozenset({(60 + x, 20 + y) for x, y in dash.pixels})
+        later_pixels = frozenset({(64 + x, 20 + y) for x, y in later.pixels})
+        black = set(dash_pixels | later_pixels)
+        residual = ResidualInk(black)
+        library = CompiledGlyphLibrary([dash, later])
+        profile = build_column_left_profile(residual.rows, top=10, bottom=22)
+
+        hit, search = first_glyph_top_down(
+            black,
+            residual.rows,
+            library,
+            row_top=10,
+            row_bottom=22,
+            allowed_translate_x_ranges=((56, 68),),
+            left_profile=profile,
+        )
+
+        self.assertIsNotNone(hit)
+        assert hit is not None
+        self.assertEqual(search.y, 13)  # the k ascender is the first exact clue
+        self.assertEqual(hit.model.label, "-")
+        self.assertEqual(hit.left, 60)
+        self.assertEqual(hit.baseline, 20)
+
 
 if __name__ == "__main__":
     unittest.main()
