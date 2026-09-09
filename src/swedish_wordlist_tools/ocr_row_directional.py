@@ -16,8 +16,8 @@ class FirstGlyphSearch:
     candidates: tuple[BaselineMatch, ...]
 
 
-def _tx_allowed(tx: int, ranges: tuple[TranslateXRange, ...]) -> bool:
-    return any(lo <= tx <= hi for lo, hi in ranges)
+def _x_allowed(x: int, ranges: tuple[TranslateXRange, ...]) -> bool:
+    return any(lo <= x <= hi for lo, hi in ranges)
 
 
 def _placed_pixels(item: CompiledGlyph, *, tx: int, baseline: int) -> frozenset[Pixel]:
@@ -54,10 +54,13 @@ def first_glyph_top_down(
     """Find the first glyph from the known upper row boundary.
 
     ``row_top`` is the only required row boundary.  With a whole-column left
-    profile we walk downward from it until the profile can actually seed an
-    exact glyph placement whose x translation belongs to a known row-start
-    interval.  The glyph itself determines how far downward verification must
-    look; a pre-known lower text-row boundary is therefore not required.
+    profile we walk downward until the *observed profile x itself* enters a
+    legal row-start interval and can seed an exact glyph placement.  The start
+    intervals are page coordinates, not model translation coordinates.
+
+    This distinction matters for short first glyphs such as '-': a later glyph
+    may have a tall ascender and become visible earlier, but if that profile x
+    lies outside the row-start interval it must not start the row.
 
     ``row_bottom`` remains as an optional compatibility/search limit for older
     callers and focused tests.  New sequential page OCR should leave it unset.
@@ -83,16 +86,17 @@ def first_glyph_top_down(
     else:
         scan_y = left_profile.nonblank_y(row_top, scan_bottom)
 
-    # The first profile raster row that can seed any exact row-start glyph owns
-    # the start event.  We do not continue into later text rows looking for a
-    # more attractive candidate; all alternatives born from this same event are
-    # resolved together.
+    # The first profile raster row inside a legal row-start x interval that can
+    # seed any exact glyph owns the start event. Alternatives from that same
+    # event are resolved together; we do not jump to a later glyph merely
+    # because it has an earlier ascender.
     for page_y in scan_y:
         if left_profile is None:
             observed_xs = tuple(black_by_y.get(page_y, ()))
         else:
             left_x = left_profile.at(page_y)
             observed_xs = () if left_x is None else (left_x,)
+        observed_xs = tuple(x for x in observed_xs if _x_allowed(x, ranges))
         if not observed_xs:
             continue
 
@@ -104,8 +108,6 @@ def first_glyph_top_down(
             for observed_x in observed_xs:
                 for model_x in top_row:
                     tx = observed_x - model_x
-                    if not _tx_allowed(tx, ranges):
-                        continue
                     key = (id(item.model), tx, baseline)
                     if key in proposals:
                         continue
