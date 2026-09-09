@@ -28,12 +28,29 @@ def _candidate_span(candidate: BaselineMatch) -> tuple[int, int]:
     return min(xs), max(xs)
 
 
+def _residual_row(
+    remaining_by_y: Mapping[int, Iterable[int]],
+    page_y: int,
+    *,
+    after_left: int,
+    column_right: int,
+) -> tuple[int, ...]:
+    return tuple(
+        sorted(
+            x
+            for x in remaining_by_y.get(page_y, ())
+            if after_left < x < column_right
+        )
+    )
+
+
 def check_live_candidate(
     candidate: BaselineMatch,
     remaining_by_y: Mapping[int, Iterable[int]],
     *,
     after_left: int,
     column_right: int,
+    row_top: int | None = None,
 ) -> LiveCandidateCheck:
     """Verify one placed glyph against the dynamic residual left profile.
 
@@ -48,6 +65,14 @@ def check_live_candidate(
       happen;
     * residual front farther right, or no residual row, contradicts expected ink;
     * an internal horizontal gap must be blank inside the candidate's own x span.
+
+    If ``row_top`` is supplied, the upward profile walk does not stop merely
+    because a short candidate has reached its own top.  We continue toward the
+    known row top.  Residual front ink still inside the candidate's horizontal
+    span above its claimed top means the candidate's required end/change event
+    never happened, so the short interpretation dies.  This is what separates
+    e.g. a short ``r`` interpretation from a taller ``f`` when their lower
+    profile is temporarily compatible.
 
     Ink farther right is irrelevant. Ink farther left can belong to another
     overlapping glyph only when it lies outside this candidate's own span.
@@ -69,12 +94,11 @@ def check_live_candidate(
 
     for rel_y in range(rel_top, rel_bottom + 1):
         page_y = candidate.baseline + rel_y
-        residual_xs = tuple(
-            sorted(
-                x
-                for x in remaining_by_y.get(page_y, ())
-                if after_left < x < column_right
-            )
+        residual_xs = _residual_row(
+            remaining_by_y,
+            page_y,
+            after_left=after_left,
+            column_right=column_right,
         )
         model_xs = rows.get(rel_y)
 
@@ -144,6 +168,36 @@ def check_live_candidate(
             )
         hidden_rows += 1
 
+    # A candidate's top edge is itself a profile event.  When matching upward,
+    # a short glyph cannot be declared complete if the residual left front
+    # simply continues through that event inside the glyph's own x span.
+    if row_top is not None:
+        candidate_top = candidate.baseline + rel_top
+        for page_y in range(candidate_top - 1, int(row_top) - 1, -1):
+            residual_xs = _residual_row(
+                remaining_by_y,
+                page_y,
+                after_left=after_left,
+                column_right=column_right,
+            )
+            if not residual_xs:
+                continue
+            observed_left = residual_xs[0]
+            if span_left <= observed_left <= span_right:
+                return LiveCandidateCheck(
+                    candidate=candidate,
+                    alive=False,
+                    front_rows=front_rows,
+                    hidden_rows=hidden_rows,
+                    gap_rows=gap_rows,
+                    contradiction_y=page_y,
+                )
+            # Once the residual front has moved genuinely outside this glyph's
+            # span, its top/end event has happened; rows farther upward belong
+            # to other geometry and need not be charged to this candidate.
+            if observed_left < span_left or observed_left > span_right:
+                break
+
     return LiveCandidateCheck(
         candidate=candidate,
         alive=True,
@@ -159,6 +213,7 @@ def live_survivors(
     *,
     after_left: int,
     column_right: int,
+    row_top: int | None = None,
 ) -> tuple[LiveCandidateCheck, ...]:
     checks = [
         check_live_candidate(
@@ -166,6 +221,7 @@ def live_survivors(
             remaining_by_y,
             after_left=after_left,
             column_right=column_right,
+            row_top=row_top,
         )
         for candidate in candidates
     ]
@@ -191,6 +247,7 @@ def pick_unique_live_semantic(
     *,
     after_left: int,
     column_right: int,
+    row_top: int | None = None,
 ) -> tuple[BaselineMatch | None, tuple[LiveCandidateCheck, ...]]:
     """Return a glyph only when one leftmost semantic interpretation survives.
 
@@ -205,6 +262,7 @@ def pick_unique_live_semantic(
         remaining_by_y,
         after_left=after_left,
         column_right=column_right,
+        row_top=row_top,
     )
     if not survivors:
         return None, survivors
