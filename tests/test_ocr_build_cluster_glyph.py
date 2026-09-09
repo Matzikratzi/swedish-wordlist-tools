@@ -50,6 +50,28 @@ class ClusterGlyphTests(unittest.TestCase):
         self.assertEqual(8, len(placement.pixels))
         self.assertEqual(frozenset({(1, 1)}), placement.enclosed_white)
 
+    def test_cluster_entry_preserves_shared_role(self) -> None:
+        left = entry("g000001", "f", {(0, 0), (1, 0), (0, 1), (0, 2), (1, 2)})
+        right = entry("g000002", "r", {(0, 0), (0, 1), (0, 2)})
+        left["role"] = "bold"
+        right["role"] = "bold"
+        placement = find_cluster_placements([left], [right], min_dx=2, max_dx=2)[0]
+
+        cluster = build_cluster_entry("fr", placement, [left, right])
+
+        self.assertEqual("bold", cluster["role"])
+
+    def test_cluster_entry_falls_back_to_unknown_for_mixed_roles(self) -> None:
+        left = entry("g000001", "f", {(0, 0), (1, 0), (0, 1), (0, 2), (1, 2)})
+        right = entry("g000002", "r", {(0, 0), (0, 1), (0, 2)})
+        left["role"] = "bold"
+        right["role"] = "roman"
+        placement = find_cluster_placements([left], [right], min_dx=2, max_dx=2)[0]
+
+        cluster = build_cluster_entry("fr", placement, [left, right])
+
+        self.assertEqual("unknown", cluster["role"])
+
     def test_cluster_entry_preserves_shared_style(self) -> None:
         left = entry("g000001", "f", {(0, 0), (1, 0), (0, 1), (0, 2), (1, 2)})
         right = entry("g000002", "r", {(0, 0), (0, 1), (0, 2)})
