@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 from time import perf_counter
 
-from .ocr_baseline_up import BaselineUpStats, CompiledGlyphLibrary, ResidualInk, find_next_baseline_up
+from .ocr_baseline_up import BaselineMatch, BaselineUpStats, CompiledGlyphLibrary, ResidualInk, find_next_baseline_up
 from .ocr_canonical_facit import load_canonical_facit_with_typography
 from .ocr_column_left_profile import build_column_left_profile
 from .ocr_page_start_geometry import infer_page_start_geometry
@@ -35,6 +35,14 @@ def _relevant_residual(
     }
 
 
+def _match_summary(hit: BaselineMatch) -> str:
+    return (
+        f"{hit.model.label!r}/{hit.model.style}@x{hit.left}..{hit.right} "
+        f"tx={hit.tx} baseline={hit.baseline} discovered_y={hit.discovered_y} "
+        f"pixels={len(hit.pixels)} sources={hit.model.sources}"
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
@@ -52,7 +60,15 @@ def main() -> int:
     ap.add_argument("--max-glyphs", type=int, default=100)
     ap.add_argument("--threshold", type=int, default=210)
     ap.add_argument("--start-x-tolerance", type=int, default=4)
+    ap.add_argument(
+        "--trace-row",
+        type=int,
+        action="append",
+        default=[],
+        help="print candidate decisions for this zero-based row index; repeat for multiple rows",
+    )
     args = ap.parse_args()
+    trace_rows = set(args.trace_row)
 
     total_started = perf_counter()
 
@@ -127,6 +143,7 @@ def main() -> int:
         row_started = perf_counter()
         row_top = int(row["page_top"])
         row_bottom = int(row["page_bottom"])
+        trace = row_index in trace_rows
 
         phase_started = perf_counter()
         row_black = _row_black(page_residual.rows, top=row_top, bottom=row_bottom)
@@ -176,6 +193,14 @@ def main() -> int:
         status = "complete"
         stop_candidates = 0
 
+        if trace:
+            print(
+                f"directional-trace: row={row_index} step=0 accepted="
+                f"{first.model.label!r}/{first.model.style}@x{first.left}..{first.right} "
+                f"baseline={first.baseline} pixels={len(first.pixels)} first_y={first_search.y}",
+                flush=True,
+            )
+
         while glyphs < args.max_glyphs:
             phase_started = perf_counter()
             hit, candidates = find_next_baseline_up(
@@ -194,6 +219,20 @@ def main() -> int:
             baseline_total += elapsed
             row_baseline_calls += 1
             baseline_calls += 1
+
+            if trace:
+                print(
+                    f"directional-trace: row={row_index} step={glyphs} after_left={current_left} "
+                    f"profile_bottom={explained_bottom} candidates={len(candidates)} "
+                    f"accepted={_match_summary(hit) if hit is not None else None}",
+                    flush=True,
+                )
+                for candidate_index, candidate in enumerate(candidates):
+                    print(
+                        f"directional-trace-candidate: row={row_index} step={glyphs} "
+                        f"n={candidate_index} {_match_summary(candidate)}",
+                        flush=True,
+                    )
 
             if hit is None:
                 baseline_misses += 1
@@ -241,6 +280,17 @@ def main() -> int:
         elapsed = perf_counter() - phase_started
         row_residual += elapsed
         residual_total += elapsed
+
+        if trace and remaining:
+            by_y: dict[int, list[int]] = {}
+            for x, y in sorted(remaining, key=lambda pixel: (pixel[1], pixel[0])):
+                by_y.setdefault(y, []).append(x)
+            for y, xs in by_y.items():
+                print(
+                    f"directional-trace-residual: row={row_index} y={y} "
+                    f"left={min(xs)} right={max(xs)} xs={xs}",
+                    flush=True,
+                )
 
         row_seconds = perf_counter() - row_started
         row_accounted = row_setup + row_first + row_baseline + row_consume + row_residual
