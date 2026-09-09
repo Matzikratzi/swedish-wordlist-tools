@@ -111,29 +111,30 @@ class BaselineUpTests(unittest.TestCase):
         self.assertEqual(hit.pixels, placed)
 
     def test_ambiguous_exact_candidates_are_filtered_by_full_live_profile(self) -> None:
-        good = GlyphModel(
-            label="L",
-            style="roman",
-            pixels=frozenset({(0, -2), (0, -1), (1, 0)}),
-            sources=1,
-        )
-        bad = GlyphModel(
+        solid = GlyphModel(
             label="I",
             style="roman",
             pixels=frozenset({(0, -2), (0, -1), (0, 0)}),
             sources=1,
         )
-        # Both models are exact subsets, but on the baseline the residual front
-        # lies at x=13.  I would require x=12 there and therefore contradicts
-        # the full left profile; L survives.
+        detached = GlyphModel(
+            label="dot-stem",
+            style="roman",
+            pixels=frozenset({(0, -2), (0, 0)}),
+            sources=1,
+        )
+        # Both are exact subsets of the residual bitmap.  The detached model,
+        # however, declares y=9 to be an internal horizontal gap.  The real ink
+        # at (12,9) therefore kills only that candidate in the live profile
+        # check, while the solid model remains valid.
         black = {
             (12, 8),
             (12, 9),
-            (13, 10),
+            (12, 10),
             (20, 10),
         }
         residual = ResidualInk(black)
-        library = CompiledGlyphLibrary([good, bad])
+        library = CompiledGlyphLibrary([solid, detached])
         stats = BaselineUpStats()
 
         hit, candidates = find_next_baseline_up(
@@ -150,8 +151,8 @@ class BaselineUpTests(unittest.TestCase):
 
         self.assertIsNotNone(hit)
         assert hit is not None
-        self.assertEqual(hit.model.label, "L")
-        self.assertEqual([candidate.model.label for candidate in candidates], ["L"])
+        self.assertEqual(hit.model.label, "I")
+        self.assertEqual([candidate.model.label for candidate in candidates], ["I"])
         self.assertEqual(stats.live_filter_calls, 1)
         self.assertEqual(stats.live_survivors, 1)
 
