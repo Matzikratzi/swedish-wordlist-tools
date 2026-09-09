@@ -38,7 +38,7 @@ class RowDirectionalTests(unittest.TestCase):
         self.assertEqual(hit.baseline, 8)
         self.assertEqual(search.y, 6)
 
-    def test_stays_passive_until_a_valid_origin_can_be_proposed(self) -> None:
+    def test_start_interval_applies_to_observed_profile_x_not_translation(self) -> None:
         model = GlyphModel(
             label="x",
             style="roman",
@@ -56,7 +56,7 @@ class RowDirectionalTests(unittest.TestCase):
             library,
             row_top=3,
             row_bottom=16,
-            allowed_translate_x_ranges=((20, 20),),
+            allowed_translate_x_ranges=((22, 22),),
         )
 
         self.assertIsNotNone(hit)
@@ -64,7 +64,7 @@ class RowDirectionalTests(unittest.TestCase):
         self.assertEqual(hit.tx, 20)
         self.assertEqual(search.y, 10)
 
-    def test_later_ascender_does_not_beat_textual_first_glyph(self) -> None:
+    def test_later_ascender_outside_start_interval_does_not_beat_first_glyph(self) -> None:
         first = GlyphModel(
             label="a",
             style="roman",
@@ -90,7 +90,7 @@ class RowDirectionalTests(unittest.TestCase):
             library,
             row_top=6,
             row_bottom=14,
-            allowed_translate_x_ranges=((8, 22),),
+            allowed_translate_x_ranges=((8, 12),),
             left_profile=profile,
         )
 
@@ -99,6 +99,42 @@ class RowDirectionalTests(unittest.TestCase):
         self.assertEqual(hit.model.label, "a")
         self.assertEqual(hit.left, 10)
         self.assertEqual(search.y, 10)
+
+    def test_short_first_dash_can_appear_after_later_ascender(self) -> None:
+        dash = GlyphModel(
+            label="-",
+            style="roman",
+            pixels=frozenset({(0, 0), (1, 0), (2, 0), (3, 0)}),
+            sources=3,
+        )
+        later = GlyphModel(
+            label="k",
+            style="roman",
+            pixels=frozenset({(0, -7), (0, -6), (0, -5), (0, -4), (0, -3), (0, -2), (1, -1), (2, 0)}),
+            sources=3,
+        )
+        dash_pixels = frozenset({(60 + x, 20 + y) for x, y in dash.pixels})
+        later_pixels = frozenset({(68 + x, 20 + y) for x, y in later.pixels})
+        black = set(dash_pixels | later_pixels)
+        residual = ResidualInk(black)
+        library = CompiledGlyphLibrary([dash, later])
+        profile = build_column_left_profile(residual.rows, top=10, bottom=22)
+
+        hit, search = first_glyph_top_down(
+            black,
+            residual.rows,
+            library,
+            row_top=10,
+            row_bottom=22,
+            allowed_translate_x_ranges=((56, 64),),
+            left_profile=profile,
+        )
+
+        self.assertIsNotNone(hit)
+        assert hit is not None
+        self.assertEqual(hit.model.label, "-")
+        self.assertEqual(hit.left, 60)
+        self.assertEqual(search.y, 20)
 
 
 if __name__ == "__main__":
