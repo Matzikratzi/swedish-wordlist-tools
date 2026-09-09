@@ -114,28 +114,30 @@ class BaselineUpTests(unittest.TestCase):
         solid = GlyphModel(
             label="I",
             style="roman",
-            pixels=frozenset({(0, -2), (0, -1), (1, 0)}),
+            pixels=frozenset({(0, -2), (0, -1), (0, 0)}),
             sources=1,
         )
-        detached = GlyphModel(
-            label="dot-stem",
+        changing = GlyphModel(
+            label="edge-change",
             style="roman",
-            pixels=frozenset({(0, -2), (0, 0)}),
+            pixels=frozenset({(1, -2), (0, 0)}),
             sources=1,
         )
         # Both placements are exact subsets and neither is a subset of the
-        # other: I owns (13,10), detached owns (12,10).  The detached model also
-        # declares y=9 to be an internal blank row, contradicted by (12,9), so
-        # only I survives the live-profile check.
+        # other: I owns (12,9), edge-change owns (13,8).  The observed residual
+        # front stays at x=12 on y=8..10.  I therefore matches the whole profile,
+        # while edge-change requires the top edge at x=13 (and a blank middle
+        # row) before returning to x=12.  Its mandatory profile change never
+        # happens, so only I survives the live-profile check.
         black = {
             (12, 8),
+            (13, 8),
             (12, 9),
             (12, 10),
-            (13, 10),
             (20, 10),
         }
         residual = ResidualInk(black)
-        library = CompiledGlyphLibrary([solid, detached])
+        library = CompiledGlyphLibrary([solid, changing])
         stats = BaselineUpStats()
 
         hit, candidates = find_next_baseline_up(
