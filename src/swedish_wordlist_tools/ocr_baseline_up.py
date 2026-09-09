@@ -172,20 +172,7 @@ def baseline_up_candidates(
     column_right: int,
     stats: BaselineUpStats | None = None,
 ) -> tuple[BaselineMatch, ...]:
-    """Find exact next-glyph candidates from the residual left profile.
-
-    For every raster row from the known row top through the lowest y reached by
-    an already accepted glyph, only the *leftmost still-unexplained* pixel is
-    used to propose placements. The complete glyph is still verified against
-    the full 2D residual bitmap.
-
-    A profile point contributes at most one translation per model. If this
-    profile point belongs to the candidate glyph, its leftmost pixel on this
-    relative raster row must coincide with the residual profile front. If the
-    front actually belongs to a later overlapping glyph, that proposal simply
-    fails exact 2D verification and another raster row can still anchor the
-    correct placement.
-    """
+    """Find exact next-glyph candidates from the residual left profile."""
     if stats is not None:
         stats.calls += 1
     if baseline < row_top:
@@ -274,13 +261,6 @@ def residual_downward_candidates(
     after_left: int,
     column_right: int,
 ) -> tuple[BaselineMatch, ...]:
-    """Try the residual immediately below the current baseline.
-
-    This is deliberately local glyph lookahead, not a text-row boundary.  The
-    caller normally supplies ``baseline + library.max_down + 1`` as the bottom
-    limit, so candidates may establish a lower baseline or contain descenders
-    without allowing the search to wander arbitrarily into following rows.
-    """
     eligible = {
         (x, y)
         for x, y in remaining
@@ -342,8 +322,35 @@ def residual_downward_candidates(
     )
 
 
+def _collapse_semantic_variants(candidates: Iterable[BaselineMatch]) -> list[BaselineMatch]:
+    """Collapse exact raster variants that mean the same placed glyph.
+
+    The facit can contain more than one exact bitmap for the same semantic glyph
+    at the same translation/baseline.  Those are geometry alternatives for one
+    OCR interpretation, not competing letters.  Keep one representative so
+    such variants cannot create a false ambiguity by themselves.
+    """
+    groups: dict[tuple[str, str, int, int], list[BaselineMatch]] = defaultdict(list)
+    for hit in candidates:
+        groups[(hit.model.label, hit.model.style, hit.tx, hit.baseline)].append(hit)
+
+    collapsed: list[BaselineMatch] = []
+    for variants in groups.values():
+        collapsed.append(
+            max(
+                variants,
+                key=lambda hit: (
+                    len(hit.pixels),
+                    hit.model.sources,
+                    -hit.discovered_y,
+                ),
+            )
+        )
+    return collapsed
+
+
 def pick_leftmost_unique_maximal(candidates: Iterable[BaselineMatch]) -> BaselineMatch | None:
-    rows = list(candidates)
+    rows = _collapse_semantic_variants(candidates)
     if not rows:
         return None
     left = min(hit.left for hit in rows)
@@ -354,14 +361,15 @@ def pick_leftmost_unique_maximal(candidates: Iterable[BaselineMatch]) -> Baselin
         for hit in rows
         if not any(hit.pixels < other.pixels for other in rows if other is not hit)
     ]
-    distinct = {hit.pixels for hit in maximal}
-    if len(distinct) != 1:
+    distinct_semantics = {
+        (hit.model.label, hit.model.style, hit.tx, hit.baseline)
+        for hit in maximal
+    }
+    if len(distinct_semantics) != 1:
         return None
 
-    target = next(iter(distinct))
-    equivalent = [hit for hit in maximal if hit.pixels == target]
     return max(
-        equivalent,
+        maximal,
         key=lambda hit: (len(hit.pixels), hit.model.sources, hit.model.label, hit.model.style),
     )
 
@@ -396,8 +404,6 @@ def find_next_baseline_up(
     if hit is not None or candidates:
         return hit, candidates
 
-    # No pre-known lower text-row boundary is needed.  Search downward only as
-    # far as a single canonical glyph can require from the current baseline.
     if row_bottom is None:
         row_bottom = baseline + library.max_down + 1
     else:
