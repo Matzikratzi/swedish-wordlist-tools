@@ -361,17 +361,12 @@ def _pick_with_live_profile(
     candidates: tuple[BaselineMatch, ...],
     remaining_by_y: Mapping[int, Iterable[int]],
     *,
+    row_top: int,
     after_left: int,
     column_right: int,
     stats: BaselineUpStats | None,
 ) -> tuple[BaselineMatch | None, tuple[BaselineMatch, ...]]:
-    """Filter genuine ambiguity through the whole placed glyph profile.
-
-    The fast exact matcher proposes placements from individual profile rows.
-    When those placements are ambiguous, run the full residual left-dominance
-    check over each candidate's vertical extent.  Import locally to avoid a
-    module cycle: the live checker intentionally works with BaselineMatch.
-    """
+    """Filter genuine ambiguity through the whole placed glyph profile."""
     hit = pick_leftmost_unique_maximal(candidates)
     if hit is not None or not candidates:
         return hit, candidates
@@ -383,6 +378,7 @@ def _pick_with_live_profile(
         remaining_by_y,
         after_left=after_left,
         column_right=column_right,
+        row_top=row_top,
     )
     survivors = tuple(check.candidate for check in checks)
     if stats is not None:
@@ -420,6 +416,7 @@ def find_next_baseline_up(
     hit, filtered = _pick_with_live_profile(
         candidates,
         remaining_by_y,
+        row_top=row_top,
         after_left=after_left,
         column_right=column_right,
         stats=stats,
@@ -444,6 +441,7 @@ def find_next_baseline_up(
     return _pick_with_live_profile(
         downward,
         remaining_by_y,
+        row_top=row_top,
         after_left=after_left,
         column_right=column_right,
         stats=stats,
