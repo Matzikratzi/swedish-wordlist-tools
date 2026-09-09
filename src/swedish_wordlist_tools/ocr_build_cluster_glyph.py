@@ -103,8 +103,6 @@ def find_cluster_placements(
                     continue
                 union = frozenset(left | right)
                 holes = _enclosed_white(union)
-                # The requested cluster must CREATE an enclosed white region;
-                # a hole already present in either component does not count.
                 if len(holes) <= left_holes + len(_enclosed_white(right)):
                     continue
                 found.append(
@@ -164,9 +162,10 @@ def _same_optional_value(left: dict, right: dict, key: str) -> str | None:
 
 
 def build_cluster_entry(label: str, placement: ClusterPlacement, glyphs: Iterable[dict]) -> dict:
+    role = _same_optional_value(placement.left_entry, placement.right_entry, "role")
     entry: dict = {
         "label": label,
-        "role": "unknown",
+        "role": role if role is not None else "unknown",
         "pixels_relative_to_baseline": _normalized_pixels(placement.pixels),
         "sources": [
             {
