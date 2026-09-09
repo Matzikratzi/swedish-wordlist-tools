@@ -264,6 +264,89 @@ def baseline_up_candidates(
     )
 
 
+def residual_downward_candidates(
+    remaining: set[Pixel],
+    library: CompiledGlyphLibrary,
+    *,
+    baseline: int,
+    row_top: int,
+    row_bottom: int,
+    after_left: int,
+    column_right: int,
+) -> tuple[BaselineMatch, ...]:
+    """Try to explain a final residual cluster by allowing a lower baseline.
+
+    This is deliberately a fallback, used only after the normal locked-baseline
+    search produced no candidates at all.  It implements the end-of-row check:
+    before declaring the row finished, keep walking downward and allow the next
+    glyph to establish a baseline at or below the current one.  Placements must
+    remain completely inside the current row and must exactly use existing
+    residual pixels.
+
+    The leftmost residual x anchors the candidate's physical left edge.  That
+    keeps the fallback cheap and prevents it from jumping over unexplained ink.
+    """
+    eligible = {
+        (x, y)
+        for x, y in remaining
+        if after_left < x < column_right and row_top <= y < row_bottom
+    }
+    if not eligible:
+        return ()
+
+    left_x = min(x for x, _y in eligible)
+    left_ys = tuple(sorted(y for x, y in eligible if x == left_x))
+    seen: set[tuple[int, int, int]] = set()
+    found: list[BaselineMatch] = []
+
+    for item in library.models:
+        tx = left_x - item.min_x
+        physical_right = tx + item.max_x
+        if physical_right >= column_right:
+            continue
+
+        for rel_y, row_xs in item.rows.items():
+            if item.min_x not in row_xs:
+                continue
+            for page_y in left_ys:
+                candidate_baseline = page_y - rel_y
+                if candidate_baseline < baseline:
+                    continue
+                key = _candidate_key(item, tx, candidate_baseline)
+                if key in seen:
+                    continue
+                seen.add(key)
+                placed = _placed_pixels(item, tx=tx, baseline=candidate_baseline)
+                if not placed:
+                    continue
+                if any(y < row_top or y >= row_bottom for _x, y in placed):
+                    continue
+                if placed.issubset(remaining):
+                    found.append(
+                        BaselineMatch(
+                            model=item.model,
+                            tx=tx,
+                            baseline=candidate_baseline,
+                            pixels=placed,
+                            discovered_y=page_y,
+                        )
+                    )
+
+    return tuple(
+        sorted(
+            found,
+            key=lambda hit: (
+                hit.left,
+                hit.baseline,
+                -len(hit.pixels),
+                -hit.model.sources,
+                hit.model.label,
+                hit.model.style,
+            ),
+        )
+    )
+
+
 def pick_leftmost_unique_maximal(candidates: Iterable[BaselineMatch]) -> BaselineMatch | None:
     rows = list(candidates)
     if not rows:
@@ -295,6 +378,7 @@ def find_next_baseline_up(
     *,
     baseline: int,
     row_top: int,
+    row_bottom: int | None = None,
     profile_bottom: int | None = None,
     after_left: int,
     column_right: int,
@@ -313,4 +397,17 @@ def find_next_baseline_up(
         column_right=column_right,
         stats=stats,
     )
-    return pick_leftmost_unique_maximal(candidates), candidates
+    hit = pick_leftmost_unique_maximal(candidates)
+    if hit is not None or candidates or row_bottom is None:
+        return hit, candidates
+
+    downward = residual_downward_candidates(
+        remaining,
+        library,
+        baseline=baseline,
+        row_top=row_top,
+        row_bottom=row_bottom,
+        after_left=after_left,
+        column_right=column_right,
+    )
+    return pick_leftmost_unique_maximal(downward), downward
