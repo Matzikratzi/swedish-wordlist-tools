@@ -77,6 +77,40 @@ def _candidate_matches_seen_profile(
     return True
 
 
+def _candidate_explains_left_ink_to_baseline(
+    candidate: BaselineMatch,
+    black: set[Pixel],
+) -> bool:
+    """Reject a first-glyph placement that skips unexplained ink to baseline.
+
+    The trigger row gives both the current left-profile front and, via the
+    candidate placement, a baseline.  A candidate that really is the first
+    glyph may have its own raster extending down and left from that trigger,
+    but it may not leave *other* black pixels behind in the already-passed
+    left-side region before the baseline is reached.
+
+    We therefore inspect the rectangle from the discovery row through the
+    candidate baseline and from the column's left side through the candidate's
+    own left-profile front on the discovery row.  Every black pixel there must
+    belong to the candidate itself.  This is purely geometric and contains no
+    label/style/page/row special case.
+    """
+    rows = _candidate_rows(candidate)
+    trigger_xs = rows.get(candidate.discovered_y)
+    if not trigger_xs:
+        return False
+    trigger_front = trigger_xs[0]
+
+    for x, y in black:
+        if y < candidate.discovered_y or y > candidate.baseline:
+            continue
+        if x > trigger_front:
+            continue
+        if (x, y) not in candidate.pixels:
+            return False
+    return True
+
+
 def _advance_candidate(
     candidate: BaselineMatch,
     *,
@@ -135,6 +169,11 @@ def _history_seed_proposals(
     must agree with all candidate-owned profile rows that have already been
     observed.  Profile observations before the candidate begins are allowed to
     remain unexplained at this stage.
+
+    Once the placement establishes a baseline, it must also explain all black
+    pixels in the already-passed left-side region from the trigger row down to
+    that baseline.  This prevents a short high candidate from jumping over the
+    lower part of a taller first glyph.
     """
     proposals: dict[tuple[int, int, int], BaselineMatch] = {}
 
@@ -165,6 +204,8 @@ def _history_seed_proposals(
                 profile_history,
                 through_y=page_y,
             ):
+                continue
+            if not _candidate_explains_left_ink_to_baseline(candidate, black):
                 continue
             proposals[key] = candidate
 
@@ -274,8 +315,6 @@ def first_glyph_top_down(
                     candidates=passed,
                 )
 
-            # Every candidate was contradicted.  Keep the complete history and
-            # allow this same observation to become a later trigger if legal.
             active_y = None
 
         if profile_x is None or not _x_allowed(profile_x, ranges):
