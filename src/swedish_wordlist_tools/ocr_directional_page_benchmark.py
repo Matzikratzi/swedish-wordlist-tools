@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from pathlib import Path
 from time import perf_counter
 
@@ -32,6 +33,11 @@ def _match_summary(hit: BaselineMatch) -> str:
         f"tx={hit.tx} baseline={hit.baseline} discovered_y={hit.discovered_y} "
         f"pixels={len(hit.pixels)} sources={hit.model.sources}"
     )
+
+
+def _format_histogram(values: list[int]) -> str:
+    counts = Counter(values)
+    return "{" + ",".join(f"{x}:{counts[x]}" for x in sorted(counts)) + "}"
 
 
 def _print_unexplained_row_check(
@@ -105,6 +111,9 @@ def main() -> int:
     )
     profile_seconds = perf_counter() - profile_started
     profile_events = left_profile.changes()
+    column_histogram = _format_histogram(
+        [int(x) for x in left_profile.values if x is not None]
+    )
 
     columns = context["row_map"].get("columns") or []
     if not 0 <= args.column < len(columns):
@@ -115,9 +124,6 @@ def main() -> int:
     if not reference_rows:
         raise ValueError("no reference rows available for benchmark")
 
-    # The reference row map is still useful to calibrate the page's legal
-    # row-start x intervals and to tell this benchmark how many rows to attempt.
-    # Its lower row boundaries do not participate in OCR.
     geometry_started = perf_counter()
     inferred = infer_page_start_geometry(
         left_profile,
@@ -137,6 +143,7 @@ def main() -> int:
         f"profile_build={profile_seconds:.6f}s geometry={geometry_seconds:.6f}s "
         f"profile_rows={len(left_profile.values)} profile_events={len(profile_events)} "
         f"black={len(black)} bounds={bounds} start_values={inferred.centers} "
+        f"column_hist={column_histogram} "
         f"start_ranges={ranges} start_observations={len(inferred.observations)} "
         f"initial_row_top={row_top}",
         flush=True,
