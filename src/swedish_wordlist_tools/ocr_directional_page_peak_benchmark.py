@@ -151,10 +151,20 @@ def find_next_residual_profile(
     # Candidate state is (compiled glyph, tx, candidate baseline).  Only the
     # leftmost pixel of a model row may be aligned to the common start pixel.
     states: dict[tuple[int, int, int], tuple[baseline_up.CompiledGlyph, int, int]] = {}
+    anchor_proposals = 0
+    anchor_row_rejects = 0
+    start_page_row = remaining_by_y.get(start_y, ())
+    start_page_pixels = (
+        start_page_row
+        if isinstance(start_page_row, set)
+        else set(start_page_row)
+    )
+
     for item in library.models:
         for rel_y, row_xs in item.rows.items():
             if not row_xs:
                 continue
+            anchor_proposals += 1
             dx = row_xs[0]
             tx = start_x - dx
             candidate_baseline = start_y - rel_y
@@ -162,6 +172,16 @@ def find_next_residual_profile(
             physical_right = tx + item.max_x
             if physical_left <= after_left or physical_right >= column_right:
                 continue
+
+            # Necessary one-row 2-D condition at the birth pixel.  We already
+            # know exactly which model row is being aligned to start_y, so kill
+            # impossible placements before adding them to the live state
+            # machine.  Extra page ink is fine; every model pixel on this row
+            # must exist.
+            if any((tx + model_x) not in start_page_pixels for model_x in row_xs):
+                anchor_row_rejects += 1
+                continue
+
             key = (id(item.model), tx, candidate_baseline)
             states[key] = (item, tx, candidate_baseline)
 
@@ -243,7 +263,8 @@ def find_next_residual_profile(
     if trace:
         print(
             f"directional-residual-profile: start=({start_x},{start_y}) "
-            f"search_y={row_top}..{search_bottom} initial={initial_candidates} "
+            f"search_y={row_top}..{search_bottom} anchor_proposals={anchor_proposals} "
+            f"anchor_row_rejects={anchor_row_rejects} initial={initial_candidates} "
             f"profile_survivors={profile_survivors} "
             f"walk_down_to={max_bottom} walk_up_to={min_top}",
             flush=True,
