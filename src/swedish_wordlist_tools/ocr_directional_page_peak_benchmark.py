@@ -26,13 +26,7 @@ def _profile_for_rows(
 
 
 def _start_range_for_peak(peak: int) -> tuple[int, int]:
-    """Return the deliberately broad experimental start window around a peak.
-
-    The histogram peak identifies the nominal row-start level.  This benchmark
-    now admits one pixel to its left and three pixels to its right so that the
-    first-glyph lifecycle, rather than a very narrow start gate, is responsible
-    for rejecting locally plausible but subsequently contradicted candidates.
-    """
+    """Return the deliberately broad experimental start window around a peak."""
     return peak - 1, peak + 3
 
 
@@ -42,20 +36,8 @@ def infer_peak_walk_start_geometry(
     *,
     tolerance: int = 4,
 ) -> InferredStartGeometry:
-    """Infer OCR start ranges from isolated-profile histogram peaks.
-
-    This is deliberately an experimental drop-in replacement for
-    infer_page_start_geometry.  It does not use glyph labels, styles, row types,
-    page numbers, or reference-row classifications.
-
-    Two strong isolated-minimum histogram groups establish the ordinary start
-    levels.  For this experiment each ordinary peak gets a wider allowed start
-    range from peak-1 through peak+3.  A possible third, farther-left level is
-    still admitted only when the top-down profile walk actually crosses the
-    left ordinary peak by two pixels; it uses the same broad peak-relative
-    window.
-    """
-    del tolerance  # kept only for compatibility with the benchmark call site
+    """Infer OCR start ranges from isolated-profile histogram peaks."""
+    del tolerance
 
     reference = list(reference_rows)
     profile = _profile_for_rows(source, reference)
@@ -108,97 +90,62 @@ def infer_peak_walk_start_geometry(
     )
 
 
-def _residual_leftmost_band_candidates(
+def _candidates_from_observation(
     remaining: set[baseline_up.Pixel],
-    remaining_by_y: Mapping[int, Iterable[int]],
     library: baseline_up.CompiledGlyphLibrary,
     *,
     baseline: int,
-    row_top: int,
-    after_left: int,
+    page_y: int,
+    observed_x: int,
     column_right: int,
     stats: baseline_up.BaselineUpStats | None = None,
 ) -> tuple[baseline_up.BaselineMatch, ...]:
-    """Propose later glyphs from the earliest residual ink above baseline.
-
-    The first glyph establishes the baseline.  Thereafter the next observation
-    is the globally leftmost unexplained x anywhere from row_top through the
-    baseline.  That x is only an observation frontier, not a required physical
-    glyph edge: any model pixel on the corresponding model row may be aligned
-    with a frontier pixel.  The complete placed model must then be present in
-    the residual, including any pixels below the baseline.
-    """
+    """Place any model pixel on one observed residual pixel at a known baseline."""
+    rel_y = page_y - baseline
+    possible_models = library.by_rel_y.get(rel_y, ())
     if stats is not None:
-        stats.calls += 1
-
-    frontier_x: int | None = None
-    frontier_ys: list[int] = []
-    for page_y in range(row_top, baseline + 1):
-        if stats is not None:
-            stats.y_rows += 1
-        xs = remaining_by_y.get(page_y, ())
-        eligible = [x for x in xs if after_left < x < column_right]
-        if not eligible:
-            continue
-        row_left = min(eligible)
-        if frontier_x is None or row_left < frontier_x:
-            frontier_x = row_left
-            frontier_ys = [page_y]
-        elif row_left == frontier_x:
-            frontier_ys.append(page_y)
-
-    if frontier_x is None:
-        return ()
-
-    if stats is not None:
-        stats.observed_pixels += len(frontier_ys)
+        stats.model_visits += len(possible_models)
 
     seen: set[tuple[int, int, int]] = set()
     found: list[baseline_up.BaselineMatch] = []
 
-    for page_y in frontier_ys:
-        rel_y = page_y - baseline
-        possible_models = library.by_rel_y.get(rel_y, ())
-        if stats is not None:
-            stats.model_visits += len(possible_models)
+    for item in possible_models:
+        model_row = item.rows[rel_y]
+        for model_x in model_row:
+            if stats is not None:
+                stats.raw_tx_proposals += 1
+            tx = observed_x - model_x
+            physical_right = tx + item.max_x
+            if physical_right >= column_right:
+                continue
+            if stats is not None:
+                stats.in_bounds_tx += 1
 
-        for item in possible_models:
-            model_row = item.rows[rel_y]
-            for model_x in model_row:
+            key = (id(item.model), tx, baseline)
+            if key in seen:
                 if stats is not None:
-                    stats.raw_tx_proposals += 1
-                tx = frontier_x - model_x
-                physical_right = tx + item.max_x
-                if physical_right >= column_right:
-                    continue
-                if stats is not None:
-                    stats.in_bounds_tx += 1
+                    stats.duplicate_tx += 1
+                continue
+            seen.add(key)
+            if stats is not None:
+                stats.unique_tx += 1
 
-                key = (id(item.model), tx, baseline)
-                if key in seen:
-                    if stats is not None:
-                        stats.duplicate_tx += 1
-                    continue
-                seen.add(key)
-                if stats is not None:
-                    stats.unique_tx += 1
-
-                placed = frozenset((tx + x, baseline + y) for x, y in item.model.pixels)
-                if stats is not None:
-                    stats.subset_checks += 1
-                if not placed.issubset(remaining):
-                    continue
-                if stats is not None:
-                    stats.exact_hits += 1
-                found.append(
-                    baseline_up.BaselineMatch(
-                        model=item.model,
-                        tx=tx,
-                        baseline=baseline,
-                        pixels=placed,
-                        discovered_y=page_y,
-                    )
+            placed = frozenset((tx + x, baseline + y) for x, y in item.model.pixels)
+            if stats is not None:
+                stats.subset_checks += 1
+            if not placed.issubset(remaining):
+                continue
+            if stats is not None:
+                stats.exact_hits += 1
+            found.append(
+                baseline_up.BaselineMatch(
+                    model=item.model,
+                    tx=tx,
+                    baseline=baseline,
+                    pixels=placed,
+                    discovered_y=page_y,
                 )
+            )
 
     return tuple(
         sorted(
@@ -214,6 +161,55 @@ def _residual_leftmost_band_candidates(
     )
 
 
+def _baseline_upward_candidates(
+    remaining: set[baseline_up.Pixel],
+    remaining_by_y: Mapping[int, Iterable[int]],
+    library: baseline_up.CompiledGlyphLibrary,
+    *,
+    baseline: int,
+    row_top: int,
+    after_left: int,
+    column_right: int,
+    stats: baseline_up.BaselineUpStats | None = None,
+) -> tuple[baseline_up.BaselineMatch, ...]:
+    """Search from baseline upward and stop at the first productive raster row.
+
+    For every y, only the leftmost unexplained pixel to the right of the already
+    accepted glyph is used as the observation.  The observation is not required
+    to be the candidate's physical left edge: any model pixel on that model row
+    may align with it.  Exact placement checks the entire glyph, including ink
+    below the baseline.
+    """
+    if stats is not None:
+        stats.calls += 1
+
+    for page_y in range(baseline, row_top - 1, -1):
+        if stats is not None:
+            stats.y_rows += 1
+        xs = remaining_by_y.get(page_y, ())
+        eligible = [x for x in xs if after_left < x < column_right]
+        if not eligible:
+            continue
+
+        observed_x = min(eligible)
+        if stats is not None:
+            stats.observed_pixels += 1
+
+        candidates = _candidates_from_observation(
+            remaining,
+            library,
+            baseline=baseline,
+            page_y=page_y,
+            observed_x=observed_x,
+            column_right=column_right,
+            stats=stats,
+        )
+        if candidates:
+            return candidates
+
+    return ()
+
+
 def find_next_residual_leftmost(
     remaining: set[baseline_up.Pixel],
     remaining_by_y: Mapping[int, Iterable[int]],
@@ -227,10 +223,10 @@ def find_next_residual_leftmost(
     column_right: int,
     stats: baseline_up.BaselineUpStats | None = None,
 ) -> tuple[baseline_up.BaselineMatch | None, tuple[baseline_up.BaselineMatch, ...]]:
-    """Experimental post-first-glyph search from the residual left frontier."""
+    """Experimental post-first-glyph search upward from the known baseline."""
     del profile_bottom
 
-    candidates = _residual_leftmost_band_candidates(
+    candidates = _baseline_upward_candidates(
         remaining,
         remaining_by_y,
         library,
@@ -241,9 +237,6 @@ def find_next_residual_leftmost(
         stats=stats,
     )
 
-    # Candidate generation starts only from ink at/above baseline, but exact
-    # placement already checks every model pixel.  If ambiguity remains, let the
-    # live-profile filter inspect through the possible descender extent too.
     known_bottom = (
         int(row_bottom) - 1
         if row_bottom is not None
