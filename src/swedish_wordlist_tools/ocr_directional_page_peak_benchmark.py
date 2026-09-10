@@ -7,7 +7,7 @@ from . import ocr_directional_page_benchmark as benchmark
 from .ocr_column_left_profile import ColumnLeftProfile, build_column_left_profile
 from .ocr_isolated_minima_cumulative import _isolated_profile_segments
 from .ocr_page_start_geometry import InferredStartGeometry
-from .ocr_profile_peak_walk import _segment_profile, _two_main_peaks, _walk_segment
+from .ocr_profile_peak_walk import _group_histogram, _segment_profile, _two_main_peaks, _walk_segment
 
 
 def _profile_for_rows(
@@ -24,6 +24,33 @@ def _profile_for_rows(
     return build_column_left_profile(source, top=top, bottom=bottom)
 
 
+def _start_pair_for_peak(hist: Counter[int], peak: int) -> tuple[int, int]:
+    """Return the best adjacent start pair inside the peak's histogram group.
+
+    Prefer a pair whose two x values are both actually observed.  This matters
+    for a group such as {60, 61}: anchoring at the modal 61 must not discard the
+    observed 60 start.  If the group contains only one observed x, keep the
+    earlier experimental convention of allowing that x and its immediate right
+    neighbour.
+    """
+    group = next((group for group in _group_histogram(hist) if peak in group.xs), None)
+    if group is None:
+        return peak, peak + 1
+
+    observed = sorted(set(group.xs))
+    adjacent = [(x, x + 1) for x in observed if x + 1 in observed]
+    if adjacent:
+        return max(
+            adjacent,
+            key=lambda pair: (
+                hist[pair[0]] + hist[pair[1]],
+                min(hist[pair[0]], hist[pair[1]]),
+                -pair[0],
+            ),
+        )
+    return peak, peak + 1
+
+
 def infer_peak_walk_start_geometry(
     source: ColumnLeftProfile | Mapping[int, Iterable[int]],
     reference_rows: Iterable[dict],
@@ -37,10 +64,11 @@ def infer_peak_walk_start_geometry(
     page numbers, or reference-row classifications.
 
     Two strong isolated-minimum histogram groups establish the ordinary start
-    levels.  Each level becomes exactly two adjacent allowed starts: peak and
-    peak+1.  A possible third, farther-left level is admitted only when the
-    top-down profile walk actually crosses the left ordinary peak by two pixels;
-    its most common observed minimum is then treated in the same way.
+    levels.  Each level becomes exactly two adjacent allowed starts.  When the
+    histogram group itself contains an observed adjacent pair, that observed pair
+    is used; otherwise the modal peak and its immediate right neighbour are used.
+    A possible third, farther-left level is admitted only when the top-down
+    profile walk actually crosses the left ordinary peak by two pixels.
     """
     del tolerance  # kept only for compatibility with the benchmark call site
 
@@ -63,28 +91,34 @@ def infer_peak_walk_start_geometry(
         if level == "third":
             third_minima.append(min_x)
 
-    peaks = [left_peak, right_peak]
+    ordinary_pairs = [
+        _start_pair_for_peak(hist, left_peak),
+        _start_pair_for_peak(hist, right_peak),
+    ]
+    ranges = list(ordinary_pairs)
+
     if third_minima:
         third_counts = Counter(third_minima)
         third_peak = max(third_counts, key=lambda x: (third_counts[x], -x))
         if third_peak <= left_peak - 2:
-            peaks.append(third_peak)
+            ranges.append(_start_pair_for_peak(third_counts, third_peak))
 
-    peaks = sorted(set(peaks))
-    ranges = tuple((peak, peak + 1) for peak in peaks)
-    centers = tuple(x for lo, hi in ranges for x in (lo, hi))
+    ranges = sorted(set(ranges))
+    ranges_tuple = tuple(ranges)
+    centers = tuple(sorted({x for lo, hi in ranges_tuple for x in (lo, hi)}))
 
     print(
         "directional-peak-starts: "
         f"hist={{{','.join(f'{x}:{hist[x]}' for x in sorted(hist))}}} "
         f"ordinary_peaks={(left_peak, right_peak)} "
-        f"third_minima={third_minima} ranges={ranges}",
+        f"ordinary_pairs={tuple(ordinary_pairs)} "
+        f"third_minima={third_minima} ranges={ranges_tuple}",
         flush=True,
     )
 
     return InferredStartGeometry(
         centers=centers,
-        ranges=ranges,
+        ranges=ranges_tuple,
         observations=tuple(min_x for _top, _bottom, min_x in segments),
     )
 
