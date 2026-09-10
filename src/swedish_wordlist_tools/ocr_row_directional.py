@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
@@ -199,6 +200,7 @@ def first_glyph_top_down(
     trace: bool = False,
     trace_prefix: str = "directional-trace",
 ) -> tuple[BaselineMatch | None, FirstGlyphSearch]:
+    trace = trace or os.environ.get("OCR_FIRST_GLYPH_TRACE") == "1"
     ranges = tuple((int(lo), int(hi)) for lo, hi in allowed_translate_x_ranges)
     if not ranges:
         return None, FirstGlyphSearch(y=None, candidates=())
@@ -270,9 +272,9 @@ def first_glyph_top_down(
             if passed:
                 hit = _pick_unique_maximal(passed)
                 if trace:
+                    accepted = repr(hit.model.label) if hit is not None else None
                     print(
-                        f"{trace_prefix} first-glyph-pick: y={page_y} passed={len(passed)} "
-                        f"accepted={hit.model.label!r if hit is not None else None}",
+                        f"{trace_prefix} first-glyph-pick: y={page_y} passed={len(passed)} accepted={accepted}",
                         flush=True,
                     )
                 return hit, FirstGlyphSearch(y=active_y, candidates=passed)
