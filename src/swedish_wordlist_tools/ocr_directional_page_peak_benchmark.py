@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Iterable, Mapping
 
+from . import ocr_baseline_up as baseline_up
 from . import ocr_directional_page_benchmark as benchmark
 from .ocr_column_left_profile import ColumnLeftProfile, build_column_left_profile
 from .ocr_isolated_minima_cumulative import _isolated_profile_segments
@@ -107,8 +108,145 @@ def infer_peak_walk_start_geometry(
     )
 
 
+def _residual_leftmost_band_candidates(
+    remaining: set[baseline_up.Pixel],
+    remaining_by_y: Mapping[int, Iterable[int]],
+    library: baseline_up.CompiledGlyphLibrary,
+    *,
+    baseline: int,
+    row_top: int,
+    after_left: int,
+    column_right: int,
+    stats: baseline_up.BaselineUpStats | None = None,
+) -> tuple[baseline_up.BaselineMatch, ...]:
+    """Propose next glyphs only from the earliest residual ink above baseline.
+
+    Once the first glyph has established the baseline, vertical discovery order
+    is irrelevant.  The next reading position is the globally leftmost still
+    unexplained x anywhere from row_top through baseline.  Every candidate must
+    explain that frontier on the known baseline.
+    """
+    if stats is not None:
+        stats.calls += 1
+
+    frontier_rows: list[tuple[int, int]] = []
+    for page_y in range(row_top, baseline + 1):
+        if stats is not None:
+            stats.y_rows += 1
+        xs = remaining_by_y.get(page_y, ())
+        eligible = [x for x in xs if after_left < x < column_right]
+        if eligible:
+            frontier_rows.append((min(eligible), page_y))
+
+    if not frontier_rows:
+        return ()
+
+    frontier_x = min(x for x, _page_y in frontier_rows)
+    frontier_ys = tuple(page_y for x, page_y in frontier_rows if x == frontier_x)
+    if stats is not None:
+        stats.observed_pixels += len(frontier_ys)
+
+    seen: set[tuple[int, int, int]] = set()
+    found: list[baseline_up.BaselineMatch] = []
+
+    for page_y in frontier_ys:
+        rel_y = page_y - baseline
+        possible_models = library.by_rel_y.get(rel_y, ())
+        if stats is not None:
+            stats.model_visits += len(possible_models)
+
+        for item in possible_models:
+            model_row = item.rows[rel_y]
+            if stats is not None:
+                stats.raw_tx_proposals += 1
+            tx = frontier_x - model_row[0]
+            physical_left = tx + item.min_x
+            physical_right = tx + item.max_x
+            if physical_left <= after_left or physical_right >= column_right:
+                continue
+            if stats is not None:
+                stats.in_bounds_tx += 1
+
+            key = (id(item.model), tx, baseline)
+            if key in seen:
+                if stats is not None:
+                    stats.duplicate_tx += 1
+                continue
+            seen.add(key)
+            if stats is not None:
+                stats.unique_tx += 1
+
+            placed = frozenset((tx + x, baseline + y) for x, y in item.model.pixels)
+            if stats is not None:
+                stats.subset_checks += 1
+            if not placed.issubset(remaining):
+                continue
+            if stats is not None:
+                stats.exact_hits += 1
+            found.append(
+                baseline_up.BaselineMatch(
+                    model=item.model,
+                    tx=tx,
+                    baseline=baseline,
+                    pixels=placed,
+                    discovered_y=page_y,
+                )
+            )
+
+    return tuple(
+        sorted(
+            found,
+            key=lambda hit: (
+                hit.left,
+                -len(hit.pixels),
+                -hit.model.sources,
+                hit.model.label,
+                hit.model.style,
+            ),
+        )
+    )
+
+
+def find_next_residual_leftmost(
+    remaining: set[baseline_up.Pixel],
+    remaining_by_y: Mapping[int, Iterable[int]],
+    library: baseline_up.CompiledGlyphLibrary,
+    *,
+    baseline: int,
+    row_top: int,
+    row_bottom: int | None = None,
+    profile_bottom: int | None = None,
+    after_left: int,
+    column_right: int,
+    stats: baseline_up.BaselineUpStats | None = None,
+) -> tuple[baseline_up.BaselineMatch | None, tuple[baseline_up.BaselineMatch, ...]]:
+    """Experimental post-first-glyph search from the residual left frontier."""
+    del row_bottom, profile_bottom
+
+    candidates = _residual_leftmost_band_candidates(
+        remaining,
+        remaining_by_y,
+        library,
+        baseline=baseline,
+        row_top=row_top,
+        after_left=after_left,
+        column_right=column_right,
+        stats=stats,
+    )
+    return baseline_up._pick_with_live_profile(
+        candidates,
+        remaining_by_y,
+        row_top=row_top,
+        known_bottom_before=baseline,
+        after_left=after_left,
+        column_right=column_right,
+        stats=stats,
+    )
+
+
 def main() -> int:
     benchmark.infer_page_start_geometry = infer_peak_walk_start_geometry
+    benchmark.find_next_baseline_up = find_next_residual_leftmost
     return benchmark.main()
 
 
