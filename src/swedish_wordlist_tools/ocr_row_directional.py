@@ -206,11 +206,11 @@ def _two_row_profile_proposals(
 ) -> tuple[BaselineMatch, ...]:
     """Place glyphs only after two adjacent residual profile rows agree.
 
-    The globally leftmost residual pixel chooses the first observation.  A
-    single point is intentionally insufficient: almost every glyph can be
-    translated through one point.  The adjacent residual row supplies the
-    profile slope/event needed to constrain both translation and baseline.
-    Only placements that explain both left-profile pixels are materialised and
+    The leftmost residual pixel chooses the first observation. A single point
+    is intentionally insufficient: almost every glyph can be translated
+    through one point. The adjacent residual row supplies the profile
+    slope/event needed to constrain both translation and baseline. Only
+    placements that explain both left-profile pixels are materialised and
     subjected to the exact 2-D subset check.
     """
     dy = neighbour_y - anchor_y
@@ -282,6 +282,26 @@ def _trace_candidate(prefix: str, event: str, candidate: BaselineMatch, **fields
     )
 
 
+def _default_scan_bottom(
+    *,
+    row_top: int,
+    black_by_y: Mapping[int, Iterable[int]],
+    library: CompiledGlyphLibrary,
+    left_profile: ColumnLeftProfile | None,
+) -> int:
+    """Bound unknown first-row height using glyph geometry, never facit rows."""
+    source_bottom = (
+        left_profile.bottom
+        if left_profile is not None
+        else (max(black_by_y) + 1 if black_by_y else row_top)
+    )
+    max_glyph_height = max(
+        (max(item.rows) - min(item.rows) + 1 for item in library.models if item.rows),
+        default=1,
+    )
+    return min(source_bottom, row_top + max_glyph_height)
+
+
 def first_glyph_top_down(
     black: set[Pixel],
     black_by_y: Mapping[int, Iterable[int]],
@@ -294,12 +314,12 @@ def first_glyph_top_down(
     trace: bool = False,
     trace_prefix: str = "directional-trace",
 ) -> tuple[BaselineMatch | None, FirstGlyphSearch]:
-    """Find the first glyph from the leftmost residual edge and a y-neighbour.
+    """Find the first glyph from the row-local leftmost edge and a y-neighbour.
 
-    This deliberately no longer walks from the top raster row.  The anchor is
-    the smallest residual x anywhere in the row's scan band.  We then inspect
-    one y step down/up and only seed placements whose model side profile
-    explains both leftmost residual pixels.
+    The anchor is the smallest residual x inside a row-local scan band. When
+    the caller does not know row_bottom, the band is bounded by the maximum
+    compiled glyph height from row_top. This keeps the search on the current
+    text row without using reference/facit row geometry.
     """
     trace = trace or os.environ.get("OCR_FIRST_GLYPH_TRACE") == "1"
     ranges = tuple((int(lo), int(hi)) for lo, hi in allowed_translate_x_ranges)
@@ -307,12 +327,12 @@ def first_glyph_top_down(
         return None, FirstGlyphSearch(y=None, candidates=())
 
     if row_bottom is None:
-        if left_profile is not None:
-            scan_bottom = left_profile.bottom
-        elif black_by_y:
-            scan_bottom = max(black_by_y) + 1
-        else:
-            return None, FirstGlyphSearch(y=None, candidates=())
+        scan_bottom = _default_scan_bottom(
+            row_top=row_top,
+            black_by_y=black_by_y,
+            library=library,
+            left_profile=left_profile,
+        )
     else:
         scan_bottom = int(row_bottom)
     if scan_bottom <= row_top:
@@ -331,7 +351,8 @@ def first_glyph_top_down(
 
     if trace:
         print(
-            f"{trace_prefix} first-glyph-leftmost: x={leftmost_x} ys={anchor_ys}",
+            f"{trace_prefix} first-glyph-leftmost: band={row_top}..{scan_bottom - 1} "
+            f"x={leftmost_x} ys={anchor_ys}",
             flush=True,
         )
 
