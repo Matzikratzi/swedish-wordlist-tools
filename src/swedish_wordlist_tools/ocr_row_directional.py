@@ -132,13 +132,7 @@ def _history_seed_proposals(
     row_top: int,
     start_ranges: tuple[TranslateXRange, ...],
 ) -> tuple[BaselineMatch, ...]:
-    """Seed glyphs from a profile observation, gating on the glyph anchor.
-
-    A glyph's upper rows can begin several pixels to the right of its physical
-    left edge.  Therefore the observed page-profile x is not itself a row-start
-    x.  Align model row fronts with the observation first, then apply inferred
-    row-start ranges to the resulting candidate's physical left edge.
-    """
+    """Legacy single-observation seeding kept for comparison/debugging."""
     proposals: dict[tuple[int, int, int], BaselineMatch] = {}
 
     for item in library.models:
@@ -187,6 +181,96 @@ def _history_seed_proposals(
     )
 
 
+def _profile_at(
+    page_y: int,
+    *,
+    black_by_y: Mapping[int, Iterable[int]],
+    left_profile: ColumnLeftProfile | None,
+) -> int | None:
+    if left_profile is not None:
+        return left_profile.at(page_y)
+    row_xs = tuple(black_by_y.get(page_y, ()))
+    return min(row_xs) if row_xs else None
+
+
+def _two_row_profile_proposals(
+    *,
+    anchor_y: int,
+    neighbour_y: int,
+    anchor_x: int,
+    neighbour_x: int,
+    black: set[Pixel],
+    library: CompiledGlyphLibrary,
+    row_top: int,
+    start_ranges: tuple[TranslateXRange, ...],
+) -> tuple[BaselineMatch, ...]:
+    """Place glyphs only after two adjacent residual profile rows agree.
+
+    The globally leftmost residual pixel chooses the first observation.  A
+    single point is intentionally insufficient: almost every glyph can be
+    translated through one point.  The adjacent residual row supplies the
+    profile slope/event needed to constrain both translation and baseline.
+    Only placements that explain both left-profile pixels are materialised and
+    subjected to the exact 2-D subset check.
+    """
+    dy = neighbour_y - anchor_y
+    if dy not in (-1, 1):
+        raise ValueError("profile neighbour must be exactly one y step away")
+
+    proposals: dict[tuple[int, int, int], BaselineMatch] = {}
+    for item in library.models:
+        for rel_y, model_row in item.rows.items():
+            neighbour_rel_y = rel_y + dy
+            neighbour_row = item.rows.get(neighbour_rel_y)
+            if neighbour_row is None:
+                continue
+
+            model_x = model_row[0]
+            neighbour_model_x = neighbour_row[0]
+            if neighbour_model_x - model_x != neighbour_x - anchor_x:
+                continue
+
+            tx = anchor_x - model_x
+            baseline = anchor_y - rel_y
+            key = (id(item.model), tx, baseline)
+            if key in proposals:
+                continue
+
+            physical_left = tx + item.min_x
+            if not _x_allowed(physical_left, start_ranges):
+                continue
+
+            placed = _placed_pixels(item, tx=tx, baseline=baseline)
+            if not placed or min(y for _x, y in placed) < row_top:
+                continue
+            if (anchor_x, anchor_y) not in placed or (neighbour_x, neighbour_y) not in placed:
+                continue
+            if not placed.issubset(black):
+                continue
+
+            proposals[key] = BaselineMatch(
+                model=item.model,
+                tx=tx,
+                baseline=baseline,
+                pixels=placed,
+                discovered_y=anchor_y,
+            )
+
+    return tuple(
+        sorted(
+            proposals.values(),
+            key=lambda hit: (
+                hit.left,
+                -len(hit.pixels),
+                -hit.model.sources,
+                hit.model.label,
+                hit.model.style,
+                hit.baseline,
+            ),
+        )
+    )
+
+
 def _trace_candidate(prefix: str, event: str, candidate: BaselineMatch, **fields: object) -> None:
     extra = " ".join(f"{key}={value}" for key, value in fields.items())
     print(
@@ -210,6 +294,13 @@ def first_glyph_top_down(
     trace: bool = False,
     trace_prefix: str = "directional-trace",
 ) -> tuple[BaselineMatch | None, FirstGlyphSearch]:
+    """Find the first glyph from the leftmost residual edge and a y-neighbour.
+
+    This deliberately no longer walks from the top raster row.  The anchor is
+    the smallest residual x anywhere in the row's scan band.  We then inspect
+    one y step down/up and only seed placements whose model side profile
+    explains both leftmost residual pixels.
+    """
     trace = trace or os.environ.get("OCR_FIRST_GLYPH_TRACE") == "1"
     ranges = tuple((int(lo), int(hi)) for lo, hi in allowed_translate_x_ranges)
     if not ranges:
@@ -227,102 +318,80 @@ def first_glyph_top_down(
     if scan_bottom <= row_top:
         return None, FirstGlyphSearch(y=None, candidates=())
 
-    profile_history: dict[int, int | None] = {}
-    active: tuple[BaselineMatch, ...] = ()
-    passed: tuple[BaselineMatch, ...] = ()
-    active_y: int | None = None
-    first_trigger_y: int | None = None
-    previous_profile_x: int | None = None
-
+    profile: dict[int, int] = {}
     for page_y in range(row_top, scan_bottom):
-        if left_profile is None:
-            row_xs = tuple(sorted(black_by_y.get(page_y, ())))
-            profile_x = row_xs[0] if row_xs else None
-        else:
-            profile_x = left_profile.at(page_y)
-        profile_history[page_y] = profile_x
+        x = _profile_at(page_y, black_by_y=black_by_y, left_profile=left_profile)
+        if x is not None:
+            profile[page_y] = x
+    if not profile:
+        return None, FirstGlyphSearch(y=None, candidates=())
 
-        if trace and profile_x is not None:
-            print(
-                f"{trace_prefix} first-glyph-profile: y={page_y} x={profile_x} prev={previous_profile_x} "
-                f"active={len(active)} passed={len(passed)} profile_x_in_start_range={_x_allowed(profile_x, ranges)}",
-                flush=True,
-            )
+    leftmost_x = min(profile.values())
+    anchor_ys = tuple(y for y, x in sorted(profile.items()) if x == leftmost_x)
 
-        if active:
-            next_live: list[BaselineMatch] = []
-            next_passed = list(passed)
-            for candidate in active:
-                state = _advance_candidate(
-                    candidate,
-                    page_y=page_y,
-                    profile_x=profile_x,
-                    previous_profile_x=previous_profile_x,
-                )
-                if trace:
-                    _trace_candidate(
-                        trace_prefix,
-                        state,
-                        candidate,
-                        y=page_y,
-                        profile_x=profile_x,
-                        previous_profile_x=previous_profile_x,
-                    )
-                if state == "live":
-                    next_live.append(candidate)
-                elif state == "passed":
-                    next_passed.append(candidate)
+    if trace:
+        print(
+            f"{trace_prefix} first-glyph-leftmost: x={leftmost_x} ys={anchor_ys}",
+            flush=True,
+        )
 
-            active = tuple(next_live)
-            passed = tuple(next_passed)
-            if active:
-                previous_profile_x = profile_x if profile_x is not None else previous_profile_x
+    all_proposals: dict[tuple[int, int, int], BaselineMatch] = {}
+    used_anchor_y: int | None = None
+
+    for anchor_y in anchor_ys:
+        for neighbour_y in (anchor_y + 1, anchor_y - 1):
+            if neighbour_y < row_top or neighbour_y >= scan_bottom:
+                continue
+            neighbour_x = profile.get(neighbour_y)
+            if neighbour_x is None:
                 continue
 
-            if passed:
-                hit = _pick_unique_maximal(passed)
-                if trace:
-                    accepted = repr(hit.model.label) if hit is not None else None
-                    print(
-                        f"{trace_prefix} first-glyph-pick: y={page_y} passed={len(passed)} accepted={accepted}",
-                        flush=True,
-                    )
-                return hit, FirstGlyphSearch(y=active_y, candidates=passed)
-
-            active_y = None
-
-        if profile_x is None:
-            continue
-
-        proposals = _history_seed_proposals(
-            page_y=page_y,
-            profile_x=profile_x,
-            profile_history=profile_history,
-            black=black,
-            library=library,
-            row_top=row_top,
-            start_ranges=ranges,
-        )
-        if trace:
-            print(
-                f"{trace_prefix} first-glyph-seed: y={page_y} x={profile_x} proposals={len(proposals)}",
-                flush=True,
+            proposals = _two_row_profile_proposals(
+                anchor_y=anchor_y,
+                neighbour_y=neighbour_y,
+                anchor_x=leftmost_x,
+                neighbour_x=neighbour_x,
+                black=black,
+                library=library,
+                row_top=row_top,
+                start_ranges=ranges,
             )
+            if trace:
+                direction = "down" if neighbour_y > anchor_y else "up"
+                print(
+                    f"{trace_prefix} first-glyph-pair: anchor=({leftmost_x},{anchor_y}) "
+                    f"{direction}=({neighbour_x},{neighbour_y}) proposals={len(proposals)}",
+                    flush=True,
+                )
+                for candidate in proposals:
+                    _trace_candidate(trace_prefix, "proposal", candidate)
+
+            if proposals and used_anchor_y is None:
+                used_anchor_y = anchor_y
             for candidate in proposals:
-                _trace_candidate(trace_prefix, "proposal", candidate)
-        if not proposals:
-            previous_profile_x = profile_x
-            continue
+                all_proposals[(id(candidate.model), candidate.tx, candidate.baseline)] = candidate
 
-        if first_trigger_y is None:
-            first_trigger_y = page_y
-        active = proposals
-        passed = ()
-        active_y = page_y
-        previous_profile_x = profile_x
-
-    candidates = tuple((*passed, *active))
-    return None, FirstGlyphSearch(
-        y=active_y if active_y is not None else first_trigger_y,
-        candidates=candidates,
+    candidates = tuple(
+        sorted(
+            all_proposals.values(),
+            key=lambda hit: (
+                hit.left,
+                -len(hit.pixels),
+                -hit.model.sources,
+                hit.model.label,
+                hit.model.style,
+                hit.baseline,
+            ),
+        )
     )
+    hit = _pick_unique_maximal(candidates)
+
+    if trace:
+        accepted = repr(hit.model.label) if hit is not None else None
+        print(
+            f"{trace_prefix} first-glyph-pick: leftmost_x={leftmost_x} "
+            f"candidates={len(candidates)} accepted={accepted}",
+            flush=True,
+        )
+
+    return hit, FirstGlyphSearch(y=used_anchor_y, candidates=candidates)
