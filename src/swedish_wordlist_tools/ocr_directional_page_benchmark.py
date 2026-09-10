@@ -40,6 +40,32 @@ def _format_histogram(values: list[int]) -> str:
     return "{" + ",".join(f"{x}:{counts[x]}" for x in sorted(counts)) + "}"
 
 
+def _print_trace_raster(
+    pixels: set[tuple[int, int]] | frozenset[tuple[int, int]],
+    *,
+    row_index: int,
+    step: int,
+    kind: str,
+    top: int,
+    height: int,
+    column_left: int,
+    column_right: int,
+) -> None:
+    """Print a fixed-height ASCII raster over the full column width."""
+    bottom = top + height
+    print(
+        f"directional-trace-raster: row={row_index} step={step} kind={kind} "
+        f"x={column_left}..{column_right - 1} y={top}..{bottom - 1}",
+        flush=True,
+    )
+    for y in range(top, bottom):
+        line = "".join(
+            "#" if (x, y) in pixels else "."
+            for x in range(column_left, column_right)
+        )
+        print(f"{y:04d} {line}", flush=True)
+
+
 def _print_trace_page_profile(
     residual: ResidualInk,
     *,
@@ -237,6 +263,18 @@ def main() -> int:
         row_setup = perf_counter() - phase_started
         setup_total += row_setup
 
+        if trace:
+            _print_trace_raster(
+                residual.pixels,
+                row_index=row_index,
+                step=-1,
+                kind="start",
+                top=row_top,
+                height=25,
+                column_left=column_left,
+                column_right=column_right,
+            )
+
         phase_started = perf_counter()
         first, first_search = first_glyph_top_down(
             residual.pixels,
@@ -290,6 +328,26 @@ def main() -> int:
                 f"{first.model.label!r}/{first.model.style}@x{first.left}..{first.right} "
                 f"baseline={first.baseline} pixels={len(first.pixels)} first_y={first_search.y}",
                 flush=True,
+            )
+            _print_trace_raster(
+                first.pixels,
+                row_index=row_index,
+                step=0,
+                kind=f"glyph:{first.model.label}",
+                top=row_top,
+                height=25,
+                column_left=column_left,
+                column_right=column_right,
+            )
+            _print_trace_raster(
+                residual.pixels,
+                row_index=row_index,
+                step=0,
+                kind="residual",
+                top=row_top,
+                height=25,
+                column_left=column_left,
+                column_right=column_right,
             )
             _print_trace_page_profile(
                 residual,
@@ -352,6 +410,26 @@ def main() -> int:
             baseline = hit.baseline
             explained_bottom = max(explained_bottom, max(y for _x, y in hit.pixels))
             if trace:
+                _print_trace_raster(
+                    hit.pixels,
+                    row_index=row_index,
+                    step=glyphs,
+                    kind=f"glyph:{hit.model.label}",
+                    top=row_top,
+                    height=25,
+                    column_left=column_left,
+                    column_right=column_right,
+                )
+                _print_trace_raster(
+                    residual.pixels,
+                    row_index=row_index,
+                    step=glyphs,
+                    kind="residual",
+                    top=row_top,
+                    height=25,
+                    column_left=column_left,
+                    column_right=column_right,
+                )
                 _print_trace_page_profile(
                     residual,
                     row_index=row_index,
