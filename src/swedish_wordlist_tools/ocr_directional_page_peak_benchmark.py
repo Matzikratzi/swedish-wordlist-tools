@@ -153,6 +153,8 @@ def find_next_residual_profile(
     states: dict[tuple[int, int, int], tuple[baseline_up.CompiledGlyph, int, int]] = {}
     anchor_proposals = 0
     anchor_row_rejects = 0
+    full_2d_rejects = 0
+    full_2d_pixel_checks = 0
     start_page_row = remaining_by_y.get(start_y, ())
     start_page_pixels = (
         start_page_row
@@ -160,6 +162,7 @@ def find_next_residual_profile(
         else set(start_page_row)
     )
 
+    anchored: list[tuple[baseline_up.CompiledGlyph, int, int]] = []
     for item in library.models:
         for rel_y, row_xs in item.rows.items():
             if not row_xs:
@@ -173,17 +176,32 @@ def find_next_residual_profile(
             if physical_left <= after_left or physical_right >= column_right:
                 continue
 
-            # Necessary one-row 2-D condition at the birth pixel.  We already
-            # know exactly which model row is being aligned to start_y, so kill
-            # impossible placements before adding them to the live state
-            # machine.  Extra page ink is fine; every model pixel on this row
-            # must exist.
+            # Necessary one-row 2-D condition at the birth pixel.
             if any((tx + model_x) not in start_page_pixels for model_x in row_xs):
                 anchor_row_rejects += 1
                 continue
 
-            key = (id(item.model), tx, candidate_baseline)
-            states[key] = (item, tx, candidate_baseline)
+            anchored.append((item, tx, candidate_baseline))
+
+    # Full 2-D is also a necessary condition, so do it before the more
+    # expensive profile state walk.  Try larger glyphs first as requested and
+    # stop each placement at its first missing pixel.  Do not construct a
+    # placed frozenset here: most false candidates die after very few checks.
+    anchored.sort(key=lambda entry: -len(entry[0].model.pixels))
+    for item, tx, candidate_baseline in anchored:
+        missing: baseline_up.Pixel | None = None
+        for model_x, model_y in item.model.pixels:
+            full_2d_pixel_checks += 1
+            pixel = (tx + model_x, candidate_baseline + model_y)
+            if pixel not in remaining:
+                missing = pixel
+                break
+        if missing is not None:
+            full_2d_rejects += 1
+            continue
+
+        key = (id(item.model), tx, candidate_baseline)
+        states[key] = (item, tx, candidate_baseline)
 
     initial_candidates = len(states)
     deaths_reported: set[tuple[int, int, int]] = set()
@@ -264,8 +282,9 @@ def find_next_residual_profile(
         print(
             f"directional-residual-profile: start=({start_x},{start_y}) "
             f"search_y={row_top}..{search_bottom} anchor_proposals={anchor_proposals} "
-            f"anchor_row_rejects={anchor_row_rejects} initial={initial_candidates} "
-            f"profile_survivors={profile_survivors} "
+            f"anchor_row_rejects={anchor_row_rejects} anchored={len(anchored)} "
+            f"full_2d_rejects={full_2d_rejects} full_2d_pixel_checks={full_2d_pixel_checks} "
+            f"initial={initial_candidates} profile_survivors={profile_survivors} "
             f"walk_down_to={max_bottom} walk_up_to={min_top}",
             flush=True,
         )
