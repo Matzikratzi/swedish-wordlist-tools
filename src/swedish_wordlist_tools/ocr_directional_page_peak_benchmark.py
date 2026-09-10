@@ -10,7 +10,7 @@ from .ocr_column_left_profile import ColumnLeftProfile, build_column_left_profil
 from .ocr_isolated_minima_cumulative import _isolated_profile_segments
 from .ocr_page_start_geometry import InferredStartGeometry
 from .ocr_profile_peak_walk import _segment_profile, _two_main_peaks, _walk_segment
-from .ocr_row_directional import _seed_from_record_row, first_glyph_top_down
+from .ocr_row_directional import _profile_compatible, first_glyph_top_down
 
 
 def _profile_for_rows(
@@ -105,19 +105,17 @@ def find_next_residual_profile(
     column_right: int,
     stats: baseline_up.BaselineUpStats | None = None,
 ) -> tuple[baseline_up.BaselineMatch | None, tuple[baseline_up.BaselineMatch, ...]]:
-    """Continue the same row from the residual lower envelope.
+    """Continue a row by matching the complete known residual profile.
 
-    The first glyph has already established both the row and its baseline. Do
-    not restart the first-glyph state machine at ``row_top``: after consumption
-    its early rows may expose arbitrary later glyphs and would be mistaken for
-    a fresh row-start record. Instead inspect the residual profile over the
-    y-band that is already known for this row, take its globally leftmost
-    exposed frontier, and seed from the complete horizontal raster row there.
+    The baseline is already known from the first accepted glyph.  For every
+    compiled glyph we therefore know exactly which model row corresponds to
+    each observed page y.  Candidate translations are generated only from
+    equalities where that glyph could own an observed lower-envelope point;
+    there is no special seed/frontier row.
 
-    Consuming a glyph changes the lower envelope of already-seen y rows, so
-    those rows are replayed against the known baseline, but row-start inference
-    is never run again. Full 2-D checks remain deferred until profile-compatible
-    candidates have survived.
+    Each proposed translation is then checked against the whole observed
+    profile with the lower-envelope rule.  Only profile survivors receive the
+    expensive exact 2-D subset check.
     """
     del row_bottom
     if stats is not None:
@@ -130,18 +128,12 @@ def find_next_residual_profile(
 
     observed: dict[int, int | None] = {}
     frontier_x: int | None = None
-    frontier_ys: list[int] = []
     for page_y in range(row_top, known_bottom + 1):
         xs = tuple(x for x in remaining_by_y.get(page_y, ()) if x < column_right)
         profile_x = min(xs) if xs else None
         observed[page_y] = profile_x
-        if profile_x is None:
-            continue
-        if frontier_x is None or profile_x < frontier_x:
+        if profile_x is not None and (frontier_x is None or profile_x < frontier_x):
             frontier_x = profile_x
-            frontier_ys = [page_y]
-        elif profile_x == frontier_x:
-            frontier_ys.append(page_y)
 
     if trace:
         points = " ".join(
@@ -150,33 +142,64 @@ def find_next_residual_profile(
         )
         print(
             f"directional-residual-profile: y={row_top}..{known_bottom} "
-            f"frontier={frontier_x} ys={tuple(frontier_ys)} profile=[{points}]",
+            f"frontier={frontier_x} profile=[{points}]",
             flush=True,
         )
 
     if frontier_x is None:
         return None, ()
 
-    start_ranges = ((after_left + 1, column_right - 1),)
     proposals: dict[tuple[int, int, int], baseline_up.BaselineMatch] = {}
+    profile_survivors = 0
 
-    for page_y in frontier_ys:
-        seeded = _seed_from_record_row(
-            page_y=page_y,
-            observed_x=frontier_x,
-            observed=observed,
-            black=remaining,
-            library=library,
-            row_top=row_top,
-            start_ranges=start_ranges,
-        )
-        for _item, candidate, _explained, _gaps in seeded:
-            if candidate.baseline != baseline:
+    for item in library.models:
+        possible_tx: set[int] = set()
+
+        # A useful translation must make this glyph own at least one visible
+        # profile point.  With baseline fixed, every such equality gives tx
+        # directly from the model row's first black pixel.
+        for page_y, observed_x in observed.items():
+            if observed_x is None:
                 continue
-            if candidate.left <= after_left or candidate.right >= column_right:
+            rel_y = page_y - baseline
+            model_row = item.rows.get(rel_y)
+            if model_row is None:
                 continue
-            if not candidate.pixels.issubset(remaining):
+            possible_tx.add(observed_x - model_row[0])
+
+        for tx in possible_tx:
+            physical_left = tx + item.min_x
+            physical_right = tx + item.max_x
+            if physical_left <= after_left or physical_right >= column_right:
                 continue
+
+            compatible, explained, gaps = _profile_compatible(
+                item,
+                tx=tx,
+                baseline=baseline,
+                observed=observed,
+            )
+            if not compatible or explained == 0:
+                continue
+            profile_survivors += 1
+
+            placed = frozenset((tx + x, baseline + y) for x, y in item.model.pixels)
+            if not placed.issubset(remaining):
+                continue
+
+            candidate = baseline_up.BaselineMatch(
+                model=item.model,
+                tx=tx,
+                baseline=baseline,
+                pixels=placed,
+                discovered_y=min(
+                    page_y
+                    for page_y, observed_x in observed.items()
+                    if observed_x is not None
+                    and (page_y - baseline) in item.rows
+                    and tx + item.rows[page_y - baseline][0] == observed_x
+                ),
+            )
             proposals[(id(candidate.model), candidate.tx, candidate.baseline)] = candidate
 
     candidates = tuple(
@@ -197,7 +220,8 @@ def find_next_residual_profile(
         accepted = repr(hit.model.label) if hit is not None else None
         print(
             f"directional-residual-pick: after_left={after_left} baseline={baseline} "
-            f"frontier={frontier_x} candidates={len(candidates)} accepted={accepted}",
+            f"frontier={frontier_x} profile_survivors={profile_survivors} "
+            f"exact={len(candidates)} accepted={accepted}",
             flush=True,
         )
         for candidate in candidates:
