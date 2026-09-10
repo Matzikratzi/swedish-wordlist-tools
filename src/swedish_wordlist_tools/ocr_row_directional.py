@@ -116,21 +116,22 @@ def _advance_candidate(
     *,
     page_y: int,
     profile_x: int | None,
+    previous_profile_x: int | None = None,
 ) -> str:
     """Advance one provisional first-glyph candidate by one profile row.
 
     Return ``live``, ``dead`` or ``passed``.
 
-    While the candidate still has raster geometry, its own leftmost pixel on
-    each occupied row must own the residual left profile.  Internal blank rows
-    do not decide the candidate: it stays live until its complete raster has
-    had a chance to appear.
+    While the candidate has raster on the current row, its own leftmost pixel
+    must own the residual left profile exactly.  An internal blank model row is
+    normally provisional, but it may not hide a new page-profile front that
+    turns left relative to the preceding observed row: such ink is unexplained
+    by the candidate and contradicts it immediately.
 
-    After the candidate's final raster row, the first later nonblank profile
-    event decides it.  For now we deliberately use the weakest terminal rule:
-    one step to the right of the candidate's last owned profile pixel confirms
-    that the profile has passed it.  A front at the same x or to the left
-    contradicts it.
+    The same left-turn rule applies after the candidate's final raster row.
+    Otherwise the first later nonblank profile event one step to the right of
+    the candidate's last owned profile pixel confirms that the profile has
+    passed it.  A front at the same x or to the left contradicts it.
 
     This is purely geometric; it contains no glyph-, style-, row- or
     page-specific cases.
@@ -140,14 +141,23 @@ def _advance_candidate(
 
     if page_y <= bottom:
         candidate_xs = rows.get(page_y)
-        if candidate_xs is None:
-            return "live"
-        if profile_x is None:
+        if candidate_xs is not None:
+            if profile_x is None:
+                return "dead"
+            return "live" if profile_x == candidate_xs[0] else "dead"
+
+        if (
+            profile_x is not None
+            and previous_profile_x is not None
+            and profile_x < previous_profile_x
+        ):
             return "dead"
-        return "live" if profile_x == candidate_xs[0] else "dead"
+        return "live"
 
     if profile_x is None:
         return "live"
+    if previous_profile_x is not None and profile_x < previous_profile_x:
+        return "dead"
     return "passed" if profile_x > _candidate_last_front(candidate) else "dead"
 
 
@@ -246,11 +256,13 @@ def first_glyph_top_down(
 
     Once candidates exist we stop discovering new ones and follow only that
     live set downward.  On each occupied candidate row its own leftmost pixel
-    must continue to own the page profile.  Internal blank rows do not kill the
-    candidate.  After the candidate's last raster row, one profile step to the
-    right is enough for now to mark it passed; staying at or moving left kills
-    it.  Passed candidates are retained while any other candidate is still
-    live, so a short glyph cannot win merely because it ended first.
+    must continue to own the page profile.  On a model-blank row, or after the
+    model ends, an unexplained move of the page profile to the left kills that
+    candidate immediately.  Otherwise internal blank rows remain provisional.
+    After the candidate's last raster row, one profile step to the right is
+    enough for now to mark it passed; staying at or moving left kills it.
+    Passed candidates are retained while any other candidate is still live, so
+    a short glyph cannot win merely because it ended first.
 
     If all live candidates die with no passed candidate, scanning resumes and
     the killing row remains in profile history.  There are no glyph-, style-,
@@ -280,6 +292,7 @@ def first_glyph_top_down(
     passed: tuple[BaselineMatch, ...] = ()
     active_y: int | None = None
     first_trigger_y: int | None = None
+    previous_profile_x: int | None = None
 
     for page_y in range(row_top, scan_bottom):
         if left_profile is None:
@@ -297,6 +310,7 @@ def first_glyph_top_down(
                     candidate,
                     page_y=page_y,
                     profile_x=profile_x,
+                    previous_profile_x=previous_profile_x,
                 )
                 if state == "live":
                     next_live.append(candidate)
@@ -306,6 +320,7 @@ def first_glyph_top_down(
             active = tuple(next_live)
             passed = tuple(next_passed)
             if active:
+                previous_profile_x = profile_x if profile_x is not None else previous_profile_x
                 continue
 
             if passed:
@@ -318,6 +333,8 @@ def first_glyph_top_down(
             active_y = None
 
         if profile_x is None or not _x_allowed(profile_x, ranges):
+            if profile_x is not None:
+                previous_profile_x = profile_x
             continue
 
         proposals = _history_seed_proposals(
@@ -329,6 +346,7 @@ def first_glyph_top_down(
             row_top=row_top,
         )
         if not proposals:
+            previous_profile_x = profile_x
             continue
 
         if first_trigger_y is None:
@@ -336,6 +354,7 @@ def first_glyph_top_down(
         active = proposals
         passed = ()
         active_y = page_y
+        previous_profile_x = profile_x
 
     candidates = tuple((*passed, *active))
     return None, FirstGlyphSearch(
