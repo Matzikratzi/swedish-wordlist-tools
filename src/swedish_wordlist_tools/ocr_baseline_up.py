@@ -61,6 +61,9 @@ class CompiledGlyphLibrary:
     def __init__(self, models: Iterable[GlyphModel]):
         compiled: list[CompiledGlyph] = []
         by_rel_y: dict[int, list[CompiledGlyph]] = defaultdict(list)
+        anchor_row_index_mut: dict[
+            tuple[int, int], dict[int, list[tuple[CompiledGlyph, int]]]
+        ] = defaultdict(lambda: defaultdict(list))
         for model in models:
             xs = [x for x, _y in model.pixels]
             rows_mut: dict[int, list[int]] = defaultdict(list)
@@ -74,11 +77,29 @@ class CompiledGlyphLibrary:
                 rows=rows,
             )
             compiled.append(item)
-            for rel_y in rows:
+            for rel_y, row_xs in rows.items():
                 by_rel_y[rel_y].append(item)
+
+                # Exact raster signature of this possible anchor row across
+                # the glyph's *full* horizontal bounding box.  The anchor
+                # offset records where the row's leftmost black pixel sits
+                # relative to the glyph's physical left edge.  This lets the
+                # matcher retrieve only rows whose black/white pattern can
+                # match the page instead of scanning every glyph row.
+                width = item.width
+                anchor_offset = row_xs[0] - item.min_x
+                mask = 0
+                for x in row_xs:
+                    mask |= 1 << (x - item.min_x)
+                anchor_row_index_mut[(width, anchor_offset)][mask].append((item, rel_y))
 
         self.models = tuple(compiled)
         self.by_rel_y = {rel_y: tuple(items) for rel_y, items in by_rel_y.items()}
+        self.anchor_row_index = {
+            key: {mask: tuple(entries) for mask, entries in masks.items()}
+            for key, masks in anchor_row_index_mut.items()
+        }
+        self.anchor_row_groups = tuple(sorted(self.anchor_row_index))
         self.max_up = max((-item.model.min_y for item in compiled), default=0)
         self.max_down = max((item.model.max_y for item in compiled), default=0)
 
