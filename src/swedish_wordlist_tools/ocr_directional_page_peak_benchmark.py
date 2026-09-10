@@ -9,6 +9,7 @@ from .ocr_column_left_profile import ColumnLeftProfile, build_column_left_profil
 from .ocr_isolated_minima_cumulative import _isolated_profile_segments
 from .ocr_page_start_geometry import InferredStartGeometry
 from .ocr_profile_peak_walk import _segment_profile, _two_main_peaks, _walk_segment
+from .ocr_row_directional import first_glyph_top_down
 
 
 def _profile_for_rows(
@@ -90,157 +91,7 @@ def infer_peak_walk_start_geometry(
     )
 
 
-def _candidates_from_observation(
-    remaining: set[baseline_up.Pixel],
-    library: baseline_up.CompiledGlyphLibrary,
-    *,
-    baseline: int,
-    page_y: int,
-    observed_x: int,
-    column_right: int,
-    stats: baseline_up.BaselineUpStats | None = None,
-) -> tuple[baseline_up.BaselineMatch, ...]:
-    """Place any model pixel on one observed residual pixel at a known baseline."""
-    rel_y = page_y - baseline
-    possible_models = library.by_rel_y.get(rel_y, ())
-    if stats is not None:
-        stats.model_visits += len(possible_models)
-
-    seen: set[tuple[int, int, int]] = set()
-    found: list[baseline_up.BaselineMatch] = []
-
-    for item in possible_models:
-        model_row = item.rows[rel_y]
-        for model_x in model_row:
-            if stats is not None:
-                stats.raw_tx_proposals += 1
-            tx = observed_x - model_x
-            physical_right = tx + item.max_x
-            if physical_right >= column_right:
-                continue
-            if stats is not None:
-                stats.in_bounds_tx += 1
-
-            key = (id(item.model), tx, baseline)
-            if key in seen:
-                if stats is not None:
-                    stats.duplicate_tx += 1
-                continue
-            seen.add(key)
-            if stats is not None:
-                stats.unique_tx += 1
-
-            placed = frozenset((tx + x, baseline + y) for x, y in item.model.pixels)
-            if stats is not None:
-                stats.subset_checks += 1
-            if not placed.issubset(remaining):
-                continue
-            if stats is not None:
-                stats.exact_hits += 1
-            found.append(
-                baseline_up.BaselineMatch(
-                    model=item.model,
-                    tx=tx,
-                    baseline=baseline,
-                    pixels=placed,
-                    discovered_y=page_y,
-                )
-            )
-
-    return tuple(
-        sorted(
-            found,
-            key=lambda hit: (
-                hit.left,
-                -len(hit.pixels),
-                -hit.model.sources,
-                hit.model.label,
-                hit.model.style,
-            ),
-        )
-    )
-
-
-def _live_residual_profile_candidates(
-    remaining: set[baseline_up.Pixel],
-    remaining_by_y: Mapping[int, Iterable[int]],
-    library: baseline_up.CompiledGlyphLibrary,
-    *,
-    baseline: int,
-    row_top: int,
-    column_right: int,
-    stats: baseline_up.BaselineUpStats | None = None,
-) -> tuple[baseline_up.BaselineMatch, ...]:
-    """Propose the next glyph from the live residual left profile.
-
-    Every raster row from ``row_top`` through ``baseline`` has an independent
-    profile cursor: its leftmost still-unexplained pixel.  Consuming an accepted
-    glyph therefore advances only the cursors on rows where that glyph owned
-    pixels.  The next reading frontier is the smallest x among all those live
-    cursors, with no y-order preference and no artificial x cutoff inherited
-    from the preceding glyph.
-
-    All profile points tied at that x are observations for the same frontier.
-    Any model pixel may be aligned with each observation on the already-known
-    baseline.  Exact placement checks the complete glyph, including descenders
-    below the baseline.
-    """
-    if stats is not None:
-        stats.calls += 1
-
-    frontier_x: int | None = None
-    frontier_ys: list[int] = []
-
-    for page_y in range(row_top, baseline + 1):
-        if stats is not None:
-            stats.y_rows += 1
-        xs = remaining_by_y.get(page_y, ())
-        eligible = [x for x in xs if x < column_right]
-        if not eligible:
-            continue
-
-        row_left = min(eligible)
-        if frontier_x is None or row_left < frontier_x:
-            frontier_x = row_left
-            frontier_ys = [page_y]
-        elif row_left == frontier_x:
-            frontier_ys.append(page_y)
-
-    if frontier_x is None:
-        return ()
-
-    if stats is not None:
-        stats.observed_pixels += len(frontier_ys)
-
-    combined: dict[tuple[int, int, int], baseline_up.BaselineMatch] = {}
-    for page_y in frontier_ys:
-        candidates = _candidates_from_observation(
-            remaining,
-            library,
-            baseline=baseline,
-            page_y=page_y,
-            observed_x=frontier_x,
-            column_right=column_right,
-            stats=stats,
-        )
-        for hit in candidates:
-            combined[(id(hit.model), hit.tx, hit.baseline)] = hit
-
-    return tuple(
-        sorted(
-            combined.values(),
-            key=lambda hit: (
-                hit.left,
-                -len(hit.pixels),
-                -hit.model.sources,
-                hit.model.label,
-                hit.model.style,
-            ),
-        )
-    )
-
-
-def find_next_residual_leftmost(
+def find_next_residual_profile(
     remaining: set[baseline_up.Pixel],
     remaining_by_y: Mapping[int, Iterable[int]],
     library: baseline_up.CompiledGlyphLibrary,
@@ -253,38 +104,52 @@ def find_next_residual_leftmost(
     column_right: int,
     stats: baseline_up.BaselineUpStats | None = None,
 ) -> tuple[baseline_up.BaselineMatch | None, tuple[baseline_up.BaselineMatch, ...]]:
-    """Experimental post-first-glyph search from the updated residual profile."""
-    del profile_bottom
+    """Find every post-first glyph with the same residual profile engine.
 
-    candidates = _live_residual_profile_candidates(
+    Once the first glyph established the text baseline there is no reason to
+    return to the old translated-model candidate search.  Re-scan the updated
+    residual left envelope, let the row/profile/gap matcher narrow placements,
+    then retain only exact survivors on the already-known baseline.
+
+    ``after_left`` is used only to reject placements that do not advance the
+    reading frontier; it is not used as a profile cutoff.  The residual itself
+    decides which x is visible at every y.
+    """
+    del profile_bottom
+    if stats is not None:
+        stats.calls += 1
+
+    lo = after_left + 1
+    hi = column_right - 1
+    if lo > hi:
+        return None, ()
+
+    _hit, search = first_glyph_top_down(
         remaining,
         remaining_by_y,
         library,
-        baseline=baseline,
         row_top=row_top,
-        column_right=column_right,
-        stats=stats,
+        row_bottom=row_bottom,
+        allowed_translate_x_ranges=((lo, hi),),
+        left_profile=None,
+        trace=False,
+        trace_prefix="directional-residual",
     )
 
-    known_bottom = (
-        int(row_bottom) - 1
-        if row_bottom is not None
-        else baseline + library.max_down
+    candidates = tuple(
+        hit
+        for hit in search.candidates
+        if hit.baseline == baseline
+        and hit.left > after_left
+        and hit.right < column_right
     )
-    return baseline_up._pick_with_live_profile(
-        candidates,
-        remaining_by_y,
-        row_top=row_top,
-        known_bottom_before=known_bottom,
-        after_left=after_left,
-        column_right=column_right,
-        stats=stats,
-    )
+    hit = baseline_up.pick_leftmost_unique_maximal(candidates)
+    return hit, candidates
 
 
 def main() -> int:
     benchmark.infer_page_start_geometry = infer_peak_walk_start_geometry
-    benchmark.find_next_baseline_up = find_next_residual_leftmost
+    benchmark.find_next_baseline_up = find_next_residual_profile
     return benchmark.main()
 
 
