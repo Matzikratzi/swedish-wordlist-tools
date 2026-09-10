@@ -8,7 +8,7 @@ from .ocr_column_left_profile import ColumnLeftProfile, build_column_left_profil
 
 
 class StartValues(tuple):
-    """Tuple-compatible strict starts with a useful named diagnostic repr."""
+    """Tuple-compatible strict starts with useful named diagnostics."""
 
     def __new__(
         cls,
@@ -20,6 +20,9 @@ class StartValues(tuple):
         headword_support: tuple[int, ...] = (),
         continuation_support: tuple[int, ...] = (),
         homonym_support: tuple[int, ...] = (),
+        headword_histogram: tuple[tuple[int, int], ...] = (),
+        continuation_histogram: tuple[tuple[int, int], ...] = (),
+        homonym_histogram: tuple[tuple[int, int], ...] = (),
     ) -> "StartValues":
         obj = super().__new__(cls, values)
         obj.headword = headword
@@ -28,6 +31,9 @@ class StartValues(tuple):
         obj.headword_support = headword_support
         obj.continuation_support = continuation_support
         obj.homonym_support = homonym_support
+        obj.headword_histogram = headword_histogram
+        obj.continuation_histogram = continuation_histogram
+        obj.homonym_histogram = homonym_histogram
         return obj
 
     @staticmethod
@@ -39,11 +45,18 @@ class StartValues(tuple):
             return f"{values}[{details}]"
         return repr(values)
 
+    @staticmethod
+    def _format_histogram(histogram: tuple[tuple[int, int], ...]) -> str:
+        return "{" + ",".join(f"{x}:{n}" for x, n in histogram) + "}"
+
     def __repr__(self) -> str:
         return (
             f"headword={self._format_pair(self.headword, self.headword_support)} "
+            f"headword_hist={self._format_histogram(self.headword_histogram)} "
             f"continuation={self._format_pair(self.continuation, self.continuation_support)} "
-            f"homonym={self._format_pair(self.homonym, self.homonym_support)}"
+            f"continuation_hist={self._format_histogram(self.continuation_histogram)} "
+            f"homonym={self._format_pair(self.homonym, self.homonym_support)} "
+            f"homonym_hist={self._format_histogram(self.homonym_histogram)}"
         )
 
 
@@ -58,6 +71,9 @@ class InferredStartGeometry:
     headword_support: tuple[int, ...] = ()
     continuation_support: tuple[int, ...] = ()
     homonym_support: tuple[int, ...] = ()
+    headword_histogram: tuple[tuple[int, int], ...] = ()
+    continuation_histogram: tuple[tuple[int, int], ...] = ()
+    homonym_histogram: tuple[tuple[int, int], ...] = ()
 
 
 def _profile_for_rows(
@@ -124,14 +140,18 @@ def _first_entry_x(
     return None
 
 
+def _histogram(entries: Iterable[int]) -> tuple[tuple[int, int], ...]:
+    counts = Counter(int(x) for x in entries)
+    return tuple(sorted(counts.items()))
+
+
 def _adjacent_start_pair(entries: Iterable[int]) -> tuple[tuple[int, int], tuple[int, int]]:
     """Choose one strict adjacent raster pair and report support for each x.
 
     A row-start family is represented by exactly two neighbouring raster x
-    positions.  We therefore score adjacent pairs directly instead of choosing
-    two unrelated frequency peaks.  Pair score is the number of observations
-    explained by either member.  Ties prefer the pair with evidence on both
-    positions, then the more balanced pair, then the leftmost pair.
+    positions. We score adjacent pairs directly instead of choosing two unrelated
+    frequency peaks. Pair score is the number of observations explained by either
+    member. Ties prefer evidence on both positions, then balance, then leftmost.
     """
     counts = Counter(int(x) for x in entries)
     if not counts:
@@ -161,20 +181,7 @@ def infer_page_start_geometry(
     *,
     tolerance: int = 4,
 ) -> InferredStartGeometry:
-    """Infer strict row-start x values for one already selected column.
-
-    The caller supplies rows from exactly one column, so every result here is
-    column-local. Existing broad geometry is used only as a bootstrap:
-
-    1. Per-row left minima form up to three recurring geometric families.
-    2. Within each family's coarse tolerance window, scan each row downward and
-       record the first raster y whose left profile enters that window.
-    3. Choose the best-supported adjacent pair (x, x+1) for each family.
-
-    Family order is purely geometric. With three families, left-to-right is
-    homonym, headword, continuation. With two families, left-to-right is
-    headword, continuation. No glyph, page or row special case is involved.
-    """
+    """Infer strict row-start x values for one already selected column."""
     if tolerance < 0:
         raise ValueError("tolerance must be non-negative")
 
@@ -218,6 +225,7 @@ def infer_page_start_geometry(
     pair_results = tuple(_adjacent_start_pair(entries) for entries in class_entries)
     starts = tuple(pair for pair, _support in pair_results)
     supports = tuple(support for _pair, support in pair_results)
+    histograms = tuple(_histogram(entries) for entries in class_entries)
 
     homonym: tuple[int, ...] = ()
     headword: tuple[int, ...] = ()
@@ -225,16 +233,22 @@ def infer_page_start_geometry(
     homonym_support: tuple[int, ...] = ()
     headword_support: tuple[int, ...] = ()
     continuation_support: tuple[int, ...] = ()
+    homonym_histogram: tuple[tuple[int, int], ...] = ()
+    headword_histogram: tuple[tuple[int, int], ...] = ()
+    continuation_histogram: tuple[tuple[int, int], ...] = ()
 
     if len(starts) >= 3:
         homonym, headword, continuation = starts[:3]
         homonym_support, headword_support, continuation_support = supports[:3]
+        homonym_histogram, headword_histogram, continuation_histogram = histograms[:3]
     elif len(starts) == 2:
         headword, continuation = starts
         headword_support, continuation_support = supports
+        headword_histogram, continuation_histogram = histograms
     elif len(starts) == 1:
         headword = starts[0]
         headword_support = supports[0]
+        headword_histogram = histograms[0]
 
     strict_tuple = tuple(sorted(set(homonym + headword + continuation)))
     strict = StartValues(
@@ -245,6 +259,9 @@ def infer_page_start_geometry(
         headword_support=headword_support,
         continuation_support=continuation_support,
         homonym_support=homonym_support,
+        headword_histogram=headword_histogram,
+        continuation_histogram=continuation_histogram,
+        homonym_histogram=homonym_histogram,
     )
     return InferredStartGeometry(
         centers=strict,
@@ -256,4 +273,7 @@ def infer_page_start_geometry(
         headword_support=headword_support,
         continuation_support=continuation_support,
         homonym_support=homonym_support,
+        headword_histogram=headword_histogram,
+        continuation_histogram=continuation_histogram,
+        homonym_histogram=homonym_histogram,
     )
