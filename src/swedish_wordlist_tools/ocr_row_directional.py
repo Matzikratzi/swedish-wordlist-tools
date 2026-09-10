@@ -130,7 +130,15 @@ def _history_seed_proposals(
     black: set[Pixel],
     library: CompiledGlyphLibrary,
     row_top: int,
+    start_ranges: tuple[TranslateXRange, ...],
 ) -> tuple[BaselineMatch, ...]:
+    """Seed glyphs from a profile observation, gating on the glyph anchor.
+
+    A glyph's upper rows can begin several pixels to the right of its physical
+    left edge.  Therefore the observed page-profile x is not itself a row-start
+    x.  Align model row fronts with the observation first, then apply inferred
+    row-start ranges to the resulting candidate's physical left edge.
+    """
     proposals: dict[tuple[int, int, int], BaselineMatch] = {}
 
     for item in library.models:
@@ -155,6 +163,8 @@ def _history_seed_proposals(
                 pixels=placed,
                 discovered_y=page_y,
             )
+            if not _x_allowed(candidate.left, start_ranges):
+                continue
             if not _candidate_matches_seen_profile(candidate, profile_history, through_y=page_y):
                 continue
             if not _candidate_explains_left_ink_to_baseline(candidate, black):
@@ -235,7 +245,7 @@ def first_glyph_top_down(
         if trace and profile_x is not None:
             print(
                 f"{trace_prefix} first-glyph-profile: y={page_y} x={profile_x} prev={previous_profile_x} "
-                f"active={len(active)} passed={len(passed)} allowed={_x_allowed(profile_x, ranges)}",
+                f"active={len(active)} passed={len(passed)} profile_x_in_start_range={_x_allowed(profile_x, ranges)}",
                 flush=True,
             )
 
@@ -281,9 +291,7 @@ def first_glyph_top_down(
 
             active_y = None
 
-        if profile_x is None or not _x_allowed(profile_x, ranges):
-            if profile_x is not None:
-                previous_profile_x = profile_x
+        if profile_x is None:
             continue
 
         proposals = _history_seed_proposals(
@@ -293,6 +301,7 @@ def first_glyph_top_down(
             black=black,
             library=library,
             row_top=row_top,
+            start_ranges=ranges,
         )
         if trace:
             print(
