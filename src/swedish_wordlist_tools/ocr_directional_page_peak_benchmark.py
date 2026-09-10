@@ -127,6 +127,7 @@ def find_next_residual_profile(
         else (max(remaining_by_y) if remaining_by_y else known_bottom)
     )
     trace = os.environ.get("OCR_FIRST_GLYPH_TRACE") == "1"
+    profile_deaths_reported: set[tuple[int, int]] = set()
 
     def build_observed(bottom: int) -> tuple[dict[int, int | None], int | None, int | None]:
         observed: dict[int, int | None] = {}
@@ -173,8 +174,23 @@ def find_next_residual_profile(
                     continue
 
                 observed_x = observed.get(page_y)
-                if observed_x is None or tx + model_row[0] != observed_x:
+                model_x = tx + model_row[0]
+                if observed_x is None or model_x != observed_x:
                     compatible = False
+                    if trace:
+                        death_key = (id(item), tx)
+                        if death_key not in profile_deaths_reported:
+                            profile_deaths_reported.add(death_key)
+                            reason = "page-gap" if observed_x is None else "profile-mismatch"
+                            print(
+                                f"directional-residual-profile-death: "
+                                f"label={item.model.label!r} style={item.model.style} "
+                                f"tx={tx} baseline={baseline} anchor_y={anchor_y} "
+                                f"y={page_y} rel_y={rel_y} reason={reason} "
+                                f"observed_x={observed_x if observed_x is not None else '-'} "
+                                f"model_x={model_x} model_dx={model_row[0]}",
+                                flush=True,
+                            )
                     break
 
             if not compatible:
