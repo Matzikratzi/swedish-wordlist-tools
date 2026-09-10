@@ -136,8 +136,9 @@ def main() -> int:
         f"models={len(models)} model_compile={models_seconds:.4f}s page_prepare={page_seconds:.4f}s "
         f"profile_build={profile_seconds:.6f}s geometry={geometry_seconds:.6f}s "
         f"profile_rows={len(left_profile.values)} profile_events={len(profile_events)} "
-        f"black={len(black)} bounds={bounds} start_centers={inferred.centers} ranges={ranges} "
-        f"start_observations={len(inferred.observations)} initial_row_top={row_top}",
+        f"black={len(black)} bounds={bounds} start_values={inferred.centers} "
+        f"start_ranges={ranges} start_observations={len(inferred.observations)} "
+        f"initial_row_top={row_top}",
         flush=True,
     )
 
@@ -193,8 +194,6 @@ def main() -> int:
                 f"baseline=0.000000s consume=0.000000s residual=0.000000s other={row_other:.6f}s",
                 flush=True,
             )
-            # With no accepted glyph there is no safe lower boundary to derive.
-            # Continuing would simply rediscover the same start event.
             print(
                 f"directional-page-stop: row={row_index} reason=no-safe-next-row-top row_top={row_top}",
                 flush=True,
@@ -272,7 +271,6 @@ def main() -> int:
             row_consume += elapsed
             consume_total += elapsed
             current_left = hit.left
-            # Baseline is a strong search prior, not a permanent constraint.
             baseline = hit.baseline
             explained_bottom = max(explained_bottom, max(y for _x, y in hit.pixels))
             glyphs += 1
@@ -281,10 +279,6 @@ def main() -> int:
 
         next_row_top = explained_bottom + 1
 
-        # Final row invariant: before handing next_row_top to the next row, every
-        # black pixel above it must already have an explanation.  No horizontal
-        # white separator is required; adjacent rows may touch diagonally or even
-        # vertically as long as their y extents do not overlap.
         phase_started = perf_counter()
         unexplained_above_boundary = _pixels_between_rows(
             residual,
