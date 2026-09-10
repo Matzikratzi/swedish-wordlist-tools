@@ -40,6 +40,30 @@ def _format_histogram(values: list[int]) -> str:
     return "{" + ",".join(f"{x}:{counts[x]}" for x in sorted(counts)) + "}"
 
 
+def _print_trace_page_profile(
+    residual: ResidualInk,
+    *,
+    row_index: int,
+    step: int,
+    row_top: int,
+    row_bottom: int,
+    column_left: int,
+    column_right: int,
+) -> None:
+    """Print the live left page profile over the row bounds known so far."""
+    points: list[str] = []
+    for y in range(row_top, row_bottom + 1):
+        xs = residual.rows.get(y, ())
+        eligible = [x for x in xs if column_left <= x < column_right]
+        left = min(eligible) if eligible else None
+        points.append(f"{y}:{left if left is not None else '-'}")
+    print(
+        f"directional-trace-page-profile: row={row_index} step={step} "
+        f"y={row_top}..{row_bottom} profile=[{' '.join(points)}]",
+        flush=True,
+    )
+
+
 def _isolated_profile_segments(left_profile) -> list[tuple[int, int, int]]:
     """Return (top, bottom, min_x) for nonblank y-runs isolated by blank rows.
 
@@ -267,6 +291,15 @@ def main() -> int:
                 f"baseline={first.baseline} pixels={len(first.pixels)} first_y={first_search.y}",
                 flush=True,
             )
+            _print_trace_page_profile(
+                residual,
+                row_index=row_index,
+                step=0,
+                row_top=row_top,
+                row_bottom=explained_bottom,
+                column_left=column_left,
+                column_right=column_right,
+            )
 
         while glyphs < args.max_glyphs:
             phase_started = perf_counter()
@@ -318,6 +351,16 @@ def main() -> int:
             current_left = hit.left
             baseline = hit.baseline
             explained_bottom = max(explained_bottom, max(y for _x, y in hit.pixels))
+            if trace:
+                _print_trace_page_profile(
+                    residual,
+                    row_index=row_index,
+                    step=glyphs,
+                    row_top=row_top,
+                    row_bottom=explained_bottom,
+                    column_left=column_left,
+                    column_right=column_right,
+                )
             glyphs += 1
         else:
             status = "max-glyphs"
