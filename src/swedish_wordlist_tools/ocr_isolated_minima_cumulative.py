@@ -72,8 +72,8 @@ def _page_values(jsonl: Path, *, page: int, column: int, threshold: int, min_hei
     values = [min_x for _top, _bottom, min_x in segments]
     hist = _hist(values)
     print(
-        f"isolated-cumulative-page: page={page} column={column} min_height={min_height} "
-        f"segments={len(values)} hist={_format_hist(hist)} cumulative={_format_cumulative(_cumulative(hist))}",
+        f"isolated-histogram-page: page={page} column={column} min_height={min_height} "
+        f"segments={len(values)} hist={_format_hist(hist)}",
         flush=True,
     )
     return values
@@ -81,7 +81,7 @@ def _page_values(jsonl: Path, *, page: int, column: int, threshold: int, min_hei
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Print isolated left-profile minima histograms and cumulative survival curves for several pages."
+        description="Print raw isolated left-profile minima histograms for several pages."
     )
     ap.add_argument("jsonl", type=Path)
     ap.add_argument("--page", type=int, action="append", required=True, help="repeat for each page")
@@ -93,27 +93,44 @@ def main() -> int:
         default=5,
         help="minimum occupied y-run height; default 5 ignores runs of 4 raster rows or fewer",
     )
+    ap.add_argument(
+        "--cumulative",
+        action="store_true",
+        help="also print the earlier cumulative survival curves",
+    )
     args = ap.parse_args()
 
     combined: list[int] = []
     for page in args.page:
-        combined.extend(
-            _page_values(
-                args.jsonl,
-                page=page,
-                column=args.column,
-                threshold=args.threshold,
-                min_height=args.min_height,
-            )
+        values = _page_values(
+            args.jsonl,
+            page=page,
+            column=args.column,
+            threshold=args.threshold,
+            min_height=args.min_height,
         )
+        combined.extend(values)
+        if args.cumulative:
+            hist = _hist(values)
+            print(
+                f"isolated-cumulative-page: page={page} column={args.column} min_height={args.min_height} "
+                f"segments={len(values)} cumulative={_format_cumulative(_cumulative(hist))}",
+                flush=True,
+            )
 
     hist = _hist(combined)
     print(
-        f"isolated-cumulative-combined: pages={tuple(args.page)} column={args.column} "
-        f"min_height={args.min_height} segments={len(combined)} "
-        f"hist={_format_hist(hist)} cumulative={_format_cumulative(_cumulative(hist))}",
+        f"isolated-histogram-combined: pages={tuple(args.page)} column={args.column} "
+        f"min_height={args.min_height} segments={len(combined)} hist={_format_hist(hist)}",
         flush=True,
     )
+    if args.cumulative:
+        print(
+            f"isolated-cumulative-combined: pages={tuple(args.page)} column={args.column} "
+            f"min_height={args.min_height} segments={len(combined)} "
+            f"cumulative={_format_cumulative(_cumulative(hist))}",
+            flush=True,
+        )
     return 0
 
 
