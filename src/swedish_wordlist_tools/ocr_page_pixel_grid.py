@@ -21,7 +21,7 @@ def render_pixel_grid(
     page_number: int,
     threshold: int = 210,
     scale: int = 3,
-    grid_step: int = 10,
+    major_grid_step: int = 10,
     label_step: int = 50,
     output: Path | None = None,
 ) -> Path:
@@ -55,24 +55,32 @@ def render_pixel_grid(
     x1 = x0 + scaled.width
     y1 = y0 + scaled.height
 
-    # Fine grid every grid_step source pixels; stronger line every label_step.
-    for x in range(0, src_w + 1, grid_step):
+    # A cell boundary for every single source pixel. Every 10th source pixel is
+    # stronger, and every 50th is labelled. This makes individual thresholded
+    # source pixels directly countable when the PNG is zoomed.
+    for x in range(0, src_w + 1):
         px = x0 + x * scale
         if x % label_step == 0:
-            fill = (145, 145, 145)
+            fill = (120, 120, 120)
             width = max(1, scale // 2)
+        elif x % major_grid_step == 0:
+            fill = (170, 170, 170)
+            width = 1
         else:
-            fill = (210, 210, 210)
+            fill = (225, 225, 225)
             width = 1
         draw.line((px, y0, px, y1), fill=fill, width=width)
 
-    for y in range(0, src_h + 1, grid_step):
+    for y in range(0, src_h + 1):
         py = y0 + y * scale
         if y % label_step == 0:
-            fill = (145, 145, 145)
+            fill = (120, 120, 120)
             width = max(1, scale // 2)
+        elif y % major_grid_step == 0:
+            fill = (170, 170, 170)
+            width = 1
         else:
-            fill = (210, 210, 210)
+            fill = (225, 225, 225)
             width = 1
         draw.line((x0, py, x1, py), fill=fill, width=width)
 
@@ -101,13 +109,13 @@ def render_pixel_grid(
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Render a whole SAOL page as thresholded square pixels with a coordinate grid."
+        description="Render a whole SAOL page as thresholded square pixels with a per-pixel coordinate grid."
     )
     ap.add_argument("jsonl", type=Path)
     ap.add_argument("--page", type=int, required=True)
     ap.add_argument("--threshold", type=int, default=210)
     ap.add_argument("--scale", type=int, default=3)
-    ap.add_argument("--grid-step", type=int, default=10)
+    ap.add_argument("--major-grid-step", type=int, default=10)
     ap.add_argument("--label-step", type=int, default=50)
     ap.add_argument("--output", type=Path)
     args = ap.parse_args()
@@ -117,7 +125,7 @@ def main() -> int:
         page_number=args.page,
         threshold=args.threshold,
         scale=args.scale,
-        grid_step=args.grid_step,
+        major_grid_step=args.major_grid_step,
         label_step=args.label_step,
         output=args.output,
     )
