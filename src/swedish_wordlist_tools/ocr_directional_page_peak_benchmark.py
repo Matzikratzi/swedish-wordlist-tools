@@ -127,7 +127,7 @@ def find_next_residual_profile(
         else (max(remaining_by_y) if remaining_by_y else known_bottom)
     )
     trace = os.environ.get("OCR_FIRST_GLYPH_TRACE") == "1"
-    profile_deaths_reported: set[tuple[int, int]] = set()
+    profile_deaths_reported: set[tuple[int, int, int]] = set()
 
     def build_observed(bottom: int) -> tuple[dict[int, int | None], int | None, int | None]:
         observed: dict[int, int | None] = {}
@@ -146,62 +146,70 @@ def find_next_residual_profile(
         observed: Mapping[int, int | None],
         frontier_x: int,
         anchor_y: int,
-    ) -> list[tuple[baseline_up.CompiledGlyph, int, bool]]:
-        survivors: list[tuple[baseline_up.CompiledGlyph, int, bool]] = []
-        anchor_rel_y = anchor_y - baseline
+    ) -> list[tuple[baseline_up.CompiledGlyph, int, int, bool]]:
+        """Match the observed left-profile fragment anywhere in a glyph profile.
+
+        The observed fragment starts at the newly discovered frontier sample,
+        but that sample need not be the top of the glyph (notably for dotted
+        letters such as i).  Therefore try every model profile row as the
+        vertical alignment for anchor_y.  Baseline is still known and is used
+        later for the full 2-D placement.
+        """
+        survivors: list[tuple[baseline_up.CompiledGlyph, int, int, bool]] = []
 
         for item in library.models:
-            anchor_row = item.rows.get(anchor_rel_y)
-            if anchor_row is None:
-                continue
-
-            tx = frontier_x - anchor_row[0]
-            physical_left = tx + item.min_x
-            physical_right = tx + item.max_x
-            if physical_left <= after_left or physical_right >= column_right:
-                continue
-
-            compatible = True
-            complete = False
-            for page_y in range(anchor_y, known_bottom + 1):
-                rel_y = page_y - baseline
-                model_row = item.rows.get(rel_y)
-
-                if model_row is None:
-                    if page_y > baseline:
-                        complete = True
-                        break
+            for model_anchor_rel_y, anchor_row in sorted(item.rows.items()):
+                tx = frontier_x - anchor_row[0]
+                physical_left = tx + item.min_x
+                physical_right = tx + item.max_x
+                if physical_left <= after_left or physical_right >= column_right:
                     continue
 
-                observed_x = observed.get(page_y)
-                model_x = tx + model_row[0]
-                if observed_x is None or model_x != observed_x:
-                    compatible = False
-                    if trace:
-                        death_key = (id(item), tx)
-                        if death_key not in profile_deaths_reported:
-                            profile_deaths_reported.add(death_key)
-                            reason = "page-gap" if observed_x is None else "profile-mismatch"
-                            print(
-                                f"directional-residual-profile-death: "
-                                f"label={item.model.label!r} style={item.model.style} "
-                                f"tx={tx} baseline={baseline} anchor_y={anchor_y} "
-                                f"y={page_y} rel_y={rel_y} reason={reason} "
-                                f"observed_x={observed_x if observed_x is not None else '-'} "
-                                f"model_x={model_x} model_dx={model_row[0]}",
-                                flush=True,
-                            )
-                    break
+                compatible = True
+                complete = False
+                for page_y in range(anchor_y, known_bottom + 1):
+                    model_rel_y = model_anchor_rel_y + (page_y - anchor_y)
+                    model_row = item.rows.get(model_rel_y)
 
-            if not compatible:
-                continue
+                    if model_row is None:
+                        # A gap/end in the model is meaningful only once the
+                        # observed fragment has reached/passed the known
+                        # baseline.  Above that it may simply be a dot gap.
+                        if page_y > baseline:
+                            complete = True
+                            break
+                        continue
 
-            if not complete and known_bottom >= baseline:
-                next_rel_y = known_bottom + 1 - baseline
-                if item.rows.get(next_rel_y) is None:
-                    complete = True
+                    observed_x = observed.get(page_y)
+                    model_x = tx + model_row[0]
+                    if observed_x is None or model_x != observed_x:
+                        compatible = False
+                        if trace:
+                            death_key = (id(item), tx, model_anchor_rel_y)
+                            if death_key not in profile_deaths_reported:
+                                profile_deaths_reported.add(death_key)
+                                reason = "page-gap" if observed_x is None else "profile-mismatch"
+                                print(
+                                    f"directional-residual-profile-death: "
+                                    f"label={item.model.label!r} style={item.model.style} "
+                                    f"tx={tx} baseline={baseline} anchor_y={anchor_y} "
+                                    f"model_anchor_rel_y={model_anchor_rel_y} "
+                                    f"y={page_y} model_rel_y={model_rel_y} reason={reason} "
+                                    f"observed_x={observed_x if observed_x is not None else '-'} "
+                                    f"model_x={model_x} model_dx={model_row[0]}",
+                                    flush=True,
+                                )
+                        break
 
-            survivors.append((item, tx, complete))
+                if not compatible:
+                    continue
+
+                if not complete and known_bottom >= baseline:
+                    next_model_rel_y = model_anchor_rel_y + (known_bottom + 1 - anchor_y)
+                    if item.rows.get(next_model_rel_y) is None:
+                        complete = True
+
+                survivors.append((item, tx, model_anchor_rel_y, complete))
 
         return survivors
 
@@ -211,7 +219,7 @@ def find_next_residual_profile(
 
     while True:
         survivors = profile_candidates(observed, frontier_x, anchor_y)
-        pending = [entry for entry in survivors if not entry[2]]
+        pending = [entry for entry in survivors if not entry[3]]
         if not pending or known_bottom >= source_bottom:
             break
         known_bottom += 1
@@ -234,49 +242,47 @@ def find_next_residual_profile(
         )
 
     proposals: dict[tuple[int, int, int], baseline_up.BaselineMatch] = {}
-    anchor_rel_y = anchor_y - baseline
-    for item, _profile_tx, complete in survivors:
+    for item, profile_tx, model_anchor_rel_y, complete in survivors:
         if not complete:
             continue
 
-        anchor_row = item.rows.get(anchor_rel_y)
-        if anchor_row is None:
+        # The profile fragment supplied a horizontal placement and a possible
+        # vertical sub-profile alignment.  The actual glyph is still placed on
+        # the already-known baseline for the 2-D truth test.
+        tx = profile_tx
+        physical_left = tx + item.min_x
+        physical_right = tx + item.max_x
+        if physical_left <= after_left or physical_right >= column_right:
             continue
 
-        for dx in anchor_row:
-            tx = frontier_x - dx
-            physical_left = tx + item.min_x
-            physical_right = tx + item.max_x
-            if physical_left <= after_left or physical_right >= column_right:
-                continue
-
-            placed = frozenset((tx + x, baseline + y) for x, y in item.model.pixels)
-            if not placed.issubset(remaining):
-                if trace:
-                    print(
-                        f"directional-residual-2d-fail: label={item.model.label!r} "
-                        f"style={item.model.style} anchor_y={anchor_y} dx={dx} "
-                        f"tx={tx} pixels={len(placed)}",
-                        flush=True,
-                    )
-                continue
-
-            candidate = baseline_up.BaselineMatch(
-                model=item.model,
-                tx=tx,
-                baseline=baseline,
-                pixels=placed,
-                discovered_y=anchor_y,
-            )
-            proposals[(id(candidate.model), candidate.tx, candidate.baseline)] = candidate
+        placed = frozenset((tx + x, baseline + y) for x, y in item.model.pixels)
+        if not placed.issubset(remaining):
             if trace:
                 print(
-                    f"directional-residual-2d-pass: label={item.model.label!r} "
-                    f"style={item.model.style} anchor_y={anchor_y} dx={dx} "
+                    f"directional-residual-2d-fail: label={item.model.label!r} "
+                    f"style={item.model.style} anchor_y={anchor_y} "
+                    f"model_anchor_rel_y={model_anchor_rel_y} "
                     f"tx={tx} pixels={len(placed)}",
                     flush=True,
                 )
-            break
+            continue
+
+        candidate = baseline_up.BaselineMatch(
+            model=item.model,
+            tx=tx,
+            baseline=baseline,
+            pixels=placed,
+            discovered_y=anchor_y,
+        )
+        proposals[(id(candidate.model), candidate.tx, candidate.baseline)] = candidate
+        if trace:
+            print(
+                f"directional-residual-2d-pass: label={item.model.label!r} "
+                f"style={item.model.style} anchor_y={anchor_y} "
+                f"model_anchor_rel_y={model_anchor_rel_y} "
+                f"tx={tx} pixels={len(placed)}",
+                flush=True,
+            )
 
     candidates = tuple(
         sorted(
