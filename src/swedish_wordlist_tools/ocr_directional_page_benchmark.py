@@ -40,6 +40,34 @@ def _format_histogram(values: list[int]) -> str:
     return "{" + ",".join(f"{x}:{counts[x]}" for x in sorted(counts)) + "}"
 
 
+def _isolated_profile_segments(left_profile) -> list[tuple[int, int, int]]:
+    """Return (top, bottom, min_x) for nonblank y-runs isolated by blank rows.
+
+    This is deliberately only a diagnostic of the raw column-left profile.  A
+    segment contributes one observation regardless of its height.  Segments at
+    the column boundary are excluded because they cannot be proven to have a
+    blank raster row on both sides.
+    """
+    values = left_profile.values
+    segments: list[tuple[int, int, int]] = []
+    index = 0
+    while index < len(values):
+        if values[index] is None:
+            index += 1
+            continue
+        start = index
+        occupied: list[int] = []
+        while index < len(values) and values[index] is not None:
+            occupied.append(int(values[index]))
+            index += 1
+        end = index - 1
+        blank_above = start > 0 and values[start - 1] is None
+        blank_below = index < len(values) and values[index] is None
+        if blank_above and blank_below:
+            segments.append((left_profile.top + start, left_profile.top + end, min(occupied)))
+    return segments
+
+
 def _print_unexplained_row_check(
     *,
     row_index: int,
@@ -114,6 +142,10 @@ def main() -> int:
     column_histogram = _format_histogram(
         [int(x) for x in left_profile.values if x is not None]
     )
+    isolated_segments = _isolated_profile_segments(left_profile)
+    isolated_min_x_histogram = _format_histogram(
+        [min_x for _top, _bottom, min_x in isolated_segments]
+    )
 
     columns = context["row_map"].get("columns") or []
     if not 0 <= args.column < len(columns):
@@ -144,8 +176,14 @@ def main() -> int:
         f"profile_rows={len(left_profile.values)} profile_events={len(profile_events)} "
         f"black={len(black)} bounds={bounds} start_values={inferred.centers} "
         f"column_hist={column_histogram} "
+        f"isolated_segments={len(isolated_segments)} isolated_min_x_hist={isolated_min_x_histogram} "
         f"start_ranges={ranges} start_observations={len(inferred.observations)} "
         f"initial_row_top={row_top}",
+        flush=True,
+    )
+    print(
+        "directional-isolated-segments: "
+        + " ".join(f"y={top}..{bottom}:min_x={min_x}" for top, bottom, min_x in isolated_segments),
         flush=True,
     )
 
