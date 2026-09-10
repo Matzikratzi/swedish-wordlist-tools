@@ -12,6 +12,9 @@ class InferredStartGeometry:
     centers: tuple[int, ...]
     ranges: tuple[tuple[int, int], ...]
     observations: tuple[int, ...]
+    headword: tuple[int, ...] = ()
+    continuation: tuple[int, ...] = ()
+    homonym: tuple[int, ...] = ()
 
 
 def _profile_for_rows(
@@ -28,44 +31,13 @@ def _profile_for_rows(
     return build_column_left_profile(source, top=top, bottom=bottom)
 
 
-def _row_leftmosts(
-    source: ColumnLeftProfile | Mapping[int, Iterable[int]],
-    reference_rows: Iterable[dict],
+def _coarse_classes(
+    values: Iterable[int],
     *,
-    min_row_pixels: int = 3,
-) -> list[int]:
-    reference = list(reference_rows)
-    profile = _profile_for_rows(source, reference)
-    if profile is None:
-        return []
-
-    starts: list[int] = []
-    for row in reference:
-        top = int(row["page_top"])
-        bottom = int(row["page_bottom"])
-        x = profile.row_leftmost(top, bottom)
-        if x is None:
-            continue
-
-        # Preserve the old tiny-noise guard for mapping callers.  A prebuilt
-        # page profile has already been constructed from the column bitmap, so
-        # there is no need to walk every x merely to rediscover its minimum.
-        if not isinstance(source, ColumnLeftProfile):
-            count = sum(len(tuple(source.get(y, ()))) for y in range(top, bottom))
-            if count < min_row_pixels:
-                continue
-        starts.append(x)
-    return starts
-
-
-def _coarse_classes(values: Iterable[int], *, max_gap: int = 2, max_classes: int = 3) -> tuple[tuple[int, ...], ...]:
-    """Group row minima into at most three coarse typographic start classes.
-
-    The old ±4 intervals were wide enough to merge neighbouring classes.  Here
-    we use only the raw per-row minima to separate the page into compact x
-    groups first.  A class may contain several nearby minima because italic
-    glyphs can lean left after the true row start.
-    """
+    max_gap: int = 2,
+    max_classes: int = 3,
+) -> tuple[tuple[int, ...], ...]:
+    """Group row minima into at most three geometric row-start families."""
     counts = Counter(int(x) for x in values)
     if not counts:
         return ()
@@ -101,12 +73,19 @@ def _first_entry_x(
     lo: int,
     hi: int,
 ) -> int | None:
-    """Return the x of the first raster row entering a coarse start window."""
+    """Return x on the first raster row that enters a coarse start window."""
     for y in range(top, bottom):
         x = profile.at(y)
         if x is not None and lo <= x <= hi:
             return int(x)
     return None
+
+
+def _two_start_values(entries: Iterable[int]) -> tuple[int, ...]:
+    """Return the two best-supported discrete raster starts for one family."""
+    counts = Counter(int(x) for x in entries)
+    chosen = sorted(counts, key=lambda x: (-counts[x], x))[:2]
+    return tuple(sorted(chosen))
 
 
 def infer_page_start_geometry(
@@ -115,24 +94,19 @@ def infer_page_start_geometry(
     *,
     tolerance: int = 4,
 ) -> InferredStartGeometry:
-    """Infer strict page-local row-start x positions before OCR begins.
+    """Infer strict row-start x values for one already selected column.
 
-    Preparation is deliberately two-stage.
+    The caller supplies rows from exactly one column, so every result here is
+    column-local.  Existing broad geometry is used only as a bootstrap:
 
-    First, the minimum left-profile x of each known physical row is used only
-    to assign that row to one of up to three coarse typographic start classes.
-    These correspond geometrically to the page's recurring row-start families;
-    no semantic label such as headword, continuation or homonym is required.
+    1. Per-row left minima form up to three recurring geometric families.
+    2. Within each family's coarse tolerance window, scan each row downward and
+       record the first raster y whose left profile enters that window.
+    3. Keep the two best-supported discrete x values for each family.
 
-    Second, for every row in a class we scan downward from its upper boundary
-    and record the *first* profile x that enters that class's old coarse
-    tolerance window.  This avoids mistaking a later left-leaning part of an
-    italic glyph for the row start.
-
-    The two most frequently observed entry x positions in each class become
-    the page's strict legal starts.  They are returned as singleton ranges so
-    existing OCR callers automatically trigger only on those discrete raster
-    positions.  A class with only one observed position contributes one value.
+    Family order is purely geometric.  With three families, left-to-right is
+    homonym, headword, continuation.  With two families, left-to-right is
+    headword, continuation.  No glyph, page or row special case is involved.
     """
     if tolerance < 0:
         raise ValueError("tolerance must be non-negative")
@@ -150,7 +124,7 @@ def infer_page_start_geometry(
         if x is not None:
             row_minima.append((row, int(x)))
 
-    classes = _coarse_classes((x for _row, x in row_minima))
+    classes = _coarse_classes(x for _row, x in row_minima)
     if not classes:
         return InferredStartGeometry(centers=(), ranges=(), observations=())
 
@@ -162,31 +136,36 @@ def infer_page_start_geometry(
         if class_index is None:
             continue
         group = classes[class_index]
-        lo = min(group) - tolerance
-        hi = max(group) + tolerance
         entry_x = _first_entry_x(
             profile,
             top=int(row["page_top"]),
             bottom=int(row["page_bottom"]),
-            lo=lo,
-            hi=hi,
+            lo=min(group) - tolerance,
+            hi=max(group) + tolerance,
         )
         if entry_x is None:
             continue
         class_entries[class_index].append(entry_x)
         all_entries.append(entry_x)
 
-    strict: list[int] = []
-    for entries in class_entries:
-        counts = Counter(entries)
-        if not counts:
-            continue
-        chosen = sorted(counts, key=lambda x: (-counts[x], x))[:2]
-        strict.extend(sorted(chosen))
+    starts = tuple(_two_start_values(entries) for entries in class_entries)
 
-    strict = sorted(set(strict))
+    homonym: tuple[int, ...] = ()
+    headword: tuple[int, ...] = ()
+    continuation: tuple[int, ...] = ()
+    if len(starts) >= 3:
+        homonym, headword, continuation = starts[:3]
+    elif len(starts) == 2:
+        headword, continuation = starts
+    elif len(starts) == 1:
+        headword = starts[0]
+
+    strict = tuple(sorted(set(homonym + headword + continuation)))
     return InferredStartGeometry(
-        centers=tuple(strict),
+        centers=strict,
         ranges=tuple((x, x) for x in strict),
         observations=tuple(all_entries),
+        headword=headword,
+        continuation=continuation,
+        homonym=homonym,
     )
