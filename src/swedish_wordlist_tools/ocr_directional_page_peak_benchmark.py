@@ -151,8 +151,9 @@ def find_next_residual_profile(
     # Candidate state is (compiled glyph, tx, candidate baseline).  Only the
     # leftmost pixel of a model row may be aligned to the common start pixel.
     states: dict[tuple[int, int, int], tuple[baseline_up.CompiledGlyph, int, int]] = {}
-    anchor_proposals = 0
-    anchor_row_rejects = 0
+    anchor_group_lookups = 0
+    anchor_pattern_hits = 0
+    anchor_rows_selected = 0
     full_2d_rejects = 0
     full_2d_pixel_checks = 0
     start_page_row = remaining_by_y.get(start_y, ())
@@ -163,39 +164,36 @@ def find_next_residual_profile(
     )
 
     anchored: list[tuple[baseline_up.CompiledGlyph, int, int]] = []
-    for item in library.models:
-        for rel_y, row_xs in item.rows.items():
-            if not row_xs:
-                continue
-            anchor_proposals += 1
-            dx = row_xs[0]
-            tx = start_x - dx
+
+    # Exact anchor-row lookup.  Each group describes glyph width and the
+    # offset from glyph-left to the row's leftmost black pixel.  Build the
+    # page mask once for that geometry and retrieve only exact black/white
+    # matches.  This replaces the old scan over every model row.
+    for width, anchor_offset in library.anchor_row_groups:
+        physical_left = start_x - anchor_offset
+        physical_right = physical_left + width - 1
+        if physical_left <= after_left or physical_right >= column_right:
+            continue
+
+        anchor_group_lookups += 1
+        page_mask = 0
+        for bit in range(width):
+            if physical_left + bit in start_page_pixels:
+                page_mask |= 1 << bit
+
+        entries = library.anchor_row_index[(width, anchor_offset)].get(page_mask, ())
+        if not entries:
+            continue
+        anchor_pattern_hits += 1
+        anchor_rows_selected += len(entries)
+
+        for item, rel_y in entries:
+            tx = physical_left - item.min_x
             candidate_baseline = start_y - rel_y
-            physical_left = tx + item.min_x
-            physical_right = tx + item.max_x
-            if physical_left <= after_left or physical_right >= column_right:
-                continue
-
-            # Exact one-row raster condition at the birth pixel, within
-            # this glyph placement's own horizontal bounding box.  Black must
-            # match black and white must match white; page ink outside the
-            # glyph bounding box is irrelevant.
-            model_black = {tx + model_x for model_x in row_xs}
-            page_black = {
-                page_x
-                for page_x in start_page_pixels
-                if physical_left <= page_x <= physical_right
-            }
-            if page_black != model_black:
-                anchor_row_rejects += 1
-                continue
-
             anchored.append((item, tx, candidate_baseline))
 
-    # Full 2-D is also a necessary condition, so do it before the more
-    # expensive profile state walk.  Try larger glyphs first as requested and
-    # stop each placement at its first missing pixel.  Do not construct a
-    # placed frozenset here: most false candidates die after very few checks.
+    # Full 2-D is a necessary condition, so do it before the profile state
+    # walk.  Larger glyphs first; abort each placement at first missing pixel.
     anchored.sort(key=lambda entry: -len(entry[0].model.pixels))
     for item, tx, candidate_baseline in anchored:
         missing: baseline_up.Pixel | None = None
@@ -290,9 +288,10 @@ def find_next_residual_profile(
     if trace:
         print(
             f"directional-residual-profile: start=({start_x},{start_y}) "
-            f"search_y={row_top}..{search_bottom} anchor_proposals={anchor_proposals} "
-            f"anchor_row_rejects={anchor_row_rejects} anchored={len(anchored)} "
-            f"full_2d_rejects={full_2d_rejects} full_2d_pixel_checks={full_2d_pixel_checks} "
+            f"search_y={row_top}..{search_bottom} anchor_group_lookups={anchor_group_lookups} "
+            f"anchor_pattern_hits={anchor_pattern_hits} anchor_rows_selected={anchor_rows_selected} "
+            f"anchored={len(anchored)} full_2d_rejects={full_2d_rejects} "
+            f"full_2d_pixel_checks={full_2d_pixel_checks} "
             f"initial={initial_candidates} profile_survivors={profile_survivors} "
             f"walk_down_to={max_bottom} walk_up_to={min_top}",
             flush=True,
