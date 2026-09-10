@@ -107,17 +107,16 @@ def find_next_residual_profile(
 ) -> tuple[baseline_up.BaselineMatch | None, tuple[baseline_up.BaselineMatch, ...]]:
     """Continue the same row from the residual lower envelope.
 
-    The first glyph has already established both the row and its baseline.  Do
+    The first glyph has already established both the row and its baseline. Do
     not restart the first-glyph state machine at ``row_top``: after consumption
     its early rows may expose arbitrary later glyphs and would be mistaken for
-    a fresh row-start record.  Instead inspect the residual profile over the
+    a fresh row-start record. Instead inspect the residual profile over the
     y-band that is already known for this row, take its globally leftmost
     exposed frontier, and seed from the complete horizontal raster row there.
 
-    This is the stateful continuation of the original downward scan: consuming
-    a glyph changes the lower envelope of already-seen y rows, so those rows are
-    replayed against the *known* baseline, but row-start inference is never run
-    again.  Full 2-D checks are still deferred until profile-compatible
+    Consuming a glyph changes the lower envelope of already-seen y rows, so
+    those rows are replayed against the known baseline, but row-start inference
+    is never run again. Full 2-D checks remain deferred until profile-compatible
     candidates have survived.
     """
     del row_bottom
@@ -158,9 +157,6 @@ def find_next_residual_profile(
     if frontier_x is None:
         return None, ()
 
-    # Later glyphs may start anywhere to the right of the previous glyph's
-    # physical left edge.  This is intentionally not a row-start range: the
-    # residual envelope itself supplies the next reading frontier.
     start_ranges = ((after_left + 1, column_right - 1),)
     proposals: dict[tuple[int, int, int], baseline_up.BaselineMatch] = {}
 
@@ -198,10 +194,10 @@ def find_next_residual_profile(
     hit = baseline_up.pick_leftmost_unique_maximal(candidates)
 
     if trace:
+        accepted = repr(hit.model.label) if hit is not None else None
         print(
             f"directional-residual-pick: after_left={after_left} baseline={baseline} "
-            f"frontier={frontier_x} candidates={len(candidates)} "
-            f"accepted={hit.model.label!r if hit is not None else None}",
+            f"frontier={frontier_x} candidates={len(candidates)} accepted={accepted}",
             flush=True,
         )
         for candidate in candidates:
