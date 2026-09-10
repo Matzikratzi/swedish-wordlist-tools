@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections import Counter
 from typing import Iterable, Mapping
 
@@ -9,7 +10,7 @@ from .ocr_column_left_profile import ColumnLeftProfile, build_column_left_profil
 from .ocr_isolated_minima_cumulative import _isolated_profile_segments
 from .ocr_page_start_geometry import InferredStartGeometry
 from .ocr_profile_peak_walk import _segment_profile, _two_main_peaks, _walk_segment
-from .ocr_row_directional import first_glyph_top_down
+from .ocr_row_directional import _seed_from_record_row, first_glyph_top_down
 
 
 def _profile_for_rows(
@@ -104,46 +105,113 @@ def find_next_residual_profile(
     column_right: int,
     stats: baseline_up.BaselineUpStats | None = None,
 ) -> tuple[baseline_up.BaselineMatch | None, tuple[baseline_up.BaselineMatch, ...]]:
-    """Find every post-first glyph with the same residual profile engine.
+    """Continue the same row from the residual lower envelope.
 
-    Once the first glyph established the text baseline there is no reason to
-    return to the old translated-model candidate search.  Re-scan the updated
-    residual left envelope, let the row/profile/gap matcher narrow placements,
-    then retain only exact survivors on the already-known baseline.
+    The first glyph has already established both the row and its baseline.  Do
+    not restart the first-glyph state machine at ``row_top``: after consumption
+    its early rows may expose arbitrary later glyphs and would be mistaken for
+    a fresh row-start record.  Instead inspect the residual profile over the
+    y-band that is already known for this row, take its globally leftmost
+    exposed frontier, and seed from the complete horizontal raster row there.
 
-    ``after_left`` is used only to reject placements that do not advance the
-    reading frontier; it is not used as a profile cutoff.  The residual itself
-    decides which x is visible at every y.
+    This is the stateful continuation of the original downward scan: consuming
+    a glyph changes the lower envelope of already-seen y rows, so those rows are
+    replayed against the *known* baseline, but row-start inference is never run
+    again.  Full 2-D checks are still deferred until profile-compatible
+    candidates have survived.
     """
-    del profile_bottom
+    del row_bottom
     if stats is not None:
         stats.calls += 1
 
-    lo = after_left + 1
-    hi = column_right - 1
-    if lo > hi:
+    if profile_bottom is None:
+        profile_bottom = baseline
+    known_bottom = max(row_top, int(profile_bottom))
+    trace = os.environ.get("OCR_FIRST_GLYPH_TRACE") == "1"
+
+    observed: dict[int, int | None] = {}
+    frontier_x: int | None = None
+    frontier_ys: list[int] = []
+    for page_y in range(row_top, known_bottom + 1):
+        xs = tuple(x for x in remaining_by_y.get(page_y, ()) if x < column_right)
+        profile_x = min(xs) if xs else None
+        observed[page_y] = profile_x
+        if profile_x is None:
+            continue
+        if frontier_x is None or profile_x < frontier_x:
+            frontier_x = profile_x
+            frontier_ys = [page_y]
+        elif profile_x == frontier_x:
+            frontier_ys.append(page_y)
+
+    if trace:
+        points = " ".join(
+            f"{y}:{observed[y] if observed[y] is not None else '-'}"
+            for y in range(row_top, known_bottom + 1)
+        )
+        print(
+            f"directional-residual-profile: y={row_top}..{known_bottom} "
+            f"frontier={frontier_x} ys={tuple(frontier_ys)} profile=[{points}]",
+            flush=True,
+        )
+
+    if frontier_x is None:
         return None, ()
 
-    _hit, search = first_glyph_top_down(
-        remaining,
-        remaining_by_y,
-        library,
-        row_top=row_top,
-        row_bottom=row_bottom,
-        allowed_translate_x_ranges=((lo, hi),),
-        left_profile=None,
-        trace=False,
-        trace_prefix="directional-residual",
-    )
+    # Later glyphs may start anywhere to the right of the previous glyph's
+    # physical left edge.  This is intentionally not a row-start range: the
+    # residual envelope itself supplies the next reading frontier.
+    start_ranges = ((after_left + 1, column_right - 1),)
+    proposals: dict[tuple[int, int, int], baseline_up.BaselineMatch] = {}
+
+    for page_y in frontier_ys:
+        seeded = _seed_from_record_row(
+            page_y=page_y,
+            observed_x=frontier_x,
+            observed=observed,
+            black=remaining,
+            library=library,
+            row_top=row_top,
+            start_ranges=start_ranges,
+        )
+        for _item, candidate, _explained, _gaps in seeded:
+            if candidate.baseline != baseline:
+                continue
+            if candidate.left <= after_left or candidate.right >= column_right:
+                continue
+            if not candidate.pixels.issubset(remaining):
+                continue
+            proposals[(id(candidate.model), candidate.tx, candidate.baseline)] = candidate
 
     candidates = tuple(
-        hit
-        for hit in search.candidates
-        if hit.baseline == baseline
-        and hit.left > after_left
-        and hit.right < column_right
+        sorted(
+            proposals.values(),
+            key=lambda hit: (
+                hit.left,
+                -len(hit.pixels),
+                -hit.model.sources,
+                hit.model.label,
+                hit.model.style,
+            ),
+        )
     )
     hit = baseline_up.pick_leftmost_unique_maximal(candidates)
+
+    if trace:
+        print(
+            f"directional-residual-pick: after_left={after_left} baseline={baseline} "
+            f"frontier={frontier_x} candidates={len(candidates)} "
+            f"accepted={hit.model.label!r if hit is not None else None}",
+            flush=True,
+        )
+        for candidate in candidates:
+            print(
+                f"directional-residual-candidate: label={candidate.model.label!r} "
+                f"style={candidate.model.style} left={candidate.left} right={candidate.right} "
+                f"baseline={candidate.baseline} pixels={len(candidate.pixels)}",
+                flush=True,
+            )
+
     return hit, candidates
 
 
