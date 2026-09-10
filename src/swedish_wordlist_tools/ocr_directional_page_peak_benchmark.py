@@ -10,7 +10,7 @@ from .ocr_column_left_profile import ColumnLeftProfile, build_column_left_profil
 from .ocr_isolated_minima_cumulative import _isolated_profile_segments
 from .ocr_page_start_geometry import InferredStartGeometry
 from .ocr_profile_peak_walk import _segment_profile, _two_main_peaks, _walk_segment
-from .ocr_row_directional import _profile_compatible, first_glyph_top_down
+from .ocr_row_directional import first_glyph_top_down
 
 
 def _profile_for_rows(
@@ -105,13 +105,14 @@ def find_next_residual_profile(
     column_right: int,
     stats: baseline_up.BaselineUpStats | None = None,
 ) -> tuple[baseline_up.BaselineMatch | None, tuple[baseline_up.BaselineMatch, ...]]:
-    """Continue a row by matching the residual profile on the known baseline.
+    """Continue a row from the leftmost residual-profile anchor.
 
-    Do not accept a short glyph merely because it is already fully visible
-    while longer profile-compatible candidates are still pending below the
-    currently observed y range.  Extend the profile one row at a time until no
-    surviving candidate still reaches below the observed bottom; only then do
-    exact 2-D checks.
+    The next glyph must own the leftmost observed residual point.  Starting at
+    the first y where that frontier is reached, its left profile must then
+    follow the same relative x sequence downward.  The observed sequence may
+    start in the middle of the glyph (for example below the dot of ``i``).
+    Once the scan has passed the baseline and the glyph profile ends or enters
+    a gap, that candidate is complete and can be checked in 2-D.
     """
     if stats is not None:
         stats.calls += 1
@@ -126,64 +127,82 @@ def find_next_residual_profile(
     )
     trace = os.environ.get("OCR_FIRST_GLYPH_TRACE") == "1"
 
-    def build_observed(bottom: int) -> tuple[dict[int, int | None], int | None]:
+    def build_observed(bottom: int) -> tuple[dict[int, int | None], int | None, int | None]:
         observed: dict[int, int | None] = {}
         frontier_x: int | None = None
+        anchor_y: int | None = None
         for page_y in range(row_top, bottom + 1):
             xs = tuple(x for x in remaining_by_y.get(page_y, ()) if x < column_right)
             profile_x = min(xs) if xs else None
             observed[page_y] = profile_x
             if profile_x is not None and (frontier_x is None or profile_x < frontier_x):
                 frontier_x = profile_x
-        return observed, frontier_x
+                anchor_y = page_y
+        return observed, frontier_x, anchor_y
 
     def profile_candidates(
         observed: Mapping[int, int | None],
-    ) -> tuple[list[tuple[baseline_up.CompiledGlyph, int, int]], int]:
-        survivors: list[tuple[baseline_up.CompiledGlyph, int, int]] = []
-        survivor_count = 0
+        frontier_x: int,
+        anchor_y: int,
+    ) -> list[tuple[baseline_up.CompiledGlyph, int, bool]]:
+        survivors: list[tuple[baseline_up.CompiledGlyph, int, bool]] = []
+        anchor_rel_y = anchor_y - baseline
+
         for item in library.models:
-            possible_tx: set[int] = set()
-            for page_y, observed_x in observed.items():
-                if observed_x is None:
-                    continue
+            anchor_row = item.rows.get(anchor_rel_y)
+            if anchor_row is None:
+                continue
+
+            tx = frontier_x - anchor_row[0]
+            physical_left = tx + item.min_x
+            physical_right = tx + item.max_x
+            if physical_left <= after_left or physical_right >= column_right:
+                continue
+
+            compatible = True
+            complete = False
+            for page_y in range(anchor_y, known_bottom + 1):
                 rel_y = page_y - baseline
                 model_row = item.rows.get(rel_y)
+
                 if model_row is None:
+                    if page_y > baseline:
+                        complete = True
+                        break
                     continue
-                possible_tx.add(observed_x - model_row[0])
 
-            for tx in possible_tx:
-                physical_left = tx + item.min_x
-                physical_right = tx + item.max_x
-                if physical_left <= after_left or physical_right >= column_right:
-                    continue
-                compatible, explained, _gaps = _profile_compatible(
-                    item,
-                    tx=tx,
-                    baseline=baseline,
-                    observed=observed,
-                )
-                if not compatible or explained == 0:
-                    continue
-                survivor_count += 1
-                glyph_bottom = baseline + max(item.rows)
-                survivors.append((item, tx, glyph_bottom))
-        return survivors, survivor_count
+                observed_x = observed.get(page_y)
+                if observed_x is None or tx + model_row[0] != observed_x:
+                    compatible = False
+                    break
 
-    observed, frontier_x = build_observed(known_bottom)
-    if frontier_x is None:
+            if not compatible:
+                continue
+
+            if not complete and known_bottom >= baseline:
+                next_rel_y = known_bottom + 1 - baseline
+                if item.rows.get(next_rel_y) is None:
+                    complete = True
+
+            survivors.append((item, tx, complete))
+
+        return survivors
+
+    observed, frontier_x, anchor_y = build_observed(known_bottom)
+    if frontier_x is None or anchor_y is None:
         return None, ()
 
     while True:
-        survivors, profile_survivors = profile_candidates(observed)
-        pending = [entry for entry in survivors if entry[2] > known_bottom]
+        survivors = profile_candidates(observed, frontier_x, anchor_y)
+        pending = [entry for entry in survivors if not entry[2]]
         if not pending or known_bottom >= source_bottom:
             break
         known_bottom += 1
-        observed, frontier_x = build_observed(known_bottom)
-        if frontier_x is None:
+        observed, frontier_x, anchor_y = build_observed(known_bottom)
+        if frontier_x is None or anchor_y is None:
             return None, ()
+
+    profile_survivors = len(survivors)
 
     if trace:
         points = " ".join(
@@ -192,14 +211,14 @@ def find_next_residual_profile(
         )
         print(
             f"directional-residual-profile: y={row_top}..{known_bottom} "
-            f"frontier={frontier_x} pending={len(pending)} "
+            f"frontier={frontier_x} anchor_y={anchor_y} pending={len(pending)} "
             f"profile_survivors={profile_survivors} profile=[{points}]",
             flush=True,
         )
 
     proposals: dict[tuple[int, int, int], baseline_up.BaselineMatch] = {}
-    for item, tx, glyph_bottom in survivors:
-        if glyph_bottom > known_bottom:
+    for item, tx, complete in survivors:
+        if not complete:
             continue
         placed = frozenset((tx + x, baseline + y) for x, y in item.model.pixels)
         if not placed.issubset(remaining):
@@ -209,13 +228,7 @@ def find_next_residual_profile(
             tx=tx,
             baseline=baseline,
             pixels=placed,
-            discovered_y=min(
-                page_y
-                for page_y, observed_x in observed.items()
-                if observed_x is not None
-                and (page_y - baseline) in item.rows
-                and tx + item.rows[page_y - baseline][0] == observed_x
-            ),
+            discovered_y=anchor_y,
         )
         proposals[(id(candidate.model), candidate.tx, candidate.baseline)] = candidate
 
@@ -237,7 +250,7 @@ def find_next_residual_profile(
         accepted = repr(hit.model.label) if hit is not None else None
         print(
             f"directional-residual-pick: after_left={after_left} baseline={baseline} "
-            f"frontier={frontier_x} profile_bottom={known_bottom} "
+            f"frontier={frontier_x} anchor_y={anchor_y} profile_bottom={known_bottom} "
             f"profile_survivors={profile_survivors} exact={len(candidates)} "
             f"accepted={accepted}",
             flush=True,
