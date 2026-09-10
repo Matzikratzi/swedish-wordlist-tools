@@ -7,6 +7,31 @@ from typing import Iterable, Mapping
 from .ocr_column_left_profile import ColumnLeftProfile, build_column_left_profile
 
 
+class StartValues(tuple):
+    """Tuple-compatible strict starts with a useful named diagnostic repr."""
+
+    def __new__(
+        cls,
+        values: Iterable[int],
+        *,
+        headword: tuple[int, ...],
+        continuation: tuple[int, ...],
+        homonym: tuple[int, ...],
+    ) -> "StartValues":
+        obj = super().__new__(cls, values)
+        obj.headword = headword
+        obj.continuation = continuation
+        obj.homonym = homonym
+        return obj
+
+    def __repr__(self) -> str:
+        return (
+            f"headword={self.headword} "
+            f"continuation={self.continuation} "
+            f"homonym={self.homonym}"
+        )
+
+
 @dataclass(frozen=True)
 class InferredStartGeometry:
     centers: tuple[int, ...]
@@ -97,16 +122,16 @@ def infer_page_start_geometry(
     """Infer strict row-start x values for one already selected column.
 
     The caller supplies rows from exactly one column, so every result here is
-    column-local.  Existing broad geometry is used only as a bootstrap:
+    column-local. Existing broad geometry is used only as a bootstrap:
 
     1. Per-row left minima form up to three recurring geometric families.
     2. Within each family's coarse tolerance window, scan each row downward and
        record the first raster y whose left profile enters that window.
     3. Keep the two best-supported discrete x values for each family.
 
-    Family order is purely geometric.  With three families, left-to-right is
-    homonym, headword, continuation.  With two families, left-to-right is
-    headword, continuation.  No glyph, page or row special case is involved.
+    Family order is purely geometric. With three families, left-to-right is
+    homonym, headword, continuation. With two families, left-to-right is
+    headword, continuation. No glyph, page or row special case is involved.
     """
     if tolerance < 0:
         raise ValueError("tolerance must be non-negative")
@@ -160,10 +185,16 @@ def infer_page_start_geometry(
     elif len(starts) == 1:
         headword = starts[0]
 
-    strict = tuple(sorted(set(homonym + headword + continuation)))
+    strict_tuple = tuple(sorted(set(homonym + headword + continuation)))
+    strict = StartValues(
+        strict_tuple,
+        headword=headword,
+        continuation=continuation,
+        homonym=homonym,
+    )
     return InferredStartGeometry(
         centers=strict,
-        ranges=tuple((x, x) for x in strict),
+        ranges=tuple((x, x) for x in strict_tuple),
         observations=tuple(all_entries),
         headword=headword,
         continuation=continuation,
