@@ -176,8 +176,17 @@ def find_next_residual_profile(
             if physical_left <= after_left or physical_right >= column_right:
                 continue
 
-            # Necessary one-row 2-D condition at the birth pixel.
-            if any((tx + model_x) not in start_page_pixels for model_x in row_xs):
+            # Exact one-row raster condition at the birth pixel, within
+            # this glyph placement's own horizontal bounding box.  Black must
+            # match black and white must match white; page ink outside the
+            # glyph bounding box is irrelevant.
+            model_black = {tx + model_x for model_x in row_xs}
+            page_black = {
+                page_x
+                for page_x in start_page_pixels
+                if physical_left <= page_x <= physical_right
+            }
+            if page_black != model_black:
                 anchor_row_rejects += 1
                 continue
 
