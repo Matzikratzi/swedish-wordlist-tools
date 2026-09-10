@@ -105,35 +105,85 @@ def find_next_residual_profile(
     column_right: int,
     stats: baseline_up.BaselineUpStats | None = None,
 ) -> tuple[baseline_up.BaselineMatch | None, tuple[baseline_up.BaselineMatch, ...]]:
-    """Continue a row by matching the complete known residual profile.
+    """Continue a row by matching the residual profile on the known baseline.
 
-    The baseline is already known from the first accepted glyph.  For every
-    compiled glyph we therefore know exactly which model row corresponds to
-    each observed page y.  Candidate translations are generated only from
-    equalities where that glyph could own an observed lower-envelope point;
-    there is no special seed/frontier row.
-
-    Each proposed translation is then checked against the whole observed
-    profile with the lower-envelope rule.  Only profile survivors receive the
-    expensive exact 2-D subset check.
+    Do not accept a short glyph merely because it is already fully visible
+    while longer profile-compatible candidates are still pending below the
+    currently observed y range.  Extend the profile one row at a time until no
+    surviving candidate still reaches below the observed bottom; only then do
+    exact 2-D checks.
     """
-    del row_bottom
     if stats is not None:
         stats.calls += 1
 
     if profile_bottom is None:
         profile_bottom = baseline
     known_bottom = max(row_top, int(profile_bottom))
+    source_bottom = (
+        int(row_bottom)
+        if row_bottom is not None
+        else (max(remaining_by_y) if remaining_by_y else known_bottom)
+    )
     trace = os.environ.get("OCR_FIRST_GLYPH_TRACE") == "1"
 
-    observed: dict[int, int | None] = {}
-    frontier_x: int | None = None
-    for page_y in range(row_top, known_bottom + 1):
-        xs = tuple(x for x in remaining_by_y.get(page_y, ()) if x < column_right)
-        profile_x = min(xs) if xs else None
-        observed[page_y] = profile_x
-        if profile_x is not None and (frontier_x is None or profile_x < frontier_x):
-            frontier_x = profile_x
+    def build_observed(bottom: int) -> tuple[dict[int, int | None], int | None]:
+        observed: dict[int, int | None] = {}
+        frontier_x: int | None = None
+        for page_y in range(row_top, bottom + 1):
+            xs = tuple(x for x in remaining_by_y.get(page_y, ()) if x < column_right)
+            profile_x = min(xs) if xs else None
+            observed[page_y] = profile_x
+            if profile_x is not None and (frontier_x is None or profile_x < frontier_x):
+                frontier_x = profile_x
+        return observed, frontier_x
+
+    def profile_candidates(
+        observed: Mapping[int, int | None],
+    ) -> tuple[list[tuple[baseline_up.CompiledGlyph, int, int]], int]:
+        survivors: list[tuple[baseline_up.CompiledGlyph, int, int]] = []
+        survivor_count = 0
+        for item in library.models:
+            possible_tx: set[int] = set()
+            for page_y, observed_x in observed.items():
+                if observed_x is None:
+                    continue
+                rel_y = page_y - baseline
+                model_row = item.rows.get(rel_y)
+                if model_row is None:
+                    continue
+                possible_tx.add(observed_x - model_row[0])
+
+            for tx in possible_tx:
+                physical_left = tx + item.min_x
+                physical_right = tx + item.max_x
+                if physical_left <= after_left or physical_right >= column_right:
+                    continue
+                compatible, explained, _gaps = _profile_compatible(
+                    item,
+                    tx=tx,
+                    baseline=baseline,
+                    observed=observed,
+                )
+                if not compatible or explained == 0:
+                    continue
+                survivor_count += 1
+                glyph_bottom = baseline + max(item.rows)
+                survivors.append((item, tx, glyph_bottom))
+        return survivors, survivor_count
+
+    observed, frontier_x = build_observed(known_bottom)
+    if frontier_x is None:
+        return None, ()
+
+    while True:
+        survivors, profile_survivors = profile_candidates(observed)
+        pending = [entry for entry in survivors if entry[2] > known_bottom]
+        if not pending or known_bottom >= source_bottom:
+            break
+        known_bottom += 1
+        observed, frontier_x = build_observed(known_bottom)
+        if frontier_x is None:
+            return None, ()
 
     if trace:
         points = " ".join(
@@ -142,65 +192,32 @@ def find_next_residual_profile(
         )
         print(
             f"directional-residual-profile: y={row_top}..{known_bottom} "
-            f"frontier={frontier_x} profile=[{points}]",
+            f"frontier={frontier_x} pending={len(pending)} "
+            f"profile_survivors={profile_survivors} profile=[{points}]",
             flush=True,
         )
 
-    if frontier_x is None:
-        return None, ()
-
     proposals: dict[tuple[int, int, int], baseline_up.BaselineMatch] = {}
-    profile_survivors = 0
-
-    for item in library.models:
-        possible_tx: set[int] = set()
-
-        # A useful translation must make this glyph own at least one visible
-        # profile point.  With baseline fixed, every such equality gives tx
-        # directly from the model row's first black pixel.
-        for page_y, observed_x in observed.items():
-            if observed_x is None:
-                continue
-            rel_y = page_y - baseline
-            model_row = item.rows.get(rel_y)
-            if model_row is None:
-                continue
-            possible_tx.add(observed_x - model_row[0])
-
-        for tx in possible_tx:
-            physical_left = tx + item.min_x
-            physical_right = tx + item.max_x
-            if physical_left <= after_left or physical_right >= column_right:
-                continue
-
-            compatible, explained, gaps = _profile_compatible(
-                item,
-                tx=tx,
-                baseline=baseline,
-                observed=observed,
-            )
-            if not compatible or explained == 0:
-                continue
-            profile_survivors += 1
-
-            placed = frozenset((tx + x, baseline + y) for x, y in item.model.pixels)
-            if not placed.issubset(remaining):
-                continue
-
-            candidate = baseline_up.BaselineMatch(
-                model=item.model,
-                tx=tx,
-                baseline=baseline,
-                pixels=placed,
-                discovered_y=min(
-                    page_y
-                    for page_y, observed_x in observed.items()
-                    if observed_x is not None
-                    and (page_y - baseline) in item.rows
-                    and tx + item.rows[page_y - baseline][0] == observed_x
-                ),
-            )
-            proposals[(id(candidate.model), candidate.tx, candidate.baseline)] = candidate
+    for item, tx, glyph_bottom in survivors:
+        if glyph_bottom > known_bottom:
+            continue
+        placed = frozenset((tx + x, baseline + y) for x, y in item.model.pixels)
+        if not placed.issubset(remaining):
+            continue
+        candidate = baseline_up.BaselineMatch(
+            model=item.model,
+            tx=tx,
+            baseline=baseline,
+            pixels=placed,
+            discovered_y=min(
+                page_y
+                for page_y, observed_x in observed.items()
+                if observed_x is not None
+                and (page_y - baseline) in item.rows
+                and tx + item.rows[page_y - baseline][0] == observed_x
+            ),
+        )
+        proposals[(id(candidate.model), candidate.tx, candidate.baseline)] = candidate
 
     candidates = tuple(
         sorted(
@@ -220,8 +237,9 @@ def find_next_residual_profile(
         accepted = repr(hit.model.label) if hit is not None else None
         print(
             f"directional-residual-pick: after_left={after_left} baseline={baseline} "
-            f"frontier={frontier_x} profile_survivors={profile_survivors} "
-            f"exact={len(candidates)} accepted={accepted}",
+            f"frontier={frontier_x} profile_bottom={known_bottom} "
+            f"profile_survivors={profile_survivors} exact={len(candidates)} "
+            f"accepted={accepted}",
             flush=True,
         )
         for candidate in candidates:
