@@ -119,30 +119,37 @@ def _residual_leftmost_band_candidates(
     column_right: int,
     stats: baseline_up.BaselineUpStats | None = None,
 ) -> tuple[baseline_up.BaselineMatch, ...]:
-    """Propose next glyphs only from the earliest residual ink above baseline.
+    """Propose later glyphs from the earliest residual ink above baseline.
 
-    Once the first glyph has established the baseline, vertical discovery order
-    is irrelevant.  The next reading position is the globally leftmost still
-    unexplained x anywhere from row_top through baseline.  Every candidate must
-    explain that frontier on the known baseline.
+    The first glyph establishes the baseline.  Thereafter the next observation
+    is the globally leftmost unexplained x anywhere from row_top through the
+    baseline.  That x is only an observation frontier, not a required physical
+    glyph edge: any model pixel on the corresponding model row may be aligned
+    with a frontier pixel.  The complete placed model must then be present in
+    the residual, including any pixels below the baseline.
     """
     if stats is not None:
         stats.calls += 1
 
-    frontier_rows: list[tuple[int, int]] = []
+    frontier_x: int | None = None
+    frontier_ys: list[int] = []
     for page_y in range(row_top, baseline + 1):
         if stats is not None:
             stats.y_rows += 1
         xs = remaining_by_y.get(page_y, ())
         eligible = [x for x in xs if after_left < x < column_right]
-        if eligible:
-            frontier_rows.append((min(eligible), page_y))
+        if not eligible:
+            continue
+        row_left = min(eligible)
+        if frontier_x is None or row_left < frontier_x:
+            frontier_x = row_left
+            frontier_ys = [page_y]
+        elif row_left == frontier_x:
+            frontier_ys.append(page_y)
 
-    if not frontier_rows:
+    if frontier_x is None:
         return ()
 
-    frontier_x = min(x for x, _page_y in frontier_rows)
-    frontier_ys = tuple(page_y for x, page_y in frontier_rows if x == frontier_x)
     if stats is not None:
         stats.observed_pixels += len(frontier_ys)
 
@@ -157,41 +164,41 @@ def _residual_leftmost_band_candidates(
 
         for item in possible_models:
             model_row = item.rows[rel_y]
-            if stats is not None:
-                stats.raw_tx_proposals += 1
-            tx = frontier_x - model_row[0]
-            physical_left = tx + item.min_x
-            physical_right = tx + item.max_x
-            if physical_left <= after_left or physical_right >= column_right:
-                continue
-            if stats is not None:
-                stats.in_bounds_tx += 1
-
-            key = (id(item.model), tx, baseline)
-            if key in seen:
+            for model_x in model_row:
                 if stats is not None:
-                    stats.duplicate_tx += 1
-                continue
-            seen.add(key)
-            if stats is not None:
-                stats.unique_tx += 1
+                    stats.raw_tx_proposals += 1
+                tx = frontier_x - model_x
+                physical_right = tx + item.max_x
+                if physical_right >= column_right:
+                    continue
+                if stats is not None:
+                    stats.in_bounds_tx += 1
 
-            placed = frozenset((tx + x, baseline + y) for x, y in item.model.pixels)
-            if stats is not None:
-                stats.subset_checks += 1
-            if not placed.issubset(remaining):
-                continue
-            if stats is not None:
-                stats.exact_hits += 1
-            found.append(
-                baseline_up.BaselineMatch(
-                    model=item.model,
-                    tx=tx,
-                    baseline=baseline,
-                    pixels=placed,
-                    discovered_y=page_y,
+                key = (id(item.model), tx, baseline)
+                if key in seen:
+                    if stats is not None:
+                        stats.duplicate_tx += 1
+                    continue
+                seen.add(key)
+                if stats is not None:
+                    stats.unique_tx += 1
+
+                placed = frozenset((tx + x, baseline + y) for x, y in item.model.pixels)
+                if stats is not None:
+                    stats.subset_checks += 1
+                if not placed.issubset(remaining):
+                    continue
+                if stats is not None:
+                    stats.exact_hits += 1
+                found.append(
+                    baseline_up.BaselineMatch(
+                        model=item.model,
+                        tx=tx,
+                        baseline=baseline,
+                        pixels=placed,
+                        discovered_y=page_y,
+                    )
                 )
-            )
 
     return tuple(
         sorted(
@@ -221,7 +228,7 @@ def find_next_residual_leftmost(
     stats: baseline_up.BaselineUpStats | None = None,
 ) -> tuple[baseline_up.BaselineMatch | None, tuple[baseline_up.BaselineMatch, ...]]:
     """Experimental post-first-glyph search from the residual left frontier."""
-    del row_bottom, profile_bottom
+    del profile_bottom
 
     candidates = _residual_leftmost_band_candidates(
         remaining,
@@ -233,11 +240,20 @@ def find_next_residual_leftmost(
         column_right=column_right,
         stats=stats,
     )
+
+    # Candidate generation starts only from ink at/above baseline, but exact
+    # placement already checks every model pixel.  If ambiguity remains, let the
+    # live-profile filter inspect through the possible descender extent too.
+    known_bottom = (
+        int(row_bottom) - 1
+        if row_bottom is not None
+        else baseline + library.max_down
+    )
     return baseline_up._pick_with_live_profile(
         candidates,
         remaining_by_y,
         row_top=row_top,
-        known_bottom_before=baseline,
+        known_bottom_before=known_bottom,
         after_left=after_left,
         column_right=column_right,
         stats=stats,
