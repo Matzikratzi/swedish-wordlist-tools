@@ -25,6 +25,13 @@ def _placed_pixels(item: CompiledGlyph, *, tx: int, baseline: int) -> frozenset[
     return frozenset((tx + x, baseline + y) for x, y in item.model.pixels)
 
 
+def _candidate_rows(candidate: BaselineMatch) -> dict[int, tuple[int, ...]]:
+    rows: dict[int, list[int]] = {}
+    for x, y in candidate.pixels:
+        rows.setdefault(y, []).append(x)
+    return {y: tuple(sorted(xs)) for y, xs in rows.items()}
+
+
 def _pick_unique_maximal(candidates: Iterable[BaselineMatch]) -> BaselineMatch | None:
     rows = list(candidates)
     if not rows:
@@ -42,145 +49,6 @@ def _pick_unique_maximal(candidates: Iterable[BaselineMatch]) -> BaselineMatch |
     return max(equivalent, key=lambda hit: (len(hit.pixels), hit.model.sources))
 
 
-def _candidate_rows(candidate: BaselineMatch) -> dict[int, tuple[int, ...]]:
-    rows: dict[int, list[int]] = {}
-    for x, y in candidate.pixels:
-        rows.setdefault(y, []).append(x)
-    return {y: tuple(sorted(xs)) for y, xs in rows.items()}
-
-
-def _candidate_last_front(candidate: BaselineMatch) -> int:
-    rows = _candidate_rows(candidate)
-    last_y = max(rows)
-    return rows[last_y][0]
-
-
-def _candidate_matches_seen_profile(
-    candidate: BaselineMatch,
-    profile_history: Mapping[int, int | None],
-    *,
-    through_y: int,
-) -> bool:
-    for page_y, xs in _candidate_rows(candidate).items():
-        if page_y > through_y:
-            continue
-        observed = profile_history.get(page_y)
-        if observed is None or observed != xs[0]:
-            return False
-    return True
-
-
-def _candidate_explains_left_ink_to_baseline(
-    candidate: BaselineMatch,
-    black: set[Pixel],
-) -> bool:
-    rows = _candidate_rows(candidate)
-    trigger_xs = rows.get(candidate.discovered_y)
-    if not trigger_xs:
-        return False
-    trigger_front = trigger_xs[0]
-
-    for x, y in black:
-        if y < candidate.discovered_y or y > candidate.baseline:
-            continue
-        if x > trigger_front:
-            continue
-        if (x, y) not in candidate.pixels:
-            return False
-    return True
-
-
-def _advance_candidate(
-    candidate: BaselineMatch,
-    *,
-    page_y: int,
-    profile_x: int | None,
-    previous_profile_x: int | None = None,
-) -> str:
-    rows = _candidate_rows(candidate)
-    bottom = max(rows)
-
-    if page_y <= bottom:
-        candidate_xs = rows.get(page_y)
-        if candidate_xs is not None:
-            if profile_x is None:
-                return "dead"
-            return "live" if profile_x == candidate_xs[0] else "dead"
-
-        if (
-            profile_x is not None
-            and previous_profile_x is not None
-            and profile_x < previous_profile_x
-        ):
-            return "dead"
-        return "live"
-
-    if profile_x is None:
-        return "live"
-    if previous_profile_x is not None and profile_x < previous_profile_x:
-        return "dead"
-    return "passed" if profile_x > _candidate_last_front(candidate) else "dead"
-
-
-def _history_seed_proposals(
-    *,
-    page_y: int,
-    profile_x: int,
-    profile_history: Mapping[int, int | None],
-    black: set[Pixel],
-    library: CompiledGlyphLibrary,
-    row_top: int,
-    start_ranges: tuple[TranslateXRange, ...],
-) -> tuple[BaselineMatch, ...]:
-    """Legacy single-observation seeding kept for comparison/debugging."""
-    proposals: dict[tuple[int, int, int], BaselineMatch] = {}
-
-    for item in library.models:
-        for rel_y, model_row in item.rows.items():
-            row_left = min(model_row)
-            tx = profile_x - row_left
-            baseline = page_y - rel_y
-            key = (id(item.model), tx, baseline)
-            if key in proposals:
-                continue
-
-            placed = _placed_pixels(item, tx=tx, baseline=baseline)
-            if not placed or min(y for _x, y in placed) < row_top:
-                continue
-            if not placed.issubset(black):
-                continue
-
-            candidate = BaselineMatch(
-                model=item.model,
-                tx=tx,
-                baseline=baseline,
-                pixels=placed,
-                discovered_y=page_y,
-            )
-            if not _x_allowed(candidate.left, start_ranges):
-                continue
-            if not _candidate_matches_seen_profile(candidate, profile_history, through_y=page_y):
-                continue
-            if not _candidate_explains_left_ink_to_baseline(candidate, black):
-                continue
-            proposals[key] = candidate
-
-    return tuple(
-        sorted(
-            proposals.values(),
-            key=lambda hit: (
-                hit.discovered_y,
-                hit.baseline,
-                hit.left,
-                -len(hit.pixels),
-                -hit.model.sources,
-                hit.model.label,
-                hit.model.style,
-            ),
-        )
-    )
-
-
 def _profile_at(
     page_y: int,
     *,
@@ -193,95 +61,6 @@ def _profile_at(
     return min(row_xs) if row_xs else None
 
 
-def _two_row_profile_proposals(
-    *,
-    anchor_y: int,
-    neighbour_y: int,
-    anchor_x: int,
-    neighbour_x: int,
-    black: set[Pixel],
-    library: CompiledGlyphLibrary,
-    row_top: int,
-    start_ranges: tuple[TranslateXRange, ...],
-) -> tuple[BaselineMatch, ...]:
-    """Place glyphs only after two adjacent residual profile rows agree.
-
-    The leftmost residual pixel chooses the first observation. A single point
-    is intentionally insufficient: almost every glyph can be translated
-    through one point. The adjacent residual row supplies the profile
-    slope/event needed to constrain both translation and baseline. Only
-    placements that explain both left-profile pixels are materialised and
-    subjected to the exact 2-D subset check.
-    """
-    dy = neighbour_y - anchor_y
-    if dy not in (-1, 1):
-        raise ValueError("profile neighbour must be exactly one y step away")
-
-    proposals: dict[tuple[int, int, int], BaselineMatch] = {}
-    for item in library.models:
-        for rel_y, model_row in item.rows.items():
-            neighbour_rel_y = rel_y + dy
-            neighbour_row = item.rows.get(neighbour_rel_y)
-            if neighbour_row is None:
-                continue
-
-            model_x = model_row[0]
-            neighbour_model_x = neighbour_row[0]
-            if neighbour_model_x - model_x != neighbour_x - anchor_x:
-                continue
-
-            tx = anchor_x - model_x
-            baseline = anchor_y - rel_y
-            key = (id(item.model), tx, baseline)
-            if key in proposals:
-                continue
-
-            physical_left = tx + item.min_x
-            if not _x_allowed(physical_left, start_ranges):
-                continue
-
-            placed = _placed_pixels(item, tx=tx, baseline=baseline)
-            if not placed or min(y for _x, y in placed) < row_top:
-                continue
-            if (anchor_x, anchor_y) not in placed or (neighbour_x, neighbour_y) not in placed:
-                continue
-            if not placed.issubset(black):
-                continue
-
-            proposals[key] = BaselineMatch(
-                model=item.model,
-                tx=tx,
-                baseline=baseline,
-                pixels=placed,
-                discovered_y=anchor_y,
-            )
-
-    return tuple(
-        sorted(
-            proposals.values(),
-            key=lambda hit: (
-                hit.left,
-                -len(hit.pixels),
-                -hit.model.sources,
-                hit.model.label,
-                hit.model.style,
-                hit.baseline,
-            ),
-        )
-    )
-
-
-def _trace_candidate(prefix: str, event: str, candidate: BaselineMatch, **fields: object) -> None:
-    extra = " ".join(f"{key}={value}" for key, value in fields.items())
-    print(
-        f"{prefix} first-glyph-{event}: label={candidate.model.label!r} style={candidate.model.style} "
-        f"left={candidate.left} right={candidate.right} baseline={candidate.baseline} "
-        f"discovered_y={candidate.discovered_y} pixels={len(candidate.pixels)}"
-        + (f" {extra}" if extra else ""),
-        flush=True,
-    )
-
-
 def _default_scan_bottom(
     *,
     row_top: int,
@@ -289,7 +68,7 @@ def _default_scan_bottom(
     library: CompiledGlyphLibrary,
     left_profile: ColumnLeftProfile | None,
 ) -> int:
-    """Bound unknown first-row height using glyph geometry, never facit rows."""
+    """Bound an unknown text row from glyph geometry, never from facit."""
     source_bottom = (
         left_profile.bottom
         if left_profile is not None
@@ -300,6 +79,147 @@ def _default_scan_bottom(
         default=1,
     )
     return min(source_bottom, row_top + max_glyph_height)
+
+
+def _row_clearance(item: CompiledGlyph, rel_y: int) -> int:
+    """Guaranteed empty prefix from the glyph's physical left edge.
+
+    For an ink row this is the distance to its first black pixel. For a row
+    inside the glyph's vertical extent with no ink, the whole glyph width is
+    guaranteed empty. This is the code-level form of the compact negative
+    'gap depth' notation discussed during development.
+    """
+    row = item.rows.get(rel_y)
+    if row is None:
+        return item.width
+    return row[0] - item.min_x
+
+
+def _profile_compatible(
+    item: CompiledGlyph,
+    *,
+    tx: int,
+    baseline: int,
+    observed: Mapping[int, int | None],
+) -> tuple[bool, int, int]:
+    """Check a glyph against the observed lower-envelope left profile.
+
+    A candidate front left of the observed page front is impossible. Equality
+    means this glyph owns/explains the page-profile point. A candidate front to
+    the right is allowed because another glyph may own the lower envelope.
+    Empty glyph rows are gaps and impose no page-envelope equality.
+    """
+    min_rel = min(item.rows)
+    max_rel = max(item.rows)
+    explained = 0
+    gap_rows = 0
+    physical_left = tx + item.min_x
+
+    for page_y, observed_x in observed.items():
+        rel_y = page_y - baseline
+        if rel_y < min_rel or rel_y > max_rel:
+            continue
+        row = item.rows.get(rel_y)
+        if row is None:
+            gap_rows += 1
+            continue
+        candidate_front = physical_left + _row_clearance(item, rel_y)
+        if observed_x is None:
+            return False, explained, gap_rows
+        if candidate_front < observed_x:
+            return False, explained, gap_rows
+        if candidate_front == observed_x:
+            explained += 1
+
+    return True, explained, gap_rows
+
+
+def _seed_from_record_row(
+    *,
+    page_y: int,
+    observed_x: int,
+    observed: Mapping[int, int | None],
+    black: set[Pixel],
+    library: CompiledGlyphLibrary,
+    row_top: int,
+    start_ranges: tuple[TranslateXRange, ...],
+) -> tuple[tuple[CompiledGlyph, BaselineMatch, int, int], ...]:
+    """Seed candidates from the actual horizontal raster at a left record.
+
+    Unlike the previous two-y experiment, the record row itself supplies more
+    than one bit: every black pixel in the model's horizontal row must already
+    exist in the source. Full 2-D verification is deliberately postponed.
+    """
+    found: dict[tuple[int, int, int], tuple[CompiledGlyph, BaselineMatch, int, int]] = {}
+
+    for item in library.models:
+        for rel_y, model_row in item.rows.items():
+            tx = observed_x - model_row[0]
+            physical_left = tx + item.min_x
+            if not _x_allowed(physical_left, start_ranges):
+                continue
+
+            baseline = page_y - rel_y
+            key = (id(item.model), tx, baseline)
+            if key in found:
+                continue
+
+            # The complete horizontal glyph row must be present before this
+            # model is allowed to become a live profile candidate.
+            if any((tx + x, page_y) not in black for x in model_row):
+                continue
+
+            placed = _placed_pixels(item, tx=tx, baseline=baseline)
+            if not placed or min(y for _x, y in placed) < row_top:
+                continue
+
+            candidate = BaselineMatch(
+                model=item.model,
+                tx=tx,
+                baseline=baseline,
+                pixels=placed,
+                discovered_y=page_y,
+            )
+            compatible, explained, gaps = _profile_compatible(
+                item,
+                tx=tx,
+                baseline=baseline,
+                observed=observed,
+            )
+            if not compatible or explained == 0:
+                continue
+            found[key] = (item, candidate, explained, gaps)
+
+    return tuple(
+        sorted(
+            found.values(),
+            key=lambda entry: (
+                entry[1].left,
+                -entry[2],
+                -len(entry[1].pixels),
+                -entry[1].model.sources,
+                entry[1].model.label,
+                entry[1].model.style,
+                entry[1].baseline,
+            ),
+        )
+    )
+
+
+def _trace_candidate(
+    prefix: str,
+    event: str,
+    candidate: BaselineMatch,
+    **fields: object,
+) -> None:
+    extra = " ".join(f"{key}={value}" for key, value in fields.items())
+    print(
+        f"{prefix} first-glyph-{event}: label={candidate.model.label!r} "
+        f"style={candidate.model.style} left={candidate.left} right={candidate.right} "
+        f"baseline={candidate.baseline} discovered_y={candidate.discovered_y} "
+        f"pixels={len(candidate.pixels)}" + (f" {extra}" if extra else ""),
+        flush=True,
+    )
 
 
 def first_glyph_top_down(
@@ -314,87 +234,141 @@ def first_glyph_top_down(
     trace: bool = False,
     trace_prefix: str = "directional-trace",
 ) -> tuple[BaselineMatch | None, FirstGlyphSearch]:
-    """Find the first glyph from the row-local leftmost edge and a y-neighbour.
+    """Find the first glyph by profile history, left records and raster rows.
 
-    The anchor is the smallest residual x inside a row-local scan band. When
-    the caller does not know row_bottom, the band is bounded by the maximum
-    compiled glyph height from row_top. This keeps the search on the current
-    text row without using reference/facit row geometry.
+    Scan down from row_top and merely remember profile values until a new
+    leftward record reaches a plausible row-start x. At that point seed from
+    the full horizontal raster row, match the candidate profile back upward,
+    then continue downward while candidates survive. Only the final survivors
+    receive an exact 2-D subset test.
     """
     trace = trace or os.environ.get("OCR_FIRST_GLYPH_TRACE") == "1"
     ranges = tuple((int(lo), int(hi)) for lo, hi in allowed_translate_x_ranges)
     if not ranges:
         return None, FirstGlyphSearch(y=None, candidates=())
 
-    if row_bottom is None:
-        scan_bottom = _default_scan_bottom(
+    scan_bottom = (
+        int(row_bottom)
+        if row_bottom is not None
+        else _default_scan_bottom(
             row_top=row_top,
             black_by_y=black_by_y,
             library=library,
             left_profile=left_profile,
         )
-    else:
-        scan_bottom = int(row_bottom)
+    )
     if scan_bottom <= row_top:
         return None, FirstGlyphSearch(y=None, candidates=())
 
-    profile: dict[int, int] = {}
-    for page_y in range(row_top, scan_bottom):
-        x = _profile_at(page_y, black_by_y=black_by_y, left_profile=left_profile)
-        if x is not None:
-            profile[page_y] = x
-    if not profile:
-        return None, FirstGlyphSearch(y=None, candidates=())
-
-    leftmost_x = min(profile.values())
-    anchor_ys = tuple(y for y, x in sorted(profile.items()) if x == leftmost_x)
+    observed: dict[int, int | None] = {}
+    best_x: int | None = None
+    live: dict[tuple[int, int, int], tuple[CompiledGlyph, BaselineMatch]] = {}
+    seed_y: int | None = None
 
     if trace:
         print(
-            f"{trace_prefix} first-glyph-leftmost: band={row_top}..{scan_bottom - 1} "
-            f"x={leftmost_x} ys={anchor_ys}",
+            f"{trace_prefix} first-glyph-profile-scan: band={row_top}..{scan_bottom - 1}",
             flush=True,
         )
 
-    all_proposals: dict[tuple[int, int, int], BaselineMatch] = {}
-    used_anchor_y: int | None = None
+    for page_y in range(row_top, scan_bottom):
+        profile_x = _profile_at(page_y, black_by_y=black_by_y, left_profile=left_profile)
+        observed[page_y] = profile_x
+        is_record = profile_x is not None and (best_x is None or profile_x < best_x)
+        if is_record:
+            best_x = profile_x
 
-    for anchor_y in anchor_ys:
-        for neighbour_y in (anchor_y + 1, anchor_y - 1):
-            if neighbour_y < row_top or neighbour_y >= scan_bottom:
-                continue
-            neighbour_x = profile.get(neighbour_y)
-            if neighbour_x is None:
+        if trace:
+            shown = "inf" if profile_x is None else str(profile_x)
+            print(
+                f"{trace_prefix} first-glyph-profile: y={page_y} x={shown} "
+                f"record={is_record} live={len(live)}",
+                flush=True,
+            )
+
+        if not live:
+            # A profile value outside every plausible start range is history,
+            # not a seed. We keep scanning until a new left record enters one.
+            if not is_record or profile_x is None or not _x_allowed(profile_x, ranges):
                 continue
 
-            proposals = _two_row_profile_proposals(
-                anchor_y=anchor_y,
-                neighbour_y=neighbour_y,
-                anchor_x=leftmost_x,
-                neighbour_x=neighbour_x,
+            seeded = _seed_from_record_row(
+                page_y=page_y,
+                observed_x=profile_x,
+                observed=observed,
                 black=black,
                 library=library,
                 row_top=row_top,
                 start_ranges=ranges,
             )
             if trace:
-                direction = "down" if neighbour_y > anchor_y else "up"
                 print(
-                    f"{trace_prefix} first-glyph-pair: anchor=({leftmost_x},{anchor_y}) "
-                    f"{direction}=({neighbour_x},{neighbour_y}) proposals={len(proposals)}",
+                    f"{trace_prefix} first-glyph-record-seed: y={page_y} x={profile_x} "
+                    f"candidates={len(seeded)}",
                     flush=True,
                 )
-                for candidate in proposals:
-                    _trace_candidate(trace_prefix, "proposal", candidate)
+                for item, candidate, explained, gaps in seeded:
+                    rel_y = page_y - candidate.baseline
+                    _trace_candidate(
+                        trace_prefix,
+                        "proposal",
+                        candidate,
+                        explained=explained,
+                        gaps=gaps,
+                        clearance=_row_clearance(item, rel_y),
+                    )
+            if not seeded:
+                continue
 
-            if proposals and used_anchor_y is None:
-                used_anchor_y = anchor_y
-            for candidate in proposals:
-                all_proposals[(id(candidate.model), candidate.tx, candidate.baseline)] = candidate
+            seed_y = page_y
+            live = {
+                (id(candidate.model), candidate.tx, candidate.baseline): (item, candidate)
+                for item, candidate, _explained, _gaps in seeded
+            }
+            continue
+
+        # Feed each new y observation into the lower-envelope matcher. A gap
+        # (no row in the model) stays live; a model front left of the observed
+        # front dies; equality explains/owns that profile point.
+        next_live: dict[tuple[int, int, int], tuple[CompiledGlyph, BaselineMatch]] = {}
+        for key, (item, candidate) in live.items():
+            compatible, explained, gaps = _profile_compatible(
+                item,
+                tx=candidate.tx,
+                baseline=candidate.baseline,
+                observed=observed,
+            )
+            if compatible:
+                next_live[key] = (item, candidate)
+            if trace:
+                _trace_candidate(
+                    trace_prefix,
+                    "live" if compatible else "dead",
+                    candidate,
+                    y=page_y,
+                    explained=explained,
+                    gaps=gaps,
+                )
+        live = next_live
+        if not live:
+            # Continue scanning. A later, still farther-left record may seed a
+            # different glyph interpretation; the collected history is kept.
+            continue
+
+    # Expensive exact raster verification happens only here, on the profile
+    # survivors rather than on every translated model proposal.
+    exact: list[BaselineMatch] = []
+    for item, candidate in live.values():
+        if candidate.pixels.issubset(black):
+            exact.append(candidate)
+            if trace:
+                _trace_candidate(trace_prefix, "2d-pass", candidate)
+        elif trace:
+            _trace_candidate(trace_prefix, "2d-fail", candidate)
 
     candidates = tuple(
         sorted(
-            all_proposals.values(),
+            exact,
             key=lambda hit: (
                 hit.left,
                 -len(hit.pixels),
@@ -406,13 +380,12 @@ def first_glyph_top_down(
         )
     )
     hit = _pick_unique_maximal(candidates)
-
     if trace:
         accepted = repr(hit.model.label) if hit is not None else None
         print(
-            f"{trace_prefix} first-glyph-pick: leftmost_x={leftmost_x} "
-            f"candidates={len(candidates)} accepted={accepted}",
+            f"{trace_prefix} first-glyph-pick: seed_y={seed_y} "
+            f"profile_survivors={len(live)} exact={len(candidates)} accepted={accepted}",
             flush=True,
         )
 
-    return hit, FirstGlyphSearch(y=used_anchor_y, candidates=candidates)
+    return hit, FirstGlyphSearch(y=seed_y, candidates=candidates)
