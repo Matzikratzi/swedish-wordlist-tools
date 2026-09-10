@@ -7,7 +7,7 @@ from . import ocr_directional_page_benchmark as benchmark
 from .ocr_column_left_profile import ColumnLeftProfile, build_column_left_profile
 from .ocr_isolated_minima_cumulative import _isolated_profile_segments
 from .ocr_page_start_geometry import InferredStartGeometry
-from .ocr_profile_peak_walk import _group_histogram, _segment_profile, _two_main_peaks, _walk_segment
+from .ocr_profile_peak_walk import _segment_profile, _two_main_peaks, _walk_segment
 
 
 def _profile_for_rows(
@@ -24,31 +24,15 @@ def _profile_for_rows(
     return build_column_left_profile(source, top=top, bottom=bottom)
 
 
-def _start_pair_for_peak(hist: Counter[int], peak: int) -> tuple[int, int]:
-    """Return the best adjacent start pair inside the peak's histogram group.
+def _start_range_for_peak(peak: int) -> tuple[int, int]:
+    """Return the deliberately broad experimental start window around a peak.
 
-    Prefer a pair whose two x values are both actually observed.  This matters
-    for a group such as {60, 61}: anchoring at the modal 61 must not discard the
-    observed 60 start.  If the group contains only one observed x, keep the
-    earlier experimental convention of allowing that x and its immediate right
-    neighbour.
+    The histogram peak identifies the nominal row-start level.  This benchmark
+    now admits one pixel to its left and three pixels to its right so that the
+    first-glyph lifecycle, rather than a very narrow start gate, is responsible
+    for rejecting locally plausible but subsequently contradicted candidates.
     """
-    group = next((group for group in _group_histogram(hist) if peak in group.xs), None)
-    if group is None:
-        return peak, peak + 1
-
-    observed = sorted(set(group.xs))
-    adjacent = [(x, x + 1) for x in observed if x + 1 in observed]
-    if adjacent:
-        return max(
-            adjacent,
-            key=lambda pair: (
-                hist[pair[0]] + hist[pair[1]],
-                min(hist[pair[0]], hist[pair[1]]),
-                -pair[0],
-            ),
-        )
-    return peak, peak + 1
+    return peak - 1, peak + 3
 
 
 def infer_peak_walk_start_geometry(
@@ -64,11 +48,11 @@ def infer_peak_walk_start_geometry(
     page numbers, or reference-row classifications.
 
     Two strong isolated-minimum histogram groups establish the ordinary start
-    levels.  Each level becomes exactly two adjacent allowed starts.  When the
-    histogram group itself contains an observed adjacent pair, that observed pair
-    is used; otherwise the modal peak and its immediate right neighbour are used.
-    A possible third, farther-left level is admitted only when the top-down
-    profile walk actually crosses the left ordinary peak by two pixels.
+    levels.  For this experiment each ordinary peak gets a wider allowed start
+    range from peak-1 through peak+3.  A possible third, farther-left level is
+    still admitted only when the top-down profile walk actually crosses the
+    left ordinary peak by two pixels; it uses the same broad peak-relative
+    window.
     """
     del tolerance  # kept only for compatibility with the benchmark call site
 
@@ -91,17 +75,17 @@ def infer_peak_walk_start_geometry(
         if level == "third":
             third_minima.append(min_x)
 
-    ordinary_pairs = [
-        _start_pair_for_peak(hist, left_peak),
-        _start_pair_for_peak(hist, right_peak),
+    ordinary_ranges = [
+        _start_range_for_peak(left_peak),
+        _start_range_for_peak(right_peak),
     ]
-    ranges = list(ordinary_pairs)
+    ranges = list(ordinary_ranges)
 
     if third_minima:
         third_counts = Counter(third_minima)
         third_peak = max(third_counts, key=lambda x: (third_counts[x], -x))
         if third_peak <= left_peak - 2:
-            ranges.append(_start_pair_for_peak(third_counts, third_peak))
+            ranges.append(_start_range_for_peak(third_peak))
 
     ranges = sorted(set(ranges))
     ranges_tuple = tuple(ranges)
@@ -111,7 +95,7 @@ def infer_peak_walk_start_geometry(
         "directional-peak-starts: "
         f"hist={{{','.join(f'{x}:{hist[x]}' for x in sorted(hist))}}} "
         f"ordinary_peaks={(left_peak, right_peak)} "
-        f"ordinary_pairs={tuple(ordinary_pairs)} "
+        f"ordinary_ranges={tuple(ordinary_ranges)} "
         f"third_minima={third_minima} ranges={ranges_tuple}",
         flush=True,
     )
