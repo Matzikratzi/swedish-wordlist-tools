@@ -17,18 +17,33 @@ class StartValues(tuple):
         headword: tuple[int, ...],
         continuation: tuple[int, ...],
         homonym: tuple[int, ...],
+        headword_support: tuple[int, ...] = (),
+        continuation_support: tuple[int, ...] = (),
+        homonym_support: tuple[int, ...] = (),
     ) -> "StartValues":
         obj = super().__new__(cls, values)
         obj.headword = headword
         obj.continuation = continuation
         obj.homonym = homonym
+        obj.headword_support = headword_support
+        obj.continuation_support = continuation_support
+        obj.homonym_support = homonym_support
         return obj
+
+    @staticmethod
+    def _format_pair(values: tuple[int, ...], support: tuple[int, ...]) -> str:
+        if not values:
+            return "()"
+        if len(values) == len(support):
+            details = ",".join(f"{x}:{n}" for x, n in zip(values, support))
+            return f"{values}[{details}]"
+        return repr(values)
 
     def __repr__(self) -> str:
         return (
-            f"headword={self.headword} "
-            f"continuation={self.continuation} "
-            f"homonym={self.homonym}"
+            f"headword={self._format_pair(self.headword, self.headword_support)} "
+            f"continuation={self._format_pair(self.continuation, self.continuation_support)} "
+            f"homonym={self._format_pair(self.homonym, self.homonym_support)}"
         )
 
 
@@ -40,6 +55,9 @@ class InferredStartGeometry:
     headword: tuple[int, ...] = ()
     continuation: tuple[int, ...] = ()
     homonym: tuple[int, ...] = ()
+    headword_support: tuple[int, ...] = ()
+    continuation_support: tuple[int, ...] = ()
+    homonym_support: tuple[int, ...] = ()
 
 
 def _profile_for_rows(
@@ -106,11 +124,35 @@ def _first_entry_x(
     return None
 
 
-def _two_start_values(entries: Iterable[int]) -> tuple[int, ...]:
-    """Return the two best-supported discrete raster starts for one family."""
+def _adjacent_start_pair(entries: Iterable[int]) -> tuple[tuple[int, int], tuple[int, int]]:
+    """Choose one strict adjacent raster pair and report support for each x.
+
+    A row-start family is represented by exactly two neighbouring raster x
+    positions.  We therefore score adjacent pairs directly instead of choosing
+    two unrelated frequency peaks.  Pair score is the number of observations
+    explained by either member.  Ties prefer the pair with evidence on both
+    positions, then the more balanced pair, then the leftmost pair.
+    """
     counts = Counter(int(x) for x in entries)
-    chosen = sorted(counts, key=lambda x: (-counts[x], x))[:2]
-    return tuple(sorted(chosen))
+    if not counts:
+        return (), ()
+
+    lo = min(counts) - 1
+    hi = max(counts)
+    candidates: list[tuple[tuple[int, int, int, int], tuple[int, int]]] = []
+    for x in range(lo, hi + 1):
+        left = counts[x]
+        right = counts[x + 1]
+        score = left + right
+        if score == 0:
+            continue
+        both = int(left > 0 and right > 0)
+        balance = min(left, right)
+        candidates.append(((score, both, balance, -x), (x, x + 1)))
+
+    _rank, pair = max(candidates, key=lambda item: item[0])
+    support = (counts[pair[0]], counts[pair[1]])
+    return pair, support
 
 
 def infer_page_start_geometry(
@@ -127,7 +169,7 @@ def infer_page_start_geometry(
     1. Per-row left minima form up to three recurring geometric families.
     2. Within each family's coarse tolerance window, scan each row downward and
        record the first raster y whose left profile enters that window.
-    3. Keep the two best-supported discrete x values for each family.
+    3. Choose the best-supported adjacent pair (x, x+1) for each family.
 
     Family order is purely geometric. With three families, left-to-right is
     homonym, headword, continuation. With two families, left-to-right is
@@ -173,17 +215,26 @@ def infer_page_start_geometry(
         class_entries[class_index].append(entry_x)
         all_entries.append(entry_x)
 
-    starts = tuple(_two_start_values(entries) for entries in class_entries)
+    pair_results = tuple(_adjacent_start_pair(entries) for entries in class_entries)
+    starts = tuple(pair for pair, _support in pair_results)
+    supports = tuple(support for _pair, support in pair_results)
 
     homonym: tuple[int, ...] = ()
     headword: tuple[int, ...] = ()
     continuation: tuple[int, ...] = ()
+    homonym_support: tuple[int, ...] = ()
+    headword_support: tuple[int, ...] = ()
+    continuation_support: tuple[int, ...] = ()
+
     if len(starts) >= 3:
         homonym, headword, continuation = starts[:3]
+        homonym_support, headword_support, continuation_support = supports[:3]
     elif len(starts) == 2:
         headword, continuation = starts
+        headword_support, continuation_support = supports
     elif len(starts) == 1:
         headword = starts[0]
+        headword_support = supports[0]
 
     strict_tuple = tuple(sorted(set(homonym + headword + continuation)))
     strict = StartValues(
@@ -191,6 +242,9 @@ def infer_page_start_geometry(
         headword=headword,
         continuation=continuation,
         homonym=homonym,
+        headword_support=headword_support,
+        continuation_support=continuation_support,
+        homonym_support=homonym_support,
     )
     return InferredStartGeometry(
         centers=strict,
@@ -199,4 +253,7 @@ def infer_page_start_geometry(
         headword=headword,
         continuation=continuation,
         homonym=homonym,
+        headword_support=headword_support,
+        continuation_support=continuation_support,
+        homonym_support=homonym_support,
     )
