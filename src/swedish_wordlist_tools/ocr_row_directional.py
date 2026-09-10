@@ -54,6 +54,29 @@ def _candidate_last_front(candidate: BaselineMatch) -> int:
     return rows[last_y][0]
 
 
+def _candidate_matches_seen_profile(
+    candidate: BaselineMatch,
+    profile_history: Mapping[int, int | None],
+    *,
+    through_y: int,
+) -> bool:
+    """Return whether the candidate agrees with every one of its seen rows.
+
+    Profile history may start before the glyph itself; those earlier pixels are
+    intentionally irrelevant.  Likewise an internal raster row on which the
+    glyph has no pixels does not have to own the page profile.  But whenever
+    the candidate has pixels on a row that has already been observed, its own
+    leftmost pixel must be the page's left profile on that row.
+    """
+    for page_y, xs in _candidate_rows(candidate).items():
+        if page_y > through_y:
+            continue
+        observed = profile_history.get(page_y)
+        if observed is None or observed != xs[0]:
+            return False
+    return True
+
+
 def _advance_candidate(
     candidate: BaselineMatch,
     *,
@@ -94,49 +117,64 @@ def _advance_candidate(
     return "passed" if profile_x > _candidate_last_front(candidate) else "dead"
 
 
-def _row_start_proposals(
+def _history_seed_proposals(
     *,
     page_y: int,
-    observed_xs: tuple[int, ...],
+    profile_x: int,
+    profile_history: Mapping[int, int | None],
     black: set[Pixel],
-    black_by_y: Mapping[int, Iterable[int]],
     library: CompiledGlyphLibrary,
+    row_top: int,
 ) -> tuple[BaselineMatch, ...]:
+    """Seed all exact glyphs whose already-seen profile fits upward.
+
+    ``page_y`` is only a trigger row: it need not be the glyph's top row and
+    ``profile_x`` need not be the glyph's physical left edge.  Every occupied
+    model row is allowed to align with the trigger.  The resulting placement
+    must fit the page raster, must not begin above the known row boundary, and
+    must agree with all candidate-owned profile rows that have already been
+    observed.  Profile observations before the candidate begins are allowed to
+    remain unexplained at this stage.
+    """
     proposals: dict[tuple[int, int, int], BaselineMatch] = {}
+
     for item in library.models:
-        top_rel_y = item.model.min_y
-        top_row = item.rows[top_rel_y]
-        baseline = page_y - top_rel_y
-        for observed_x in observed_xs:
-            for model_x in top_row:
-                tx = observed_x - model_x
-                key = (id(item.model), tx, baseline)
-                if key in proposals:
-                    continue
-                placed = _placed_pixels(item, tx=tx, baseline=baseline)
-                if not placed.issubset(black):
-                    continue
+        for rel_y, model_row in item.rows.items():
+            row_left = min(model_row)
+            tx = profile_x - row_left
+            baseline = page_y - rel_y
+            key = (id(item.model), tx, baseline)
+            if key in proposals:
+                continue
 
-                physical_left = tx + item.min_x
-                physical_right = tx + item.max_x
-                previous = black_by_y.get(page_y - 1, ())
-                if any(physical_left <= x <= physical_right for x in previous):
-                    continue
+            placed = _placed_pixels(item, tx=tx, baseline=baseline)
+            if not placed or min(y for _x, y in placed) < row_top:
+                continue
+            if not placed.issubset(black):
+                continue
 
-                proposals[key] = BaselineMatch(
-                    model=item.model,
-                    tx=tx,
-                    baseline=baseline,
-                    pixels=placed,
-                    discovered_y=page_y,
-                )
+            candidate = BaselineMatch(
+                model=item.model,
+                tx=tx,
+                baseline=baseline,
+                pixels=placed,
+                discovered_y=page_y,
+            )
+            if not _candidate_matches_seen_profile(
+                candidate,
+                profile_history,
+                through_y=page_y,
+            ):
+                continue
+            proposals[key] = candidate
 
     return tuple(
         sorted(
             proposals.values(),
             key=lambda hit: (
-                hit.left,
                 hit.discovered_y,
+                hit.baseline,
+                hit.left,
                 -len(hit.pixels),
                 -hit.model.sources,
                 hit.model.label,
@@ -158,26 +196,26 @@ def first_glyph_top_down(
 ) -> tuple[BaselineMatch | None, FirstGlyphSearch]:
     """Find the first glyph from the known upper row boundary.
 
-    A row-start placement is provisional.  Once candidates are alive, the
-    residual left profile is followed row by row and no later row-start glyph
-    is proposed until those candidates have either been contradicted or the
-    profile has confirmed that it passed them.
+    The page profile is remembered from ``row_top`` downward.  Entering a legal
+    row-start x interval is a *trigger*, not an assertion that the current
+    profile pixel is the top or physical left edge of the first glyph.  At that
+    point every exact facit placement whose already-seen left profile fits
+    upward is admitted as a provisional candidate.  Older profile pixels may
+    extend above the glyph and remain unexplained.
 
-    Candidate survival is based on the candidate's own placed raster.  On a
-    row where the candidate has pixels, its leftmost placed pixel must own the
-    profile front.  Internal blank rows remain undecided.  After its last raster
-    row, the first nonblank profile event must move at least one pixel right to
-    confirm passage.
+    Once candidates exist we stop discovering new ones and follow only that
+    live set downward.  On each occupied candidate row its own leftmost pixel
+    must continue to own the page profile.  Internal blank rows do not kill the
+    candidate.  After the candidate's last raster row, one profile step to the
+    right is enough for now to mark it passed; staying at or moving left kills
+    it.  Passed candidates are retained while any other candidate is still
+    live, so a short glyph cannot win merely because it ended first.
 
-    If every live candidate is contradicted, the same profile row that killed
-    them is immediately eligible as a new row-start observation.  New
-    candidates are still only created when that observed x lies in a permitted
-    row-start interval.
+    If all live candidates die with no passed candidate, scanning resumes and
+    the killing row remains in profile history.  There are no glyph-, style-,
+    row- or page-specific cases here.
 
-    Start intervals are absolute page x coordinates of observed profile pixels,
-    not model translation coordinates.
-
-    ``row_bottom`` remains as an optional compatibility/search limit for older
+    ``row_bottom`` remains an optional compatibility/search limit for older
     callers and focused tests.  New sequential page OCR should leave it unset.
     """
     ranges = tuple((int(lo), int(hi)) for lo, hi in allowed_translate_x_ranges)
@@ -196,23 +234,23 @@ def first_glyph_top_down(
     if scan_bottom <= row_top:
         return None, FirstGlyphSearch(y=None, candidates=())
 
-    scan_y = tuple(range(row_top, scan_bottom))
-
+    profile_history: dict[int, int | None] = {}
     active: tuple[BaselineMatch, ...] = ()
+    passed: tuple[BaselineMatch, ...] = ()
     active_y: int | None = None
-    first_y: int | None = None
+    first_trigger_y: int | None = None
 
-    for page_y in scan_y:
+    for page_y in range(row_top, scan_bottom):
         if left_profile is None:
             row_xs = tuple(sorted(black_by_y.get(page_y, ())))
             profile_x = row_xs[0] if row_xs else None
         else:
             profile_x = left_profile.at(page_y)
-            row_xs = () if profile_x is None else (profile_x,)
+        profile_history[page_y] = profile_x
 
         if active:
-            live: list[BaselineMatch] = []
-            passed: list[BaselineMatch] = []
+            next_live: list[BaselineMatch] = []
+            next_passed = list(passed)
             for candidate in active:
                 state = _advance_candidate(
                     candidate,
@@ -220,52 +258,48 @@ def first_glyph_top_down(
                     profile_x=profile_x,
                 )
                 if state == "live":
-                    live.append(candidate)
+                    next_live.append(candidate)
                 elif state == "passed":
-                    passed.append(candidate)
+                    next_passed.append(candidate)
 
-            if live:
-                active = tuple(live)
+            active = tuple(next_live)
+            passed = tuple(next_passed)
+            if active:
                 continue
 
             if passed:
-                passed_group = tuple(passed)
-                hit = _pick_unique_maximal(passed_group)
+                hit = _pick_unique_maximal(passed)
                 return hit, FirstGlyphSearch(
                     y=active_y,
-                    candidates=passed_group,
+                    candidates=passed,
                 )
 
-            # All active candidates were contradicted.  Reuse this exact
-            # profile row as a possible start of the real first glyph.
-            active = ()
+            # Every candidate was contradicted.  Keep the complete history and
+            # allow this same observation to become a later trigger if legal.
             active_y = None
 
-        observed_xs = tuple(x for x in row_xs if _x_allowed(x, ranges))
-        if not observed_xs:
+        if profile_x is None or not _x_allowed(profile_x, ranges):
             continue
 
-        proposals = _row_start_proposals(
+        proposals = _history_seed_proposals(
             page_y=page_y,
-            observed_xs=observed_xs,
+            profile_x=profile_x,
+            profile_history=profile_history,
             black=black,
-            black_by_y=black_by_y,
             library=library,
+            row_top=row_top,
         )
         if not proposals:
             continue
 
-        if first_y is None:
-            first_y = page_y
-
-        left = min(hit.left for hit in proposals)
-        active = tuple(hit for hit in proposals if hit.left == left)
+        if first_trigger_y is None:
+            first_trigger_y = page_y
+        active = proposals
+        passed = ()
         active_y = page_y
 
-    if not active:
-        return None, FirstGlyphSearch(y=first_y, candidates=())
-
+    candidates = tuple((*passed, *active))
     return None, FirstGlyphSearch(
-        y=active_y,
-        candidates=active,
+        y=active_y if active_y is not None else first_trigger_y,
+        candidates=candidates,
     )
