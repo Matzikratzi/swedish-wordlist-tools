@@ -331,3 +331,310 @@ git rev-parse --short HEAD
 ## TAPTO-rutin
 
 Vid dagens slut uppdateras denna fil med stabil master-commit, aktiv branch/head, senaste gröna regression och omfattning, praktiska återanvändbara kommandon, relevanta commits/PR, dagens färdiga arbete, exakt nästa steg och lokala filer som inte får skrivas över. Undvik engångsdiagnostik i kommandoreferensen.
+
+
+---
+
+## Pixel-OCR arbetsläge — 2026-09-10 kväll
+
+### Git och aktuell checkpoint
+
+Aktiv branch är `agent/ocr-whole-column-shadow`.
+
+Kod-head före denna TAPTO-uppdatering:
+
+```text
+06d9fc1b3334c1986ce36b7671cb457b88c02557
+Anchor residual candidates to one leftmost pixel
+```
+
+Närliggande föregående commit:
+
+```text
+e866305f0bf89508e87df9183d9271a16e973460
+Anchor residual candidates only at leftmost pixel
+```
+
+Verifiera lokal checkout före test:
+
+```bash
+cd ~/proj/saol14-fast-forward-test
+git fetch origin
+git status --short
+git log -2 --oneline --decorate
+git rev-parse HEAD
+git rev-parse origin/agent/ocr-whole-column-shadow
+```
+
+Återställ denna avsedda testcheckout exakt till publicerad experimentbranch:
+
+```bash
+git fetch origin
+git reset --hard origin/agent/ocr-whole-column-shadow
+```
+
+### Nuvarande algoritmiska checkpoint
+
+Residualsteget fungerar nu enligt modellen:
+
+1. föregående glyphs baseline begränsar bara y-området där nästa startpixel söks,
+2. en enda gemensam vänstraste residualpixel väljs,
+3. alla kandidater föds endast från den pixeln,
+4. inga kandidater föds på nytt längre ned i profilen,
+5. kandidatens egen rastergeometri bestämmer dess placering och baseline,
+6. kandidater följs nedåt och uppåt från startpixeln,
+7. annan glyph får ligga framför kandidaten i vänsterprofilen,
+8. överlevare måste därefter klara full 2D: varje svart glyphpixel måste finnas i residualbilden, men extra sidbläck är tillåtet.
+
+Kritiska p36/c0/r2-fallet fungerar semantiskt:
+
+```text
+start=(66,122)
+initial=3953
+profile_survivors=18
+exact=1
+accepted='i'
+```
+
+`(66,122)` är vänsterseriffen på `i`.
+
+Nästa större mål är prestanda: 3953 initiala kandidater är för många. Optimera kandidatgenereringen utan att ändra semantiken ovan.
+
+Separat kvarstående optimering: 2D-prova flerpixliga kandidater före färrepixliga och avbryt omedelbart vid första saknade pixel.
+
+### Standardkommando för aktuell felsökning
+
+```bash
+cd ~/proj/saol14-fast-forward-test
+
+OCR_FIRST_GLYPH_TRACE=1 env PYTHONPATH=src \
+python -m swedish_wordlist_tools.ocr_directional_page_peak_benchmark \
+  /home/matsj/proj/saol14-faksimil.jsonl \
+  --facit glyphs/saol14-manual-glyph-facit-v2.json \
+  --page 36 \
+  --column 0 \
+  --rows 3 \
+  --trace-row=2
+```
+
+Spara trace reproducerbart:
+
+```bash
+OCR_FIRST_GLYPH_TRACE=1 env PYTHONPATH=src \
+python -m swedish_wordlist_tools.ocr_directional_page_peak_benchmark \
+  /home/matsj/proj/saol14-faksimil.jsonl \
+  --facit glyphs/saol14-manual-glyph-facit-v2.json \
+  --page 36 --column 0 --rows 3 --trace-row=2 \
+  > /tmp/saol14-p36-c0-r2-trace.log 2>&1
+```
+
+Bra nyckelrader i trace:
+
+```text
+directional-trace-raster:
+directional-trace first-glyph-pick:
+directional-residual-profile:
+directional-residual-profile-death:
+directional-residual-2d-fail:
+directional-residual-2d-pass:
+directional-residual-pick:
+directional-row:
+directional-timing:
+directional-page-done:
+```
+
+Filtrera kritiska i-spåret:
+
+```bash
+grep -E 'first-glyph-pick|residual-profile:|residual-profile-death:.*label=.i.|residual-2d-(pass|fail):.*label=.i.|residual-pick:|directional-row: row=2|directional-page-done:' \
+  /tmp/saol14-p36-c0-r2-trace.log
+```
+
+### ASCII-pixelraster i trace
+
+`--trace-row=N` skriver ett 25 pixelrader högt band över hela spaltbredden:
+
+- `kind=start`: residualen innan glyphen tas,
+- `kind=glyph:<tecken>`: bara accepterad glyph,
+- `kind=residual`: kvarvarande raster efter att glyphens pixlar nollats.
+
+```text
+. = vit pixel
+# = svart pixel
+```
+
+Detta är snabbaste sättet att kontrollera exakt vilka pixlar en glyph tog med sig.
+
+### Mm-papper / pixel-grid-debugbild
+
+Verktyget `ocr_page_pixel_grid` använder samma threshold-konvention som OCR:n och ritar varje källpixel som en kvadrat med koordinatnät.
+
+```bash
+cd ~/proj/saol14-fast-forward-test
+
+env PYTHONPATH=src \
+python -m swedish_wordlist_tools.ocr_page_pixel_grid \
+  /home/matsj/proj/saol14-faksimil.jsonl \
+  --page 36 \
+  --threshold 210 \
+  --scale 3 \
+  --major-grid-step 10 \
+  --label-step 50 \
+  --output /tmp/saol14-page36-pixel-grid.png
+```
+
+`--scale 4` eller större kan användas för större rutor utan att ändra OCR-pixlarna.
+
+### Timing utan trace
+
+```bash
+/usr/bin/time -f 'TOTALT: %e s' \
+env PYTHONPATH=src \
+python -m swedish_wordlist_tools.ocr_directional_page_peak_benchmark \
+  /home/matsj/proj/saol14-faksimil.jsonl \
+  --facit glyphs/saol14-manual-glyph-facit-v2.json \
+  --page 36 --column 0 --rows 3
+```
+
+### Kör hela kolumnen och jämför mot sparad referens
+
+`--rows 0` betyder alla referensrader i vald kolumn.
+
+```bash
+env PYTHONPATH=src \
+python -m swedish_wordlist_tools.ocr_directional_page_peak_benchmark \
+  /home/matsj/proj/saol14-faksimil.jsonl \
+  --facit glyphs/saol14-manual-glyph-facit-v2.json \
+  --page 36 --column 0 --rows 0 \
+  > /tmp/directional-p36-c0.log 2>&1
+
+env PYTHONPATH=src \
+python -m swedish_wordlist_tools.ocr_compare_directional_reference \
+  /tmp/directional-p36-c0.log \
+  tests/reference/saol14-ocr/conservative-v1/rows.jsonl \
+  --page 36 --column 0
+```
+
+Nyckelresultat är `reference-ok`, `reference-diff`, `reference-summary` och `reference-not-run`.
+
+### Kör sida 1–100, kolumn 0–2
+
+Directional page-benchmarken tar en sida och kolumn per process, så helkörningen görs som shell-loop:
+
+```bash
+cd ~/proj/saol14-fast-forward-test
+mkdir -p /tmp/saol14-directional
+
+for page in $(seq 1 100); do
+  for column in 0 1 2; do
+    echo "=== page=$page column=$column ==="
+    outfile=$(printf '/tmp/saol14-directional/p%03d-c%d.log' "$page" "$column")
+    env PYTHONPATH=src \
+    python -m swedish_wordlist_tools.ocr_directional_page_peak_benchmark \
+      /home/matsj/proj/saol14-faksimil.jsonl \
+      --facit glyphs/saol14-manual-glyph-facit-v2.json \
+      --page "$page" --column "$column" --rows 0 \
+      > "$outfile" 2>&1 \
+      || echo "BENCH FAIL page=$page column=$column"
+  done
+done
+```
+
+Behåll felloggar; vissa sidor kan ha avvikande kolumnlayout och sådant ska inte döljas.
+
+### Jämför hela batchen mot frusen konservativ referens
+
+```bash
+cd ~/proj/saol14-fast-forward-test
+mkdir -p /tmp/saol14-directional-compare
+
+for page in $(seq 1 100); do
+  for column in 0 1 2; do
+    log=$(printf '/tmp/saol14-directional/p%03d-c%d.log' "$page" "$column")
+    out=$(printf '/tmp/saol14-directional-compare/p%03d-c%d.txt' "$page" "$column")
+    [ -f "$log" ] || continue
+
+    env PYTHONPATH=src \
+    python -m swedish_wordlist_tools.ocr_compare_directional_reference \
+      "$log" \
+      tests/reference/saol14-ocr/conservative-v1/rows.jsonl \
+      --page "$page" --column "$column" \
+      > "$out" 2>&1 || true
+  done
+done
+
+grep -h '^reference-summary:' /tmp/saol14-directional-compare/*.txt
+grep -l '^reference-diff:' /tmp/saol14-directional-compare/*.txt
+```
+
+Den sista raden listar direkt vilka page/column-körningar som skiljer sig.
+
+### Frusen konservativ sida-1–100-regression
+
+För det äldre konservativa spåret:
+
+```bash
+/usr/bin/time -f 'TOTALT: %e s' \
+env PYTHONPATH=src \
+python -m swedish_wordlist_tools.ocr_capture_conservative_baseline \
+  /home/matsj/proj/saol14-faksimil.jsonl \
+  --facit glyphs/saol14-manual-glyph-facit-v2.json \
+  --start-page 1 --end-page 100 \
+  --output-dir /tmp/saol14-conservative-baseline
+
+env PYTHONPATH=src \
+python -m swedish_wordlist_tools.ocr_compare_baseline \
+  tests/reference/saol14-ocr/conservative-v1/rows.jsonl \
+  /tmp/saol14-conservative-baseline/rows.jsonl
+```
+
+Resultatneutralitet:
+
+```text
+baseline-diff: differences=0
+```
+
+### CPU-profilering
+
+Kör utan full trace när timing är syftet:
+
+```bash
+env PYTHONPATH=src \
+python -m cProfile -s tottime \
+  -m swedish_wordlist_tools.ocr_directional_page_peak_benchmark \
+  /home/matsj/proj/saol14-faksimil.jsonl \
+  --facit glyphs/saol14-manual-glyph-facit-v2.json \
+  --page 36 --column 0 --rows 3 \
+  > /tmp/saol14-directional-cprofile.log 2>&1
+
+head -80 /tmp/saol14-directional-cprofile.log
+```
+
+### Skyddsvärda data och referenser
+
+Skriv inte över dessa bara för att få ett test grönt:
+
+```text
+/home/matsj/proj/saol14-faksimil.jsonl
+glyphs/facit-v2
+glyphs/saol14-manual-glyph-facit-v2.json
+tests/reference/saol14-ocr/conservative-v1/rows.jsonl
+/home/matsj/proj/saol14-conservative-rebuild/tests/reference/saol14-ocr
+```
+
+Använd `/tmp` för nya benchmarkloggar, profiler, jämförelser och debugbilder.
+
+### Bra rutin före/efter större optimering
+
+1. Notera `git rev-parse HEAD`.
+2. Spara p36/c0/r2-trace.
+3. Spara timing utan trace.
+4. Kör fokuserade unit tests.
+5. Kontrollera efter ändring att `-i` fortfarande ger `start=(66,122)` och `accepted='i'`.
+6. Jämför hel sida mot konservativ referens.
+7. Vid större algoritmändring: kör sida 1–100 och lista alla `reference-diff`.
+8. Optimera vidare först när beteendet är begripligt.
+
+### Git-arbetsregel
+
+Assistenten implementerar och committar på `agent/ocr-whole-column-shadow`. Mats testar lokalt på hinken. Vi itererar på loggarna. Merge till master först när Mats uttryckligen säger `Merga!`.
