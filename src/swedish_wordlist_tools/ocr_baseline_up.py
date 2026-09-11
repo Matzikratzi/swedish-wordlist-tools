@@ -81,17 +81,18 @@ class CompiledGlyphLibrary:
                 by_rel_y[rel_y].append(item)
 
                 # Exact raster signature of this possible anchor row across
-                # the glyph's *full* horizontal bounding box.  The anchor
-                # offset records where the row's leftmost black pixel sits
-                # relative to the glyph's physical left edge.  This lets the
-                # matcher retrieve only rows whose black/white pattern can
-                # match the page instead of scanning every glyph row.
+                # the glyph's *full* horizontal bounding box.  Any black pixel
+                # in the row may be the page pixel from which this candidate
+                # is discovered; it need not be the row's or glyph's leftmost
+                # black pixel (important for e.g. j when its descender extends
+                # farther left below the discovery window).
                 width = item.width
-                anchor_offset = row_xs[0] - item.min_x
                 mask = 0
                 for x in row_xs:
                     mask |= 1 << (x - item.min_x)
-                anchor_row_index_mut[(width, anchor_offset)][mask].append((item, rel_y))
+                for anchor_x in row_xs:
+                    anchor_offset = anchor_x - item.min_x
+                    anchor_row_index_mut[(width, anchor_offset)][mask].append((item, rel_y))
 
         self.models = tuple(compiled)
         self.by_rel_y = {rel_y: tuple(items) for rel_y, items in by_rel_y.items()}
