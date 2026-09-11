@@ -208,118 +208,142 @@ def find_next_residual_profile(
 
         return True
 
-    profile_survivors_map: dict[
-        tuple[int, int, int],
-        tuple[baseline_up.CompiledGlyph, int, int],
-    ] = {}
-
-    for item in library.models:
-        placements: dict[
+    def collect_pass(
+        *,
+        same_baseline_only: bool,
+        exclude_same_baseline: bool = False,
+    ) -> dict[tuple[int, int, int], tuple[baseline_up.CompiledGlyph, int, int]]:
+        nonlocal same_baseline_placements, other_baseline_placements, profile_survivors_raw
+        survivors: dict[
             tuple[int, int, int],
             tuple[baseline_up.CompiledGlyph, int, int],
         ] = {}
-        for model_x, model_y in item.model.pixels:
-            tx = start_x - model_x
-            candidate_baseline = start_y - model_y
-            physical_left = tx + item.min_x
-            physical_right = tx + item.max_x
-            if physical_left < 0 or physical_right >= column_right:
-                continue
-            key = (id(item.model), tx, candidate_baseline)
-            placements[key] = (item, tx, candidate_baseline)
 
+        for item in library.models:
+            placements: dict[
+                tuple[int, int, int],
+                tuple[baseline_up.CompiledGlyph, int, int],
+            ] = {}
+            for model_x, model_y in item.model.pixels:
+                tx = start_x - model_x
+                candidate_baseline = start_y - model_y
+                if same_baseline_only and candidate_baseline != baseline:
+                    continue
+                if exclude_same_baseline and candidate_baseline == baseline:
+                    continue
+
+                physical_left = tx + item.min_x
+                physical_right = tx + item.max_x
+                if physical_left < 0 or physical_right >= column_right:
+                    continue
+
+                key = (id(item.model), tx, candidate_baseline)
+                placements[key] = (item, tx, candidate_baseline)
+
+            ordered = sorted(
+                placements.values(),
+                key=lambda entry: (
+                    abs(entry[2] - baseline),
+                    entry[1],
+                ),
+            )
+            for entry in ordered:
+                item2, tx, candidate_baseline = entry
+                if candidate_baseline == baseline:
+                    same_baseline_placements += 1
+                else:
+                    other_baseline_placements += 1
+                if not profile_allows(item2, tx, candidate_baseline):
+                    continue
+                key = (id(item2.model), tx, candidate_baseline)
+                survivors[key] = entry
+                profile_survivors_raw += 1
+
+        return survivors
+
+    def exact_2d_candidates(
+        entries: Mapping[
+            tuple[int, int, int],
+            tuple[baseline_up.CompiledGlyph, int, int],
+        ],
+    ) -> dict[tuple[int, int, int], baseline_up.BaselineMatch]:
+        nonlocal full_2d_rejects, full_2d_pixel_checks
+        exact: dict[tuple[int, int, int], baseline_up.BaselineMatch] = {}
         ordered = sorted(
-            placements.values(),
-            key=lambda entry: (
-                0 if entry[2] == baseline else 1,
-                abs(entry[2] - baseline),
-                entry[1],
+            entries.items(),
+            key=lambda pair: -len(pair[1][0].model.pixels),
+        )
+        for key, (item, tx, candidate_baseline) in ordered:
+            missing = False
+            for model_x, model_y in item.model.pixels:
+                full_2d_pixel_checks += 1
+                if (tx + model_x, candidate_baseline + model_y) not in remaining:
+                    missing = True
+                    break
+            if missing:
+                full_2d_rejects += 1
+                continue
+            placed = frozenset(
+                (tx + x, candidate_baseline + y)
+                for x, y in item.model.pixels
+            )
+            exact[key] = baseline_up.BaselineMatch(
+                model=item.model,
+                tx=tx,
+                baseline=candidate_baseline,
+                pixels=placed,
+                discovered_y=start_y,
+            )
+        return exact
+
+    # Pass 1: only placements that preserve the previous glyph baseline.
+    same_profile = collect_pass(same_baseline_only=True)
+    same_exact = exact_2d_candidates(same_profile)
+    same_candidates = tuple(
+        sorted(
+            same_exact.values(),
+            key=lambda hit: (
+                hit.left,
+                -len(hit.pixels),
+                -hit.model.sources,
+                hit.model.label,
+                hit.model.style,
             ),
         )
-
-        for entry in ordered:
-            item2, tx, candidate_baseline = entry
-            if candidate_baseline == baseline:
-                same_baseline_placements += 1
-            else:
-                other_baseline_placements += 1
-            if not profile_allows(item2, tx, candidate_baseline):
-                continue
-            key = (id(item2.model), tx, candidate_baseline)
-            profile_survivors_map[key] = entry
-            profile_survivors_raw += 1
-
-    # Only profile survivors receive the expensive full 2-D truth test.
-    states: dict[tuple[int, int, int], tuple[baseline_up.CompiledGlyph, int, int]] = {}
-    survivors_for_2d = sorted(
-        profile_survivors_map.values(),
-        key=lambda entry: -len(entry[0].model.pixels),
     )
-    for item, tx, candidate_baseline in survivors_for_2d:
-        missing: baseline_up.Pixel | None = None
-        for model_x, model_y in item.model.pixels:
-            full_2d_pixel_checks += 1
-            pixel = (tx + model_x, candidate_baseline + model_y)
-            if pixel not in remaining:
-                missing = pixel
-                break
-        if missing is not None:
-            full_2d_rejects += 1
-            continue
-        key = (id(item.model), tx, candidate_baseline)
-        states[key] = (item, tx, candidate_baseline)
+    same_hit = baseline_up.pick_anchor_unique_maximal(same_candidates)
 
-    initial_candidates = len(states)
-    live = dict(states)
-    profile_survivors = len(live)
-
-    if trace:
-        print(
-            f"directional-residual-profile: start=({start_x},{start_y}) "
-            f"search_y={row_top}..{search_bottom} profile_placements={profile_placements} "
-            f"same_baseline={same_baseline_placements} other_baseline={other_baseline_placements} "
-            f"profile_rejects={profile_rejects} profile_survivors_raw={profile_survivors_raw} "
-            f"full_2d_rejects={full_2d_rejects} full_2d_pixel_checks={full_2d_pixel_checks} "
-            f"initial={initial_candidates} profile_survivors={profile_survivors}",
-            flush=True,
-        )
-
-    # Full 2-D truth test.  Extra page ink is allowed; every glyph pixel must
-    # exist.  Candidate placement comes entirely from the start-pixel anchor.
-    proposals: dict[tuple[int, int, int], baseline_up.BaselineMatch] = {}
-    for key, (item, tx, candidate_baseline) in live.items():
-        placed = frozenset(
-            (tx + x, candidate_baseline + y)
-            for x, y in item.model.pixels
-        )
-        missing = next((pixel for pixel in placed if pixel not in remaining), None)
-        if missing is not None:
-            if trace:
-                print(
-                    f"directional-residual-2d-fail: label={item.model.label!r} "
-                    f"style={item.model.style} start=({start_x},{start_y}) "
-                    f"tx={tx} candidate_baseline={candidate_baseline} "
-                    f"pixels={len(placed)} first_missing={missing}",
-                    flush=True,
-                )
-            continue
-
-        candidate = baseline_up.BaselineMatch(
-            model=item.model,
-            tx=tx,
-            baseline=candidate_baseline,
-            pixels=placed,
-            discovered_y=start_y,
-        )
-        proposals[key] = candidate
+    if same_hit is not None:
         if trace:
             print(
-                f"directional-residual-2d-pass: label={item.model.label!r} "
-                f"style={item.model.style} start=({start_x},{start_y}) "
-                f"tx={tx} candidate_baseline={candidate_baseline} "
-                f"pixels={len(placed)}",
+                f"directional-residual-profile: start=({start_x},{start_y}) "
+                f"search_y={row_top}..{search_bottom} pass=same-baseline "
+                f"profile_placements={profile_placements} "
+                f"same_baseline={same_baseline_placements} other_baseline=0 "
+                f"profile_rejects={profile_rejects} profile_survivors_raw={profile_survivors_raw} "
+                f"full_2d_rejects={full_2d_rejects} full_2d_pixel_checks={full_2d_pixel_checks} "
+                f"initial={len(same_candidates)} profile_survivors={len(same_candidates)}",
                 flush=True,
             )
+            print(
+                f"directional-residual-pick: after_left={after_left} "
+                f"previous_baseline={baseline} start=({start_x},{start_y}) "
+                f"profile_survivors={len(same_candidates)} exact={len(same_candidates)} "
+                f"accepted={same_hit.model.label!r} pass=same-baseline",
+                flush=True,
+            )
+        return same_hit, same_candidates
+
+    # Pass 2: only now consider placements on other baselines.  Keep any
+    # same-baseline exact candidates too, because they may participate in a
+    # genuine ambiguity that pass 2 resolves.
+    other_profile = collect_pass(
+        same_baseline_only=False,
+        exclude_same_baseline=True,
+    )
+    other_exact = exact_2d_candidates(other_profile)
+    proposals = dict(same_exact)
+    proposals.update(other_exact)
 
     candidates = tuple(
         sorted(
@@ -334,6 +358,19 @@ def find_next_residual_profile(
         )
     )
     hit = baseline_up.pick_anchor_unique_maximal(candidates)
+    profile_survivors = len(candidates)
+
+    if trace:
+        print(
+            f"directional-residual-profile: start=({start_x},{start_y}) "
+            f"search_y={row_top}..{search_bottom} pass=all-baselines "
+            f"profile_placements={profile_placements} "
+            f"same_baseline={same_baseline_placements} other_baseline={other_baseline_placements} "
+            f"profile_rejects={profile_rejects} profile_survivors_raw={profile_survivors_raw} "
+            f"full_2d_rejects={full_2d_rejects} full_2d_pixel_checks={full_2d_pixel_checks} "
+            f"initial={len(candidates)} profile_survivors={profile_survivors}",
+            flush=True,
+        )
 
     if trace:
         accepted = repr(hit.model.label) if hit is not None else None
