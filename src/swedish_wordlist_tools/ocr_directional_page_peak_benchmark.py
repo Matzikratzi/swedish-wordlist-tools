@@ -152,50 +152,41 @@ def find_next_residual_profile(
     # start pixel may align to any black pixel in a model row; it need not be
     # the glyph's or row's leftmost pixel.
     states: dict[tuple[int, int, int], tuple[baseline_up.CompiledGlyph, int, int]] = {}
-    anchor_group_lookups = 0
-    anchor_pattern_hits = 0
-    anchor_rows_selected = 0
+    anchor_proposals = 0
+    duplicate_placements = 0
     full_2d_rejects = 0
     full_2d_pixel_checks = 0
-    start_page_row = remaining_by_y.get(start_y, ())
-    start_page_pixels = (
-        start_page_row
-        if isinstance(start_page_row, set)
-        else set(start_page_row)
+
+    # The discovery pixel is only an anchor: it may correspond to *any* black
+    # pixel in a glyph, not necessarily the row/glyph left edge.  The same
+    # glyph therefore intentionally yields several candidate placements from
+    # one page anchor when several of its black pixels could land there.
+    anchored_by_key: dict[
+        tuple[int, int, int],
+        tuple[baseline_up.CompiledGlyph, int, int],
+    ] = {}
+    for item in library.models:
+        for model_x, model_y in item.model.pixels:
+            anchor_proposals += 1
+            tx = start_x - model_x
+            candidate_baseline = start_y - model_y
+            physical_left = tx + item.min_x
+            physical_right = tx + item.max_x
+            if physical_left < 0 or physical_right >= column_right:
+                continue
+
+            key = (id(item.model), tx, candidate_baseline)
+            if key in anchored_by_key:
+                duplicate_placements += 1
+                continue
+            anchored_by_key[key] = (item, tx, candidate_baseline)
+
+    # Full 2-D is the first geometric discriminator.  Larger glyphs first;
+    # abort a placement immediately at the first missing black page pixel.
+    anchored = sorted(
+        anchored_by_key.values(),
+        key=lambda entry: -len(entry[0].model.pixels),
     )
-
-    anchored: list[tuple[baseline_up.CompiledGlyph, int, int]] = []
-
-    # Exact anchor-row lookup.  Each group describes glyph width and the
-    # offset from glyph-left to one possible black anchor pixel.  Build the
-    # page mask once for that geometry and retrieve only exact black/white
-    # matches.  This replaces the old scan over every model row.
-    for width, anchor_offset in library.anchor_row_groups:
-        physical_left = start_x - anchor_offset
-        physical_right = physical_left + width - 1
-        if physical_left < 0 or physical_right >= column_right:
-            continue
-
-        anchor_group_lookups += 1
-        page_mask = 0
-        for bit in range(width):
-            if physical_left + bit in start_page_pixels:
-                page_mask |= 1 << bit
-
-        entries = library.anchor_row_index[(width, anchor_offset)].get(page_mask, ())
-        if not entries:
-            continue
-        anchor_pattern_hits += 1
-        anchor_rows_selected += len(entries)
-
-        for item, rel_y in entries:
-            tx = physical_left - item.min_x
-            candidate_baseline = start_y - rel_y
-            anchored.append((item, tx, candidate_baseline))
-
-    # Full 2-D is a necessary condition, so do it before the profile state
-    # walk.  Larger glyphs first; abort each placement at first missing pixel.
-    anchored.sort(key=lambda entry: -len(entry[0].model.pixels))
     for item, tx, candidate_baseline in anchored:
         missing: baseline_up.Pixel | None = None
         for model_x, model_y in item.model.pixels:
@@ -289,9 +280,9 @@ def find_next_residual_profile(
     if trace:
         print(
             f"directional-residual-profile: start=({start_x},{start_y}) "
-            f"search_y={row_top}..{search_bottom} anchor_group_lookups={anchor_group_lookups} "
-            f"anchor_pattern_hits={anchor_pattern_hits} anchor_rows_selected={anchor_rows_selected} "
-            f"anchored={len(anchored)} full_2d_rejects={full_2d_rejects} "
+            f"search_y={row_top}..{search_bottom} anchor_proposals={anchor_proposals} "
+            f"duplicate_placements={duplicate_placements} anchored={len(anchored)} "
+            f"full_2d_rejects={full_2d_rejects} "
             f"full_2d_pixel_checks={full_2d_pixel_checks} "
             f"initial={initial_candidates} profile_survivors={profile_survivors} "
             f"walk_down_to={max_bottom} walk_up_to={min_top}",
