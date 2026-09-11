@@ -638,3 +638,228 @@ Använd `/tmp` för nya benchmarkloggar, profiler, jämförelser och debugbilder
 ### Git-arbetsregel
 
 Assistenten implementerar och committar på `agent/ocr-whole-column-shadow`. Mats testar lokalt på hinken. Vi itererar på loggarna. Merge till master först när Mats uttryckligen säger `Merga!`.
+
+
+---
+
+## CHECKPOINT — pixel-OCR 53/53 på sida 36 — 2026-09-11
+
+### Frysning av fungerande läge
+
+Aktiv arbetsbranch:
+
+\`\`\`text
+agent/ocr-whole-column-shadow
+\`\`\`
+
+Fungerande kodcommit:
+
+\`\`\`text
+4fcbd2b94fac1b690c35b8825dc9f298142dc822
+Short-circuit residual OCR on previous baseline
+\`\`\`
+
+Checkpoint-branch skapad och pekar exakt på den committen:
+
+\`\`\`text
+checkpoint/pixel-ocr-53of53-2026-09-11
+\`\`\`
+
+Detta är återställningspunkten om fortsatta optimeringar går sönder.
+
+Återställ arbetsbranchen till checkpointen:
+
+\`\`\`bash
+cd ~/proj/saol14-fast-forward-test
+git fetch origin
+git reset --hard origin/checkpoint/pixel-ocr-53of53-2026-09-11
+\`\`\`
+
+För normal fortsatt utveckling används fortfarande:
+
+\`\`\`bash
+git fetch origin
+git reset --hard origin/agent/ocr-whole-column-shadow
+\`\`\`
+
+### Viktigaste resultatet
+
+Sida 36, kolumn 0, 53 rader:
+
+\`\`\`text
+requested_rows=53
+solved=53
+unresolved=0
+glyphs=1021
+matching=9.8856s
+total=10.7393s
+final_row_top=1018
+TOTALT: 11.08 s
+\`\`\`
+
+Alla 53 rader blev pixelmässigt kompletta: \`remaining=0\` genom hela kolumnen.
+
+Kritiska tidigare problem är lösta, bland annat:
+
+\`\`\`text
+depressivaläkemedel
+\`\`\`
+
+i stället för den felaktiga uppdelningen:
+
+\`\`\`text
+depressiva.-·äkemedel
+\`\`\`
+
+### Algoritmen vid checkpointen
+
+Efter första glyphen på en rad:
+
+1. Sök nästa upptäckta sidpixel som vänstraste kvarvarande pixel i aktuellt sökfönster.
+2. Upptäckt sidpixel behöver INTE vara glyphens vänstraste pixel.
+3. Samma glyph får testas i flera placeringar.
+4. En placering kan sträcka sig vänster om upptäckt pixel.
+5. Kandidaten får expandera över hela sin egen höjd uppåt och nedåt.
+6. Profilen används före full 2D.
+7. Profilen tillåter godtyckliga x-hopp; den är inte begränsad till +/-1.
+8. Glapp i glyphens profil representeras naturligt av rader utan glyphbläck.
+9. Föregående glyphs baseline är en prior, inte ett geometriskt tvång.
+10. Pass 1 provar endast placeringar med samma baseline som föregående glyph.
+11. Om pass 1 ger en unik kandidat returneras den direkt.
+12. Först om pass 1 inte räcker körs pass 2 med övriga baselines.
+13. Endast profilöverlevare får full 2D-kontroll.
+14. I 2D kontrolleras större glypher först och kandidaten dör direkt på första saknade pixel.
+15. Kandidatval för residualer prioriterar inte längre fysisk \`left\`, eftersom upptäckt pixel kan ligga mitt i glyphen.
+
+### Viktigt bevis för baseline-fallback
+
+Fallet kring \`i\` på sida 36 visade att fallback verkligen behövs:
+
+\`\`\`text
+start=(66,122)
+previous_baseline=128
+pass=all-baselines
+accepted='i'
+\`\`\`
+
+Alltså: samma baseline först är bra och snabbt, men får aldrig bli ett hårt krav.
+
+### Prestanda vid checkpointen
+
+Helsida 36 / kolumn 0:
+
+\`\`\`text
+first_total    = 1.743117 s
+baseline_total = 8.044413 s
+baseline_calls = 1021
+avg_call       = 0.007879 s
+matching       = 9.8856 s
+total          = 10.7393 s
+\`\`\`
+
+Korrektheten är nu viktigare än mikrooptimeringarna som gjordes tidigare. Nästa arbete är att optimera residual/baseline-matchningen UTAN att ändra 53/53-beteendet.
+
+### Nästa mest lovande optimeringar
+
+Fortsätt från denna ordning:
+
+1. Behåll tvåpassmodellen:
+   - samma baseline först,
+   - övriga baselines bara vid behov.
+
+2. Undvik att profiltesta hundratals/tusentals placeringar som aldrig kan nå ankaret.
+   För samma-baseline-pass kan vi direkt räkna:
+   \`\`\`text
+   rel_y = start_y - baseline
+   \`\`\`
+   och bara titta på glyphar som faktiskt har svart pixel på den rel_y-raden.
+
+3. Indexera samma-baseline-kandidater per \`rel_y\`, och gärna per möjliga svarta x-offsets på den raden.
+
+4. Fortsätt köra glyph för glyph och "köra klart" varje placerings profil innan 2D.
+
+5. Profilen ska fortsätta stödja:
+   - godtyckliga dx-hopp,
+   - glapp,
+   - descenders/ascenders utanför ursprungligt sökfönster.
+
+6. Kör alltid sida 36 / kolumn 0 efter optimering och kräv:
+   \`\`\`text
+   solved=53
+   unresolved=0
+   \`\`\`
+
+### Standardkommando för checkpoint-regression
+
+\`\`\`bash
+cd ~/proj/saol14-fast-forward-test
+
+/usr/bin/time -f 'TOTALT: %e s' \
+env PYTHONPATH=src \
+python -m swedish_wordlist_tools.ocr_directional_page_peak_benchmark \
+  /home/matsj/proj/saol14-faksimil.jsonl \
+  --facit glyphs/saol14-manual-glyph-facit-v2.json \
+  --page 36 \
+  --column 0 \
+  --rows 53
+\`\`\`
+
+Godkänt resultat:
+
+\`\`\`text
+directional-page-done: requested_rows=53 solved=53 unresolved=0 ...
+\`\`\`
+
+### Rad 3 — snabb regression för kursivt l
+
+\`\`\`bash
+OCR_FIRST_GLYPH_TRACE=1 env PYTHONPATH=src \
+python -m swedish_wordlist_tools.ocr_directional_page_peak_benchmark \
+  /home/matsj/proj/saol14-faksimil.jsonl \
+  --facit glyphs/saol14-manual-glyph-facit-v2.json \
+  --page 36 \
+  --column 0 \
+  --rows 4 \
+  --trace-row=3 \
+2>&1 | grep -E \
+'directional-residual-profile:|directional-residual-pick:|directional-trace: row=3|directional-row: row=3'
+\`\`\`
+
+Förväntat slut:
+
+\`\`\`text
+text='depressivaläkemedel'
+remaining=0
+status=complete
+\`\`\`
+
+### Pixel-grid med residualer
+
+Svart = förklarade/avkodade pixlar.
+Rött = kvarvarande oförklarade pixlar inom vald kolumn.
+
+\`\`\`bash
+env PYTHONPATH=src \
+python -m swedish_wordlist_tools.ocr_directional_page_peak_benchmark \
+  /home/matsj/proj/saol14-faksimil.jsonl \
+  --facit glyphs/saol14-manual-glyph-facit-v2.json \
+  --page 36 \
+  --column 0 \
+  --rows 53 \
+  --pixel-grid-output /tmp/saol14-page36-ocr-grid.png
+\`\`\`
+
+### Första meddelandet i nästa chat
+
+Klistra gärna in detta:
+
+\`\`\`text
+Vi fortsätter med pixel-OCR i swedish-wordlist-tools.
+Läs TAPTO.md, särskilt CHECKPOINT — pixel-OCR 53/53 på sida 36 — 2026-09-11.
+Branch: agent/ocr-whole-column-shadow.
+Checkpoint: checkpoint/pixel-ocr-53of53-2026-09-11.
+Fungerande commit: 4fcbd2b.
+Sida 36 kolumn 0 klarar 53/53 rader, unresolved=0.
+Nästa mål: optimera profil/baseline-matchningen utan att tappa 53/53.
+Gör kodändringar och commit; jag testar på hinken.
+\`\`\`
