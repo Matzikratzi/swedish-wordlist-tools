@@ -9,6 +9,7 @@ from .ocr_baseline_up import BaselineMatch, BaselineUpStats, CompiledGlyphLibrar
 from .ocr_canonical_facit import load_canonical_facit_with_typography
 from .ocr_column_left_profile import build_column_left_profile
 from .ocr_page_start_geometry import infer_page_start_geometry
+from .ocr_page_pixel_grid import render_pixel_grid
 from .ocr_review_page_pixel_array_glyphs_html import build_page_context_pixel_array
 from .ocr_row_directional import first_glyph_top_down
 from .ocr_shadow_whole_column import _black_pixels, _column_bounds
@@ -154,6 +155,10 @@ def main() -> int:
     ap.add_argument("--max-glyphs", type=int, default=100)
     ap.add_argument("--threshold", type=int, default=210)
     ap.add_argument("--start-x-tolerance", type=int, default=4)
+    ap.add_argument("--pixel-grid-output", type=Path, help="write pixel-grid PNG with decoded ink black and unexplained ink red")
+    ap.add_argument("--pixel-grid-scale", type=int, default=3)
+    ap.add_argument("--pixel-grid-major-step", type=int, default=10)
+    ap.add_argument("--pixel-grid-label-step", type=int, default=50)
     ap.add_argument(
         "--trace-row",
         type=int,
@@ -526,6 +531,20 @@ def main() -> int:
         f"final_row_top={row_top}",
         flush=True,
     )
+    if args.pixel_grid_output is not None:
+        output = render_pixel_grid(
+            args.jsonl,
+            page_number=args.page,
+            threshold=args.threshold,
+            scale=args.pixel_grid_scale,
+            major_grid_step=args.pixel_grid_major_step,
+            label_step=args.pixel_grid_label_step,
+            output=args.pixel_grid_output,
+            residual_pixels=residual.pixels,
+            residual_bounds=bounds,
+        )
+        print(f"directional-pixel-grid: {output.resolve()}", flush=True)
+
     return 0
 
 
