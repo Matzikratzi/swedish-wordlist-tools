@@ -148,46 +148,114 @@ def find_next_residual_profile(
     if start_x is None or start_y is None:
         return None, ()
 
-    # Candidate state is (compiled glyph, tx, candidate baseline).  The common
-    # start pixel may align to any black pixel in a model row; it need not be
-    # the glyph's or row's leftmost pixel.
-    states: dict[tuple[int, int, int], tuple[baseline_up.CompiledGlyph, int, int]] = {}
-    anchor_proposals = 0
-    duplicate_placements = 0
+    # Profile-first candidate search.  The discovery pixel may correspond to
+    # any black glyph pixel, so one glyph can have several placements.  Test
+    # placements for the previous glyph baseline first as a prior, then the
+    # remaining placements.  A placement is run to completion through the
+    # glyph's left profile before any full 2-D check is attempted.
+    profile_placements = 0
+    profile_rejects = 0
+    profile_survivors_raw = 0
+    same_baseline_placements = 0
+    other_baseline_placements = 0
     full_2d_rejects = 0
     full_2d_pixel_checks = 0
 
-    # The discovery pixel is only an anchor: it may correspond to *any* black
-    # pixel in a glyph, not necessarily the row/glyph left edge.  The same
-    # glyph therefore intentionally yields several candidate placements from
-    # one page anchor when several of its black pixels could land there.
-    anchored_by_key: dict[
+    def page_left(page_y: int) -> int | None:
+        xs = [
+            x for x in remaining_by_y.get(page_y, ())
+            if 0 <= x < column_right
+        ]
+        return min(xs) if xs else None
+
+    def profile_allows(
+        item: baseline_up.CompiledGlyph,
+        tx: int,
+        candidate_baseline: int,
+    ) -> bool:
+        nonlocal profile_placements, profile_rejects
+        profile_placements += 1
+
+        top = candidate_baseline + item.model.min_y
+        bottom = candidate_baseline + item.model.max_y
+        # Walk down from the anchor, then up, matching the intended search
+        # order.  Gaps are implicit model rows with no ink; arbitrary x jumps
+        # are naturally represented by the row's leftmost black pixel.
+        for page_y in range(start_y, bottom + 1):
+            rel_y = page_y - candidate_baseline
+            model_row = item.rows.get(rel_y)
+            if model_row is None:
+                continue
+            observed_x = page_left(page_y)
+            model_x = tx + model_row[0]
+            # Ink further left may belong to another glyph and is harmless.
+            # If the candidate requires ink left of the observed envelope, or
+            # the page row is blank, this placement is impossible.
+            if observed_x is None or observed_x > model_x:
+                profile_rejects += 1
+                return False
+
+        for page_y in range(start_y - 1, top - 1, -1):
+            rel_y = page_y - candidate_baseline
+            model_row = item.rows.get(rel_y)
+            if model_row is None:
+                continue
+            observed_x = page_left(page_y)
+            model_x = tx + model_row[0]
+            if observed_x is None or observed_x > model_x:
+                profile_rejects += 1
+                return False
+
+        return True
+
+    profile_survivors_map: dict[
         tuple[int, int, int],
         tuple[baseline_up.CompiledGlyph, int, int],
     ] = {}
+
     for item in library.models:
+        placements: dict[
+            tuple[int, int, int],
+            tuple[baseline_up.CompiledGlyph, int, int],
+        ] = {}
         for model_x, model_y in item.model.pixels:
-            anchor_proposals += 1
             tx = start_x - model_x
             candidate_baseline = start_y - model_y
             physical_left = tx + item.min_x
             physical_right = tx + item.max_x
             if physical_left < 0 or physical_right >= column_right:
                 continue
-
             key = (id(item.model), tx, candidate_baseline)
-            if key in anchored_by_key:
-                duplicate_placements += 1
-                continue
-            anchored_by_key[key] = (item, tx, candidate_baseline)
+            placements[key] = (item, tx, candidate_baseline)
 
-    # Full 2-D is the first geometric discriminator.  Larger glyphs first;
-    # abort a placement immediately at the first missing black page pixel.
-    anchored = sorted(
-        anchored_by_key.values(),
+        ordered = sorted(
+            placements.values(),
+            key=lambda entry: (
+                0 if entry[2] == baseline else 1,
+                abs(entry[2] - baseline),
+                entry[1],
+            ),
+        )
+
+        for entry in ordered:
+            item2, tx, candidate_baseline = entry
+            if candidate_baseline == baseline:
+                same_baseline_placements += 1
+            else:
+                other_baseline_placements += 1
+            if not profile_allows(item2, tx, candidate_baseline):
+                continue
+            key = (id(item2.model), tx, candidate_baseline)
+            profile_survivors_map[key] = entry
+            profile_survivors_raw += 1
+
+    # Only profile survivors receive the expensive full 2-D truth test.
+    states: dict[tuple[int, int, int], tuple[baseline_up.CompiledGlyph, int, int]] = {}
+    survivors_for_2d = sorted(
+        profile_survivors_map.values(),
         key=lambda entry: -len(entry[0].model.pixels),
     )
-    for item, tx, candidate_baseline in anchored:
+    for item, tx, candidate_baseline in survivors_for_2d:
         missing: baseline_up.Pixel | None = None
         for model_x, model_y in item.model.pixels:
             full_2d_pixel_checks += 1
@@ -198,94 +266,21 @@ def find_next_residual_profile(
         if missing is not None:
             full_2d_rejects += 1
             continue
-
         key = (id(item.model), tx, candidate_baseline)
         states[key] = (item, tx, candidate_baseline)
 
     initial_candidates = len(states)
-    deaths_reported: set[tuple[int, int, int]] = set()
-
-    def page_left(page_y: int) -> int | None:
-        xs = [
-            x for x in remaining_by_y.get(page_y, ())
-            if after_left < x < column_right
-        ]
-        return min(xs) if xs else None
-
-    def kill_on_row(
-        live: dict[tuple[int, int, int], tuple[baseline_up.CompiledGlyph, int, int]],
-        page_y: int,
-        *,
-        direction: str,
-    ) -> None:
-        observed_x = page_left(page_y)
-        dead: list[tuple[int, int, int]] = []
-        for key, (item, tx, candidate_baseline) in live.items():
-            rel_y = page_y - candidate_baseline
-            model_row = item.rows.get(rel_y)
-            if model_row is None:
-                continue
-
-            model_x = tx + model_row[0]
-            # observed_x < model_x is fine: another glyph owns the envelope.
-            # observed_x == model_x means this candidate owns/ties it.
-            # observed_x > model_x (or blank) proves the candidate impossible:
-            # its required leftmost pixel is absent from the page.
-            if observed_x is not None and observed_x <= model_x:
-                continue
-
-            dead.append(key)
-            if trace and key not in deaths_reported:
-                deaths_reported.add(key)
-                reason = "page-gap" if observed_x is None else "model-left-of-page"
-                print(
-                    f"directional-residual-profile-death: "
-                    f"label={item.model.label!r} style={item.model.style} "
-                    f"start=({start_x},{start_y}) tx={tx} "
-                    f"candidate_baseline={candidate_baseline} direction={direction} "
-                    f"y={page_y} rel_y={rel_y} reason={reason} "
-                    f"observed_x={observed_x if observed_x is not None else '-'} "
-                    f"model_x={model_x} model_dx={model_row[0]}",
-                    flush=True,
-                )
-
-        for key in dead:
-            live.pop(key, None)
-
-    # Walk only the family born from the common start pixel.  We continue far
-    # enough for every initial candidate either to die or to have its complete
-    # model extent visited in that direction.
     live = dict(states)
-    max_bottom = max(
-        candidate_baseline + item.model.max_y
-        for item, _tx, candidate_baseline in live.values()
-    ) if live else start_y
-    min_top = min(
-        candidate_baseline + item.model.min_y
-        for item, _tx, candidate_baseline in live.values()
-    ) if live else start_y
-
-    for page_y in range(start_y, max_bottom + 1):
-        if not live:
-            break
-        kill_on_row(live, page_y, direction="down")
-
-    for page_y in range(start_y - 1, min_top - 1, -1):
-        if not live:
-            break
-        kill_on_row(live, page_y, direction="up")
-
     profile_survivors = len(live)
 
     if trace:
         print(
             f"directional-residual-profile: start=({start_x},{start_y}) "
-            f"search_y={row_top}..{search_bottom} anchor_proposals={anchor_proposals} "
-            f"duplicate_placements={duplicate_placements} anchored={len(anchored)} "
-            f"full_2d_rejects={full_2d_rejects} "
-            f"full_2d_pixel_checks={full_2d_pixel_checks} "
-            f"initial={initial_candidates} profile_survivors={profile_survivors} "
-            f"walk_down_to={max_bottom} walk_up_to={min_top}",
+            f"search_y={row_top}..{search_bottom} profile_placements={profile_placements} "
+            f"same_baseline={same_baseline_placements} other_baseline={other_baseline_placements} "
+            f"profile_rejects={profile_rejects} profile_survivors_raw={profile_survivors_raw} "
+            f"full_2d_rejects={full_2d_rejects} full_2d_pixel_checks={full_2d_pixel_checks} "
+            f"initial={initial_candidates} profile_survivors={profile_survivors}",
             flush=True,
         )
 
