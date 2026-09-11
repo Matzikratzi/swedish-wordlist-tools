@@ -401,6 +401,37 @@ def pick_leftmost_unique_maximal(candidates: Iterable[BaselineMatch]) -> Baselin
     )
 
 
+
+def pick_anchor_unique_maximal(candidates: Iterable[BaselineMatch]) -> BaselineMatch | None:
+    """Pick one maximal interpretation for candidates sharing one page anchor.
+
+    Unlike pick_leftmost_unique_maximal(), physical glyph.left is *not* a
+    ranking key here: after residual discovery was generalized, the common
+    page start pixel may lie anywhere inside the glyph.  Prefer candidates
+    whose placed pixel sets strictly contain smaller alternatives; otherwise
+    require one semantic result.
+    """
+    rows = _collapse_semantic_variants(candidates)
+    if not rows:
+        return None
+
+    maximal = [
+        hit
+        for hit in rows
+        if not any(hit.pixels < other.pixels for other in rows if other is not hit)
+    ]
+    distinct_semantics = {
+        (hit.model.label, hit.pixels)
+        for hit in maximal
+    }
+    if len(distinct_semantics) != 1:
+        return None
+
+    return max(
+        maximal,
+        key=lambda hit: (len(hit.pixels), hit.model.sources, hit.model.label, hit.model.style),
+    )
+
 def _pick_with_live_profile(
     candidates: tuple[BaselineMatch, ...],
     remaining_by_y: Mapping[int, Iterable[int]],
