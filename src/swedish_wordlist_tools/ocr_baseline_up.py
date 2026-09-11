@@ -334,22 +334,44 @@ def residual_downward_candidates(
 
 
 def _collapse_semantic_variants(candidates: Iterable[BaselineMatch]) -> list[BaselineMatch]:
-    groups: dict[tuple[str, str, int, int], list[BaselineMatch]] = defaultdict(list)
-    for hit in candidates:
-        groups[(hit.model.label, hit.model.style, hit.tx, hit.baseline)].append(hit)
+    """Collapse template variants that produce the same OCR interpretation.
 
-    collapsed: list[BaselineMatch] = []
-    for variants in groups.values():
-        collapsed.append(
+    Baseline/style are template metadata, not semantic distinctions, once two
+    placements explain exactly the same page pixels with the same label.
+    Keep one representative for identical (label, placed-pixel-set) results.
+    Then, for the same label and physical left edge, prefer a strict pixel
+    superset over a smaller variant.
+    """
+    exact_groups: dict[tuple[str, frozenset[Pixel]], list[BaselineMatch]] = defaultdict(list)
+    for hit in candidates:
+        exact_groups[(hit.model.label, hit.pixels)].append(hit)
+
+    exact_collapsed: list[BaselineMatch] = []
+    for variants in exact_groups.values():
+        exact_collapsed.append(
             max(
                 variants,
                 key=lambda hit: (
-                    len(hit.pixels),
                     hit.model.sources,
+                    len(hit.pixels),
                     -hit.discovered_y,
                 ),
             )
         )
+
+    by_label_left: dict[tuple[str, int], list[BaselineMatch]] = defaultdict(list)
+    for hit in exact_collapsed:
+        by_label_left[(hit.model.label, hit.left)].append(hit)
+
+    collapsed: list[BaselineMatch] = []
+    for variants in by_label_left.values():
+        maximal = [
+            hit
+            for hit in variants
+            if not any(hit.pixels < other.pixels for other in variants if other is not hit)
+        ]
+        collapsed.extend(maximal)
+
     return collapsed
 
 
@@ -366,7 +388,7 @@ def pick_leftmost_unique_maximal(candidates: Iterable[BaselineMatch]) -> Baselin
         if not any(hit.pixels < other.pixels for other in rows if other is not hit)
     ]
     distinct_semantics = {
-        (hit.model.label, hit.model.style, hit.tx, hit.baseline)
+        (hit.model.label, hit.pixels)
         for hit in maximal
     }
     if len(distinct_semantics) != 1:
