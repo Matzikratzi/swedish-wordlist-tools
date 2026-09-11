@@ -148,8 +148,9 @@ def find_next_residual_profile(
     if start_x is None or start_y is None:
         return None, ()
 
-    # Candidate state is (compiled glyph, tx, candidate baseline).  Only the
-    # leftmost pixel of a model row may be aligned to the common start pixel.
+    # Candidate state is (compiled glyph, tx, candidate baseline).  The common
+    # start pixel may align to any black pixel in a model row; it need not be
+    # the glyph's or row's leftmost pixel.
     states: dict[tuple[int, int, int], tuple[baseline_up.CompiledGlyph, int, int]] = {}
     anchor_group_lookups = 0
     anchor_pattern_hits = 0
@@ -166,13 +167,13 @@ def find_next_residual_profile(
     anchored: list[tuple[baseline_up.CompiledGlyph, int, int]] = []
 
     # Exact anchor-row lookup.  Each group describes glyph width and the
-    # offset from glyph-left to the row's leftmost black pixel.  Build the
+    # offset from glyph-left to one possible black anchor pixel.  Build the
     # page mask once for that geometry and retrieve only exact black/white
     # matches.  This replaces the old scan over every model row.
     for width, anchor_offset in library.anchor_row_groups:
         physical_left = start_x - anchor_offset
         physical_right = physical_left + width - 1
-        if physical_left <= after_left or physical_right >= column_right:
+        if physical_left < 0 or physical_right >= column_right:
             continue
 
         anchor_group_lookups += 1
