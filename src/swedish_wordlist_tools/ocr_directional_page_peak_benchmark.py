@@ -161,12 +161,26 @@ def find_next_residual_profile(
     full_2d_rejects = 0
     full_2d_pixel_checks = 0
 
+    # The residual raster does not change during one matcher call.  Build its
+    # left envelope once instead of filtering and min()-scanning the same page
+    # row for every candidate placement and every profile point.
+    page_left_by_y: dict[int, int] = {}
+    profile_top = row_top
+    profile_limit = profile_bottom
+    if profile_limit is None:
+        profile_limit = row_bottom
+    if profile_limit is None:
+        profile_limit = search_bottom + library.max_down + 1
+    for page_y in range(profile_top, int(profile_limit) + 1):
+        best: int | None = None
+        for x in remaining_by_y.get(page_y, ()):
+            if 0 <= x < column_right and (best is None or x < best):
+                best = x
+        if best is not None:
+            page_left_by_y[page_y] = best
+
     def page_left(page_y: int) -> int | None:
-        xs = [
-            x for x in remaining_by_y.get(page_y, ())
-            if 0 <= x < column_right
-        ]
-        return min(xs) if xs else None
+        return page_left_by_y.get(page_y)
 
     def profile_allows(
         item: baseline_up.CompiledGlyph,
@@ -220,11 +234,15 @@ def find_next_residual_profile(
         ] = {}
 
         for item in library.models:
+            if stats is not None:
+                stats.model_visits += 1
             placements: dict[
                 tuple[int, int, int],
                 tuple[baseline_up.CompiledGlyph, int, int],
             ] = {}
             for model_x, model_y in item.model.pixels:
+                if stats is not None:
+                    stats.raw_tx_proposals += 1
                 tx = start_x - model_x
                 candidate_baseline = start_y - model_y
                 if same_baseline_only and candidate_baseline != baseline:
@@ -236,8 +254,15 @@ def find_next_residual_profile(
                 physical_right = tx + item.max_x
                 if physical_left < 0 or physical_right >= column_right:
                     continue
+                if stats is not None:
+                    stats.in_bounds_tx += 1
 
                 key = (id(item.model), tx, candidate_baseline)
+                if stats is not None:
+                    if key in placements:
+                        stats.duplicate_tx += 1
+                    else:
+                        stats.unique_tx += 1
                 placements[key] = (item, tx, candidate_baseline)
 
             ordered = sorted(
@@ -274,6 +299,8 @@ def find_next_residual_profile(
             key=lambda pair: -len(pair[1][0].model.pixels),
         )
         for key, (item, tx, candidate_baseline) in ordered:
+            if stats is not None:
+                stats.subset_checks += 1
             missing = False
             for model_x, model_y in item.model.pixels:
                 full_2d_pixel_checks += 1
@@ -287,6 +314,8 @@ def find_next_residual_profile(
                 (tx + x, candidate_baseline + y)
                 for x, y in item.model.pixels
             )
+            if stats is not None:
+                stats.exact_hits += 1
             exact[key] = baseline_up.BaselineMatch(
                 model=item.model,
                 tx=tx,
