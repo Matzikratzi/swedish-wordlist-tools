@@ -24,6 +24,8 @@ def render_pixel_grid(
     major_grid_step: int = 10,
     label_step: int = 50,
     output: Path | None = None,
+    residual_pixels: set[tuple[int, int]] | frozenset[tuple[int, int]] | None = None,
+    residual_bounds: tuple[int, int, int, int] | None = None,
 ) -> Path:
     context = build_page_context_pixel_array(jsonl, page_number, threshold)
     gray = context["pixel_gray_page"]
@@ -35,6 +37,21 @@ def render_pixel_grid(
 
     src_w, src_h = binary.size
     scaled = binary.resize((src_w * scale, src_h * scale), Image.Resampling.NEAREST).convert("RGB")
+
+    # Optional OCR overlay: decoded ink remains black; still-unexplained ink
+    # inside the selected OCR bounds is red.  Pixels outside those bounds are
+    # left exactly as in the ordinary black/white pixel-grid image.
+    if residual_pixels is not None:
+        overlay = ImageDraw.Draw(scaled)
+        if residual_bounds is None:
+            residual_bounds = (0, src_w, 0, src_h)
+        left, right, top, bottom = residual_bounds
+        for x, y in residual_pixels:
+            if left <= x < right and top <= y < bottom:
+                overlay.rectangle(
+                    (x * scale, y * scale, (x + 1) * scale - 1, (y + 1) * scale - 1),
+                    fill=(220, 0, 0),
+                )
 
     margin_left = 46
     margin_top = 34
