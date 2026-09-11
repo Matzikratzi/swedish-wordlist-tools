@@ -347,7 +347,7 @@ def find_next_residual_profile(
             ),
         )
     )
-    hit = baseline_up.pick_leftmost_unique_maximal(candidates)
+    hit = baseline_up.pick_anchor_unique_maximal(candidates)
 
     if trace:
         accepted = repr(hit.model.label) if hit is not None else None
