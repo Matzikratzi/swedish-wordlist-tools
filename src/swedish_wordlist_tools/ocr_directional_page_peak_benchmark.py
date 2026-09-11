@@ -165,6 +165,7 @@ def find_next_residual_profile(
     # left envelope once instead of filtering and min()-scanning the same page
     # row for every candidate placement and every profile point.
     page_left_by_y: dict[int, int] = {}
+    profile_build_start = time.perf_counter()
     # Candidate baselines are inferred from the common start pixel and may
     # place a glyph above or below the current row/profile window.  Cache every
     # residual row so this remains exactly equivalent to the old page_left().
@@ -175,6 +176,8 @@ def find_next_residual_profile(
                 best = x
         if best is not None:
             page_left_by_y[int(page_y)] = best
+
+    profile_build_seconds = time.perf_counter() - profile_build_start
 
     def page_left(page_y: int) -> int | None:
         return page_left_by_y.get(page_y)
