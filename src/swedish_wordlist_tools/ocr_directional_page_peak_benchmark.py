@@ -165,19 +165,16 @@ def find_next_residual_profile(
     # left envelope once instead of filtering and min()-scanning the same page
     # row for every candidate placement and every profile point.
     page_left_by_y: dict[int, int] = {}
-    profile_top = row_top
-    profile_limit = profile_bottom
-    if profile_limit is None:
-        profile_limit = row_bottom
-    if profile_limit is None:
-        profile_limit = search_bottom + library.max_down + 1
-    for page_y in range(profile_top, int(profile_limit) + 1):
+    # Candidate baselines are inferred from the common start pixel and may
+    # place a glyph above or below the current row/profile window.  Cache every
+    # residual row so this remains exactly equivalent to the old page_left().
+    for page_y, xs in remaining_by_y.items():
         best: int | None = None
-        for x in remaining_by_y.get(page_y, ()):
+        for x in xs:
             if 0 <= x < column_right and (best is None or x < best):
                 best = x
         if best is not None:
-            page_left_by_y[page_y] = best
+            page_left_by_y[int(page_y)] = best
 
     def page_left(page_y: int) -> int | None:
         return page_left_by_y.get(page_y)
