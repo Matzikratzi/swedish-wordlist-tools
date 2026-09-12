@@ -26,6 +26,7 @@ _WORKER_TRIE_EDGES = 0
 _WORKER_JSONL: Path | None = None
 _WORKER_THRESHOLD = 210
 _WORKER_DEBUG_DIR: Path | None = None
+_WORKER_DEFERRED_DIR: Path | None = None
 
 
 def _init_worker(
@@ -34,10 +35,11 @@ def _init_worker(
     threshold: int,
     prefix_len: int,
     debug_dir: str,
+    deferred_dir: str,
 ) -> None:
     """Compile immutable OCR data once per long-lived worker."""
     global _WORKER_TRIE, _WORKER_TRIE_NODES, _WORKER_TRIE_EDGES
-    global _WORKER_JSONL, _WORKER_THRESHOLD, _WORKER_DEBUG_DIR
+    global _WORKER_JSONL, _WORKER_THRESHOLD, _WORKER_DEBUG_DIR, _WORKER_DEFERRED_DIR
 
     models = tuple(load_canonical_facit_with_typography(Path(facit)))
     library = CompiledGlyphLibrary(models)
@@ -49,6 +51,7 @@ def _init_worker(
     _WORKER_JSONL = Path(jsonl)
     _WORKER_THRESHOLD = int(threshold)
     _WORKER_DEBUG_DIR = Path(debug_dir) if debug_dir else None
+    _WORKER_DEFERRED_DIR = Path(deferred_dir) if deferred_dir else None
 
 
 def _ocr_column(
@@ -362,9 +365,28 @@ def _ocr_page(page_number: int, frontier_slack: int) -> dict[str, object]:
     reconstructed_rows = sum(int(column["row_count"]) for column in column_results)
     reference_rows = sum(int(column["reference_row_count"]) for column in column_results)
 
+    deferred_overlay = None
+    deferred_points = [
+        tuple(point)
+        for column in column_results
+        for point in column.get("deferred_pixels", [])
+    ]
+    if _WORKER_DEFERRED_DIR is not None and deferred_points:
+        from PIL import ImageDraw
+
+        _WORKER_DEFERRED_DIR.mkdir(parents=True, exist_ok=True)
+        overlay = context["page"].convert("RGB")
+        draw = ImageDraw.Draw(overlay)
+        for x, y in deferred_points:
+            draw.rectangle((x - 2, y - 2, x + 2, y + 2), outline=(255, 0, 0), width=1)
+        overlay_path = _WORKER_DEFERRED_DIR / f"page-{page_number:04d}-deferred-overlay.png"
+        overlay.save(overlay_path)
+        deferred_overlay = str(overlay_path)
+
     return {
         "page": page_number,
         "source": str(context.get("source") or ""),
+        "deferred_overlay": deferred_overlay,
         "column_count": len(column_results),
         "remaining": remaining,
         "active_remaining": active_remaining,
@@ -376,33 +398,6 @@ def _ocr_page(page_number: int, frontier_slack: int) -> dict[str, object]:
         "total_seconds": perf_counter() - page_started,
         "columns": column_results,
     }
-
-
-def _write_deferred_overlay(page_result: dict[str, object], output_dir: Path) -> str | None:
-    deferred = [
-        tuple(point)
-        for column in page_result["columns"]
-        for point in column.get("deferred_pixels", [])
-    ]
-    if not deferred:
-        return None
-
-    source = Path(str(page_result["source"]))
-    if not source.exists():
-        return None
-
-    from PIL import Image, ImageDraw
-
-    image = Image.open(source).convert("RGB")
-    draw = ImageDraw.Draw(image)
-    # Draw a visible box around every deferred source pixel without obscuring it.
-    for x, y in deferred:
-        draw.rectangle((x - 2, y - 2, x + 2, y + 2), outline=(255, 0, 0), width=1)
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    path = output_dir / f"page-{int(page_result['page']):04d}-deferred-overlay.png"
-    image.save(path)
-    return str(path)
 
 
 def main() -> int:
@@ -486,6 +481,7 @@ def main() -> int:
             args.threshold,
             args.prefix_len,
             str(args.debug_stalls),
+            str(args.debug_deferred),
         ),
     ) as pool:
         future_to_page = {
@@ -496,7 +492,7 @@ def main() -> int:
             page = future_to_page[future]
             result = future.result()
             results[page] = result
-            overlay = _write_deferred_overlay(result, args.debug_deferred)
+            overlay = result.get("deferred_overlay")
             if overlay:
                 print(
                     f"batch-deferred-overlay: page={page} "
