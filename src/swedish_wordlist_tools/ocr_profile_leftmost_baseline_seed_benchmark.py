@@ -183,6 +183,7 @@ def main() -> int:
     wave_started = perf_counter()
     wave_summaries: list[tuple[int, int, int, int, int]] = []
     all_wave_baseline_votes: Counter[int] = Counter()
+    accepted_streams: dict[int, list[tuple[int, int, int, int, str, str, int, int]]] = defaultdict(list)
     wave = 0
     while args.waves == 0 or wave < args.waves:
         wave_profile = build_column_left_profile(
@@ -241,6 +242,22 @@ def main() -> int:
             consumed.update(placed)
             accepted += 1
             accepted_baselines[baseline] += 1
+            left = min(x for x, _y in placed)
+            right = max(x for x, _y in placed)
+            top = min(y for _x, y in placed)
+            bottom = max(y for _x, y in placed)
+            accepted_streams[baseline].append(
+                (
+                    left,
+                    right,
+                    wave,
+                    wave_x,
+                    item.model.label,
+                    item.model.style,
+                    top,
+                    bottom,
+                )
+            )
         wave_residual.consume(consumed)
         wave_summaries.append(
             (wave, wave_x, len(wave_ys), proposals_wave, accepted)
@@ -267,6 +284,27 @@ def main() -> int:
         wave += 1
 
     wave_seconds = perf_counter() - wave_started
+
+    print("leftmost-wave-streams-start", flush=True)
+    for baseline in sorted(accepted_streams):
+        entries = sorted(
+            accepted_streams[baseline],
+            key=lambda entry: (entry[0], entry[1], entry[2], entry[4], entry[5]),
+        )
+        text_value = "".join(entry[4] for entry in entries)
+        parts = " ".join(
+            (
+                f"x={left}..{right}:w{wave}/px{wave_x}:"
+                f"{label!r}/{style}:y={top}..{bottom}"
+            )
+            for left, right, wave, wave_x, label, style, top, bottom in entries
+        )
+        print(
+            f"leftmost-wave-stream: baseline={baseline} glyphs={len(entries)} "
+            f"text={text_value!r} {parts}",
+            flush=True,
+        )
+    print("leftmost-wave-streams-end", flush=True)
 
     # Diagnostic only: raw exact-hit votes contain many alternative baselines
     # for the same consumed glyph.  The accepted-baseline lists above show the
