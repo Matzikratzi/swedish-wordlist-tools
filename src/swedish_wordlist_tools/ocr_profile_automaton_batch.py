@@ -260,7 +260,6 @@ def _ocr_column(
                 "seed_diagnostics": seed_diagnostics[:32],
                 "failure_candidates": failure_candidates,
                 "remaining": len(residual.pixels),
-        "active_remaining": len(residual.pixels - deferred_frontier_pixels),
                 "debug_image": debug_image,
             }
             break
@@ -308,11 +307,16 @@ def _ocr_column(
         else []
     )
 
+    unresolved_deferred = residual.pixels & deferred_frontier_pixels
+    active_remaining = residual.pixels - deferred_frontier_pixels
+
     return {
         "column": column,
         "bounds": list(bounds),
         "steps": steps,
         "remaining": len(residual.pixels),
+        "active_remaining": len(active_remaining),
+        "deferred_remaining": len(unresolved_deferred),
         "row_count": len(rows),
         "reference_row_count": len(reference_rows),
         "candidate_spawns": candidate_spawns,
@@ -352,6 +356,8 @@ def _ocr_page(page_number: int, frontier_slack: int) -> dict[str, object]:
     ]
 
     remaining = sum(int(column["remaining"]) for column in column_results)
+    active_remaining = sum(int(column["active_remaining"]) for column in column_results)
+    deferred_remaining = sum(int(column["deferred_remaining"]) for column in column_results)
     reconstructed_rows = sum(int(column["row_count"]) for column in column_results)
     reference_rows = sum(int(column["reference_row_count"]) for column in column_results)
 
@@ -360,6 +366,8 @@ def _ocr_page(page_number: int, frontier_slack: int) -> dict[str, object]:
         "source": str(context.get("source") or ""),
         "column_count": len(column_results),
         "remaining": remaining,
+        "active_remaining": active_remaining,
+        "deferred_remaining": deferred_remaining,
         "row_count": reconstructed_rows,
         "reference_row_count": reference_rows,
         "load_seconds": load_seconds,
@@ -458,7 +466,8 @@ def main() -> int:
                 f"batch-page-done: page={page} columns={result['column_count']} "
                 f"rows={result['row_count']}/{result['reference_row_count']} "
                 f"remaining={result['remaining']} "
-        f"active_remaining={sum(int(c.get('active_remaining', c['remaining'])) for c in result['columns'])} "
+                f"active_remaining={result['active_remaining']} "
+                f"deferred_remaining={result['deferred_remaining']} "
                 f"load={float(result['load_seconds']):.3f}s "
                 f"ocr={float(result['ocr_seconds']):.3f}s "
                 f"total={float(result['total_seconds']):.3f}s",
@@ -472,6 +481,8 @@ def main() -> int:
                     f"batch-column-stuck: page={page} column={column['column']} "
                     f"rows={column['row_count']}/{column['reference_row_count']} "
                     f"steps={column['steps']} remaining={column['remaining']} "
+                    f"active_remaining={column['active_remaining']} "
+                    f"deferred_remaining={column['deferred_remaining']} "
                     f"x={stuck.get('x')} ys={stuck.get('ys')} "
                     f"best_survivors={stuck.get('best_survivors')} "
                     f"checks_2d={column['checks_2d']} "
@@ -499,14 +510,18 @@ def main() -> int:
     elapsed = perf_counter() - batch_started
     failed_pages = [
         page for page in pages
-        if int(results[page]["remaining"]) != 0
+        if int(results[page]["active_remaining"]) != 0
     ]
     total_rows = sum(int(results[page]["row_count"]) for page in pages)
     total_remaining = sum(int(results[page]["remaining"]) for page in pages)
+    total_active_remaining = sum(int(results[page]["active_remaining"]) for page in pages)
+    total_deferred_remaining = sum(int(results[page]["deferred_remaining"]) for page in pages)
 
     print(
         f"batch-done: pages={len(pages)} failed_pages={failed_pages} "
         f"rows={total_rows} remaining={total_remaining} "
+        f"active_remaining={total_active_remaining} "
+        f"deferred_remaining={total_deferred_remaining} "
         f"elapsed={elapsed:.3f}s pages_per_second={len(pages)/elapsed:.3f} "
         f"seconds_per_page={elapsed/len(pages):.3f} output={args.output}",
         flush=True,
