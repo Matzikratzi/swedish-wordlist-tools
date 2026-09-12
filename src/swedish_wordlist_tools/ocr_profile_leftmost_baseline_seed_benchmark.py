@@ -13,6 +13,32 @@ from .ocr_review_page_pixel_array_glyphs_html import build_page_context_pixel_ar
 from .ocr_shadow_whole_column import _black_pixels, _column_bounds
 
 
+def _cluster_adjacent_baselines(votes: Counter[int]) -> list[tuple[tuple[int, ...], int, int]]:
+    """Collapse adjacent baseline hypotheses into geometric row seeds.
+
+    Returns (members, representative, total_votes).  Adjacency is deliberately
+    only one raster row: the experiment shows the same glyph geometry often
+    voting at b and b+1, while neighbouring text rows are much farther apart.
+    """
+    if not votes:
+        return []
+    ordered = sorted(votes)
+    groups: list[list[int]] = [[ordered[0]]]
+    for baseline in ordered[1:]:
+        if baseline <= groups[-1][-1] + 1:
+            groups[-1].append(baseline)
+        else:
+            groups.append([baseline])
+
+    result: list[tuple[tuple[int, ...], int, int]] = []
+    for group in groups:
+        peak = max(votes[b] for b in group)
+        peak_members = [b for b in group if votes[b] == peak]
+        representative = peak_members[len(peak_members) // 2]
+        result.append((tuple(group), representative, sum(votes[b] for b in group)))
+    return result
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
@@ -133,6 +159,7 @@ def main() -> int:
     wave_residual = ResidualInk(black)
     wave_started = perf_counter()
     wave_summaries: list[tuple[int, int, int, int, int]] = []
+    all_wave_baseline_votes: Counter[int] = Counter()
     for wave in range(max(0, args.waves)):
         wave_profile = build_column_left_profile(
             wave_residual.rows,
@@ -183,6 +210,7 @@ def main() -> int:
         baseline_votes: Counter[int] = Counter()
         for baseline, tx, item, placed in wave_hits:
             baseline_votes[baseline] += 1
+            all_wave_baseline_votes[baseline] += 1
             if placed & consumed:
                 continue
             consumed.update(placed)
@@ -208,6 +236,16 @@ def main() -> int:
             break
 
     wave_seconds = perf_counter() - wave_started
+
+    clustered_wave_baselines = _cluster_adjacent_baselines(all_wave_baseline_votes)
+    print(
+        "leftmost-wave-row-seeds: "
+        + " ".join(
+            f"{representative}[{','.join(str(b) for b in members)}]:{total_votes}"
+            for members, representative, total_votes in clustered_wave_baselines
+        ),
+        flush=True,
+    )
 
     print(
         f"leftmost-seed-start: page={args.page} column={args.column} "
