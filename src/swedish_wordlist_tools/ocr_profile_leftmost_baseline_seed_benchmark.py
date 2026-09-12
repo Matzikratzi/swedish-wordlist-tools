@@ -4,6 +4,7 @@ import argparse
 from collections import Counter, defaultdict
 from pathlib import Path
 from time import perf_counter
+from typing import Mapping
 
 from .ocr_baseline_up import CompiledGlyphLibrary, ResidualInk
 from .ocr_canonical_facit import load_canonical_facit_with_typography
@@ -60,6 +61,53 @@ def _cluster_adjacent_baselines(votes: Counter[int]) -> list[tuple[tuple[int, ..
             weight = baseline_weight
     emit()
     return result
+
+def _reconstruct_rows_from_accepted_streams(
+    accepted_streams: Mapping[int, list[tuple[int, int, int, int, str, str, int, int]]],
+) -> list[tuple[int, tuple[int, ...], int, int, str, int]]:
+    """Merge only nearby accepted baselines into physical text rows.
+
+    This deliberately works on accepted glyph streams, not raw candidate votes.
+    Nearby baseline variants (typically +/-1 px) are merged, while real text
+    rows are separated by much larger vertical gaps.
+    """
+    baselines = sorted(accepted_streams)
+    if not baselines:
+        return []
+
+    groups: list[list[int]] = [[baselines[0]]]
+    for baseline in baselines[1:]:
+        if baseline - groups[-1][-1] <= 2:
+            groups[-1].append(baseline)
+        else:
+            groups.append([baseline])
+
+    rows: list[tuple[int, tuple[int, ...], int, int, str, int]] = []
+    for group in groups:
+        representative = max(
+            group,
+            key=lambda b: (len(accepted_streams[b]), -abs(b - group[len(group) // 2])),
+        )
+        entries = [
+            entry
+            for baseline in group
+            for entry in accepted_streams[baseline]
+        ]
+        entries.sort(key=lambda entry: (entry[0], entry[1], entry[2], entry[4], entry[5]))
+        text_value = "".join(entry[4] for entry in entries)
+        top = min(entry[6] for entry in entries)
+        bottom = max(entry[7] for entry in entries)
+        rows.append(
+            (
+                representative,
+                tuple(group),
+                top,
+                bottom,
+                text_value,
+                len(entries),
+            )
+        )
+    return rows
 
 
 def main() -> int:
@@ -305,6 +353,28 @@ def main() -> int:
             flush=True,
         )
     print("leftmost-wave-streams-end", flush=True)
+
+    reconstructed_rows = _reconstruct_rows_from_accepted_streams(accepted_streams)
+    print(
+        f"leftmost-wave-reconstructed-start: rows={len(reconstructed_rows)} "
+        f"reference_rows={len(reference_rows)}",
+        flush=True,
+    )
+    for row_index, (representative, members, top, bottom, text_value, glyph_count) in enumerate(reconstructed_rows):
+        reference = reference_rows[row_index] if row_index < len(reference_rows) else None
+        if reference is None:
+            reference_detail = "reference_y=-"
+        else:
+            reference_detail = (
+                f"reference_y={int(reference['page_top'])}..{int(reference['page_bottom']) - 1}"
+            )
+        print(
+            f"leftmost-wave-reconstructed-row: row={row_index} baseline={representative} "
+            f"members={members} y={top}..{bottom} glyphs={glyph_count} "
+            f"text={text_value!r} {reference_detail}",
+            flush=True,
+        )
+    print("leftmost-wave-reconstructed-end", flush=True)
 
     # Diagnostic only: raw exact-hit votes contain many alternative baselines
     # for the same consumed glyph.  The accepted-baseline lists above show the
