@@ -86,6 +86,14 @@ def _ocr_column(
     stuck = None
     deferred_frontier_pixels: set[tuple[int, int]] = set()
     frontier_deferrals = 0
+
+    def next_profile_x(page_y: int) -> int | None:
+        xs = residual.rows.get(page_y) or set()
+        visible = [
+            x for x in xs
+            if (x, page_y) not in deferred_frontier_pixels
+        ]
+        return min(visible) if visible else None
     matching_started = perf_counter()
 
     while residual.pixels:
@@ -194,12 +202,21 @@ def _ocr_column(
             # diagnostics and accounting.
             advanced = False
             if frontier_slack > 0:
+                quarantine_right = min_x + frontier_slack
                 for page_y in min_ys:
                     xs = residual.rows.get(page_y) or set()
-                    later = [x for x in xs if min_x < x <= min_x + frontier_slack]
-                    if later:
-                        deferred_frontier_pixels.add((min_x, page_y))
-                        profile_left[page_y] = min(later)
+                    blocked = [
+                        x for x in xs
+                        if min_x <= x <= quarantine_right
+                        and (x, page_y) not in deferred_frontier_pixels
+                    ]
+                    if blocked:
+                        deferred_frontier_pixels.update((x, page_y) for x in blocked)
+                        next_x = next_profile_x(page_y)
+                        if next_x is None:
+                            profile_left.pop(page_y, None)
+                        else:
+                            profile_left[page_y] = next_x
                         advanced = True
                 if advanced:
                     frontier_deferrals += 1
@@ -243,6 +260,7 @@ def _ocr_column(
                 "seed_diagnostics": seed_diagnostics[:32],
                 "failure_candidates": failure_candidates,
                 "remaining": len(residual.pixels),
+        "active_remaining": len(residual.pixels - deferred_frontier_pixels),
                 "debug_image": debug_image,
             }
             break
@@ -256,11 +274,11 @@ def _ocr_column(
         affected_ys = {y for _x, y in placed}
         residual.consume(placed)
         for page_y in affected_ys:
-            xs = residual.rows.get(page_y)
-            if xs:
-                profile_left[page_y] = min(xs)
-            else:
+            next_x = next_profile_x(page_y)
+            if next_x is None:
                 profile_left.pop(page_y, None)
+            else:
+                profile_left[page_y] = next_x
 
         accepted_streams[baseline].append(
             (left, right, steps, min_x, item.model.label, item.model.style, top, bottom)
@@ -440,6 +458,7 @@ def main() -> int:
                 f"batch-page-done: page={page} columns={result['column_count']} "
                 f"rows={result['row_count']}/{result['reference_row_count']} "
                 f"remaining={result['remaining']} "
+        f"active_remaining={sum(int(c.get('active_remaining', c['remaining'])) for c in result['columns'])} "
                 f"load={float(result['load_seconds']):.3f}s "
                 f"ocr={float(result['ocr_seconds']):.3f}s "
                 f"total={float(result['total_seconds']):.3f}s",
