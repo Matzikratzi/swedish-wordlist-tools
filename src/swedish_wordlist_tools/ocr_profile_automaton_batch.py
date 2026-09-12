@@ -317,6 +317,7 @@ def _ocr_column(
         "remaining": len(residual.pixels),
         "active_remaining": len(active_remaining),
         "deferred_remaining": len(unresolved_deferred),
+        "deferred_pixels": [list(p) for p in sorted(unresolved_deferred)],
         "row_count": len(rows),
         "reference_row_count": len(reference_rows),
         "candidate_spawns": candidate_spawns,
@@ -377,6 +378,33 @@ def _ocr_page(page_number: int, frontier_slack: int) -> dict[str, object]:
     }
 
 
+def _write_deferred_overlay(page_result: dict[str, object], output_dir: Path) -> str | None:
+    deferred = [
+        tuple(point)
+        for column in page_result["columns"]
+        for point in column.get("deferred_pixels", [])
+    ]
+    if not deferred:
+        return None
+
+    source = Path(str(page_result["source"]))
+    if not source.exists():
+        return None
+
+    from PIL import Image, ImageDraw
+
+    image = Image.open(source).convert("RGB")
+    draw = ImageDraw.Draw(image)
+    # Draw a visible box around every deferred source pixel without obscuring it.
+    for x, y in deferred:
+        draw.rectangle((x - 2, y - 2, x + 2, y + 2), outline=(255, 0, 0), width=1)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / f"page-{int(page_result['page']):04d}-deferred-overlay.png"
+    image.save(path)
+    return str(path)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
@@ -402,6 +430,12 @@ def main() -> int:
         type=int,
         default=0,
         help="Default: logical CPUs minus one.",
+    )
+    ap.add_argument(
+        "--debug-deferred",
+        type=Path,
+        default=Path("reports/profile-deferred"),
+        help="Directory for full-page overlays marking every deferred residual pixel.",
     )
     ap.add_argument(
         "--debug-stalls",
@@ -462,6 +496,13 @@ def main() -> int:
             page = future_to_page[future]
             result = future.result()
             results[page] = result
+            overlay = _write_deferred_overlay(result, args.debug_deferred)
+            if overlay:
+                print(
+                    f"batch-deferred-overlay: page={page} "
+                    f"pixels={result['deferred_remaining']} output={overlay}",
+                    flush=True,
+                )
             print(
                 f"batch-page-done: page={page} columns={result['column_count']} "
                 f"rows={result['row_count']}/{result['reference_row_count']} "
