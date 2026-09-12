@@ -12,20 +12,20 @@ from .ocr_review_page_pixel_array_glyphs_html import build_page_context_pixel_ar
 from .ocr_shadow_whole_column import _black_pixels, _column_bounds
 
 
-def _compile_profile_prefix_index(
+def _compile_profile_prefix_trie(
     library: CompiledGlyphLibrary,
     *,
-    prefix_len: int = 3,
+    prefix_len: int = 5,
 ):
-    """Group glyph/anchor templates by a short left-profile prefix.
+    """Compile short left-profile prefixes into a shared decision trie.
 
-    The prefix is only a subset of the exact 1D checks used by the matcher, so
-    rejecting a bucket here cannot change which candidates are valid.
+    Each edge is one (dy, dx) constraint relative to the seed.  Prefixes that
+    share their nearest profile points share trie nodes, so an observed profile
+    tests that common prefix only once.
     """
-    groups: dict[
-        tuple[tuple[int, int], ...],
-        list[tuple[object, tuple[tuple[int, int], ...], int]],
-    ] = defaultdict(list)
+    root = {"children": {}, "templates": []}
+    node_count = 1
+    edge_count = 0
 
     for item in library.models:
         by_y: dict[int, int] = {}
@@ -37,8 +37,6 @@ def _compile_profile_prefix_index(
         anchor_ys = tuple(sorted(y for y, x in by_y.items() if x == item.min_x))
 
         for anchor_y in anchor_ys:
-            # The seed row itself is guaranteed to match min_x and carries no
-            # discrimination.  Prefer the nearest rows above/below it.
             ordered = sorted(
                 (
                     (model_y, model_left)
@@ -56,12 +54,20 @@ def _compile_profile_prefix_index(
             remainder = tuple(
                 point for point in left_profile if point not in chosen_set
             )
-            groups[signature].append((item, remainder, anchor_y))
 
-    return tuple(
-        (signature, tuple(entries))
-        for signature, entries in groups.items()
-    )
+            node = root
+            for edge in signature:
+                children = node["children"]
+                child = children.get(edge)
+                if child is None:
+                    child = {"children": {}, "templates": []}
+                    children[edge] = child
+                    node_count += 1
+                    edge_count += 1
+                node = child
+            node["templates"].append((item, remainder, anchor_y))
+
+    return root, node_count, edge_count
 
 
 def main() -> int:
@@ -79,13 +85,16 @@ def main() -> int:
     ap.add_argument("--rows", type=int, default=0)
     ap.add_argument("--threshold", type=int, default=210)
     ap.add_argument("--max-steps", type=int, default=0, help="0 means until stuck/empty")
-    ap.add_argument("--prefix-len", type=int, default=3, help="Number of nearest profile rows used by the prefix index")
+    ap.add_argument("--prefix-len", type=int, default=5, help="Number of nearest profile rows used by the prefix trie")
     args = ap.parse_args()
 
     total_started = perf_counter()
     models = tuple(load_canonical_facit_with_typography(args.facit))
     library = CompiledGlyphLibrary(models)
-    prefix_index = _compile_profile_prefix_index(library, prefix_len=args.prefix_len)
+    prefix_trie, prefix_trie_nodes, prefix_trie_edges = _compile_profile_prefix_trie(
+        library,
+        prefix_len=args.prefix_len,
+    )
 
     context = build_page_context_pixel_array(args.jsonl, args.page, args.threshold)
     bounds = _column_bounds(context, args.column)
@@ -103,8 +112,9 @@ def main() -> int:
     steps = 0
     seed_points = 0
     candidate_spawns = 0
-    prefix_groups_checked = 0
-    prefix_groups_rejected = 0
+    prefix_edges_checked = 0
+    prefix_edges_rejected = 0
+    prefix_terminal_visits = 0
     prefix_templates_passed = 0
     profile_rows_checked = 0
     profile_rejects = 0
@@ -146,61 +156,58 @@ def main() -> int:
             seen: set[tuple[int, int, int]] = set()
             filter_started = perf_counter()
 
-            for signature, templates in prefix_index:
-                prefix_groups_checked += 1
-                prefix_support = 0
-                prefix_ok = True
-                for dy, dx in signature:
+            stack = [(prefix_trie, 0)]
+            while stack:
+                node, prefix_support = stack.pop()
+
+                templates = node["templates"]
+                if templates:
+                    prefix_terminal_visits += 1
+                    prefix_templates_passed += len(templates)
+                    for item, left_profile, anchor_y in templates:
+                        tx = min_x - item.min_x
+                        if tx + item.max_x >= column_right or tx + item.min_x < column_left:
+                            continue
+
+                        baseline = seed_y - anchor_y
+                        key = (id(item.model), tx, baseline)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        candidate_spawns += 1
+
+                        top = baseline + item.model.min_y
+                        bottom = baseline + item.model.max_y
+                        if top < column_top or bottom >= column_bottom:
+                            continue
+
+                        support = prefix_support
+                        contradicted = False
+                        for model_y, model_left in left_profile:
+                            page_y = baseline + model_y
+                            expected_x = tx + model_left
+                            actual_x = profile_left.get(page_y)
+                            profile_rows_checked += 1
+                            if actual_x is None or actual_x > expected_x:
+                                contradicted = True
+                                profile_rejects += 1
+                                break
+                            if actual_x == expected_x:
+                                support += 1
+                        if contradicted:
+                            continue
+                        survivors.append((item, tx, baseline, support))
+
+                for (dy, dx), child in node["children"].items():
+                    prefix_edges_checked += 1
                     actual_x = profile_left.get(seed_y + dy)
                     profile_rows_checked += 1
                     expected_x = min_x + dx
                     if actual_x is None or actual_x > expected_x:
-                        prefix_ok = False
-                        break
-                    if actual_x == expected_x:
-                        prefix_support += 1
-                if not prefix_ok:
-                    prefix_groups_rejected += 1
-                    continue
-
-                prefix_templates_passed += len(templates)
-                for item, left_profile, anchor_y in templates:
-                    tx = min_x - item.min_x
-                    if tx + item.max_x >= column_right or tx + item.min_x < column_left:
+                        prefix_edges_rejected += 1
                         continue
-
-                    baseline = seed_y - anchor_y
-                    key = (id(item.model), tx, baseline)
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    candidate_spawns += 1
-
-                    top = baseline + item.model.min_y
-                    bottom = baseline + item.model.max_y
-                    if top < column_top or bottom >= column_bottom:
-                        continue
-
-                    support = prefix_support
-                    contradicted = False
-                    for model_y, model_left in left_profile:
-                        page_y = baseline + model_y
-                        expected_x = tx + model_left
-                        actual_x = profile_left.get(page_y)
-                        profile_rows_checked += 1
-                        # If the current page profile is to the right of the
-                        # glyph's required left pixel (or blank), that required
-                        # pixel cannot exist.  A smaller page x may simply be
-                        # masking this glyph and therefore does not disprove it.
-                        if actual_x is None or actual_x > expected_x:
-                            contradicted = True
-                            profile_rejects += 1
-                            break
-                        if actual_x == expected_x:
-                            support += 1
-                    if contradicted:
-                        continue
-                    survivors.append((item, tx, baseline, support))
+                    child_support = prefix_support + (1 if actual_x == expected_x else 0)
+                    stack.append((child, child_support))
 
             profile_filter_seconds += perf_counter() - filter_started
             profile_survivors += len(survivors)
@@ -297,8 +304,11 @@ def main() -> int:
 
     print(
         f"profile-auto-done: prefix_len={args.prefix_len} steps={steps} remaining={len(residual.pixels)} "
-        f"seed_points={seed_points} prefix_groups_checked={prefix_groups_checked} "
-        f"prefix_groups_rejected={prefix_groups_rejected} "
+        f"seed_points={seed_points} prefix_trie_nodes={prefix_trie_nodes} "
+        f"prefix_trie_edges={prefix_trie_edges} "
+        f"prefix_edges_checked={prefix_edges_checked} "
+        f"prefix_edges_rejected={prefix_edges_rejected} "
+        f"prefix_terminal_visits={prefix_terminal_visits} "
         f"prefix_templates_passed={prefix_templates_passed} "
         f"candidate_spawns={candidate_spawns} "
         f"profile_rows_checked={profile_rows_checked} profile_rejects={profile_rejects} "
