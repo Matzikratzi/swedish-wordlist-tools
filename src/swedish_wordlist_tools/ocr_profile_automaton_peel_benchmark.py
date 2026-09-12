@@ -12,17 +12,56 @@ from .ocr_review_page_pixel_array_glyphs_html import build_page_context_pixel_ar
 from .ocr_shadow_whole_column import _black_pixels, _column_bounds
 
 
-def _compile_left_profiles(library: CompiledGlyphLibrary):
-    compiled = []
+def _compile_profile_prefix_index(
+    library: CompiledGlyphLibrary,
+    *,
+    prefix_len: int = 3,
+):
+    """Group glyph/anchor templates by a short left-profile prefix.
+
+    The prefix is only a subset of the exact 1D checks used by the matcher, so
+    rejecting a bucket here cannot change which candidates are valid.
+    """
+    groups: dict[
+        tuple[tuple[int, int], ...],
+        list[tuple[object, tuple[tuple[int, int], ...], int]],
+    ] = defaultdict(list)
+
     for item in library.models:
         by_y: dict[int, int] = {}
         for x, y in item.model.pixels:
             old = by_y.get(y)
             if old is None or x < old:
                 by_y[y] = x
+        left_profile = tuple(sorted(by_y.items()))
         anchor_ys = tuple(sorted(y for y, x in by_y.items() if x == item.min_x))
-        compiled.append((item, tuple(sorted(by_y.items())), anchor_ys))
-    return tuple(compiled)
+
+        for anchor_y in anchor_ys:
+            # The seed row itself is guaranteed to match min_x and carries no
+            # discrimination.  Prefer the nearest rows above/below it.
+            ordered = sorted(
+                (
+                    (model_y, model_left)
+                    for model_y, model_left in left_profile
+                    if model_y != anchor_y
+                ),
+                key=lambda point: (abs(point[0] - anchor_y), point[0]),
+            )
+            chosen = tuple(ordered[:prefix_len])
+            chosen_set = set(chosen)
+            signature = tuple(
+                (model_y - anchor_y, model_left - item.min_x)
+                for model_y, model_left in chosen
+            )
+            remainder = tuple(
+                point for point in left_profile if point not in chosen_set
+            )
+            groups[signature].append((item, remainder, anchor_y))
+
+    return tuple(
+        (signature, tuple(entries))
+        for signature, entries in groups.items()
+    )
 
 
 def main() -> int:
@@ -45,7 +84,7 @@ def main() -> int:
     total_started = perf_counter()
     models = tuple(load_canonical_facit_with_typography(args.facit))
     library = CompiledGlyphLibrary(models)
-    compiled = _compile_left_profiles(library)
+    prefix_index = _compile_profile_prefix_index(library, prefix_len=3)
 
     context = build_page_context_pixel_array(args.jsonl, args.page, args.threshold)
     bounds = _column_bounds(context, args.column)
@@ -63,6 +102,9 @@ def main() -> int:
     steps = 0
     seed_points = 0
     candidate_spawns = 0
+    prefix_groups_checked = 0
+    prefix_groups_rejected = 0
+    prefix_templates_passed = 0
     profile_rows_checked = 0
     profile_rejects = 0
     profile_survivors = 0
@@ -103,11 +145,29 @@ def main() -> int:
             seen: set[tuple[int, int, int]] = set()
             filter_started = perf_counter()
 
-            for item, left_profile, anchor_ys in compiled:
-                tx = min_x - item.min_x
-                if tx + item.max_x >= column_right or tx + item.min_x < column_left:
+            for signature, templates in prefix_index:
+                prefix_groups_checked += 1
+                prefix_support = 0
+                prefix_ok = True
+                for dy, dx in signature:
+                    actual_x = profile_left.get(seed_y + dy)
+                    profile_rows_checked += 1
+                    expected_x = min_x + dx
+                    if actual_x is None or actual_x > expected_x:
+                        prefix_ok = False
+                        break
+                    if actual_x == expected_x:
+                        prefix_support += 1
+                if not prefix_ok:
+                    prefix_groups_rejected += 1
                     continue
-                for anchor_y in anchor_ys:
+
+                prefix_templates_passed += len(templates)
+                for item, left_profile, anchor_y in templates:
+                    tx = min_x - item.min_x
+                    if tx + item.max_x >= column_right or tx + item.min_x < column_left:
+                        continue
+
                     baseline = seed_y - anchor_y
                     key = (id(item.model), tx, baseline)
                     if key in seen:
@@ -120,7 +180,7 @@ def main() -> int:
                     if top < column_top or bottom >= column_bottom:
                         continue
 
-                    support = 0
+                    support = prefix_support
                     contradicted = False
                     for model_y, model_left in left_profile:
                         page_y = baseline + model_y
@@ -236,7 +296,10 @@ def main() -> int:
 
     print(
         f"profile-auto-done: steps={steps} remaining={len(residual.pixels)} "
-        f"seed_points={seed_points} candidate_spawns={candidate_spawns} "
+        f"seed_points={seed_points} prefix_groups_checked={prefix_groups_checked} "
+        f"prefix_groups_rejected={prefix_groups_rejected} "
+        f"prefix_templates_passed={prefix_templates_passed} "
+        f"candidate_spawns={candidate_spawns} "
         f"profile_rows_checked={profile_rows_checked} profile_rejects={profile_rejects} "
         f"profile_survivors={profile_survivors} checks_2d={checks_2d} hits_2d={hits_2d} "
         f"profile_update={profile_build_seconds:.6f}s "
