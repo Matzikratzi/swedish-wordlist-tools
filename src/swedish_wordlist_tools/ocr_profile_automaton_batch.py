@@ -51,7 +51,13 @@ def _init_worker(
     _WORKER_DEBUG_DIR = Path(debug_dir) if debug_dir else None
 
 
-def _ocr_column(context: dict, column: int, page_number: int) -> dict[str, object]:
+def _ocr_column(
+    context: dict,
+    column: int,
+    page_number: int,
+    *,
+    frontier_slack: int,
+) -> dict[str, object]:
     prefix_trie = _WORKER_TRIE
     if prefix_trie is None:
         raise RuntimeError("worker trie is not initialized")
@@ -78,6 +84,8 @@ def _ocr_column(context: dict, column: int, page_number: int) -> dict[str, objec
     profile_rows_checked = 0
     checks_2d = 0
     stuck = None
+    deferred_frontier_pixels: set[tuple[int, int]] = set()
+    frontier_deferrals = 0
     matching_started = perf_counter()
 
     while residual.pixels:
@@ -180,6 +188,23 @@ def _ocr_column(context: dict, column: int, page_number: int) -> dict[str, objec
                 break
 
         if accepted is None:
+            # Recovery experiment: keep the residual ink, but move the logical
+            # left profile past a very short blocking frontier.  This lets later
+            # real glyphs continue while preserving the skipped pixels for final
+            # diagnostics and accounting.
+            advanced = False
+            if frontier_slack > 0:
+                for page_y in min_ys:
+                    xs = residual.rows.get(page_y) or set()
+                    later = [x for x in xs if min_x < x <= min_x + frontier_slack]
+                    if later:
+                        deferred_frontier_pixels.add((min_x, page_y))
+                        profile_left[page_y] = min(later)
+                        advanced = True
+                if advanced:
+                    frontier_deferrals += 1
+                    continue
+
             debug_image = None
             if _WORKER_DEBUG_DIR is not None and min_ys:
                 _WORKER_DEBUG_DIR.mkdir(parents=True, exist_ok=True)
@@ -275,6 +300,8 @@ def _ocr_column(context: dict, column: int, page_number: int) -> dict[str, objec
         "candidate_spawns": candidate_spawns,
         "profile_rows_checked": profile_rows_checked,
         "checks_2d": checks_2d,
+        "frontier_deferrals": frontier_deferrals,
+        "deferred_frontier_pixels": len(deferred_frontier_pixels),
         "matching_seconds": matching_seconds,
         "total_seconds": perf_counter() - started,
         "stuck": stuck,
@@ -282,7 +309,7 @@ def _ocr_column(context: dict, column: int, page_number: int) -> dict[str, objec
     }
 
 
-def _ocr_page(page_number: int) -> dict[str, object]:
+def _ocr_page(page_number: int, frontier_slack: int) -> dict[str, object]:
     if _WORKER_JSONL is None:
         raise RuntimeError("worker JSONL path is not initialized")
 
@@ -297,7 +324,12 @@ def _ocr_page(page_number: int) -> dict[str, object]:
 
     columns = context["row_map"].get("columns") or []
     column_results = [
-        _ocr_column(context, column, page_number)
+        _ocr_column(
+            context,
+            column,
+            page_number,
+            frontier_slack=frontier_slack,
+        )
         for column in range(len(columns))
     ]
 
@@ -334,6 +366,12 @@ def main() -> int:
     ap.add_argument("--threshold", type=int, default=210)
     ap.add_argument("--prefix-len", type=int, default=5)
     ap.add_argument(
+        "--frontier-slack",
+        type=int,
+        default=0,
+        help="At a 2D stall, allow the logical left profile to defer blocking ink by at most this many x pixels.",
+    )
+    ap.add_argument(
         "--workers",
         type=int,
         default=0,
@@ -367,6 +405,7 @@ def main() -> int:
         f"batch-start: pages={args.start_page}..{args.end_page} count={len(pages)} "
         f"logical_cpus={logical_cpus} workers={workers} "
         f"reserved_cpus={max(0, logical_cpus-workers)} prefix_len={args.prefix_len} "
+        f"frontier_slack={args.frontier_slack} "
         f"output={args.output}",
         flush=True,
     )
@@ -390,7 +429,7 @@ def main() -> int:
         ),
     ) as pool:
         future_to_page = {
-            pool.submit(_ocr_page, page): page
+            pool.submit(_ocr_page, page, args.frontier_slack): page
             for page in pages
         }
         for future in as_completed(future_to_page):
