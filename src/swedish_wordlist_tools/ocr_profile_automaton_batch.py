@@ -89,6 +89,7 @@ def _ocr_column(
     stuck = None
     deferred_frontier_pixels: set[tuple[int, int]] = set()
     frontier_deferrals = 0
+    f_events: list[dict[str, object]] = []
 
     def next_profile_x(page_y: int) -> int | None:
         xs = residual.rows.get(page_y) or set()
@@ -193,7 +194,24 @@ def _ocr_column(
                             "missing": [list(point) for point in sorted(missing)[:24]],
                         })
                     continue
-                accepted = (item, tx, baseline, placed)
+                accepted = (
+                    item,
+                    tx,
+                    baseline,
+                    placed,
+                    seed_y,
+                    [
+                        {
+                            "label": str(alt_item.model.label),
+                            "style": str(alt_item.model.style),
+                            "baseline": alt_baseline,
+                            "tx": alt_tx,
+                            "support": alt_support,
+                            "pixels": len(alt_item.model.pixels),
+                        }
+                        for alt_item, alt_tx, alt_baseline, alt_support in survivors[:12]
+                    ],
+                )
                 break
             if accepted is not None:
                 break
@@ -267,11 +285,39 @@ def _ocr_column(
             }
             break
 
-        item, tx, baseline, placed = accepted
+        item, tx, baseline, placed, accepted_seed_y, accepted_alternatives = accepted
         left = min(x for x, _y in placed)
         right = max(x for x, _y in placed)
         top = min(y for _x, y in placed)
         bottom = max(y for _x, y in placed)
+
+        if str(item.model.label) == "f":
+            window_left = min(x for x, _y in placed)
+            window_right = max(x for x, _y in placed) + 10
+            window_top = min(y for _x, y in placed) - 5
+            window_bottom = max(y for _x, y in placed) + 6
+            before_window = sorted(
+                (x, y)
+                for x, y in residual.pixels
+                if window_left <= x <= window_right
+                and window_top <= y <= window_bottom
+            )
+            f_events.append({
+                "step": steps,
+                "seed_x": min_x,
+                "seed_y": accepted_seed_y,
+                "baseline": baseline,
+                "tx": tx,
+                "bbox": [
+                    min(x for x, _y in placed),
+                    min(y for _x, y in placed),
+                    max(x for x, _y in placed),
+                    max(y for _x, y in placed),
+                ],
+                "glyph_pixels": len(placed),
+                "alternatives": accepted_alternatives,
+                "window_before": [list(point) for point in before_window],
+            })
 
         affected_ys = {y for _x, y in placed}
         residual.consume(placed)
@@ -313,6 +359,16 @@ def _ocr_column(
     unresolved_deferred = residual.pixels & deferred_frontier_pixels
     active_remaining = residual.pixels - deferred_frontier_pixels
 
+    for event in f_events:
+        left, top, right, bottom = event["bbox"]
+        nearby_deferred = sorted(
+            (x, y)
+            for x, y in unresolved_deferred
+            if left - 2 <= x <= right + 12
+            and top - 6 <= y <= bottom + 8
+        )
+        event["nearby_deferred"] = [list(point) for point in nearby_deferred]
+
     return {
         "column": column,
         "bounds": list(bounds),
@@ -321,6 +377,7 @@ def _ocr_column(
         "active_remaining": len(active_remaining),
         "deferred_remaining": len(unresolved_deferred),
         "deferred_pixels": [list(p) for p in sorted(unresolved_deferred)],
+        "f_events": f_events,
         "row_count": len(rows),
         "reference_row_count": len(reference_rows),
         "candidate_spawns": candidate_spawns,
@@ -511,6 +568,15 @@ def main() -> int:
                 flush=True,
             )
             for column in result["columns"]:
+                if page == 34:
+                    for event in column.get("f_events", []):
+                        print(
+                            f"ft-diag: page=34 column={column['column']} step={event['step']} "
+                            f"seed=({event['seed_x']},{event['seed_y']}) baseline={event['baseline']} "
+                            f"bbox={event['bbox']} nearby_deferred={event['nearby_deferred']} "
+                            f"alternatives={event['alternatives'][:6]}",
+                            flush=True,
+                        )
                 if int(column["remaining"]) == 0:
                     continue
                 stuck = column.get("stuck") or {}
