@@ -164,8 +164,8 @@ def _ocr_column(context: dict, column: int, page_number: int) -> dict[str, objec
                     if len(failure_candidates) < 24:
                         failure_candidates.append({
                             "seed_y": seed_y,
-                            "label": item.model.label,
-                            "style": item.model.style,
+                            "label": str(item.model.label),
+                            "style": str(item.model.style),
                             "baseline": baseline,
                             "tx": tx,
                             "support": support,
