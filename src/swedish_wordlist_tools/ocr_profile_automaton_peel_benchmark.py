@@ -7,7 +7,6 @@ from time import perf_counter
 
 from .ocr_baseline_up import CompiledGlyphLibrary, ResidualInk
 from .ocr_canonical_facit import load_canonical_facit_with_typography
-from .ocr_column_left_profile import build_column_left_profile
 from .ocr_profile_leftmost_baseline_seed_benchmark import _reconstruct_rows_from_accepted_streams
 from .ocr_review_page_pixel_array_glyphs_html import build_page_context_pixel_array
 from .ocr_shadow_whole_column import _black_pixels, _column_bounds
@@ -74,22 +73,22 @@ def main() -> int:
     check_2d_seconds = 0.0
     matching_started = perf_counter()
 
-    while residual.pixels and (args.max_steps == 0 or steps < args.max_steps):
-        t0 = perf_counter()
-        profile = build_column_left_profile(
-            residual.rows,
-            top=column_top,
-            bottom=column_bottom,
-            left=column_left,
-            right=column_right,
-        )
-        profile_build_seconds += perf_counter() - t0
+    # Maintain the residual left profile incrementally.  Removing one glyph can
+    # only change rows touched by that glyph, so there is no reason to rescan
+    # every page row after every accepted character.
+    t0 = perf_counter()
+    profile_left: dict[int, int] = {
+        y: min(xs)
+        for y, xs in residual.rows.items()
+        if xs and column_top <= y < column_bottom
+    }
+    profile_build_seconds += perf_counter() - t0
 
-        nonblank = [int(x) for x in profile.values if x is not None]
-        if not nonblank:
+    while residual.pixels and (args.max_steps == 0 or steps < args.max_steps):
+        if not profile_left:
             break
-        min_x = min(nonblank)
-        min_ys = tuple(y for y in profile.nonblank_y() if profile.at(y) == min_x)
+        min_x = min(profile_left.values())
+        min_ys = tuple(sorted(y for y, x in profile_left.items() if x == min_x))
 
         accepted = None
         accepted_seed_y = None
@@ -126,7 +125,7 @@ def main() -> int:
                     for model_y, model_left in left_profile:
                         page_y = baseline + model_y
                         expected_x = tx + model_left
-                        actual_x = profile.at(page_y)
+                        actual_x = profile_left.get(page_y)
                         profile_rows_checked += 1
                         # If the current page profile is to the right of the
                         # glyph's required left pixel (or blank), that required
@@ -188,7 +187,17 @@ def main() -> int:
         right = max(x for x, _y in placed)
         top = min(y for _x, y in placed)
         bottom = max(y for _x, y in placed)
+        affected_ys = {y for _x, y in placed}
+        update_started = perf_counter()
         residual.consume(placed)
+        for page_y in affected_ys:
+            xs = residual.rows.get(page_y)
+            if xs:
+                profile_left[page_y] = min(xs)
+            else:
+                profile_left.pop(page_y, None)
+        profile_build_seconds += perf_counter() - update_started
+
         accepted_streams[baseline].append(
             (left, right, steps, min_x, item.model.label, item.model.style, top, bottom)
         )
@@ -230,7 +239,7 @@ def main() -> int:
         f"seed_points={seed_points} candidate_spawns={candidate_spawns} "
         f"profile_rows_checked={profile_rows_checked} profile_rejects={profile_rejects} "
         f"profile_survivors={profile_survivors} checks_2d={checks_2d} hits_2d={hits_2d} "
-        f"profile_build={profile_build_seconds:.6f}s "
+        f"profile_update={profile_build_seconds:.6f}s "
         f"profile_filter={profile_filter_seconds:.6f}s "
         f"check_2d={check_2d_seconds:.6f}s matching={matching_seconds:.6f}s "
         f"total={perf_counter()-total_started:.6f}s",
