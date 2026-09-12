@@ -12,8 +12,71 @@ from .ocr_baseline_up import CompiledGlyphLibrary, ResidualInk
 from .ocr_canonical_facit import load_canonical_facit_with_typography
 from .ocr_profile_automaton_peel_benchmark import _compile_profile_prefix_trie
 from .ocr_profile_leftmost_baseline_seed_benchmark import _reconstruct_rows_from_accepted_streams
-from .ocr_review_page_pixel_array_glyphs_html import build_page_context_pixel_array
-from .ocr_shadow_whole_column import _black_pixels, _column_bounds
+from . import ocr_review_five_rows_glyphs_fast_html as fast
+from .ocr_column_row_segmentation import segment_page_rows
+from .ocr_row_map_words import _persistent_left_rule_x
+
+
+
+def _build_minimal_page_context(jsonl: Path, page_number: int, threshold: int) -> dict:
+    """Load only data needed by the profile automaton.
+
+    Keep row_map temporarily for reference bounds/comparison, but skip the
+    PagePixelArray ownership assignment and all ownership bookkeeping.
+    """
+    source = fast.source_for_page(fast.read_jsonl(jsonl), page_number)
+    if not source:
+        raise ValueError(f"no source found for page {page_number}")
+    page = fast._load_source_image(source)
+    if page is None:
+        raise ValueError(f"could not load page image: {source}")
+    gray = page if page.mode == "L" else page.convert("L")
+    row_map = segment_page_rows(page, threshold=threshold)
+    content_lefts: dict[int, int | None] = {}
+    for column_index, column_entry in enumerate(row_map.get("columns") or []):
+        rule_x = _persistent_left_rule_x(gray, column_entry, threshold=threshold)
+        content_lefts[column_index] = rule_x + 2 if rule_x is not None else None
+    return {
+        "source": source,
+        "page": page,
+        "gray": gray,
+        "row_map": row_map,
+        "threshold": threshold,
+        "page_number": page_number,
+        "column_content_lefts": content_lefts,
+    }
+
+
+def _minimal_column_bounds(context: dict, column_index: int) -> tuple[int, int, int, int]:
+    columns = context["row_map"].get("columns") or []
+    if not 0 <= column_index < len(columns):
+        raise ValueError(f"column {column_index} does not exist")
+    column = columns[column_index]
+    rows = column.get("rows") or []
+    if not rows:
+        raise ValueError(f"column {column_index} has no reference rows")
+    width, height = context["gray"].size
+    left = int(column.get("crop_left", column.get("left", 0)))
+    content_left = context["column_content_lefts"].get(column_index)
+    if content_left is not None:
+        left = max(left, int(content_left))
+    right = int(column.get("crop_right", column.get("right", width)))
+    top = min(int(row["page_top"]) for row in rows)
+    bottom = max(int(row["page_bottom"]) for row in rows)
+    return max(0, left), min(width, right), max(0, top), min(height, bottom)
+
+
+def _minimal_black_pixels(context: dict, bounds: tuple[int, int, int, int]) -> set[tuple[int, int]]:
+    left, right, top, bottom = bounds
+    gray = context["gray"]
+    threshold = int(context["threshold"])
+    pixels = gray.load()
+    return {
+        (x, y)
+        for y in range(top, bottom)
+        for x in range(left, right)
+        if int(pixels[x, y]) < threshold
+    }
 
 
 _SHARED_CONTEXT = None
@@ -34,8 +97,8 @@ def _run_shared_column(
         raise RuntimeError("shared fork state not initialized")
 
     started = perf_counter()
-    bounds = _column_bounds(context, column)
-    black = _black_pixels(context, bounds)
+    bounds = _minimal_column_bounds(context, column)
+    black = _minimal_black_pixels(context, bounds)
     residual = ResidualInk(black)
     column_left, column_right, column_top, column_bottom = bounds
 
@@ -220,7 +283,7 @@ def main() -> int:
         _SHARED_TRIE_EDGES,
     ) = _compile_profile_prefix_trie(library, prefix_len=args.prefix_len)
 
-    _SHARED_CONTEXT = build_page_context_pixel_array(
+    _SHARED_CONTEXT = _build_minimal_page_context(
         args.jsonl,
         args.page,
         args.threshold,
@@ -247,7 +310,7 @@ def main() -> int:
         f"fork-columns-start: page={args.page} columns={columns} "
         f"logical_cpus={logical_cpus} workers={workers} "
         f"reserved_cpus={max(0, logical_cpus - workers)} "
-        f"prefix_len={args.prefix_len} trie_nodes={_SHARED_TRIE_NODES} "
+        f"loader=minimal-no-ownership prefix_len={args.prefix_len} trie_nodes={_SHARED_TRIE_NODES} "
         f"trie_edges={_SHARED_TRIE_EDGES} setup={setup_seconds:.6f}s",
         flush=True,
     )
