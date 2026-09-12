@@ -75,7 +75,7 @@ def main() -> int:
     ap.add_argument("--column", type=int, default=0)
     ap.add_argument("--rows", type=int, default=0)
     ap.add_argument("--threshold", type=int, default=210)
-    ap.add_argument("--waves", type=int, default=6)
+    ap.add_argument("--waves", type=int, default=6, help="Maximum peel waves; 0 means until stuck")
     args = ap.parse_args()
 
     total_started = perf_counter()
@@ -183,7 +183,8 @@ def main() -> int:
     wave_started = perf_counter()
     wave_summaries: list[tuple[int, int, int, int, int]] = []
     all_wave_baseline_votes: Counter[int] = Counter()
-    for wave in range(max(0, args.waves)):
+    wave = 0
+    while args.waves == 0 or wave < args.waves:
         wave_profile = build_column_left_profile(
             wave_residual.rows,
             top=column_top,
@@ -263,6 +264,7 @@ def main() -> int:
         )
         if not consumed:
             break
+        wave += 1
 
     wave_seconds = perf_counter() - wave_started
 
