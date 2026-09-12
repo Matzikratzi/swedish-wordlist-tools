@@ -25,6 +25,7 @@ _WORKER_TRIE_NODES = 0
 _WORKER_TRIE_EDGES = 0
 _WORKER_JSONL: Path | None = None
 _WORKER_THRESHOLD = 210
+_WORKER_DEBUG_DIR: Path | None = None
 
 
 def _init_worker(
@@ -32,10 +33,11 @@ def _init_worker(
     facit: str,
     threshold: int,
     prefix_len: int,
+    debug_dir: str,
 ) -> None:
     """Compile immutable OCR data once per long-lived worker."""
     global _WORKER_TRIE, _WORKER_TRIE_NODES, _WORKER_TRIE_EDGES
-    global _WORKER_JSONL, _WORKER_THRESHOLD
+    global _WORKER_JSONL, _WORKER_THRESHOLD, _WORKER_DEBUG_DIR
 
     models = tuple(load_canonical_facit_with_typography(Path(facit)))
     library = CompiledGlyphLibrary(models)
@@ -46,9 +48,10 @@ def _init_worker(
     ) = _compile_profile_prefix_trie(library, prefix_len=prefix_len)
     _WORKER_JSONL = Path(jsonl)
     _WORKER_THRESHOLD = int(threshold)
+    _WORKER_DEBUG_DIR = Path(debug_dir) if debug_dir else None
 
 
-def _ocr_column(context: dict, column: int) -> dict[str, object]:
+def _ocr_column(context: dict, column: int, page_number: int) -> dict[str, object]:
     prefix_trie = _WORKER_TRIE
     if prefix_trie is None:
         raise RuntimeError("worker trie is not initialized")
@@ -86,6 +89,7 @@ def _ocr_column(context: dict, column: int) -> dict[str, object]:
         accepted = None
         best_survivors = 0
         seed_diagnostics = []
+        failure_candidates = []
         for seed_y in min_ys:
             survivors = []
             seen: set[tuple[int, int, int]] = set()
@@ -155,7 +159,20 @@ def _ocr_column(context: dict, column: int) -> dict[str, object]:
                     (tx + x, baseline + y)
                     for x, y in item.model.pixels
                 )
-                if not placed.issubset(residual.pixels):
+                missing = placed - residual.pixels
+                if missing:
+                    if len(failure_candidates) < 24:
+                        failure_candidates.append({
+                            "seed_y": seed_y,
+                            "label": item.model.label,
+                            "style": item.model.style,
+                            "baseline": baseline,
+                            "tx": tx,
+                            "support": support,
+                            "pixels": len(placed),
+                            "missing_count": len(missing),
+                            "missing": [list(point) for point in sorted(missing)[:24]],
+                        })
                     continue
                 accepted = (item, tx, baseline, placed)
                 break
@@ -163,13 +180,45 @@ def _ocr_column(context: dict, column: int) -> dict[str, object]:
                 break
 
         if accepted is None:
+            debug_image = None
+            if _WORKER_DEBUG_DIR is not None and min_ys:
+                _WORKER_DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+                y0 = max(column_top, min(min_ys) - 24)
+                y1 = min(column_bottom, max(min_ys) + 25)
+                x0 = max(column_left, min_x - 12)
+                x1 = min(column_right, min_x + 48)
+                crop = context["gray"].crop((x0, y0, x1, y1)).convert("RGB")
+                from PIL import ImageDraw
+                draw = ImageDraw.Draw(crop)
+                for y in min_ys:
+                    if y0 <= y < y1:
+                        draw.rectangle(
+                            (min_x - x0 - 1, y - y0 - 1, min_x - x0 + 1, y - y0 + 1),
+                            outline=(255, 0, 0),
+                        )
+                if failure_candidates:
+                    for mx, my in failure_candidates[0]["missing"]:
+                        if x0 <= mx < x1 and y0 <= my < y1:
+                            draw.rectangle(
+                                (mx - x0 - 1, my - y0 - 1, mx - x0 + 1, my - y0 + 1),
+                                outline=(0, 0, 255),
+                            )
+                crop = crop.resize((crop.width * 8, crop.height * 8))
+                debug_path = _WORKER_DEBUG_DIR / (
+                    f"page-{page_number:04d}-col-{column}-x{min_x}-stall.png"
+                )
+                crop.save(debug_path)
+                debug_image = str(debug_path)
+
             stuck = {
                 "x": min_x,
                 "ys": list(min_ys[:32]),
                 "y_count": len(min_ys),
                 "best_survivors": best_survivors,
                 "seed_diagnostics": seed_diagnostics[:32],
+                "failure_candidates": failure_candidates,
                 "remaining": len(residual.pixels),
+                "debug_image": debug_image,
             }
             break
 
@@ -248,7 +297,7 @@ def _ocr_page(page_number: int) -> dict[str, object]:
 
     columns = context["row_map"].get("columns") or []
     column_results = [
-        _ocr_column(context, column)
+        _ocr_column(context, column, page_number)
         for column in range(len(columns))
     ]
 
@@ -291,6 +340,12 @@ def main() -> int:
         help="Default: logical CPUs minus one.",
     )
     ap.add_argument(
+        "--debug-stalls",
+        type=Path,
+        default=Path("reports/profile-stalls"),
+        help="Directory for enlarged pixel crops at the first stall in each column.",
+    )
+    ap.add_argument(
         "--output",
         type=Path,
         default=Path("reports/saol14-profile-automaton-batch.jsonl"),
@@ -331,6 +386,7 @@ def main() -> int:
             str(args.facit),
             args.threshold,
             args.prefix_len,
+            str(args.debug_stalls),
         ),
     ) as pool:
         future_to_page = {
@@ -360,9 +416,20 @@ def main() -> int:
                     f"steps={column['steps']} remaining={column['remaining']} "
                     f"x={stuck.get('x')} ys={stuck.get('ys')} "
                     f"best_survivors={stuck.get('best_survivors')} "
-                    f"checks_2d={column['checks_2d']}",
+                    f"checks_2d={column['checks_2d']} "
+                    f"debug={stuck.get('debug_image')}",
                     flush=True,
                 )
+                for candidate in (stuck.get("failure_candidates") or [])[:5]:
+                    print(
+                        f"batch-stall-candidate: page={page} column={column['column']} "
+                        f"seed_y={candidate['seed_y']} label={candidate['label']!r}/"
+                        f"{candidate['style']} baseline={candidate['baseline']} "
+                        f"tx={candidate['tx']} support={candidate['support']} "
+                        f"missing={candidate['missing_count']}/{candidate['pixels']} "
+                        f"missing_pixels={candidate['missing']}",
+                        flush=True,
+                    )
 
     # Deterministic, restart-friendly output: rewrite the requested page packet
     # in page order only after all tasks have completed successfully.
