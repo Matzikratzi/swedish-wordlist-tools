@@ -231,6 +231,7 @@ def main() -> int:
         consumed: set[tuple[int, int]] = set()
         accepted = 0
         baseline_votes: Counter[int] = Counter()
+        accepted_baselines: Counter[int] = Counter()
         for baseline, tx, item, placed in wave_hits:
             baseline_votes[baseline] += 1
             all_wave_baseline_votes[baseline] += 1
@@ -238,6 +239,7 @@ def main() -> int:
                 continue
             consumed.update(placed)
             accepted += 1
+            accepted_baselines[baseline] += 1
         wave_residual.consume(consumed)
         wave_summaries.append(
             (wave, wave_x, len(wave_ys), proposals_wave, accepted)
@@ -248,10 +250,6 @@ def main() -> int:
             strongest = tuple(
                 b for b, n in sorted(baseline_votes.items()) if n == peak
             )
-        accepted_baselines: Counter[int] = Counter()
-        for baseline, tx, item, placed in wave_hits:
-            if placed.issubset(consumed):
-                accepted_baselines[baseline] += 1
         accepted_detail = ",".join(
             f"{b}:{accepted_baselines[b]}" for b in sorted(accepted_baselines)
         )
