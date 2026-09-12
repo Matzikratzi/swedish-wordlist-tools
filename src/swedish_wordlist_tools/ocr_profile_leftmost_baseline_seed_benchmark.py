@@ -14,28 +14,51 @@ from .ocr_shadow_whole_column import _black_pixels, _column_bounds
 
 
 def _cluster_adjacent_baselines(votes: Counter[int]) -> list[tuple[tuple[int, ...], int, int]]:
-    """Collapse adjacent baseline hypotheses into geometric row seeds.
+    """Collapse only local baseline alternatives into geometric row seeds.
 
-    Returns (members, representative, total_votes).  Adjacency is deliberately
-    only one raster row: the experiment shows the same glyph geometry often
-    voting at b and b+1, while neighbouring text rows are much farther apart.
+    A one-pixel chain must not bridge a whole 14-pixel ambiguity cloud.  Grow a
+    cluster only while every member stays within +/-2 of its weighted centre.
+    This keeps the common b/b+1 alternatives together without merging the
+    distinct hypotheses produced by unrelated glyph alignments.
     """
     if not votes:
         return []
-    ordered = sorted(votes)
-    groups: list[list[int]] = [[ordered[0]]]
-    for baseline in ordered[1:]:
-        if baseline <= groups[-1][-1] + 1:
-            groups[-1].append(baseline)
-        else:
-            groups.append([baseline])
 
     result: list[tuple[tuple[int, ...], int, int]] = []
-    for group in groups:
+    group: list[int] = []
+    weighted_sum = 0
+    weight = 0
+
+    def emit() -> None:
+        nonlocal group, weighted_sum, weight
+        if not group:
+            return
         peak = max(votes[b] for b in group)
         peak_members = [b for b in group if votes[b] == peak]
         representative = peak_members[len(peak_members) // 2]
-        result.append((tuple(group), representative, sum(votes[b] for b in group)))
+        result.append((tuple(group), representative, weight))
+        group = []
+        weighted_sum = 0
+        weight = 0
+
+    for baseline in sorted(votes):
+        baseline_weight = votes[baseline]
+        if not group:
+            group = [baseline]
+            weighted_sum = baseline * baseline_weight
+            weight = baseline_weight
+            continue
+        centre = weighted_sum / weight
+        if baseline <= group[-1] + 1 and abs(baseline - centre) <= 2.0:
+            group.append(baseline)
+            weighted_sum += baseline * baseline_weight
+            weight += baseline_weight
+        else:
+            emit()
+            group = [baseline]
+            weighted_sum = baseline * baseline_weight
+            weight = baseline_weight
+    emit()
     return result
 
 
