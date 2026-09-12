@@ -79,12 +79,13 @@ def main() -> int:
     ap.add_argument("--rows", type=int, default=0)
     ap.add_argument("--threshold", type=int, default=210)
     ap.add_argument("--max-steps", type=int, default=0, help="0 means until stuck/empty")
+    ap.add_argument("--prefix-len", type=int, default=3, help="Number of nearest profile rows used by the prefix index")
     args = ap.parse_args()
 
     total_started = perf_counter()
     models = tuple(load_canonical_facit_with_typography(args.facit))
     library = CompiledGlyphLibrary(models)
-    prefix_index = _compile_profile_prefix_index(library, prefix_len=3)
+    prefix_index = _compile_profile_prefix_index(library, prefix_len=args.prefix_len)
 
     context = build_page_context_pixel_array(args.jsonl, args.page, args.threshold)
     bounds = _column_bounds(context, args.column)
@@ -295,7 +296,7 @@ def main() -> int:
     print("profile-auto-rows-end", flush=True)
 
     print(
-        f"profile-auto-done: steps={steps} remaining={len(residual.pixels)} "
+        f"profile-auto-done: prefix_len={args.prefix_len} steps={steps} remaining={len(residual.pixels)} "
         f"seed_points={seed_points} prefix_groups_checked={prefix_groups_checked} "
         f"prefix_groups_rejected={prefix_groups_rejected} "
         f"prefix_templates_passed={prefix_templates_passed} "
