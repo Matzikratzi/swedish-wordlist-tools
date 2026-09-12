@@ -74,6 +74,7 @@ def _ocr_column(context: dict, column: int) -> dict[str, object]:
     candidate_spawns = 0
     profile_rows_checked = 0
     checks_2d = 0
+    stuck = None
     matching_started = perf_counter()
 
     while residual.pixels:
@@ -83,6 +84,8 @@ def _ocr_column(context: dict, column: int) -> dict[str, object]:
         min_ys = tuple(sorted(y for y, x in profile_left.items() if x == min_x))
 
         accepted = None
+        best_survivors = 0
+        seed_diagnostics = []
         for seed_y in min_ys:
             survivors = []
             seen: set[tuple[int, int, int]] = set()
@@ -131,6 +134,12 @@ def _ocr_column(context: dict, column: int) -> dict[str, object]:
                     child_support = prefix_support + (1 if actual_x == expected_x else 0)
                     stack.append((child, child_support))
 
+            best_survivors = max(best_survivors, len(survivors))
+            seed_diagnostics.append({
+                "y": seed_y,
+                "survivors": len(survivors),
+            })
+
             survivors.sort(
                 key=lambda entry: (
                     -len(entry[0].model.pixels),
@@ -154,6 +163,14 @@ def _ocr_column(context: dict, column: int) -> dict[str, object]:
                 break
 
         if accepted is None:
+            stuck = {
+                "x": min_x,
+                "ys": list(min_ys[:32]),
+                "y_count": len(min_ys),
+                "best_survivors": best_survivors,
+                "seed_diagnostics": seed_diagnostics[:32],
+                "remaining": len(residual.pixels),
+            }
             break
 
         item, tx, baseline, placed = accepted
@@ -211,6 +228,7 @@ def _ocr_column(context: dict, column: int) -> dict[str, object]:
         "checks_2d": checks_2d,
         "matching_seconds": matching_seconds,
         "total_seconds": perf_counter() - started,
+        "stuck": stuck,
         "rows": rows,
     }
 
@@ -332,6 +350,19 @@ def main() -> int:
                 f"total={float(result['total_seconds']):.3f}s",
                 flush=True,
             )
+            for column in result["columns"]:
+                if int(column["remaining"]) == 0:
+                    continue
+                stuck = column.get("stuck") or {}
+                print(
+                    f"batch-column-stuck: page={page} column={column['column']} "
+                    f"rows={column['row_count']}/{column['reference_row_count']} "
+                    f"steps={column['steps']} remaining={column['remaining']} "
+                    f"x={stuck.get('x')} ys={stuck.get('ys')} "
+                    f"best_survivors={stuck.get('best_survivors')} "
+                    f"checks_2d={column['checks_2d']}",
+                    flush=True,
+                )
 
     # Deterministic, restart-friendly output: rewrite the requested page packet
     # in page order only after all tasks have completed successfully.
