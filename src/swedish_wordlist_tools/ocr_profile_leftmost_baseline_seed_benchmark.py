@@ -248,11 +248,19 @@ def main() -> int:
             strongest = tuple(
                 b for b, n in sorted(baseline_votes.items()) if n == peak
             )
+        accepted_baselines: Counter[int] = Counter()
+        for baseline, tx, item, placed in wave_hits:
+            if placed.issubset(consumed):
+                accepted_baselines[baseline] += 1
+        accepted_detail = ",".join(
+            f"{b}:{accepted_baselines[b]}" for b in sorted(accepted_baselines)
+        )
         print(
             f"leftmost-wave: wave={wave} x={wave_x} anchor_rows={len(wave_ys)} "
             f"proposals={proposals_wave} exact_hits={len(wave_hits)} "
             f"accepted={accepted} consumed_pixels={len(consumed)} "
-            f"strongest_baselines={strongest} remaining={len(wave_residual.pixels)}",
+            f"strongest_baselines={strongest} accepted_baselines=[{accepted_detail}] "
+            f"remaining={len(wave_residual.pixels)}",
             flush=True,
         )
         if not consumed:
@@ -260,6 +268,9 @@ def main() -> int:
 
     wave_seconds = perf_counter() - wave_started
 
+    # Diagnostic only: raw exact-hit votes contain many alternative baselines
+    # for the same consumed glyph.  The accepted-baseline lists above show the
+    # hypotheses that actually survived non-overlapping peeling.
     clustered_wave_baselines = _cluster_adjacent_baselines(all_wave_baseline_votes)
     print(
         "leftmost-wave-row-seeds: "
