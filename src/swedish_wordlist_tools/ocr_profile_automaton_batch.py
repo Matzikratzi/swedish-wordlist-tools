@@ -41,6 +41,37 @@ def _profile_point_is_visible(actual_x: int | None, expected_x: int) -> bool:
     return actual_x == expected_x
 
 
+def _established_baseline_distance(
+    baseline: int,
+    accepted_streams,
+    *,
+    max_distance: int = 3,
+) -> int:
+    """Distance to an already established text-row baseline.
+
+    Superscript/subscript models can share exactly the same page raster with an
+    ordinary glyph while encoding a different model baseline.  Once a row has
+    preceding accepted glyphs, prefer the variant whose stored baseline lands
+    on that established row.  Distances beyond max_distance are deliberately
+    treated as unanchored so another physical row cannot attract the choice.
+    """
+    if not accepted_streams:
+        return max_distance + 1
+    distance = min(abs(int(baseline) - int(existing)) for existing in accepted_streams)
+    return distance if distance <= max_distance else max_distance + 1
+
+
+def _choose_same_raster_variant(candidates, accepted_streams):
+    """Choose among candidates that explain the identical physical pixel set."""
+    return min(
+        candidates,
+        key=lambda candidate: (
+            _established_baseline_distance(candidate[2], accepted_streams),
+            candidate[4],
+        ),
+    )
+
+
 def _init_worker(
     jsonl: str,
     facit: str,
@@ -217,7 +248,7 @@ def _ocr_column(
                     entry[0].model.style,
                 )
             )
-            for item, tx, baseline, support in survivors:
+            for survivor_rank, (item, tx, baseline, support) in enumerate(survivors):
                 checks_2d += 1
                 placed = frozenset(
                     (tx + x, baseline + y)
@@ -238,6 +269,25 @@ def _ocr_column(
                             "missing": [list(point) for point in sorted(missing)[:24]],
                         })
                     continue
+
+                # If multiple labels/models explain precisely the same physical
+                # pixels, geometry alone cannot distinguish e.g. ordinary u
+                # from superscript ᵘ. Use the already established row baseline
+                # as the semantic tie-break, preserving the original ranking
+                # when no nearby baseline has yet been established.
+                same_raster = []
+                for alt_rank, (alt_item, alt_tx, alt_baseline, alt_support) in enumerate(survivors):
+                    alt_placed = frozenset(
+                        (alt_tx + x, alt_baseline + y)
+                        for x, y in alt_item.model.pixels
+                    )
+                    if alt_placed == placed and not (alt_placed - residual.pixels):
+                        same_raster.append(
+                            (alt_item, alt_tx, alt_baseline, alt_support, alt_rank)
+                        )
+                if len(same_raster) > 1:
+                    chosen = _choose_same_raster_variant(same_raster, accepted_streams)
+                    item, tx, baseline, support, _chosen_rank = chosen
                 cluster_alternatives = []
                 if cluster_diag and len(str(item.model.label)) == 1:
                     for alt_item, alt_tx, alt_baseline, alt_support in survivors:
