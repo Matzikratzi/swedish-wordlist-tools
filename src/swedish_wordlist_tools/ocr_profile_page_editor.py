@@ -24,15 +24,6 @@ from .ocr_profile_automaton_parallel_benchmark import (
 )
 
 
-ROLES = (
-    "unknown",
-    "headword-bold",
-    "pos-roman",
-    "inflection-italic",
-    "context-italic",
-    "definition-roman",
-    "inflection-label-roman",
-)
 STYLES = ("roman", "italic", "bold")
 
 
@@ -56,14 +47,12 @@ def _parse_points(value: str) -> set[tuple[int, int]]:
 def _merge_glyph(payload: dict, glyph: dict) -> str:
     key = (
         glyph["label"],
-        glyph["role"],
         glyph["style"],
         tuple(tuple(p) for p in glyph["pixels_relative_to_baseline"]),
     )
     for existing in payload.get("glyphs") or []:
         existing_key = (
             str(existing.get("label") or ""),
-            str(existing.get("role") or "unknown"),
             str(existing.get("style") or "roman"),
             tuple(tuple(p) for p in existing.get("pixels_relative_to_baseline") or []),
         )
@@ -163,6 +152,56 @@ class ProfilePageEditor:
         target = index + delta
         return rows[target] if 0 <= target < len(rows) else None
 
+    def row_is_incomplete(self, pair: tuple[int, dict]) -> bool:
+        assert self.result is not None
+        column, row = pair
+        top = int(row["page_top"])
+        bottom = int(row["page_bottom"])
+        deferred = {
+            tuple(point)
+            for point in self.result["columns"][column].get("deferred_pixels", [])
+        }
+        return any(top <= y < bottom for _x, y in deferred)
+
+    def incomplete_nav(self, current: tuple[int, dict], delta: int) -> tuple[int, dict] | None:
+        rows = self.rows_flat()
+        keys = [(c, int(row["baseline"])) for c, row in rows]
+        current_key = (current[0], int(current[1]["baseline"]))
+        try:
+            index = keys.index(current_key)
+        except ValueError:
+            return None
+        step = 1 if delta >= 0 else -1
+        for i in range(index + step, len(rows) if step > 0 else -1, step):
+            if self.row_is_incomplete(rows[i]):
+                return rows[i]
+        return None
+
+    def row_preview(self, pair: tuple[int, dict]) -> dict:
+        assert self.context is not None and self.result is not None
+        column, row = pair
+        row_top = int(row["page_top"])
+        row_bottom = int(row["page_bottom"])
+        left, right, _ct, _cb = _minimal_column_bounds(self.context, column)
+        top = max(0, row_top - 2)
+        bottom = min(self.context["gray"].height, row_bottom + 2)
+        gray = self.context["gray"]
+        src = gray.load()
+        raster = Image.new("L", (right - left, bottom - top), 255)
+        rp = raster.load()
+        for y in range(top, bottom):
+            for x in range(left, right):
+                if int(src[x, y]) < self.threshold:
+                    rp[x - left, y - top] = 0
+        return {
+            "column": column,
+            "baseline": int(row["baseline"]),
+            "text": str(row.get("text") or ""),
+            "image": _png_data_uri(raster),
+            "incomplete": self.row_is_incomplete(pair),
+            "url": "/?" + urlencode({"column": column, "baseline": int(row["baseline"])}),
+        }
+
     def row_state(self, column: int, baseline: int | None) -> dict:
         assert self.context is not None and self.result is not None
         column, row = self.locate(column, baseline)
@@ -205,6 +244,9 @@ class ProfilePageEditor:
         current = (column, row)
         previous = self.nav(current, -1)
         following = self.nav(current, +1)
+        previous_incomplete = self.incomplete_nav(current, -1)
+        next_incomplete = self.incomplete_nav(current, +1)
+        context_pairs = [pair for pair in (previous, current, following) if pair is not None]
 
         def link_for(pair):
             if pair is None:
@@ -230,6 +272,9 @@ class ProfilePageEditor:
             "image": _png_data_uri(raster),
             "previous_url": link_for(previous),
             "next_url": link_for(following),
+            "previous_incomplete_url": link_for(previous_incomplete),
+            "next_incomplete_url": link_for(next_incomplete),
+            "context_rows": [self.row_preview(pair) for pair in context_pairs],
             "active_remaining": int(self.result["active_remaining"]),
             "deferred_remaining": int(self.result["deferred_remaining"]),
             "row_count": int(self.result["row_count"]),
@@ -238,13 +283,10 @@ class ProfilePageEditor:
     def add_glyph(self, state: dict, form: dict[str, list[str]]) -> str:
         label = (form.get("label") or [""])[0]
         style = (form.get("style") or ["roman"])[0]
-        role = (form.get("role") or ["unknown"])[0]
         if not label:
             raise ValueError("glyph måste ha ett namn")
         if style not in STYLES:
             raise ValueError(f"ogiltig stil: {style}")
-        if role not in ROLES:
-            raise ValueError(f"ogiltig roll: {role}")
 
         local_points = _parse_points((form.get("selected_pixels") or [""])[0])
         if not local_points:
@@ -269,7 +311,7 @@ class ProfilePageEditor:
         payload = load_split_facit(store)
         glyph = {
             "label": label,
-            "role": role,
+            "role": "unknown",
             "style": style,
             "pixels_relative_to_baseline": [[x, y] for x, y in normalized],
             "sources": [{
@@ -289,16 +331,12 @@ class ProfilePageEditor:
         outcome = _merge_glyph(payload, glyph)
         count, assigned = persist_facit_payload(self.facit, payload, store_dir=store)
         self.recompute(f"{outcome} {label!r}/{style}; facit={count}, nya id={assigned}")
-        return f"{outcome}: {label!r}/{style}/{role} ({len(page_points)} px)"
+        return f"{outcome}: {label!r}/{style} ({len(page_points)} px)"
 
 
 def render_html(state: dict, message: str = "") -> str:
     data = json.dumps(state, ensure_ascii=False).replace("</", "<\\/")
     msg = html.escape(message)
-    role_options = "".join(
-        f'<option value="{html.escape(role)}">{html.escape(role)}</option>'
-        for role in ROLES
-    )
     prev_link = (
         f'<a class="nav" href="{state["previous_url"]}">← föregående rad</a>'
         if state["previous_url"] else '<span class="nav disabled">← föregående rad</span>'
@@ -306,6 +344,22 @@ def render_html(state: dict, message: str = "") -> str:
     next_link = (
         f'<a class="nav" href="{state["next_url"]}">nästa rad →</a>'
         if state["next_url"] else '<span class="nav disabled">nästa rad →</span>'
+    )
+    prev_incomplete = (
+        f'<a class="nav defect" href="{state["previous_incomplete_url"]}">← förra ickeklara</a>'
+        if state["previous_incomplete_url"] else '<span class="nav disabled">← förra ickeklara</span>'
+    )
+    next_incomplete = (
+        f'<a class="nav defect" href="{state["next_incomplete_url"]}">nästa ickeklara →</a>'
+        if state["next_incomplete_url"] else '<span class="nav disabled">nästa ickeklara →</span>'
+    )
+    context_cards = "".join(
+        '<a class="context-card' + (' active' if row["baseline"] == state["baseline_page"] and row["column"] == state["column"] else '') +
+        (' incomplete' if row["incomplete"] else '') + '" href="' + row["url"] + '">' +
+        f'<div>kol {row["column"]} · baseline {row["baseline"]}' + (' · ickeklar' if row["incomplete"] else '') + '</div>' +
+        '<img src="' + row["image"] + '">' +
+        '<div class="context-text">' + html.escape(row["text"]) + '</div></a>'
+        for row in state["context_rows"]
     )
     return f"""<!doctype html>
 <html lang="sv"><head><meta charset="utf-8">
@@ -320,11 +374,20 @@ canvas{{image-rendering:pixelated;cursor:crosshair;touch-action:none}}
 label{{display:flex;flex-direction:column;gap:3px}} input,select,button{{font:inherit;padding:6px}}
 .msg{{font-weight:700;margin:8px 0}} .stats{{margin:6px 0}}
 .hint{{max-width:1100px}} .red{{color:#b00020;font-weight:700}}
+.nav.defect{{border-color:#b00020;background:#fff3f5;font-weight:700}}
+.context{{display:grid;grid-template-columns:repeat(3,minmax(220px,1fr));gap:8px;max-width:1250px;margin:10px 0 14px}}
+.context-card{{display:block;border:2px solid #bbb;background:white;padding:6px;color:#171717;text-decoration:none;min-width:0}}
+.context-card.active{{border:4px solid #1769d2;padding:4px;background:#eef6ff}}
+.context-card.incomplete{{box-shadow:inset 0 0 0 2px #b00020}}
+.context-card img{{width:100%;height:72px;object-fit:contain;object-position:left center;image-rendering:pixelated;background:white}}
+.context-text{{font:12px monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+@media(max-width:900px){{.context{{grid-template-columns:1fr}}}}
 </style></head><body>
 <h1>SAOL profil-OCR – sida {state['page']}, kolumn {state['column']}, baseline {state['baseline_page']}</h1>
-<div class="navbar">{prev_link}{next_link}
+<div class="navbar">{prev_link}{next_link}{prev_incomplete}{next_incomplete}
 <a class="nav" href="/?column={state['column']}&baseline={state['baseline_page']}&refresh=1">↻ räkna om hela sidan</a>
 </div>
+<div class="context">{context_cards}</div>
 <div class="stats">Rekonstruerad rad {state['row_index']}; y={state['row_page_top']}..{state['row_page_bottom']-1};
 glyphar={state['glyphs']}; text=<code>{html.escape(state['text'])}</code>.
 Sidan: {state['row_count']} rader, active_remaining={state['active_remaining']},
@@ -344,11 +407,10 @@ deferred=<span class="red">{state['deferred_remaining']}</span>.</div>
 <div class="controls">
 <label>Glyph<input name="label" size="7" required autofocus></label>
 <label>Stil<select name="style"><option>roman</option><option>italic</option><option>bold</option></select></label>
-<label>Roll<select name="role">{role_options}</select></label>
 <button type="submit">Spara glyph och räkna om hela sidan</button>
 </div>
 </form>
-<p class="hint">Dra en rektangel över svarta pixlar för att välja dem. Shift-klick lägger till en enskild svart pixel; Alt-klick tar bort. Röda rutor är deferred-pixlar från profil-OCR:n. Efter sparning byggs facit/trie om, hela sidan OCR:as om och editorn återgår till raden närmast samma baseline.</p>
+<p class="hint">Dra en rektangel över svarta pixlar för att välja dem. Shift-klick lägger till en enskild svart pixel; Alt-klick tar bort. Röda rutor är deferred-pixlar från profil-OCR:n. De tre små raderna ovan visar föregående, aktuell och nästa rad. "Ickeklar" betyder att raden innehåller deferred-pixlar. Efter sparning byggs facit/trie om, hela sidan OCR:as om och editorn återgår till raden närmast samma baseline.</p>
 <script>
 const S={data}, scale=9, topPad=28;
 const canvas=document.getElementById('row'),ctx=canvas.getContext('2d');
