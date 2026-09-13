@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor
 import json
 import multiprocessing as mp
 import os
@@ -833,60 +833,60 @@ def main() -> int:
                     failed_pages.append(page)
 
                 submit_next(pool)
-            overlay = result.get("deferred_overlay")
-            if overlay:
-                print(
-                    f"batch-deferred-overlay: page={page} "
-                    f"pixels={result['deferred_remaining']} output={overlay}",
-                    flush=True,
-                )
-            print(
-                f"batch-page-done: page={page} columns={result['column_count']} "
-                f"rows={result['row_count']} "
-                f"remaining={result['remaining']} "
-                f"active_remaining={result['active_remaining']} "
-                f"deferred_remaining={result['deferred_remaining']} "
-                f"load={float(result['load_seconds']):.3f}s "
-                f"ocr={float(result['ocr_seconds']):.3f}s "
-                f"total={float(result['total_seconds']):.3f}s",
-                flush=True,
-            )
-            for column in result["columns"]:
-                for event in column.get("cluster_events", []):
+                overlay = result.get("deferred_overlay")
+                if overlay:
                     print(
-                        f"cluster-diag: page={page} column={column['column']} "
-                        f"step={event['step']} accepted={event['accepted_label']!r}/"
-                        f"{event['accepted_style']} seed=({event['seed_x']},{event['seed_y']}) "
-                        f"baseline={event['baseline']} bbox={event['bbox']} "
-                        f"nearby_deferred={event['nearby_deferred']} "
-                        f"cluster_candidates={event['cluster_alternatives'][:8]}",
+                        f"batch-deferred-overlay: page={page} "
+                        f"pixels={result['deferred_remaining']} output={overlay}",
                         flush=True,
                     )
-                if int(column["remaining"]) == 0:
-                    continue
-                stuck = column.get("stuck") or {}
                 print(
-                    f"batch-column-stuck: page={page} column={column['column']} "
-                    f"rows={column['row_count']} "
-                    f"steps={column['steps']} remaining={column['remaining']} "
-                    f"active_remaining={column['active_remaining']} "
-                    f"deferred_remaining={column['deferred_remaining']} "
-                    f"x={stuck.get('x')} ys={stuck.get('ys')} "
-                    f"best_survivors={stuck.get('best_survivors')} "
-                    f"checks_2d={column['checks_2d']} "
-                    f"debug={stuck.get('debug_image')}",
+                    f"batch-page-done: page={page} columns={result['column_count']} "
+                    f"rows={result['row_count']} "
+                    f"remaining={result['remaining']} "
+                    f"active_remaining={result['active_remaining']} "
+                    f"deferred_remaining={result['deferred_remaining']} "
+                    f"load={float(result['load_seconds']):.3f}s "
+                    f"ocr={float(result['ocr_seconds']):.3f}s "
+                    f"total={float(result['total_seconds']):.3f}s",
                     flush=True,
                 )
-                for candidate in (stuck.get("failure_candidates") or [])[:5]:
+                for column in result["columns"]:
+                    for event in column.get("cluster_events", []):
+                        print(
+                            f"cluster-diag: page={page} column={column['column']} "
+                            f"step={event['step']} accepted={event['accepted_label']!r}/"
+                            f"{event['accepted_style']} seed=({event['seed_x']},{event['seed_y']}) "
+                            f"baseline={event['baseline']} bbox={event['bbox']} "
+                            f"nearby_deferred={event['nearby_deferred']} "
+                            f"cluster_candidates={event['cluster_alternatives'][:8]}",
+                            flush=True,
+                        )
+                    if int(column["remaining"]) == 0:
+                        continue
+                    stuck = column.get("stuck") or {}
                     print(
-                        f"batch-stall-candidate: page={page} column={column['column']} "
-                        f"seed_y={candidate['seed_y']} label={candidate['label']!r}/"
-                        f"{candidate['style']} baseline={candidate['baseline']} "
-                        f"tx={candidate['tx']} support={candidate['support']} "
-                        f"missing={candidate['missing_count']}/{candidate['pixels']} "
-                        f"missing_pixels={candidate['missing']}",
+                        f"batch-column-stuck: page={page} column={column['column']} "
+                        f"rows={column['row_count']} "
+                        f"steps={column['steps']} remaining={column['remaining']} "
+                        f"active_remaining={column['active_remaining']} "
+                        f"deferred_remaining={column['deferred_remaining']} "
+                        f"x={stuck.get('x')} ys={stuck.get('ys')} "
+                        f"best_survivors={stuck.get('best_survivors')} "
+                        f"checks_2d={column['checks_2d']} "
+                        f"debug={stuck.get('debug_image')}",
                         flush=True,
                     )
+                    for candidate in (stuck.get("failure_candidates") or [])[:5]:
+                        print(
+                            f"batch-stall-candidate: page={page} column={column['column']} "
+                            f"seed_y={candidate['seed_y']} label={candidate['label']!r}/"
+                            f"{candidate['style']} baseline={candidate['baseline']} "
+                            f"tx={candidate['tx']} support={candidate['support']} "
+                            f"missing={candidate['missing_count']}/{candidate['pixels']} "
+                            f"missing_pixels={candidate['missing']}",
+                            flush=True,
+                        )
 
     elapsed = perf_counter() - batch_started
 
