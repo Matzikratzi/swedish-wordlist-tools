@@ -452,7 +452,7 @@ def render_html_with_delete(original_render, state: dict, message: str = "") -> 
     _apply_display_typography(state)
     html = original_render(state, message)
     needle = '<button name="action" value="relabel" type="submit">Rätta vald glyphs facitmodell</button>'
-    button = needle + '\n<button name="action" value="delete" type="submit" formnovalidate onclick="return confirm(\'Radera den valda glyphmodellen ur facit?\')">Radera vald glyphmodell</button>'
+    button = needle + '\n<button class="delete-model-button" name="action" value="delete" type="submit" formnovalidate onclick="return confirm(\'Ta bort den valda mallen ur facit? Detta kan inte ångras i editorn.\')">Ta bort vald mall</button>'
     if needle not in html:
         raise ValueError("could not find relabel button in glyph editor HTML")
     html = html.replace(needle, button, 1)
@@ -479,6 +479,8 @@ def render_html_with_delete(original_render, state: dict, message: str = "") -> 
 .two-row-fallback{max-width:1100px;border:2px solid #c77b00;background:#fff7e6;padding:10px 12px;margin:10px 0 14px}
 .two-row-fallback h2{font-size:18px;margin:0 0 5px}.two-row-fallback p{margin:4px 0 8px}
 .two-row-candidate{padding:7px 0;border-top:1px solid #e0bf7c}.two-row-form{display:inline-block;margin-left:8px}.two-row-form button{padding:4px 7px}
+.delete-model-button{margin-left:8px;border:2px solid #a40000;background:#fff5f5;color:#7a0000;font-weight:700;padding:5px 9px}
+.delete-model-button:hover{background:#ffe5e5}
 '''
     html = html.replace(style_needle, review_style + style_needle, 1)
     html = html.replace('<div>Exakt:', '<div class="row-summary">Exakt:', 1)
