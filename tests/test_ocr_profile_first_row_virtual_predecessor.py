@@ -10,13 +10,12 @@ from swedish_wordlist_tools.ocr_profile_automaton_batch import (
 
 
 class ProfileFirstRowVirtualPredecessorTest(unittest.TestCase):
-    def _context(self, *, extra_ink_y: int | None) -> dict:
+    def _context(self, upper_ink_rows: tuple[int, ...] = ()) -> dict:
         image = Image.new("L", (20, 20), 255)
         px = image.load()
-        # Ink belonging to the segmented first row.
         px[7, 8] = 0
-        if extra_ink_y is not None:
-            px[9, extra_ink_y] = 0
+        for y in upper_ink_rows:
+            px[9, y] = 0
         return {
             "gray": image,
             "threshold": 210,
@@ -36,22 +35,31 @@ class ProfileFirstRowVirtualPredecessorTest(unittest.TestCase):
             },
         }
 
-    def test_first_row_top_expands_to_highest_column_ink(self) -> None:
+    def test_first_row_top_expands_to_nearby_upper_ink(self) -> None:
         bounds = _column_bounds_with_virtual_first_row_predecessor(
-            self._context(extra_ink_y=5),
+            self._context((7,)),
             0,
+        )
+        self.assertEqual(bounds, (5, 15, 7, 18))
+
+    def test_small_blank_gap_allows_dot_or_diacritic(self) -> None:
+        bounds = _column_bounds_with_virtual_first_row_predecessor(
+            self._context((5,)),
+            0,
+            max_blank_gap=2,
         )
         self.assertEqual(bounds, (5, 15, 5, 18))
 
-    def test_no_extra_ink_keeps_segmented_first_row_top(self) -> None:
+    def test_real_separator_stops_before_unrelated_upper_ink(self) -> None:
         bounds = _column_bounds_with_virtual_first_row_predecessor(
-            self._context(extra_ink_y=None),
+            self._context((3,)),
             0,
+            max_blank_gap=2,
         )
         self.assertEqual(bounds, (5, 15, 8, 18))
 
     def test_helper_does_not_create_or_modify_rows(self) -> None:
-        context = self._context(extra_ink_y=5)
+        context = self._context((7,))
         before = list(context["row_map"]["columns"][0]["rows"])
         _column_bounds_with_virtual_first_row_predecessor(context, 0)
         self.assertEqual(context["row_map"]["columns"][0]["rows"], before)
