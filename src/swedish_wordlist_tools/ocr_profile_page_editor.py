@@ -730,11 +730,19 @@ function draw(){{
  for(const boundary of [S.row_boundary_top,S.row_boundary_bottom]){{
    if(boundary>=originY && boundary<=bottomY){{
      const y=py(boundary)+.5;
-     ctx.save();ctx.strokeStyle='#d00000';ctx.lineWidth=2;
+     ctx.save();ctx.strokeStyle='#d00000';ctx.lineWidth=3;
      ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(S.width*scale,y);ctx.stroke();ctx.restore();
    }}
  }}
- if(document.getElementById('baseline').checked){{const y=py(S.baseline_local+1)+.5;ctx.strokeStyle='#0657c8';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(S.width*scale,y);ctx.stroke();}}
+ if(document.getElementById('baseline').checked){{
+   const y=py(S.baseline_local+1)+.5;
+   ctx.save();
+   ctx.strokeStyle='#0657c8';
+   ctx.lineWidth=2;
+   ctx.setLineDash([6,4]);
+   ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(S.width*scale,y);ctx.stroke();
+   ctx.restore();
+ }}
  if(dragStart&&dragNow){{const x0=Math.min(dragStart.x,dragNow.x),x1=Math.max(dragStart.x,dragNow.x),y0=Math.min(dragStart.y,dragNow.y),y1=Math.max(dragStart.y,dragNow.y);ctx.strokeStyle='#0878cf';ctx.lineWidth=3;ctx.strokeRect(x0*scale,py(y0),(x1-x0+1)*scale,(y1-y0+1)*scale);}}
  renderMatchBand();
 }}
