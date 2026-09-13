@@ -33,15 +33,20 @@ _WORKER_TRACE: tuple[int | None, int | None, int | None, int | None] = (None, No
 def _column_bounds_with_virtual_first_row_predecessor(
     context: dict,
     column: int,
+    *,
+    max_blank_gap: int = 2,
 ) -> tuple[int, int, int, int]:
-    """Extend only the first row upward to the highest ink in the column crop.
+    """Extend first-row ownership only through its nearest upper ink band.
 
-    The ordinary row machinery gives every row except the first one an upper
-    neighbour whose lower boundary limits ownership.  Treat the first row as
-    if it had a virtual predecessor ending one raster row above the highest
-    black pixel in the column crop.  No synthetic baseline or reconstructed row
-    is created; this only widens the OCR pixel envelope above the segmented
-    first-row top.
+    The first segmented row has no real predecessor.  Model a virtual one by
+    walking upward from the segmented top and absorbing nearby ink, while
+    allowing the small white gaps that occur between an i-dot/diacritic and the
+    letter body.  Stop after a real separator band instead of scanning all the
+    way to crop_top; otherwise unrelated page/header ink can become fake OCR
+    rows.
+
+    This helper only widens the OCR pixel envelope.  It never creates a
+    synthetic baseline, accepted stream, or reconstructed row.
     """
     left, right, segmented_top, bottom = _minimal_column_bounds(context, column)
     columns = context["row_map"].get("columns") or []
@@ -53,15 +58,26 @@ def _column_bounds_with_virtual_first_row_predecessor(
     gray = context["gray"]
     threshold = int(context["threshold"])
     pixels = gray.load()
-    first_ink_y = None
-    for y in range(crop_top, segmented_top):
-        if any(int(pixels[x, y]) < threshold for x in range(left, right)):
-            first_ink_y = y
+
+    highest_owned_y = segmented_top
+    blank_run = 0
+    seen_upper_ink = False
+
+    for y in range(segmented_top - 1, crop_top - 1, -1):
+        row_has_ink = any(int(pixels[x, y]) < threshold for x in range(left, right))
+        if row_has_ink:
+            highest_owned_y = y
+            blank_run = 0
+            seen_upper_ink = True
+            continue
+
+        blank_run += 1
+        if blank_run > max_blank_gap:
             break
 
-    if first_ink_y is None:
+    if not seen_upper_ink:
         return left, right, segmented_top, bottom
-    return left, right, first_ink_y, bottom
+    return left, right, highest_owned_y, bottom
 
 
 def _profile_point_is_visible(actual_x: int | None, expected_x: int) -> bool:
