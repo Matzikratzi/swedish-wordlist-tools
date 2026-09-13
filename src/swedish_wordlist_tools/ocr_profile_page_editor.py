@@ -567,7 +567,7 @@ def _render_dump_text(state: dict) -> str:
     lines = [
         "SAOL14 PROFILE OCR RASTER DUMP",
         f"page={state['page']} column={state['column']} baseline_page={state['baseline_page']}",
-        f"crop_left={state['left']} crop_top={state['top']} width={state['width']} height={state['height']}",
+        f"crop_left={crop_left} crop_top={crop_top} width={state['width']} height={state['height']}",
         f"baseline_local={state['baseline_local']}",
         f"coverage={state['matched_pixels']}/{state['source_pixels']}",
         "legend: #=black source pixel  X=deferred pixel  .=white",
