@@ -1,0 +1,725 @@
+from __future__ import annotations
+
+import argparse
+from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import json
+import multiprocessing as mp
+import os
+from pathlib import Path
+from time import perf_counter
+
+from .ocr_baseline_up import CompiledGlyphLibrary, ResidualInk
+from .ocr_canonical_facit import load_canonical_facit_with_typography
+from .ocr_profile_automaton_parallel_benchmark import (
+    _build_minimal_page_context,
+    _minimal_black_pixels,
+    _minimal_column_bounds,
+)
+from .ocr_profile_automaton_peel_benchmark import _compile_profile_prefix_trie
+from .ocr_profile_leftmost_baseline_seed_benchmark import _reconstruct_rows_from_accepted_streams
+
+
+_WORKER_TRIE = None
+_WORKER_TRIE_NODES = 0
+_WORKER_TRIE_EDGES = 0
+_WORKER_JSONL: Path | None = None
+_WORKER_THRESHOLD = 210
+_WORKER_DEBUG_DIR: Path | None = None
+_WORKER_DEFERRED_DIR: Path | None = None
+
+
+def _init_worker(
+    jsonl: str,
+    facit: str,
+    threshold: int,
+    prefix_len: int,
+    debug_dir: str,
+    deferred_dir: str,
+) -> None:
+    """Compile immutable OCR data once per long-lived worker."""
+    global _WORKER_TRIE, _WORKER_TRIE_NODES, _WORKER_TRIE_EDGES
+    global _WORKER_JSONL, _WORKER_THRESHOLD, _WORKER_DEBUG_DIR, _WORKER_DEFERRED_DIR
+
+    models = tuple(load_canonical_facit_with_typography(Path(facit)))
+    library = CompiledGlyphLibrary(models)
+    (
+        _WORKER_TRIE,
+        _WORKER_TRIE_NODES,
+        _WORKER_TRIE_EDGES,
+    ) = _compile_profile_prefix_trie(library, prefix_len=prefix_len)
+    _WORKER_JSONL = Path(jsonl)
+    _WORKER_THRESHOLD = int(threshold)
+    _WORKER_DEBUG_DIR = Path(debug_dir) if debug_dir else None
+    _WORKER_DEFERRED_DIR = Path(deferred_dir) if deferred_dir else None
+
+
+def _ocr_column(
+    context: dict,
+    column: int,
+    page_number: int,
+    *,
+    frontier_slack: int,
+    cluster_diag: bool = False,
+) -> dict[str, object]:
+    prefix_trie = _WORKER_TRIE
+    if prefix_trie is None:
+        raise RuntimeError("worker trie is not initialized")
+
+    started = perf_counter()
+    bounds = _minimal_column_bounds(context, column)
+    black = _minimal_black_pixels(context, bounds)
+    residual = ResidualInk(black)
+    column_left, column_right, column_top, column_bottom = bounds
+
+    accepted_streams: dict[
+        int,
+        list[tuple[int, int, int, int, str, str, int, int]],
+    ] = defaultdict(list)
+
+    profile_left: dict[int, int] = {
+        y: min(xs)
+        for y, xs in residual.rows.items()
+        if xs and column_top <= y < column_bottom
+    }
+
+    steps = 0
+    candidate_spawns = 0
+    profile_rows_checked = 0
+    checks_2d = 0
+    stuck = None
+    deferred_frontier_pixels: set[tuple[int, int]] = set()
+    frontier_deferrals = 0
+    cluster_events: list[dict[str, object]] = []
+
+    def next_profile_x(page_y: int) -> int | None:
+        xs = residual.rows.get(page_y) or set()
+        visible = [
+            x for x in xs
+            if (x, page_y) not in deferred_frontier_pixels
+        ]
+        return min(visible) if visible else None
+    matching_started = perf_counter()
+
+    while residual.pixels:
+        if not profile_left:
+            break
+        min_x = min(profile_left.values())
+        min_ys = tuple(sorted(y for y, x in profile_left.items() if x == min_x))
+
+        accepted = None
+        best_survivors = 0
+        seed_diagnostics = []
+        failure_candidates = []
+        for seed_y in min_ys:
+            survivors = []
+            seen: set[tuple[int, int, int]] = set()
+            stack = [(prefix_trie, 0)]
+
+            while stack:
+                node, prefix_support = stack.pop()
+
+                for item, left_profile, anchor_y in node["templates"]:
+                    tx = min_x - item.min_x
+                    if tx + item.max_x >= column_right or tx + item.min_x < column_left:
+                        continue
+
+                    baseline = seed_y - anchor_y
+                    key = (id(item.model), tx, baseline)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    candidate_spawns += 1
+
+                    top = baseline + item.model.min_y
+                    bottom = baseline + item.model.max_y
+                    if top < column_top or bottom >= column_bottom:
+                        continue
+
+                    support = prefix_support
+                    contradicted = False
+                    for model_y, model_left in left_profile:
+                        actual_x = profile_left.get(baseline + model_y)
+                        expected_x = tx + model_left
+                        profile_rows_checked += 1
+                        if actual_x is None or actual_x > expected_x:
+                            contradicted = True
+                            break
+                        if actual_x == expected_x:
+                            support += 1
+                    if not contradicted:
+                        survivors.append((item, tx, baseline, support))
+
+                for (dy, dx), child in node["children"].items():
+                    actual_x = profile_left.get(seed_y + dy)
+                    expected_x = min_x + dx
+                    profile_rows_checked += 1
+                    if actual_x is None or actual_x > expected_x:
+                        continue
+                    child_support = prefix_support + (1 if actual_x == expected_x else 0)
+                    stack.append((child, child_support))
+
+            best_survivors = max(best_survivors, len(survivors))
+            seed_diagnostics.append({
+                "y": seed_y,
+                "survivors": len(survivors),
+            })
+
+            survivors.sort(
+                key=lambda entry: (
+                    -len(entry[0].model.pixels),
+                    -entry[3],
+                    entry[2],
+                    entry[0].model.label,
+                    entry[0].model.style,
+                )
+            )
+            for item, tx, baseline, support in survivors:
+                checks_2d += 1
+                placed = frozenset(
+                    (tx + x, baseline + y)
+                    for x, y in item.model.pixels
+                )
+                missing = placed - residual.pixels
+                if missing:
+                    if len(failure_candidates) < 24:
+                        failure_candidates.append({
+                            "seed_y": seed_y,
+                            "label": str(item.model.label),
+                            "style": str(item.model.style),
+                            "baseline": baseline,
+                            "tx": tx,
+                            "support": support,
+                            "pixels": len(placed),
+                            "missing_count": len(missing),
+                            "missing": [list(point) for point in sorted(missing)[:24]],
+                        })
+                    continue
+                cluster_alternatives = []
+                if cluster_diag and len(str(item.model.label)) == 1:
+                    for alt_item, alt_tx, alt_baseline, alt_support in survivors:
+                        alt_label = str(alt_item.model.label)
+                        if len(alt_label) <= 1:
+                            continue
+                        alt_placed = frozenset(
+                            (alt_tx + x, alt_baseline + y)
+                            for x, y in alt_item.model.pixels
+                        )
+                        missing = alt_placed - residual.pixels
+                        bbox_left = min(x for x, _y in alt_placed)
+                        bbox_right = max(x for x, _y in alt_placed)
+                        bbox_top = min(y for _x, y in alt_placed)
+                        bbox_bottom = max(y for _x, y in alt_placed)
+                        local_residual = {
+                            (x, y)
+                            for x, y in residual.pixels
+                            if bbox_left <= x <= bbox_right
+                            and bbox_top <= y <= bbox_bottom
+                        }
+                        extra = local_residual - alt_placed
+                        cluster_alternatives.append({
+                            "label": alt_label,
+                            "style": str(alt_item.model.style),
+                            "baseline": alt_baseline,
+                            "tx": alt_tx,
+                            "support": alt_support,
+                            "pixels": len(alt_placed),
+                            "missing_count": len(missing),
+                            "extra_count": len(extra),
+                            "missing": [list(point) for point in sorted(missing)[:24]],
+                        })
+                    cluster_alternatives.sort(
+                        key=lambda entry: (
+                            entry["missing_count"],
+                            entry["extra_count"],
+                            -entry["pixels"],
+                            entry["label"],
+                        )
+                    )
+
+                accepted = (
+                    item,
+                    tx,
+                    baseline,
+                    placed,
+                    seed_y,
+                    cluster_alternatives[:24],
+                )
+                break
+            if accepted is not None:
+                break
+
+        if accepted is None:
+            # Recovery experiment: keep the residual ink, but move the logical
+            # left profile past a very short blocking frontier.  This lets later
+            # real glyphs continue while preserving the skipped pixels for final
+            # diagnostics and accounting.
+            advanced = False
+            if frontier_slack > 0:
+                quarantine_right = min_x + frontier_slack
+                for page_y in min_ys:
+                    xs = residual.rows.get(page_y) or set()
+                    blocked = [
+                        x for x in xs
+                        if min_x <= x <= quarantine_right
+                        and (x, page_y) not in deferred_frontier_pixels
+                    ]
+                    if blocked:
+                        deferred_frontier_pixels.update((x, page_y) for x in blocked)
+                        next_x = next_profile_x(page_y)
+                        if next_x is None:
+                            profile_left.pop(page_y, None)
+                        else:
+                            profile_left[page_y] = next_x
+                        advanced = True
+                if advanced:
+                    frontier_deferrals += 1
+                    continue
+
+            debug_image = None
+            if _WORKER_DEBUG_DIR is not None and min_ys:
+                _WORKER_DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+                y0 = max(column_top, min(min_ys) - 24)
+                y1 = min(column_bottom, max(min_ys) + 25)
+                x0 = max(column_left, min_x - 12)
+                x1 = min(column_right, min_x + 48)
+                crop = context["gray"].crop((x0, y0, x1, y1)).convert("RGB")
+                from PIL import ImageDraw
+                draw = ImageDraw.Draw(crop)
+                for y in min_ys:
+                    if y0 <= y < y1:
+                        draw.rectangle(
+                            (min_x - x0 - 1, y - y0 - 1, min_x - x0 + 1, y - y0 + 1),
+                            outline=(255, 0, 0),
+                        )
+                if failure_candidates:
+                    for mx, my in failure_candidates[0]["missing"]:
+                        if x0 <= mx < x1 and y0 <= my < y1:
+                            draw.rectangle(
+                                (mx - x0 - 1, my - y0 - 1, mx - x0 + 1, my - y0 + 1),
+                                outline=(0, 0, 255),
+                            )
+                crop = crop.resize((crop.width * 8, crop.height * 8))
+                debug_path = _WORKER_DEBUG_DIR / (
+                    f"page-{page_number:04d}-col-{column}-x{min_x}-stall.png"
+                )
+                crop.save(debug_path)
+                debug_image = str(debug_path)
+
+            stuck = {
+                "x": min_x,
+                "ys": list(min_ys[:32]),
+                "y_count": len(min_ys),
+                "best_survivors": best_survivors,
+                "seed_diagnostics": seed_diagnostics[:32],
+                "failure_candidates": failure_candidates,
+                "remaining": len(residual.pixels),
+                "debug_image": debug_image,
+            }
+            break
+
+        item, tx, baseline, placed, accepted_seed_y, accepted_alternatives = accepted
+        left = min(x for x, _y in placed)
+        right = max(x for x, _y in placed)
+        top = min(y for _x, y in placed)
+        bottom = max(y for _x, y in placed)
+
+        if cluster_diag and len(str(item.model.label)) == 1:
+            window_left = min(x for x, _y in placed)
+            window_right = max(x for x, _y in placed) + 12
+            window_top = min(y for _x, y in placed) - 6
+            window_bottom = max(y for _x, y in placed) + 8
+            before_window = sorted(
+                (x, y)
+                for x, y in residual.pixels
+                if window_left <= x <= window_right
+                and window_top <= y <= window_bottom
+            )
+            cluster_events.append({
+                "step": steps,
+                "accepted_label": str(item.model.label),
+                "accepted_style": str(item.model.style),
+                "seed_x": min_x,
+                "seed_y": accepted_seed_y,
+                "baseline": baseline,
+                "tx": tx,
+                "bbox": [
+                    min(x for x, _y in placed),
+                    min(y for _x, y in placed),
+                    max(x for x, _y in placed),
+                    max(y for _x, y in placed),
+                ],
+                "glyph_pixels": len(placed),
+                "cluster_alternatives": accepted_alternatives,
+                "window_before": [list(point) for point in before_window],
+            })
+
+        affected_ys = {y for _x, y in placed}
+        residual.consume(placed)
+        for page_y in affected_ys:
+            next_x = next_profile_x(page_y)
+            if next_x is None:
+                profile_left.pop(page_y, None)
+            else:
+                profile_left[page_y] = next_x
+
+        typographic_style = getattr(item.model.style, "typographic_style", None)
+        if typographic_style not in {"roman", "italic", "bold"}:
+            raw_style = str(item.model.style)
+            typographic_style = raw_style if raw_style in {"roman", "italic", "bold"} else "roman"
+        accepted_streams[baseline].append(
+            (
+                left,
+                right,
+                steps,
+                min_x,
+                item.model.label,
+                typographic_style,
+                top,
+                bottom,
+                len(placed),
+                tuple(sorted(placed)),
+            )
+        )
+        steps += 1
+
+    matching_seconds = perf_counter() - matching_started
+    reconstructed = _reconstruct_rows_from_accepted_streams(accepted_streams)
+    rows = []
+    for index, (representative, members, top, bottom, text_value, glyph_count) in enumerate(reconstructed):
+        row_entries = [
+            entry
+            for member in members
+            for entry in accepted_streams.get(member, [])
+        ]
+        row_entries.sort(key=lambda entry: (entry[0], entry[1], entry[2], entry[4], entry[5]))
+        matches = [
+            {
+                "left": int(entry[0]),
+                "right": int(entry[1]) + 1,
+                "label": str(entry[4]),
+                "style": str(entry[5]),
+                "pixels": int(entry[8]) if len(entry) > 8 else 0,
+                "points": [list(point) for point in (entry[9] if len(entry) > 9 else ())],
+                "top": int(entry[6]),
+                "bottom": int(entry[7]) + 1,
+                "baseline": int(member),
+            }
+            for member in members
+            for entry in accepted_streams.get(member, [])
+        ]
+        matches.sort(key=lambda match: (match["left"], match["right"], match["label"], match["style"]))
+        rows.append({
+            "index": index,
+            "baseline": representative,
+            "baseline_members": list(members),
+            "page_top": top,
+            "page_bottom": bottom + 1,
+            "glyphs": glyph_count,
+            "text": text_value,
+            "matches": matches,
+            "matched_pixels": sum(int(match["pixels"]) for match in matches),
+        })
+
+    reference_columns = context["row_map"].get("columns") or []
+    reference_rows = (
+        reference_columns[column].get("rows") or []
+        if 0 <= column < len(reference_columns)
+        else []
+    )
+
+    unresolved_deferred = residual.pixels & deferred_frontier_pixels
+    active_remaining = residual.pixels - deferred_frontier_pixels
+
+    relevant_cluster_events = []
+    if cluster_diag:
+      for event in cluster_events:
+          left, top, right, bottom = event["bbox"]
+          nearby_deferred = sorted(
+              (x, y)
+              for x, y in unresolved_deferred
+              if left - 2 <= x <= right + 14
+              and top - 7 <= y <= bottom + 9
+          )
+          if not nearby_deferred:
+              continue
+          event["nearby_deferred"] = [list(point) for point in nearby_deferred]
+          relevant_cluster_events.append(event)
+
+    return {
+        "column": column,
+        "bounds": list(bounds),
+        "steps": steps,
+        "remaining": len(residual.pixels),
+        "active_remaining": len(active_remaining),
+        "deferred_remaining": len(unresolved_deferred),
+        "deferred_pixels": [list(p) for p in sorted(unresolved_deferred)],
+        "cluster_events": relevant_cluster_events,
+        "row_count": len(rows),
+        "reference_row_count": len(reference_rows),
+        "candidate_spawns": candidate_spawns,
+        "profile_rows_checked": profile_rows_checked,
+        "checks_2d": checks_2d,
+        "frontier_deferrals": frontier_deferrals,
+        "deferred_frontier_pixels": len(deferred_frontier_pixels),
+        "matching_seconds": matching_seconds,
+        "total_seconds": perf_counter() - started,
+        "stuck": stuck,
+        "rows": rows,
+    }
+
+
+def _ocr_page(
+    page_number: int,
+    frontier_slack: int,
+    cluster_diag: bool = False,
+) -> dict[str, object]:
+    if _WORKER_JSONL is None:
+        raise RuntimeError("worker JSONL path is not initialized")
+
+    page_started = perf_counter()
+    load_started = perf_counter()
+    context = _build_minimal_page_context(
+        _WORKER_JSONL,
+        page_number,
+        _WORKER_THRESHOLD,
+    )
+    load_seconds = perf_counter() - load_started
+
+    columns = context["row_map"].get("columns") or []
+    column_results = [
+        _ocr_column(
+            context,
+            column,
+            page_number,
+            frontier_slack=frontier_slack,
+            cluster_diag=cluster_diag,
+        )
+        for column in range(len(columns))
+    ]
+
+    remaining = sum(int(column["remaining"]) for column in column_results)
+    active_remaining = sum(int(column["active_remaining"]) for column in column_results)
+    deferred_remaining = sum(int(column["deferred_remaining"]) for column in column_results)
+    reconstructed_rows = sum(int(column["row_count"]) for column in column_results)
+    reference_rows = sum(int(column["reference_row_count"]) for column in column_results)
+
+    deferred_overlay = None
+    deferred_points = [
+        tuple(point)
+        for column in column_results
+        for point in column.get("deferred_pixels", [])
+    ]
+    if _WORKER_DEFERRED_DIR is not None and deferred_points:
+        from PIL import ImageDraw
+
+        _WORKER_DEFERRED_DIR.mkdir(parents=True, exist_ok=True)
+        overlay = context["page"].convert("RGB")
+        draw = ImageDraw.Draw(overlay)
+        for x, y in deferred_points:
+            draw.rectangle((x - 2, y - 2, x + 2, y + 2), outline=(255, 0, 0), width=1)
+        overlay_path = _WORKER_DEFERRED_DIR / f"page-{page_number:04d}-deferred-overlay.png"
+        overlay.save(overlay_path)
+        deferred_overlay = str(overlay_path)
+
+    return {
+        "page": page_number,
+        "source": str(context.get("source") or ""),
+        "deferred_overlay": deferred_overlay,
+        "column_count": len(column_results),
+        "remaining": remaining,
+        "active_remaining": active_remaining,
+        "deferred_remaining": deferred_remaining,
+        "row_count": reconstructed_rows,
+        "reference_row_count": reference_rows,
+        "load_seconds": load_seconds,
+        "ocr_seconds": sum(float(column["matching_seconds"]) for column in column_results),
+        "total_seconds": perf_counter() - page_started,
+        "columns": column_results,
+    }
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(
+        description=(
+            "Persistent multi-page SAOL profile-automaton OCR. Each worker "
+            "compiles facit/trie once, then processes whole pages so each PNG "
+            "is loaded only once."
+        )
+    )
+    ap.add_argument("jsonl", type=Path)
+    ap.add_argument("--facit", type=Path, required=True)
+    ap.add_argument("--start-page", type=int, default=2)
+    ap.add_argument("--end-page", type=int, default=11)
+    ap.add_argument("--threshold", type=int, default=210)
+    ap.add_argument("--prefix-len", type=int, default=5)
+    ap.add_argument(
+        "--frontier-slack",
+        type=int,
+        default=0,
+        help="At a 2D stall, allow the logical left profile to defer blocking ink by at most this many x pixels.",
+    )
+    ap.add_argument(
+        "--cluster-diag",
+        action="store_true",
+        help="Enable expensive cluster-alternative diagnostics. Off by default for normal OCR.",
+    )
+    ap.add_argument(
+        "--workers",
+        type=int,
+        default=0,
+        help="Default: logical CPUs minus one.",
+    )
+    ap.add_argument(
+        "--debug-deferred",
+        type=Path,
+        default=Path("reports/profile-deferred"),
+        help="Directory for full-page overlays marking every deferred residual pixel.",
+    )
+    ap.add_argument(
+        "--debug-stalls",
+        type=Path,
+        default=Path("reports/profile-stalls"),
+        help="Directory for enlarged pixel crops at the first stall in each column.",
+    )
+    ap.add_argument(
+        "--output",
+        type=Path,
+        default=Path("reports/saol14-profile-automaton-batch.jsonl"),
+    )
+    args = ap.parse_args()
+
+    if args.end_page < args.start_page:
+        raise ValueError("end page must be >= start page")
+
+    pages = tuple(range(args.start_page, args.end_page + 1))
+    logical_cpus = os.cpu_count() or 1
+    default_workers = max(1, logical_cpus - 1)
+    requested_workers = args.workers if args.workers > 0 else default_workers
+    workers = max(1, min(requested_workers, len(pages)))
+
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+
+    print(
+        f"batch-start: pages={args.start_page}..{args.end_page} count={len(pages)} "
+        f"logical_cpus={logical_cpus} workers={workers} "
+        f"reserved_cpus={max(0, logical_cpus-workers)} prefix_len={args.prefix_len} "
+        f"frontier_slack={args.frontier_slack} "
+        f"cluster_diag={args.cluster_diag} "
+        f"output={args.output}",
+        flush=True,
+    )
+
+    batch_started = perf_counter()
+    results: dict[int, dict[str, object]] = {}
+
+    # fork is deliberate on Linux. Worker initializers compile immutable
+    # glyph/trie state once; every worker then reuses it for many pages.
+    fork_context = mp.get_context("fork")
+    with ProcessPoolExecutor(
+        max_workers=workers,
+        mp_context=fork_context,
+        initializer=_init_worker,
+        initargs=(
+            str(args.jsonl),
+            str(args.facit),
+            args.threshold,
+            args.prefix_len,
+            str(args.debug_stalls),
+            str(args.debug_deferred),
+        ),
+    ) as pool:
+        future_to_page = {
+            pool.submit(_ocr_page, page, args.frontier_slack, args.cluster_diag): page
+            for page in pages
+        }
+        for future in as_completed(future_to_page):
+            page = future_to_page[future]
+            result = future.result()
+            results[page] = result
+            overlay = result.get("deferred_overlay")
+            if overlay:
+                print(
+                    f"batch-deferred-overlay: page={page} "
+                    f"pixels={result['deferred_remaining']} output={overlay}",
+                    flush=True,
+                )
+            print(
+                f"batch-page-done: page={page} columns={result['column_count']} "
+                f"rows={result['row_count']}/{result['reference_row_count']} "
+                f"remaining={result['remaining']} "
+                f"active_remaining={result['active_remaining']} "
+                f"deferred_remaining={result['deferred_remaining']} "
+                f"load={float(result['load_seconds']):.3f}s "
+                f"ocr={float(result['ocr_seconds']):.3f}s "
+                f"total={float(result['total_seconds']):.3f}s",
+                flush=True,
+            )
+            for column in result["columns"]:
+                for event in column.get("cluster_events", []):
+                    print(
+                        f"cluster-diag: page={page} column={column['column']} "
+                        f"step={event['step']} accepted={event['accepted_label']!r}/"
+                        f"{event['accepted_style']} seed=({event['seed_x']},{event['seed_y']}) "
+                        f"baseline={event['baseline']} bbox={event['bbox']} "
+                        f"nearby_deferred={event['nearby_deferred']} "
+                        f"cluster_candidates={event['cluster_alternatives'][:8]}",
+                        flush=True,
+                    )
+                if int(column["remaining"]) == 0:
+                    continue
+                stuck = column.get("stuck") or {}
+                print(
+                    f"batch-column-stuck: page={page} column={column['column']} "
+                    f"rows={column['row_count']}/{column['reference_row_count']} "
+                    f"steps={column['steps']} remaining={column['remaining']} "
+                    f"active_remaining={column['active_remaining']} "
+                    f"deferred_remaining={column['deferred_remaining']} "
+                    f"x={stuck.get('x')} ys={stuck.get('ys')} "
+                    f"best_survivors={stuck.get('best_survivors')} "
+                    f"checks_2d={column['checks_2d']} "
+                    f"debug={stuck.get('debug_image')}",
+                    flush=True,
+                )
+                for candidate in (stuck.get("failure_candidates") or [])[:5]:
+                    print(
+                        f"batch-stall-candidate: page={page} column={column['column']} "
+                        f"seed_y={candidate['seed_y']} label={candidate['label']!r}/"
+                        f"{candidate['style']} baseline={candidate['baseline']} "
+                        f"tx={candidate['tx']} support={candidate['support']} "
+                        f"missing={candidate['missing_count']}/{candidate['pixels']} "
+                        f"missing_pixels={candidate['missing']}",
+                        flush=True,
+                    )
+
+    # Deterministic, restart-friendly output: rewrite the requested page packet
+    # in page order only after all tasks have completed successfully.
+    with args.output.open("w", encoding="utf-8") as handle:
+        for page in pages:
+            handle.write(json.dumps(results[page], ensure_ascii=False, sort_keys=True))
+            handle.write("\n")
+
+    elapsed = perf_counter() - batch_started
+    failed_pages = [
+        page for page in pages
+        if int(results[page]["active_remaining"]) != 0
+    ]
+    total_rows = sum(int(results[page]["row_count"]) for page in pages)
+    total_remaining = sum(int(results[page]["remaining"]) for page in pages)
+    total_active_remaining = sum(int(results[page]["active_remaining"]) for page in pages)
+    total_deferred_remaining = sum(int(results[page]["deferred_remaining"]) for page in pages)
+
+    print(
+        f"batch-done: pages={len(pages)} failed_pages={failed_pages} "
+        f"rows={total_rows} remaining={total_remaining} "
+        f"active_remaining={total_active_remaining} "
+        f"deferred_remaining={total_deferred_remaining} "
+        f"elapsed={elapsed:.3f}s pages_per_second={len(pages)/elapsed:.3f} "
+        f"seconds_per_page={elapsed/len(pages):.3f} output={args.output}",
+        flush=True,
+    )
+    return 1 if failed_pages else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

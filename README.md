@@ -154,6 +154,105 @@ Det kör i ordning:
 
 På så sätt kan en gammal NOUN-artefakt inte av misstag användas som bevis för att en ny generatorregel saknar effekt.
 
+## OCR: profilstrategi och optimeringsidéer
+
+Den omedelbara prioriteten är **korrekthet först**: få den nya directional/profile-OCR:n hela vägen genom sida 30. Därefter optimeras den med mätdata. Profilstrategin är särskilt intressant eftersom den kan eliminera stora mängder onödiga 2D-pixelprov.
+
+### Grundprincip
+
+Använd så mycket billig geometri och vänsterprofil som möjligt innan en dyr full 2D-matchning görs.
+
+Avsedd ordning:
+
+1. hitta ny rad geometriskt,
+2. följ ytterkants-/vänsterprofilen,
+3. håll alla fortfarande möjliga glyphkandidater levande,
+4. prova hela kandidatens vertikala profil, både nedåt och uppåt,
+5. först när alla överlevande kandidater har fått hela sin profil prövad görs full 2D-pixelmatchning,
+6. om flera kandidater fortfarande överlever används look-ahead/backtracking i raden.
+
+### Ny rad utan tidig glyphmatchning
+
+För radstart bör OCR:n först följa sidans/kolumnens ytterkantsprofil i y-led utan att börja prova glyphar så fort profilen bara råkar komma in i ett tillåtet x-intervall.
+
+- Inledande helt vitt y-intervall räknas inte som söksträcka.
+- När första svarta profilpunkten kommer börjar den verkliga sökningen.
+- Fortsätt nedåt tills profilen når en rimlig radstart **och en rimlig vänsterkant**, inte bara första inträdet i området.
+- Tillåt att profilen går några pixlar vidare och eventuellt tillbaka åt höger för att "runda" toppen av första glyphen innan matchning börjar.
+- Sätt samtidigt en hård y-budget så att sökningen inte kan fortsätta godtyckligt långt.
+
+SAOL har typiska x-lägen för fortsättningsrad respektive huvudordsrad. Om en plausibel fortsättningsradsstart hittas bör sökningen kunna spana lite längre efter en ännu starkare huvudordsstart innan beslut tas. Huvudord börjar dessutom ofta med någon av ett litet antal återkommande glyphprofiler; dessa kan användas som billig prior/rankning men inte som hård regel.
+
+### Komplett profil innan 2D
+
+En glyphkandidat ska inte gå vidare till full 2D-matchning bara för att den passar den första synliga delen av vänsterprofilen.
+
+För varje kandidat ska profilfasen fortsätta tills kandidaten har prövats över hela sin egen vertikala utsträckning:
+
+- kandidatens övre gräns,
+- kandidatens undre gräns,
+- hela vänsterprofilen mellan dem,
+- relevanta profilhändelser/terminalhändelser vid topp och botten,
+- interna vertikala eller horisontella luckor som profilen kan falsifiera billigt.
+
+Om kandidater har olika höjd får profilfasen inte sluta när den kortaste kandidaten är färdig. Den avslutas först när **varje fortfarande levande kandidat** har nått både sin egen topp och sin egen botten.
+
+Full `pixels.issubset(...)`/2D-matchning görs därefter endast för de kandidater som överlevt hela profilfasen.
+
+### Tvetydiga glyphar: förklarad x-front och backtracking
+
+Om två eller fler glyphar uppfyller samma totala vänsterprofil ska alla behållas som möjliga grenar.
+
+För varje kandidat:
+
+1. konsumera kandidatens pixlar temporärt,
+2. beräkna den längst högra x-linje sådan att alla relevanta svarta pixlar till vänster om linjen är förklarade,
+3. prova först kandidaten som flyttar denna **förklarade x-front** längst åt höger.
+
+Ett lokalt bättre frontier-värde är dock inte tillräckligt för att permanent kasta övriga kandidater. Den valda grenen fortsätter framåt tills den når nästa helt vita vertikala spalt inom den aktuella temporärt kända raden (`row_top .. temporary_row_bottom`).
+
+- Om allt till vänster om denna vita spalt kan förklaras är det ett säkert checkpoint och övriga grenar kan kastas.
+- Om grenen fastnar innan checkpointen återställs residualen och nästa sparade kandidat provas.
+- Först när alla grenar misslyckats är tolkningen verkligt olöst.
+
+Detta ska vara generellt och inte specialkoda enskilda bokstäver.
+
+### Klusterglyphar
+
+När tryckrastret gör att två tecken faktiskt sitter ihop kan sammansättningen vara en egen glyphmodell. Ett aktuellt exempel är `fr`, där en kort variant av `f` annars kan matcha lokalt men lämna pixlar från `r` oförklarade. En `fr`-klusterglyph ska konkurrera på exakt samma generella profil/frontier-regler som andra glyphar.
+
+### Cacha profilinformation per glyph
+
+Profilrelaterad information som bara beror på glyphmodellen bör förkompileras en gång tillsammans med glyphbiblioteket, till exempel:
+
+- `min_y` / `max_y`,
+- `min_x` / `max_x`,
+- x-pixlar per relativ y-rad,
+- vänsterkant per relativ y-rad,
+- eventuellt högerkant per relativ y-rad,
+- profilförändringar mellan y-rader,
+- interna tomrader/luckor,
+- topp- och bottenhändelser som kan kontrolleras utan full 2D-matchning.
+
+Runtime-matchningen bör inte bygga om dessa strukturer från `model.pixels` för varje kandidat.
+
+### Mät först, optimera sedan
+
+Sida 30 används först som korrekthetsmål. När den går igenom bör benchmarken utökas så att optimeringar kan bedömas kvantitativt. Minst följande räknare är intressanta:
+
+- antal initiala kandidatförslag,
+- antal kandidater som dör på radstartsgeometri,
+- antal som dör på ofullständig profil,
+- antal som överlever komplett profil,
+- antal fulla 2D/subset-kontroller,
+- antal godkända glyphar,
+- antal tvetydigheter som kräver frontier/look-ahead,
+- antal backtracks,
+- antal checkpoints vid helt vit vertikal spalt,
+- tid i radstart, profil, 2D-matchning och look-ahead var för sig.
+
+Målet är inte bara lägre total tid utan framför allt att se **varför** kandidater försvinner och hur stor del av 2D-arbetet profilstrategin kan eliminera.
+
 ## Nuvarande arbetssätt
 
 1. Tolka SAOL-strukturen mekaniskt.

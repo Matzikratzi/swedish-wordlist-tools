@@ -1,0 +1,552 @@
+from __future__ import annotations
+
+import argparse
+from collections import Counter
+from pathlib import Path
+from time import perf_counter
+
+from .ocr_baseline_up import BaselineMatch, BaselineUpStats, CompiledGlyphLibrary, ResidualInk, find_next_baseline_up
+from .ocr_canonical_facit import load_canonical_facit_with_typography
+from .ocr_column_left_profile import build_column_left_profile
+from .ocr_page_start_geometry import infer_page_start_geometry
+from .ocr_page_pixel_grid import render_pixel_grid
+from .ocr_review_page_pixel_array_glyphs_html import build_page_context_pixel_array
+from .ocr_row_directional import first_glyph_top_down
+from .ocr_shadow_whole_column import _black_pixels, _column_bounds
+
+
+def _pixels_between_rows(
+    residual: ResidualInk,
+    *,
+    top: int,
+    bottom: int,
+) -> set[tuple[int, int]]:
+    return {
+        (x, y)
+        for x, y in residual.pixels
+        if top <= y < bottom
+    }
+
+
+def _match_summary(hit: BaselineMatch) -> str:
+    return (
+        f"{hit.model.label!r}/{hit.model.style}@x{hit.left}..{hit.right} "
+        f"tx={hit.tx} baseline={hit.baseline} discovered_y={hit.discovered_y} "
+        f"pixels={len(hit.pixels)} sources={hit.model.sources}"
+    )
+
+
+def _format_histogram(values: list[int]) -> str:
+    counts = Counter(values)
+    return "{" + ",".join(f"{x}:{counts[x]}" for x in sorted(counts)) + "}"
+
+
+def _print_trace_raster(
+    pixels: set[tuple[int, int]] | frozenset[tuple[int, int]],
+    *,
+    row_index: int,
+    step: int,
+    kind: str,
+    top: int,
+    height: int,
+    column_left: int,
+    column_right: int,
+) -> None:
+    """Print a fixed-height ASCII raster over the full column width."""
+    bottom = top + height
+    print(
+        f"directional-trace-raster: row={row_index} step={step} kind={kind} "
+        f"x={column_left}..{column_right - 1} y={top}..{bottom - 1}",
+        flush=True,
+    )
+    for y in range(top, bottom):
+        line = "".join(
+            "#" if (x, y) in pixels else "."
+            for x in range(column_left, column_right)
+        )
+        print(f"{y:04d} {line}", flush=True)
+
+
+def _print_trace_page_profile(
+    residual: ResidualInk,
+    *,
+    row_index: int,
+    step: int,
+    row_top: int,
+    row_bottom: int,
+    column_left: int,
+    column_right: int,
+) -> None:
+    """Print the live left page profile over the row bounds known so far."""
+    points: list[str] = []
+    for y in range(row_top, row_bottom + 1):
+        xs = residual.rows.get(y, ())
+        eligible = [x for x in xs if column_left <= x < column_right]
+        left = min(eligible) if eligible else None
+        points.append(f"{y}:{left if left is not None else '-'}")
+    print(
+        f"directional-trace-page-profile: row={row_index} step={step} "
+        f"y={row_top}..{row_bottom} profile=[{' '.join(points)}]",
+        flush=True,
+    )
+
+
+def _isolated_profile_segments(left_profile) -> list[tuple[int, int, int]]:
+    """Return (top, bottom, min_x) for nonblank y-runs isolated by blank rows.
+
+    This is deliberately only a diagnostic of the raw column-left profile.  A
+    segment contributes one observation regardless of its height.  Segments at
+    the column boundary are excluded because they cannot be proven to have a
+    blank raster row on both sides.
+    """
+    values = left_profile.values
+    segments: list[tuple[int, int, int]] = []
+    index = 0
+    while index < len(values):
+        if values[index] is None:
+            index += 1
+            continue
+        start = index
+        occupied: list[int] = []
+        while index < len(values) and values[index] is not None:
+            occupied.append(int(values[index]))
+            index += 1
+        end = index - 1
+        blank_above = start > 0 and values[start - 1] is None
+        blank_below = index < len(values) and values[index] is None
+        if blank_above and blank_below:
+            segments.append((left_profile.top + start, left_profile.top + end, min(occupied)))
+    return segments
+
+
+def _print_unexplained_row_check(
+    *,
+    row_index: int,
+    row_top: int,
+    next_row_top: int,
+    unexplained: set[tuple[int, int]],
+) -> None:
+    if not unexplained:
+        return
+    ordered = sorted(unexplained, key=lambda pixel: (pixel[1], pixel[0]))
+    first_x, first_y = ordered[0]
+    print(
+        f"directional-row-check: row={row_index} "
+        f"status=UNEXPLAINED-BEFORE-NEXT-ROW row_top={row_top} "
+        f"next_row_top={next_row_top} unexplained_pixels={len(unexplained)} "
+        f"first_unexplained=({first_x},{first_y})",
+        flush=True,
+    )
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(
+        description=(
+            "Benchmark sequential directional OCR. The first row top is known; "
+            "every following row top is derived only from accepted glyph pixels. "
+            "Reference row bottoms are diagnostics and never constrain matching."
+        )
+    )
+    ap.add_argument("jsonl", type=Path)
+    ap.add_argument("--facit", type=Path, required=True)
+    ap.add_argument("--page", type=int, default=30)
+    ap.add_argument("--column", type=int, default=0)
+    ap.add_argument("--rows", type=int, default=0, help="0 means all reference rows in the column")
+    ap.add_argument("--max-glyphs", type=int, default=100)
+    ap.add_argument("--threshold", type=int, default=210)
+    ap.add_argument("--start-x-tolerance", type=int, default=4)
+    ap.add_argument("--pixel-grid-output", type=Path, help="write pixel-grid PNG with decoded ink black and unexplained ink red")
+    ap.add_argument("--pixel-grid-scale", type=int, default=3)
+    ap.add_argument("--pixel-grid-major-step", type=int, default=10)
+    ap.add_argument("--pixel-grid-label-step", type=int, default=50)
+    ap.add_argument(
+        "--trace-row",
+        type=int,
+        action="append",
+        default=[],
+        help="print candidate decisions for this zero-based row index; repeat for multiple rows",
+    )
+    args = ap.parse_args()
+    trace_rows = set(args.trace_row)
+
+    total_started = perf_counter()
+
+    models_started = perf_counter()
+    models = tuple(load_canonical_facit_with_typography(args.facit))
+    library = CompiledGlyphLibrary(models)
+    models_seconds = perf_counter() - models_started
+
+    page_started = perf_counter()
+    context = build_page_context_pixel_array(args.jsonl, args.page, args.threshold)
+    bounds = _column_bounds(context, args.column)
+    black = _black_pixels(context, bounds)
+    residual = ResidualInk(black)
+    page_seconds = perf_counter() - page_started
+
+    column_left, column_right, column_top, column_bottom = bounds
+    profile_started = perf_counter()
+    left_profile = build_column_left_profile(
+        residual.rows,
+        top=column_top,
+        bottom=column_bottom,
+        left=column_left,
+        right=column_right,
+    )
+    profile_seconds = perf_counter() - profile_started
+    profile_events = left_profile.changes()
+    column_histogram = _format_histogram(
+        [int(x) for x in left_profile.values if x is not None]
+    )
+    isolated_segments = _isolated_profile_segments(left_profile)
+    isolated_min_x_histogram = _format_histogram(
+        [min_x for _top, _bottom, min_x in isolated_segments]
+    )
+
+    columns = context["row_map"].get("columns") or []
+    if not 0 <= args.column < len(columns):
+        raise ValueError(f"column out of range: {args.column}")
+    reference_rows = columns[args.column].get("rows") or []
+    if args.rows > 0:
+        reference_rows = reference_rows[: args.rows]
+    if not reference_rows:
+        raise ValueError("no reference rows available for benchmark")
+
+    geometry_started = perf_counter()
+    inferred = infer_page_start_geometry(
+        left_profile,
+        reference_rows,
+        tolerance=args.start_x_tolerance,
+    )
+    geometry_seconds = perf_counter() - geometry_started
+    if not inferred.ranges:
+        raise ValueError("could not infer row-start x ranges from this page")
+    ranges = inferred.ranges
+
+    row_top = int(reference_rows[0]["page_top"])
+
+    print(
+        f"directional-page-start: page={args.page} column={args.column} rows={len(reference_rows)} "
+        f"models={len(models)} model_compile={models_seconds:.4f}s page_prepare={page_seconds:.4f}s "
+        f"profile_build={profile_seconds:.6f}s geometry={geometry_seconds:.6f}s "
+        f"profile_rows={len(left_profile.values)} profile_events={len(profile_events)} "
+        f"black={len(black)} bounds={bounds} start_values={inferred.centers} "
+        f"column_hist={column_histogram} "
+        f"isolated_segments={len(isolated_segments)} isolated_min_x_hist={isolated_min_x_histogram} "
+        f"start_ranges={ranges} start_observations={len(inferred.observations)} "
+        f"initial_row_top={row_top}",
+        flush=True,
+    )
+    print(
+        "directional-isolated-segments: "
+        + " ".join(f"y={top}..{bottom}:min_x={min_x}" for top, bottom, min_x in isolated_segments),
+        flush=True,
+    )
+
+    solved = 0
+    unresolved = 0
+    glyphs_total = 0
+    matching_started = perf_counter()
+
+    setup_total = 0.0
+    first_total = 0.0
+    baseline_total = 0.0
+    consume_total = 0.0
+    residual_total = 0.0
+    baseline_calls = 0
+    baseline_hits = 0
+    baseline_misses = 0
+    baseline_stats = BaselineUpStats()
+
+    for row_index, reference_row in enumerate(reference_rows):
+        row_started = perf_counter()
+        reference_top = int(reference_row["page_top"])
+        reference_bottom = int(reference_row["page_bottom"])
+        trace = row_index in trace_rows
+
+        phase_started = perf_counter()
+        pixels_at_start = len(residual.pixels)
+        row_setup = perf_counter() - phase_started
+        setup_total += row_setup
+
+        if trace:
+            _print_trace_raster(
+                residual.pixels,
+                row_index=row_index,
+                step=-1,
+                kind="start",
+                top=row_top,
+                height=25,
+                column_left=column_left,
+                column_right=column_right,
+            )
+
+        phase_started = perf_counter()
+        first, first_search = first_glyph_top_down(
+            residual.pixels,
+            residual.rows,
+            library,
+            row_top=row_top,
+            allowed_translate_x_ranges=ranges,
+            left_profile=left_profile,
+        )
+        row_first = perf_counter() - phase_started
+        first_total += row_first
+
+        if first is None:
+            unresolved += 1
+            row_seconds = perf_counter() - row_started
+            row_other = max(0.0, row_seconds - row_setup - row_first)
+            print(
+                f"directional-row: row={row_index} y={row_top}..? "
+                f"reference_y={reference_top}..{reference_bottom-1} "
+                f"status=unresolved-first first_y={first_search.y} "
+                f"candidates={len(first_search.candidates)} pixels_at_start={pixels_at_start} "
+                f"next_row_top={row_top} time={row_seconds:.4f}s "
+                f"setup={row_setup:.6f}s first={row_first:.6f}s "
+                f"baseline=0.000000s consume=0.000000s residual=0.000000s other={row_other:.6f}s",
+                flush=True,
+            )
+            print(
+                f"directional-page-stop: row={row_index} reason=no-safe-next-row-top row_top={row_top}",
+                flush=True,
+            )
+            break
+
+        labels = [first.model.label]
+        phase_started = perf_counter()
+        residual.consume(first.pixels)
+        row_consume = perf_counter() - phase_started
+        consume_total += row_consume
+        row_baseline = 0.0
+        row_residual = 0.0
+        row_baseline_calls = 0
+        current_left = first.left
+        baseline = first.baseline
+        explained_bottom = max(y for _x, y in first.pixels)
+        glyphs = 1
+        status = "complete"
+        stop_candidates = 0
+
+        if trace:
+            print(
+                f"directional-trace: row={row_index} step=0 accepted="
+                f"{first.model.label!r}/{first.model.style}@x{first.left}..{first.right} "
+                f"baseline={first.baseline} pixels={len(first.pixels)} first_y={first_search.y}",
+                flush=True,
+            )
+            _print_trace_raster(
+                first.pixels,
+                row_index=row_index,
+                step=0,
+                kind=f"glyph:{first.model.label}",
+                top=row_top,
+                height=25,
+                column_left=column_left,
+                column_right=column_right,
+            )
+            _print_trace_raster(
+                residual.pixels,
+                row_index=row_index,
+                step=0,
+                kind="residual",
+                top=row_top,
+                height=25,
+                column_left=column_left,
+                column_right=column_right,
+            )
+            _print_trace_page_profile(
+                residual,
+                row_index=row_index,
+                step=0,
+                row_top=row_top,
+                row_bottom=explained_bottom,
+                column_left=column_left,
+                column_right=column_right,
+            )
+
+        while glyphs < args.max_glyphs:
+            phase_started = perf_counter()
+            hit, candidates = find_next_baseline_up(
+                residual.pixels,
+                residual.rows,
+                library,
+                baseline=baseline,
+                row_top=row_top,
+                profile_bottom=explained_bottom,
+                after_left=current_left,
+                column_right=column_right,
+                stats=baseline_stats,
+            )
+            elapsed = perf_counter() - phase_started
+            row_baseline += elapsed
+            baseline_total += elapsed
+            row_baseline_calls += 1
+            baseline_calls += 1
+
+            if trace:
+                print(
+                    f"directional-trace: row={row_index} step={glyphs} after_left={current_left} "
+                    f"profile_bottom={explained_bottom} candidates={len(candidates)} "
+                    f"accepted={_match_summary(hit) if hit is not None else None}",
+                    flush=True,
+                )
+                for candidate_index, candidate in enumerate(candidates):
+                    print(
+                        f"directional-trace-candidate: row={row_index} step={glyphs} "
+                        f"n={candidate_index} {_match_summary(candidate)}",
+                        flush=True,
+                    )
+
+            if hit is None:
+                baseline_misses += 1
+                stop_candidates = len(candidates)
+                if candidates:
+                    status = "unresolved"
+                break
+
+            baseline_hits += 1
+            labels.append(hit.model.label)
+            phase_started = perf_counter()
+            residual.consume(hit.pixels)
+            elapsed = perf_counter() - phase_started
+            row_consume += elapsed
+            consume_total += elapsed
+            current_left = hit.left
+            baseline = hit.baseline
+            explained_bottom = max(explained_bottom, max(y for _x, y in hit.pixels))
+            if trace:
+                _print_trace_raster(
+                    hit.pixels,
+                    row_index=row_index,
+                    step=glyphs,
+                    kind=f"glyph:{hit.model.label}",
+                    top=row_top,
+                    height=25,
+                    column_left=column_left,
+                    column_right=column_right,
+                )
+                _print_trace_raster(
+                    residual.pixels,
+                    row_index=row_index,
+                    step=glyphs,
+                    kind="residual",
+                    top=row_top,
+                    height=25,
+                    column_left=column_left,
+                    column_right=column_right,
+                )
+                _print_trace_page_profile(
+                    residual,
+                    row_index=row_index,
+                    step=glyphs,
+                    row_top=row_top,
+                    row_bottom=explained_bottom,
+                    column_left=column_left,
+                    column_right=column_right,
+                )
+            glyphs += 1
+        else:
+            status = "max-glyphs"
+
+        next_row_top = explained_bottom + 1
+
+        phase_started = perf_counter()
+        unexplained_above_boundary = _pixels_between_rows(
+            residual,
+            top=row_top,
+            bottom=next_row_top,
+        )
+        elapsed = perf_counter() - phase_started
+        row_residual += elapsed
+        residual_total += elapsed
+        if unexplained_above_boundary:
+            status = "unresolved"
+        _print_unexplained_row_check(
+            row_index=row_index,
+            row_top=row_top,
+            next_row_top=next_row_top,
+            unexplained=unexplained_above_boundary,
+        )
+
+        if trace and unexplained_above_boundary:
+            by_y: dict[int, list[int]] = {}
+            for x, y in sorted(unexplained_above_boundary, key=lambda pixel: (pixel[1], pixel[0])):
+                by_y.setdefault(y, []).append(x)
+            for y, xs in by_y.items():
+                print(
+                    f"directional-trace-residual: row={row_index} y={y} "
+                    f"left={min(xs)} right={max(xs)} xs={xs}",
+                    flush=True,
+                )
+
+        glyphs_total += glyphs
+        if status == "complete":
+            solved += 1
+        else:
+            unresolved += 1
+
+        row_seconds = perf_counter() - row_started
+        row_accounted = row_setup + row_first + row_baseline + row_consume + row_residual
+        row_other = max(0.0, row_seconds - row_accounted)
+        print(
+            f"directional-row: row={row_index} y={row_top}..{explained_bottom} "
+            f"reference_y={reference_top}..{reference_bottom-1} "
+            f"status={status} first_y={first_search.y} baseline={baseline} "
+            f"profile_bottom={explained_bottom} next_row_top={next_row_top} "
+            f"glyphs={glyphs} text={''.join(labels)!r} "
+            f"remaining={len(unexplained_above_boundary)} stop_candidates={stop_candidates} "
+            f"time={row_seconds:.4f}s setup={row_setup:.6f}s first={row_first:.6f}s "
+            f"baseline={row_baseline:.6f}s/{row_baseline_calls}calls "
+            f"consume={row_consume:.6f}s residual={row_residual:.6f}s other={row_other:.6f}s",
+            flush=True,
+        )
+
+        row_top = next_row_top
+        if row_top >= column_bottom:
+            break
+
+    matching_seconds = perf_counter() - matching_started
+    accounted = setup_total + first_total + baseline_total + consume_total + residual_total
+    other_total = max(0.0, matching_seconds - accounted)
+    average_baseline = baseline_total / baseline_calls if baseline_calls else 0.0
+    average_hit = baseline_total / baseline_hits if baseline_hits else 0.0
+    print(
+        f"directional-timing: setup={setup_total:.6f}s first={first_total:.6f}s "
+        f"baseline={baseline_total:.6f}s calls={baseline_calls} hits={baseline_hits} misses={baseline_misses} "
+        f"avg_baseline_call={average_baseline:.6f}s baseline_per_hit={average_hit:.6f}s "
+        f"consume={consume_total:.6f}s residual={residual_total:.6f}s other={other_total:.6f}s",
+        flush=True,
+    )
+    print(
+        f"directional-baseline-stats: calls={baseline_stats.calls} y_rows={baseline_stats.y_rows} "
+        f"profile_points={baseline_stats.observed_pixels} model_visits={baseline_stats.model_visits} "
+        f"raw_tx={baseline_stats.raw_tx_proposals} in_bounds_tx={baseline_stats.in_bounds_tx} "
+        f"duplicate_tx={baseline_stats.duplicate_tx} unique_tx={baseline_stats.unique_tx} "
+        f"subset_checks={baseline_stats.subset_checks} exact_hits={baseline_stats.exact_hits}",
+        flush=True,
+    )
+    print(
+        f"directional-page-done: requested_rows={len(reference_rows)} solved={solved} unresolved={unresolved} "
+        f"glyphs={glyphs_total} matching={matching_seconds:.4f}s total={perf_counter()-total_started:.4f}s "
+        f"final_row_top={row_top}",
+        flush=True,
+    )
+    if args.pixel_grid_output is not None:
+        output = render_pixel_grid(
+            args.jsonl,
+            page_number=args.page,
+            threshold=args.threshold,
+            scale=args.pixel_grid_scale,
+            major_grid_step=args.pixel_grid_major_step,
+            label_step=args.pixel_grid_label_step,
+            output=args.pixel_grid_output,
+            residual_pixels=residual.pixels,
+            residual_bounds=bounds,
+        )
+        print(f"directional-pixel-grid: {output.resolve()}", flush=True)
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

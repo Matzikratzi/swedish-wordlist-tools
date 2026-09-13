@@ -1,0 +1,36 @@
+{
+  "algorithm": "ocr_find_unreviewed_glyph_rows_conservative",
+  "facit": {
+    "aggregate": "glyphs/saol14-manual-glyph-facit-v2.json",
+    "aggregate_sha256": "f0f293f87bc55e960a665a065623796b270bf294ec4dc07347dec329e06888b0",
+    "models": 428,
+    "split_store": "glyphs/facit-v2",
+    "split_store_sha256": "4610c68775c885f8848a31c16d3d536329792759856d68f21dbffeb495c932c3",
+    "verified_equal": true
+  },
+  "format": "saol14-ocr-conservative-baseline-v1",
+  "git_commit": "ba40a6d6c901a6728593649241c3b195c48cbcdb",
+  "outputs": {
+    "problems": {
+      "path": "problems.json",
+      "sha256": "21ca08825264484724429cdf7b43279ce551ffe7f83ee70521cf8788b8ceb60b"
+    },
+    "rows": {
+      "path": "rows.jsonl",
+      "sha256": "ef1d58c2332d484067c811cd6b639ab135cb92d5ea40f196ad1c8d8ab3e6de98"
+    },
+    "summary": {
+      "path": "summary.json",
+      "sha256": "4b124cc5e000627f362bcd159b6160254ebf9876f4eff44276a7465cc7929b7a"
+    }
+  },
+  "parameters": {
+    "end_page": 100,
+    "start_page": 1,
+    "threshold": 210
+  },
+  "source": {
+    "jsonl": "/home/matsj/proj/saol14-faksimil.jsonl",
+    "sha256": "6e98b62f4b49d2f7c5635a100aa1d0c33c3d38daa29ec43246f949ce5b99cb07"
+  }
+}
