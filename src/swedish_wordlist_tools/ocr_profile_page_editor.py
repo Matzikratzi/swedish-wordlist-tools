@@ -182,6 +182,10 @@ class ProfilePageEditor:
             self.prefix_len,
             "",
             "",
+            None,
+            None,
+            None,
+            None,
         )
         self.context = _build_minimal_page_context(
             self.jsonl,
