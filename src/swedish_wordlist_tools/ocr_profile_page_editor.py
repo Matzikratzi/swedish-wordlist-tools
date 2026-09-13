@@ -468,7 +468,7 @@ label{{display:flex;flex-direction:column;gap:3px}} input,select,button{{font:in
 <h1>SAOL profil-OCR – sida {state['page']}, kolumn {state['column']}, baseline {state['baseline_page']}</h1>
 <div class="navbar">{prev_link}{next_link}{prev_incomplete}{next_incomplete}
 <a class="nav" href="/?column={state['column']}&baseline={state['baseline_page']}&refresh=1">↻ räkna om hela sidan</a>
-<a class="nav" href="{state['dump_text_url']}">Dumpa raster som text</a>
+<button class="nav" type="button" id="copydump" data-url="{state['dump_text_url']}">Kopiera rasterdump</button>
 </div>
 <div class="context">{context_cards}</div>
 <div class="stats">Rekonstruerad rad {state['row_index']}; y={state['row_page_top']}..{state['row_page_bottom']-1};
@@ -543,6 +543,24 @@ function chooseRect(a,b){{let x0=Math.min(a.x,b.x),x1=Math.max(a.x,b.x),y0=Math.
 canvas.addEventListener('mousedown',e=>{{let p=point(e);if(e.shiftKey||e.altKey){{let k=p.x+','+p.y;if(source.has(k)){{if(e.altKey)chosen.delete(k);else chosen.add(k);sync();}}e.preventDefault();return;}}dragStart=p;dragNow=p;e.preventDefault();draw();}});
 canvas.addEventListener('mousemove',e=>{{if(dragStart){{dragNow=point(e);draw();}}}});
 window.addEventListener('mouseup',e=>{{if(!dragStart)return;dragNow=point(e);chooseRect(dragStart,dragNow);dragStart=null;dragNow=null;sync();}});
+document.getElementById('copydump').onclick=async function(){{
+ const button=this, old=button.textContent;
+ try {{
+   const response=await fetch(button.dataset.url);
+   if(!response.ok) throw new Error('HTTP '+response.status);
+   const dump=await response.text();
+   if(navigator.clipboard && navigator.clipboard.writeText) {{
+     await navigator.clipboard.writeText(dump);
+   }} else {{
+     const area=document.createElement('textarea');area.value=dump;area.style.position='fixed';area.style.opacity='0';
+     document.body.appendChild(area);area.select();document.execCommand('copy');area.remove();
+   }}
+   button.textContent='Kopierat!';
+   setTimeout(()=>button.textContent=old,1200);
+ }} catch(err) {{
+   alert('Kunde inte kopiera rasterdumpen: '+err);
+ }}
+}};
 document.getElementById('clear').onclick=()=>{{chosen.clear();sync();}};
 document.getElementById('grid').onchange=draw;document.getElementById('baseline').onchange=draw;
 img.onload=draw;
