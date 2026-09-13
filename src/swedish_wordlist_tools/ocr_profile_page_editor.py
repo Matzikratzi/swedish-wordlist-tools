@@ -123,14 +123,10 @@ class ProfilePageEditor:
                             )
         self.regression_targets = sorted(set(self.regression_targets))
 
-    def _refresh_current_page_targets(self) -> None:
-        if self.regression is None or self.result is None:
-            return
-        self.regression_targets = [
-            target for target in self.regression_targets
-            if target[0] != self.page_number
-        ]
-        for column in self.result.get("columns") or []:
+    @staticmethod
+    def _targets_from_page_result(page_number: int, result: dict) -> list[tuple[int, int, int]]:
+        targets: list[tuple[int, int, int]] = []
+        for column in result.get("columns") or []:
             deferred = {tuple(point) for point in column.get("deferred_pixels", [])}
             if not deferred:
                 continue
@@ -139,10 +135,69 @@ class ProfilePageEditor:
                 top = int(row["page_top"])
                 bottom = int(row["page_bottom"])
                 if any(top <= y < bottom for _x, y in deferred):
-                    self.regression_targets.append(
-                        (self.page_number, column_number, int(row["baseline"]))
+                    targets.append(
+                        (int(page_number), column_number, int(row["baseline"]))
                     )
+        return sorted(set(targets))
+
+    def _replace_page_targets(
+        self,
+        page_number: int,
+        targets: list[tuple[int, int, int]],
+    ) -> None:
+        self.regression_targets = [
+            target for target in self.regression_targets
+            if target[0] != int(page_number)
+        ]
+        self.regression_targets.extend(targets)
         self.regression_targets = sorted(set(self.regression_targets))
+
+    def _refresh_current_page_targets(self) -> None:
+        if self.regression is None or self.result is None:
+            return
+        self._replace_page_targets(
+            self.page_number,
+            self._targets_from_page_result(self.page_number, self.result),
+        )
+
+    def _validate_regression_page(self, page_number: int) -> None:
+        """Replace stale regression targets for one page with a live OCR result."""
+        if self.regression is None:
+            return
+        page_number = int(page_number)
+        if page_number == self.page_number and self.result is not None:
+            self._refresh_current_page_targets()
+            return
+
+        print(
+            f"profile-editor: validerar gamla problem på sida {page_number} med aktuellt facit ...",
+            flush=True,
+        )
+        batch._init_worker(
+            str(self.jsonl),
+            str(self.facit),
+            self.threshold,
+            self.prefix_len,
+            "",
+            "",
+            None,
+            None,
+            None,
+            None,
+        )
+        _build_minimal_page_context(
+            self.jsonl,
+            page_number,
+            self.threshold,
+        )
+        result = batch._ocr_page(page_number, self.frontier_slack)
+        live_targets = self._targets_from_page_result(page_number, result)
+        self._replace_page_targets(page_number, live_targets)
+        print(
+            f"profile-editor: sida {page_number}: "
+            f"{len(live_targets)} ofärdiga rader kvar",
+            flush=True,
+        )
 
     def switch_page(self, page_number: int, reason: str = "navigation") -> None:
         page_number = int(page_number)
@@ -156,22 +211,56 @@ class ProfilePageEditor:
         current: tuple[int, int, int],
         delta: int,
     ) -> tuple[int, int, int] | None:
+        """Navigate to the next problem that still reproduces with current facit.
+
+        Regression JSONL is only a seed list. Before returning a target on
+        another page, rerun that page with the current glyph library and replace
+        all stale targets for the page. Resolved rows are therefore skipped
+        automatically.
+        """
         if not self.regression_targets:
             return None
-        targets = self.regression_targets
+
         step = 1 if delta >= 0 else -1
-        if current in targets:
-            index = targets.index(current) + step
-            return targets[index] if 0 <= index < len(targets) else None
-        if step > 0:
-            for target in targets:
-                if target > current:
-                    return target
-        else:
-            for target in reversed(targets):
-                if target < current:
-                    return target
-        return None
+        checked_pages: set[int] = set()
+
+        while True:
+            targets = self.regression_targets
+            candidate = None
+            if step > 0:
+                for target in targets:
+                    if target > current:
+                        candidate = target
+                        break
+            else:
+                for target in reversed(targets):
+                    if target < current:
+                        candidate = target
+                        break
+
+            if candidate is None:
+                return None
+
+            candidate_page = int(candidate[0])
+            if candidate_page in checked_pages:
+                # This page was already recomputed in this search, so the
+                # candidate is live and safe to return.
+                return candidate
+
+            self._validate_regression_page(candidate_page)
+            checked_pages.add(candidate_page)
+
+            # The live page recomputation may have removed the candidate,
+            # changed its baseline, or removed every old problem on the page.
+            live_on_page = [
+                target
+                for target in self.regression_targets
+                if target[0] == candidate_page
+                and (target > current if step > 0 else target < current)
+            ]
+            if live_on_page:
+                return live_on_page[0] if step > 0 else live_on_page[-1]
+            # Otherwise loop: the next stale page will be validated in turn.
 
     def recompute(self, reason: str) -> None:
         print(f"profile-editor: räknar om hela sida {self.page_number} ({reason}) ...", flush=True)
