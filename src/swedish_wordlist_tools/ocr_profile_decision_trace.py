@@ -11,6 +11,7 @@ from .ocr_profile_automaton_parallel_benchmark import (
     _minimal_column_bounds,
 )
 from .ocr_profile_automaton_peel_benchmark import _compile_profile_prefix_trie
+from .ocr_profile_automaton_batch import _profile_point_is_visible
 
 
 def _style(model) -> str:
@@ -102,19 +103,18 @@ def trace_column(
                     for model_y, model_left in left_profile:
                         actual_x = profile_left.get(baseline + model_y)
                         expected_x = tx + model_left
-                        if actual_x is None or actual_x > expected_x:
+                        if not _profile_point_is_visible(actual_x, expected_x):
                             contradicted = True
                             break
-                        if actual_x == expected_x:
-                            support += 1
+                        support += 1
                     if not contradicted:
                         survivors.append((item, tx, baseline, support))
                 for (dy, dx), child in node["children"].items():
                     actual_x = profile_left.get(seed_y + dy)
                     expected_x = min_x + dx
-                    if actual_x is None or actual_x > expected_x:
+                    if not _profile_point_is_visible(actual_x, expected_x):
                         continue
-                    child_support = prefix_support + (1 if actual_x == expected_x else 0)
+                    child_support = prefix_support + 1
                     stack.append((child, child_support))
 
             survivors.sort(
