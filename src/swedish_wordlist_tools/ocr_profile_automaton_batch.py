@@ -362,15 +362,51 @@ def _ocr_column(
             else:
                 profile_left[page_y] = next_x
 
+        typographic_style = getattr(item.model.style, "typographic_style", None)
+        if typographic_style not in {"roman", "italic", "bold"}:
+            raw_style = str(item.model.style)
+            typographic_style = raw_style if raw_style in {"roman", "italic", "bold"} else "roman"
         accepted_streams[baseline].append(
-            (left, right, steps, min_x, item.model.label, item.model.style, top, bottom)
+            (
+                left,
+                right,
+                steps,
+                min_x,
+                item.model.label,
+                typographic_style,
+                top,
+                bottom,
+                len(placed),
+            )
         )
         steps += 1
 
     matching_seconds = perf_counter() - matching_started
     reconstructed = _reconstruct_rows_from_accepted_streams(accepted_streams)
-    rows = [
-        {
+    rows = []
+    for index, (representative, members, top, bottom, text_value, glyph_count) in enumerate(reconstructed):
+        row_entries = [
+            entry
+            for member in members
+            for entry in accepted_streams.get(member, [])
+        ]
+        row_entries.sort(key=lambda entry: (entry[0], entry[1], entry[2], entry[4], entry[5]))
+        matches = [
+            {
+                "left": int(entry[0]),
+                "right": int(entry[1]) + 1,
+                "label": str(entry[4]),
+                "style": str(entry[5]),
+                "pixels": int(entry[8]) if len(entry) > 8 else 0,
+                "top": int(entry[6]),
+                "bottom": int(entry[7]) + 1,
+                "baseline": int(member),
+            }
+            for member in members
+            for entry in accepted_streams.get(member, [])
+        ]
+        matches.sort(key=lambda match: (match["left"], match["right"], match["label"], match["style"]))
+        rows.append({
             "index": index,
             "baseline": representative,
             "baseline_members": list(members),
@@ -378,10 +414,9 @@ def _ocr_column(
             "page_bottom": bottom + 1,
             "glyphs": glyph_count,
             "text": text_value,
-        }
-        for index, (representative, members, top, bottom, text_value, glyph_count)
-        in enumerate(reconstructed)
-    ]
+            "matches": matches,
+            "matched_pixels": sum(int(match["pixels"]) for match in matches),
+        })
 
     reference_columns = context["row_map"].get("columns") or []
     reference_rows = (
