@@ -35,17 +35,19 @@ def _column_bounds_with_virtual_first_row_predecessor(
     column: int,
     *,
     header_cutoff_y: int = 50,
+    min_slab_height: int = 20,
 ) -> tuple[int, int, int, int]:
-    """Start first-row OCR after the fixed-left ink slab below the header.
+    """Choose the upper OCR envelope for the first real row.
 
-    Starting at header_cutoff_y, find the first raster row with ink in the
-    column.  If the column left profile then stays at exactly the same x while
-    descending, treat that as the leading ink slab/rule.  The slab ends at the
-    first raster row whose left-profile x is greater than that fixed x.  OCR
-    begins there.
+    Below the fixed page-header cutoff, ordinary columns start at their first
+    black pixel. Only the leftmost column can contain the leading ink slab.
+    That slab is recognized by an exact invariant: its left profile stays at
+    exactly one x value for more than min_slab_height raster rows. When that
+    long fixed profile finally moves to a larger x, OCR starts there.
 
-    No synthetic baseline or reconstructed row is created; only the upper OCR
-    envelope for the first real row is adjusted.
+    If column 0 does not satisfy that invariant, the first black pixel below the
+    header cutoff belongs to the first real text row. No synthetic baseline or
+    reconstructed row is ever created.
     """
     left, right, segmented_top, bottom = _minimal_column_bounds(context, column)
     search_top = max(0, int(header_cutoff_y))
@@ -56,33 +58,35 @@ def _column_bounds_with_virtual_first_row_predecessor(
     threshold = int(context["threshold"])
     pixels = gray.load()
 
-    first_ink_y = None
-    fixed_x = None
-    for y in range(search_top, segmented_top):
+    profile: list[tuple[int, int]] = []
+    for y in range(search_top, segmented_top + 1):
         xs = [x for x in range(left, right) if int(pixels[x, y]) < threshold]
         if xs:
-            first_ink_y = y
-            fixed_x = min(xs)
-            break
+            profile.append((y, min(xs)))
 
-    if first_ink_y is None or fixed_x is None:
+    if not profile:
         return left, right, segmented_top, bottom
 
-    saw_fixed_profile = False
-    for y in range(first_ink_y, segmented_top):
-        xs = [x for x in range(left, right) if int(pixels[x, y]) < threshold]
-        if not xs:
-            continue
-        profile_x = min(xs)
-        if profile_x == fixed_x:
-            saw_fixed_profile = True
-            continue
-        if saw_fixed_profile and profile_x > fixed_x:
-            return left, right, y, bottom
-        if not saw_fixed_profile:
-            return left, right, segmented_top, bottom
+    first_ink_y, fixed_x = profile[0]
 
-    return left, right, segmented_top, bottom
+    # The ink slab exists only in the leftmost column.
+    if column != 0:
+        return left, right, first_ink_y, bottom
+
+    fixed_rows = 0
+    for y, profile_x in profile:
+        if profile_x == fixed_x:
+            fixed_rows += 1
+            continue
+
+        if profile_x > fixed_x and fixed_rows > min_slab_height:
+            return left, right, y, bottom
+
+        # A short fixed run, or any move to the left, means that the first ink
+        # was already part of the real first text row rather than the slab.
+        return left, right, first_ink_y, bottom
+
+    return left, right, first_ink_y, bottom
 
 def _profile_point_is_visible(actual_x: int | None, expected_x: int) -> bool:
     """Require each glyph left-profile point to be the live column frontier.
