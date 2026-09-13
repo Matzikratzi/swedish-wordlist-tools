@@ -448,7 +448,7 @@ canvas{{display:block;image-rendering:pixelated;cursor:crosshair;touch-action:no
 .match-label{{position:absolute;top:2px;text-align:center;overflow:visible;white-space:nowrap;border-left:1px solid rgba(0,0,0,.15);border-right:1px solid rgba(0,0,0,.15);box-sizing:border-box}}
 .match-label .glyph{{font-size:16px;line-height:17px}}
 .match-label.roman{{color:#0b57d0}}
-.match-label.italic{{color:#188038}}
+.match-label.italic{{color:#e66a00}}
 .match-label.bold{{color:#111}}
 .match-label.italic .glyph{{font-style:italic}}
 .match-label.bold .glyph{{font-weight:700}}
@@ -660,7 +660,7 @@ def _render_dump_png(state: dict) -> bytes:
     draw.line((0, band_top, width * scale, band_top), fill=(150, 150, 150), width=1)
     style_colors = {
         "roman": (11, 87, 208),
-        "italic": (24, 128, 56),
+        "italic": (230, 106, 0),
         "bold": (17, 17, 17),
     }
     for match in state.get("matches") or []:
