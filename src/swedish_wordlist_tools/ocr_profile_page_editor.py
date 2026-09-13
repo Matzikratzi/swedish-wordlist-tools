@@ -82,6 +82,7 @@ class ProfilePageEditor:
         threshold: int,
         prefix_len: int,
         frontier_slack: int,
+        regression: Path | None = None,
     ):
         self.jsonl = jsonl
         self.facit = facit
@@ -89,10 +90,88 @@ class ProfilePageEditor:
         self.threshold = int(threshold)
         self.prefix_len = int(prefix_len)
         self.frontier_slack = int(frontier_slack)
+        self.regression = Path(regression) if regression else None
+        self.regression_targets: list[tuple[int, int, int]] = []
         self.message = ""
         self.context: dict | None = None
         self.result: dict | None = None
+        if self.regression is not None:
+            self._load_regression_targets()
         self.recompute("initial")
+
+    def _load_regression_targets(self) -> None:
+        self.regression_targets = []
+        if self.regression is None or not self.regression.exists():
+            return
+        with self.regression.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                page = json.loads(line)
+                page_number = int(page["page"])
+                for column in page.get("columns") or []:
+                    deferred = {tuple(point) for point in column.get("deferred_pixels", [])}
+                    if not deferred:
+                        continue
+                    column_number = int(column["column"])
+                    for row in column.get("rows") or []:
+                        top = int(row["page_top"])
+                        bottom = int(row["page_bottom"])
+                        if any(top <= y < bottom for _x, y in deferred):
+                            self.regression_targets.append(
+                                (page_number, column_number, int(row["baseline"]))
+                            )
+        self.regression_targets = sorted(set(self.regression_targets))
+
+    def _refresh_current_page_targets(self) -> None:
+        if self.regression is None or self.result is None:
+            return
+        self.regression_targets = [
+            target for target in self.regression_targets
+            if target[0] != self.page_number
+        ]
+        for column in self.result.get("columns") or []:
+            deferred = {tuple(point) for point in column.get("deferred_pixels", [])}
+            if not deferred:
+                continue
+            column_number = int(column["column"])
+            for row in column.get("rows") or []:
+                top = int(row["page_top"])
+                bottom = int(row["page_bottom"])
+                if any(top <= y < bottom for _x, y in deferred):
+                    self.regression_targets.append(
+                        (self.page_number, column_number, int(row["baseline"]))
+                    )
+        self.regression_targets = sorted(set(self.regression_targets))
+
+    def switch_page(self, page_number: int, reason: str = "navigation") -> None:
+        page_number = int(page_number)
+        if page_number == self.page_number and self.result is not None:
+            return
+        self.page_number = page_number
+        self.recompute(reason)
+
+    def global_incomplete_nav(
+        self,
+        current: tuple[int, int, int],
+        delta: int,
+    ) -> tuple[int, int, int] | None:
+        if not self.regression_targets:
+            return None
+        targets = self.regression_targets
+        step = 1 if delta >= 0 else -1
+        if current in targets:
+            index = targets.index(current) + step
+            return targets[index] if 0 <= index < len(targets) else None
+        if step > 0:
+            for target in targets:
+                if target > current:
+                    return target
+        else:
+            for target in reversed(targets):
+                if target < current:
+                    return target
+        return None
 
     def recompute(self, reason: str) -> None:
         print(f"profile-editor: räknar om hela sida {self.page_number} ({reason}) ...", flush=True)
@@ -110,6 +189,7 @@ class ProfilePageEditor:
             self.threshold,
         )
         self.result = batch._ocr_page(self.page_number, self.frontier_slack)
+        self._refresh_current_page_targets()
         print(
             f"profile-editor: sida {self.page_number} klar: "
             f"rows={self.result['row_count']} active_remaining={self.result['active_remaining']} "
@@ -199,7 +279,7 @@ class ProfilePageEditor:
             "text": str(row.get("text") or ""),
             "image": _png_data_uri(raster),
             "incomplete": self.row_is_incomplete(pair),
-            "url": "/?" + urlencode({"column": column, "baseline": int(row["baseline"])}),
+            "url": "/?" + urlencode({"page": self.page_number, "column": column, "baseline": int(row["baseline"])}),
         }
 
     def row_state(self, column: int, baseline: int | None) -> dict:
@@ -331,15 +411,31 @@ class ProfilePageEditor:
         current = (column, row)
         previous = self.nav(current, -1)
         following = self.nav(current, +1)
-        previous_incomplete = self.incomplete_nav(current, -1)
-        next_incomplete = self.incomplete_nav(current, +1)
+        if self.regression is not None:
+            current_global = (self.page_number, column, int(row["baseline"]))
+            previous_incomplete = self.global_incomplete_nav(current_global, -1)
+            next_incomplete = self.global_incomplete_nav(current_global, +1)
+        else:
+            previous_incomplete = self.incomplete_nav(current, -1)
+            next_incomplete = self.incomplete_nav(current, +1)
         context_pairs = [pair for pair in (previous, current, following) if pair is not None]
 
         def link_for(pair):
             if pair is None:
                 return None
+            if len(pair) == 3:
+                p, c, baseline_value = pair
+                return "/?" + urlencode({
+                    "page": int(p),
+                    "column": int(c),
+                    "baseline": int(baseline_value),
+                })
             c, r = pair
-            return "/?" + urlencode({"column": c, "baseline": int(r["baseline"])})
+            return "/?" + urlencode({
+                "page": self.page_number,
+                "column": c,
+                "baseline": int(r["baseline"]),
+            })
 
         return {
             "page": self.page_number,
@@ -371,6 +467,7 @@ class ProfilePageEditor:
             "deferred_remaining": int(self.result["deferred_remaining"]),
             "row_count": int(self.result["row_count"]),
             "dump_text_url": "/dump.txt?" + urlencode({
+                "page": self.page_number,
                 "column": column,
                 "baseline": int(row["baseline"]),
             }),
@@ -754,6 +851,11 @@ def main() -> int:
         help="Start on row number (1-based; within --column when column is given, otherwise across the whole page).",
     )
     target.add_argument("--baseline", type=int)
+    ap.add_argument(
+        "--regression",
+        type=Path,
+        help="Batch regression JSONL; enables previous/next incomplete navigation across pages.",
+    )
     ap.add_argument("--threshold", type=int, default=210)
     ap.add_argument("--prefix-len", type=int, default=5)
     ap.add_argument("--frontier-slack", type=int, default=5)
@@ -769,6 +871,7 @@ def main() -> int:
         threshold=args.threshold,
         prefix_len=args.prefix_len,
         frontier_slack=args.frontier_slack,
+        regression=args.regression,
     )
 
     editor.recompute("initial page")
@@ -793,6 +896,9 @@ def main() -> int:
 
         def _target(self):
             query = self._params()
+            page = int((query.get("page") or [str(editor.page_number)])[0])
+            if page != editor.page_number:
+                editor.switch_page(page, "cross-page navigation")
             column = int((query.get("column") or [str(initial_column)])[0])
             raw = (query.get("baseline") or [str(initial_baseline) if initial_baseline is not None else ""])[0]
             baseline = int(raw) if raw else None
@@ -844,6 +950,7 @@ def main() -> int:
                 editor.message = editor.add_glyph(state, form)
                 target = editor.row_state(column, baseline)
                 location = "/?" + urlencode({
+                    "page": target["page"],
                     "column": target["column"],
                     "baseline": target["baseline_page"],
                 })
@@ -860,6 +967,7 @@ def main() -> int:
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     initial = editor.row_state(initial_column, initial_baseline)
     url = f"http://{args.host}:{args.port}/?" + urlencode({
+        "page": initial["page"],
         "column": initial["column"],
         "baseline": initial["baseline_page"],
     })
