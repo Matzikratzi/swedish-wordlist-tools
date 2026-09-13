@@ -72,15 +72,10 @@ def trace_column(
     while residual.pixels and profile_left:
         min_x = min(profile_left.values())
         min_ys = tuple(sorted(y for y, x in profile_left.items() if x == min_x))
-        trace_here = min_x == trace_x
-        if trace_here:
+        at_trace_x = min_x == trace_x
+        trace_here = False
+        if at_trace_x:
             seen_target = True
-            print(
-                f"decision-frontier page={page_number} col={column} step={steps} "
-                f"min_x={min_x} min_ys={list(min_ys)} residual={len(residual.pixels)} "
-                f"deferred_total={len(deferred_frontier_pixels)}",
-                flush=True,
-            )
 
         accepted = None
         for seed_index, seed_y in enumerate(min_ys):
@@ -132,15 +127,22 @@ def trace_column(
                 )
             )
 
-            if trace_here:
-                contains_target_baseline = any(
-                    baseline == trace_baseline
-                    for _item, _tx, baseline, _support in survivors
+            contains_target_baseline = any(
+                baseline == trace_baseline
+                for _item, _tx, baseline, _support in survivors
+            )
+            trace_seed = at_trace_x and contains_target_baseline
+            trace_here = trace_here or trace_seed
+            if trace_seed:
+                print(
+                    f"decision-frontier page={page_number} col={column} step={steps} "
+                    f"min_x={min_x} seed_index={seed_index} seed_y={seed_y} "
+                    f"residual={len(residual.pixels)} deferred_total={len(deferred_frontier_pixels)}",
+                    flush=True,
                 )
                 print(
                     f"decision-seed index={seed_index} seed_y={seed_y} "
-                    f"survivors={len(survivors)} contains_baseline_{trace_baseline}="
-                    f"{contains_target_baseline}",
+                    f"survivors={len(survivors)} contains_baseline_{trace_baseline}=True",
                     flush=True,
                 )
                 for rank, entry in enumerate(survivors, start=1):
@@ -160,7 +162,7 @@ def trace_column(
             for rank, entry in enumerate(survivors, start=1):
                 data = _candidate_data(entry, residual, deferred_frontier_pixels)
                 item = data["item"]
-                if trace_here:
+                if trace_seed:
                     print(
                         f"decision-2d seed_index={seed_index} rank={rank} "
                         f"label={item.model.label!r} style={_style(item.model)} "
@@ -173,7 +175,7 @@ def trace_column(
                 if data["missing"]:
                     continue
                 accepted = (data, seed_y, rank)
-                if trace_here:
+                if trace_seed:
                     print(
                         f"decision-select seed_index={seed_index} rank={rank} "
                         f"label={item.model.label!r} style={_style(item.model)} "
@@ -183,7 +185,7 @@ def trace_column(
                     )
                 break
             if accepted is not None:
-                if trace_here and seed_index + 1 < len(min_ys):
+                if trace_seed and seed_index + 1 < len(min_ys):
                     print(
                         f"decision-stop-seeds accepted_seed_index={seed_index} "
                         f"unexamined_seed_count={len(min_ys) - seed_index - 1}",
@@ -255,7 +257,8 @@ def trace_column(
                 profile_left[page_y] = next_x
         steps += 1
 
-        # A real commit at the requested x answers which candidate consumed ink.
+        # Stop only after the requested baseline actually participated in this
+        # x-frontier decision. Earlier commits at the same x may belong to other rows.
         if trace_here:
             return 0
 
