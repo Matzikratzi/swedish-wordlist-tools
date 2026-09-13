@@ -1,0 +1,55 @@
+{
+  "label": "-",
+  "role": "unknown",
+  "style": "roman",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -3
+    ],
+    [
+      1,
+      -3
+    ],
+    [
+      2,
+      -3
+    ],
+    [
+      3,
+      -3
+    ],
+    [
+      4,
+      -3
+    ],
+    [
+      5,
+      -3
+    ],
+    [
+      6,
+      -3
+    ],
+    [
+      7,
+      -3
+    ]
+  ],
+  "sources": [
+    {
+      "page": 2,
+      "column": 1,
+      "baseline": 200,
+      "page_bbox": [
+        348,
+        197,
+        356,
+        198
+      ],
+      "source": "profile-page-editor"
+    }
+  ],
+  "reviewed": true,
+  "model_id": "g000453"
+}
