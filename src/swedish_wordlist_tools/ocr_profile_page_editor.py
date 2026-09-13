@@ -305,6 +305,10 @@ class ProfilePageEditor:
                 "style": str(match.get("style") or "roman"),
                 "width": match_right - match_left,
                 "pixels": len(owned_points),
+                "points": [
+                    [x - left, y - top]
+                    for x, y in sorted(owned_points, key=lambda p: (p[1], p[0]))
+                ],
             })
         matched_pixels = len(matched_page_points)
 
@@ -465,7 +469,7 @@ h1{{font-size:21px;margin:0 0 8px}} code{{background:#eee;padding:2px 4px}}
 .pixel-wrap{{display:inline-block;min-width:max-content}}
 canvas{{display:block;image-rendering:pixelated;cursor:crosshair;touch-action:none}}
 .matchband{{position:relative;height:68px;margin-top:2px;background:#fafafa;border-top:1px solid #bbb;font:12px/13px monospace}}
-.match-label{{position:absolute;top:2px;text-align:center;overflow:visible;white-space:nowrap;border-left:1px solid rgba(0,0,0,.15);border-right:1px solid rgba(0,0,0,.15);box-sizing:border-box}}
+.match-label{{position:absolute;top:2px;text-align:center;overflow:visible;white-space:nowrap;border-left:1px solid rgba(0,0,0,.15);border-right:1px solid rgba(0,0,0,.15);box-sizing:border-box;cursor:pointer}}
 .match-label .glyph{{font-size:16px;line-height:17px}}
 .match-label.roman{{color:#0b57d0}}
 .match-label.italic{{color:#e66a00}}
@@ -522,7 +526,7 @@ const source=new Set(S.source_points.map(p=>p[0]+','+p[1]));
 const allSource=new Set(S.all_source_points.map(p=>p[0]+','+p[1]));
 const foreign=new Set(S.foreign_points.map(p=>p[0]+','+p[1]));
 const deferred=new Set(S.deferred_points.map(p=>p[0]+','+p[1]));
-const chosen=new Set(); let dragStart=null,dragNow=null;
+const chosen=new Set(); let selectedMatch=null; let dragStart=null,dragNow=null;
 const img=new Image();img.src=S.image;
 function point(e){{const r=canvas.getBoundingClientRect();return {{
  x:Math.max(0,Math.min(S.width-1,Math.floor((e.clientX-r.left)*(canvas.width/r.width)/scale))),
@@ -543,6 +547,12 @@ function renderMatchBand(){{
    const width=document.createElement('div');width.textContent=String(m.width);
    const px=document.createElement('div');px.textContent='px';
    el.title=m.label+' / '+m.style+' / '+m.pixels+' matchade pixlar';
+   const index=S.matches.indexOf(m);
+   if(selectedMatch===index) el.style.background='#dbeafe';
+   el.onclick=()=>{{
+     selectedMatch=(selectedMatch===index)?null:index;
+     draw();
+   }};
    el.append(glyph,style,width,px);
    matchband.appendChild(el);
  }}
@@ -552,6 +562,13 @@ function draw(){{
  ctx.fillStyle='white';ctx.fillRect(0,0,canvas.width,canvas.height);
  for(const key of allSource){{const [x,y]=key.split(',').map(Number);ctx.fillStyle=foreign.has(key)?'#b5b5b5':'#000';ctx.fillRect(x*scale,topPad+y*scale,scale,scale);}}
  for(const key of deferred){{const [x,y]=key.split(',').map(Number);ctx.fillStyle='rgba(255,0,0,.75)';ctx.fillRect(x*scale,topPad+y*scale,scale,scale);}}
+ if(selectedMatch!==null){{
+   for(const p of S.matches[selectedMatch].points){{
+     const x=p[0],y=p[1];
+     ctx.fillStyle='rgba(0,110,255,.68)';
+     ctx.fillRect(x*scale,topPad+y*scale,scale,scale);
+   }}
+ }}
  for(const key of chosen){{const [x,y]=key.split(',').map(Number);ctx.fillStyle='rgba(0,145,230,.52)';ctx.fillRect(x*scale,topPad+y*scale,scale,scale);}}
  if(document.getElementById('grid').checked){{ctx.strokeStyle='rgba(80,80,80,.23)';ctx.lineWidth=1;
   for(let x=0;x<=S.width;x++){{let q=x*scale+.5;ctx.beginPath();ctx.moveTo(q,topPad);ctx.lineTo(q,topPad+S.height*scale);ctx.stroke();}}
