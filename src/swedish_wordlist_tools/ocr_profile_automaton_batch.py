@@ -30,6 +30,17 @@ _WORKER_DEFERRED_DIR: Path | None = None
 _WORKER_TRACE: tuple[int | None, int | None, int | None, int | None] = (None, None, None, None)
 
 
+def _profile_point_is_visible(actual_x: int | None, expected_x: int) -> bool:
+    """Require each glyph left-profile point to be the live column frontier.
+
+    Physical text rows do not interleave vertically. Once earlier glyphs on the
+    same row are consumed, every left-profile point of the next correct glyph
+    must therefore be visible in profile_left. Allowing actual_x < expected_x
+    lets a lower-row glyph borrow interior pixels from the row above.
+    """
+    return actual_x == expected_x
+
+
 def _init_worker(
     jsonl: str,
     facit: str,
@@ -164,11 +175,10 @@ def _ocr_column(
                         actual_x = profile_left.get(baseline + model_y)
                         expected_x = tx + model_left
                         profile_rows_checked += 1
-                        if actual_x is None or actual_x > expected_x:
+                        if not _profile_point_is_visible(actual_x, expected_x):
                             contradicted = True
                             break
-                        if actual_x == expected_x:
-                            support += 1
+                        support += 1
                     if not contradicted:
                         survivors.append((item, tx, baseline, support))
 
@@ -176,9 +186,9 @@ def _ocr_column(
                     actual_x = profile_left.get(seed_y + dy)
                     expected_x = min_x + dx
                     profile_rows_checked += 1
-                    if actual_x is None or actual_x > expected_x:
+                    if not _profile_point_is_visible(actual_x, expected_x):
                         continue
-                    child_support = prefix_support + (1 if actual_x == expected_x else 0)
+                    child_support = prefix_support + 1
                     stack.append((child, child_support))
 
             best_survivors = max(best_survivors, len(survivors))
