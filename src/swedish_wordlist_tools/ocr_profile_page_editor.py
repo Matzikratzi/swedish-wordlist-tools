@@ -325,28 +325,41 @@ class ProfilePageEditor:
         )
         ownership_bottom = row_match_bottom(row)
 
-        match_tops = [int(match["top"]) for match in row.get("matches") or []]
-        match_bottoms = [int(match["bottom"]) for match in row.get("matches") or []]
-        top = max(col_top, min(match_tops) if match_tops else row_top)
-        bottom = min(col_bottom, max(match_bottoms) if match_bottoms else row_bottom)
+        def row_visual_extent(candidate: dict) -> tuple[int, int]:
+            matches = candidate.get("matches") or []
+            candidate_top = min(
+                (int(match["top"]) for match in matches),
+                default=int(candidate["page_top"]),
+            )
+            candidate_bottom = max(
+                (int(match["bottom"]) for match in matches),
+                default=int(candidate["page_bottom"]),
+            )
+            return candidate_top, candidate_bottom
+
+        # Never crop from only the glyphs already accepted on the current row.
+        # If a glyph is entirely missing, doing so can hide exactly the pixels
+        # the reviewer needs to capture.  Build a safe three-row envelope first,
+        # then read raw thresholded facsimile pixels from that full envelope.
+        visual_rows = [
+            candidate
+            for candidate in (previous_row, row, next_row)
+            if candidate is not None
+        ]
+        visual_extents = [row_visual_extent(candidate) for candidate in visual_rows]
+        top = max(col_top, min(extent[0] for extent in visual_extents))
+        bottom = min(col_bottom, max(extent[1] for extent in visual_extents))
         left = col_left
         right = col_right
         gray = self.context["gray"]
         pixels = gray.load()
 
-        # Optional visual context: previous/next reconstructed row in the SAME
-        # column. Coordinates are relative to the current row crop, so y may be
-        # negative or larger than the current crop height.
         neighbor_rows = [candidate for candidate in (previous_row, next_row) if candidate is not None]
         neighbor_points: list[list[int]] = []
         context_top = top
         context_bottom = bottom
         for neighbor in neighbor_rows:
-            n_matches = neighbor.get("matches") or []
-            n_top = min((int(match["top"]) for match in n_matches), default=int(neighbor["page_top"]))
-            n_bottom = max((int(match["bottom"]) for match in n_matches), default=int(neighbor["page_bottom"]))
-            context_top = min(context_top, n_top)
-            context_bottom = max(context_bottom, n_bottom)
+            n_top, n_bottom = row_visual_extent(neighbor)
             for y in range(max(col_top, n_top), min(col_bottom, n_bottom)):
                 for x in range(left, right):
                     if int(pixels[x, y]) < self.threshold:
@@ -490,8 +503,8 @@ class ProfilePageEditor:
             "foreign_points": foreign_points,
             "deferred_points": deferred_local,
             "neighbor_points": neighbor_points,
-            "neighbor_min_y": context_top - top,
-            "neighbor_max_y": context_bottom - top,
+            "neighbor_min_y": 0,
+            "neighbor_max_y": bottom - top,
             "row_boundary_top": ownership_top - top,
             "row_boundary_bottom": ownership_bottom - top,
             "image": _png_data_uri(raster),
@@ -653,7 +666,7 @@ deferred=<span class="red">{state['deferred_remaining']}</span>.</div>
 <button type="submit">Spara glyph och räkna om hela sidan</button>
 </div>
 </form>
-<p class="hint">Dra en rektangel över svarta pixlar för att välja dem. Shift-klick lägger till en enskild svart pixel; Alt-klick tar bort. Röda rutor är deferred-pixlar från profil-OCR:n. Röda horisontella linjer visar radgränserna direkt under föregående rads lägsta matchade pixel. De tre små raderna ovan visar föregående, aktuell och nästa rad. "Ickeklar" betyder att raden innehåller deferred-pixlar. Efter sparning byggs facit/trie om, hela sidan OCR:as om och editorn återgår till raden närmast samma baseline.</p>
+<p class="hint">Dra en rektangel över svarta pixlar för att välja dem. Shift-klick lägger till en enskild svart pixel; Alt-klick tar bort. Röda rutor är deferred-pixlar från profil-OCR:n. Röda horisontella linjer visar radgränserna direkt under föregående rads lägsta matchade pixel. Huvudrastret läser alltid råa faksimilpixlar över föregående, aktuell och nästa rads fulla vertikala område, så omatchade pixlar kapas inte bort. De tre små raderna ovan visar föregående, aktuell och nästa rad. "Ickeklar" betyder att raden innehåller deferred-pixlar. Efter sparning byggs facit/trie om, hela sidan OCR:as om och editorn återgår till raden närmast samma baseline.</p>
 <script>
 const S={data}, scale=9, topPad=28;
 const canvas=document.getElementById('row'),ctx=canvas.getContext('2d'),matchband=document.getElementById('matchband');
