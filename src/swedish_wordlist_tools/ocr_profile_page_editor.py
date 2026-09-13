@@ -320,6 +320,24 @@ class ProfilePageEditor:
         gray = self.context["gray"]
         pixels = gray.load()
 
+        # Optional visual context: previous/next reconstructed row in the SAME
+        # column. Coordinates are relative to the current row crop, so y may be
+        # negative or larger than the current crop height.
+        neighbor_rows = [candidate for candidate in (previous_row, next_row) if candidate is not None]
+        neighbor_points: list[list[int]] = []
+        context_top = top
+        context_bottom = bottom
+        for neighbor in neighbor_rows:
+            n_matches = neighbor.get("matches") or []
+            n_top = min((int(match["top"]) for match in n_matches), default=int(neighbor["page_top"]))
+            n_bottom = max((int(match["bottom"]) for match in n_matches), default=int(neighbor["page_bottom"]))
+            context_top = min(context_top, n_top)
+            context_bottom = max(context_bottom, n_bottom)
+            for y in range(max(col_top, n_top), min(col_bottom, n_bottom)):
+                for x in range(left, right):
+                    if int(pixels[x, y]) < self.threshold:
+                        neighbor_points.append([x - left, y - top])
+
         # source_points is filled after excluding pixels already explained
         # by matched glyphs on neighbouring reconstructed rows.
         source_points = []
@@ -457,6 +475,9 @@ class ProfilePageEditor:
             "all_source_points": all_source_points,
             "foreign_points": foreign_points,
             "deferred_points": deferred_local,
+            "neighbor_points": neighbor_points,
+            "neighbor_min_y": context_top - top,
+            "neighbor_max_y": context_bottom - top,
             "image": _png_data_uri(raster),
             "previous_url": link_for(previous),
             "next_url": link_for(following),
@@ -600,6 +621,7 @@ deferred=<span class="red">{state['deferred_remaining']}</span>.</div>
 <div class="controls">
 <label class="inline"><input id="grid" type="checkbox" checked> rutnät</label>
 <label class="inline"><input id="baseline" type="checkbox" checked> baseline</label>
+<label class="inline"><input id="neighbors" type="checkbox"> grannrader i samma kolumn</label>
 <button type="button" id="clear">Rensa pixelval</button>
 <span id="count">0 valda pixlar</span>
 </div>
@@ -623,11 +645,14 @@ const source=new Set(S.source_points.map(p=>p[0]+','+p[1]));
 const allSource=new Set(S.all_source_points.map(p=>p[0]+','+p[1]));
 const foreign=new Set(S.foreign_points.map(p=>p[0]+','+p[1]));
 const deferred=new Set(S.deferred_points.map(p=>p[0]+','+p[1]));
+const neighborPoints=new Set(S.neighbor_points.map(p=>p[0]+','+p[1]));
 const chosen=new Set(); let selectedMatch=null; let dragStart=null,dragNow=null;
 const img=new Image();img.src=S.image;
-function point(e){{const r=canvas.getBoundingClientRect();return {{
+function viewOriginY(){{return document.getElementById('neighbors').checked?Math.min(0,S.neighbor_min_y):0;}}
+function viewBottomY(){{return document.getElementById('neighbors').checked?Math.max(S.height,S.neighbor_max_y):S.height;}}
+function point(e){{const r=canvas.getBoundingClientRect(), originY=viewOriginY(), bottomY=viewBottomY();return {{
  x:Math.max(0,Math.min(S.width-1,Math.floor((e.clientX-r.left)*(canvas.width/r.width)/scale))),
- y:Math.max(0,Math.min(S.height-1,Math.floor(((e.clientY-r.top)*(canvas.height/r.height)-topPad)/scale)))
+ y:Math.max(originY,Math.min(bottomY-1,originY+Math.floor(((e.clientY-r.top)*(canvas.height/r.height)-topPad)/scale)))
 }};}}
 function sync(){{document.getElementById('selectedPixels').value=[...chosen].join(';');document.getElementById('count').textContent=chosen.size+' valda pixlar';draw();}}
 function renderMatchBand(){{
@@ -655,24 +680,29 @@ function renderMatchBand(){{
  }}
 }}
 function draw(){{
- canvas.width=S.width*scale;canvas.height=S.height*scale+topPad;ctx.imageSmoothingEnabled=false;
+ const originY=viewOriginY(),bottomY=viewBottomY(),viewHeight=bottomY-originY;
+ canvas.width=S.width*scale;canvas.height=viewHeight*scale+topPad;ctx.imageSmoothingEnabled=false;
  ctx.fillStyle='white';ctx.fillRect(0,0,canvas.width,canvas.height);
- for(const key of allSource){{const [x,y]=key.split(',').map(Number);ctx.fillStyle=foreign.has(key)?'#b5b5b5':'#000';ctx.fillRect(x*scale,topPad+y*scale,scale,scale);}}
- for(const key of deferred){{const [x,y]=key.split(',').map(Number);ctx.fillStyle='rgba(255,0,0,.75)';ctx.fillRect(x*scale,topPad+y*scale,scale,scale);}}
+ const py=y=>topPad+(y-originY)*scale;
+ if(document.getElementById('neighbors').checked){{
+   for(const key of neighborPoints){{const [x,y]=key.split(',').map(Number);ctx.fillStyle='#b5b5b5';ctx.fillRect(x*scale,py(y),scale,scale);}}
+ }}
+ for(const key of allSource){{const [x,y]=key.split(',').map(Number);ctx.fillStyle=foreign.has(key)?'#b5b5b5':'#000';ctx.fillRect(x*scale,py(y),scale,scale);}}
+ for(const key of deferred){{const [x,y]=key.split(',').map(Number);ctx.fillStyle='rgba(255,0,0,.75)';ctx.fillRect(x*scale,py(y),scale,scale);}}
  if(selectedMatch!==null){{
    for(const p of S.matches[selectedMatch].points){{
      const x=p[0],y=p[1];
      ctx.fillStyle='rgba(0,110,255,.68)';
-     ctx.fillRect(x*scale,topPad+y*scale,scale,scale);
+     ctx.fillRect(x*scale,py(y),scale,scale);
    }}
  }}
- for(const key of chosen){{const [x,y]=key.split(',').map(Number);ctx.fillStyle='rgba(0,145,230,.52)';ctx.fillRect(x*scale,topPad+y*scale,scale,scale);}}
+ for(const key of chosen){{const [x,y]=key.split(',').map(Number);ctx.fillStyle='rgba(0,145,230,.52)';ctx.fillRect(x*scale,py(y),scale,scale);}}
  if(document.getElementById('grid').checked){{ctx.strokeStyle='rgba(80,80,80,.23)';ctx.lineWidth=1;
-  for(let x=0;x<=S.width;x++){{let q=x*scale+.5;ctx.beginPath();ctx.moveTo(q,topPad);ctx.lineTo(q,topPad+S.height*scale);ctx.stroke();}}
-  for(let y=0;y<=S.height;y++){{let q=topPad+y*scale+.5;ctx.beginPath();ctx.moveTo(0,q);ctx.lineTo(S.width*scale,q);ctx.stroke();}}
+  for(let x=0;x<=S.width;x++){{let q=x*scale+.5;ctx.beginPath();ctx.moveTo(q,topPad);ctx.lineTo(q,topPad+viewHeight*scale);ctx.stroke();}}
+  for(let y=0;y<=S.height;y++){{let q=py(y)+.5;ctx.beginPath();ctx.moveTo(0,q);ctx.lineTo(S.width*scale,q);ctx.stroke();}}
  }}
- if(document.getElementById('baseline').checked){{const y=topPad+(S.baseline_local+1)*scale+.5;ctx.strokeStyle='#0657c8';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(S.width*scale,y);ctx.stroke();}}
- if(dragStart&&dragNow){{const x0=Math.min(dragStart.x,dragNow.x),x1=Math.max(dragStart.x,dragNow.x),y0=Math.min(dragStart.y,dragNow.y),y1=Math.max(dragStart.y,dragNow.y);ctx.strokeStyle='#0878cf';ctx.lineWidth=3;ctx.strokeRect(x0*scale,topPad+y0*scale,(x1-x0+1)*scale,(y1-y0+1)*scale);}}
+ if(document.getElementById('baseline').checked){{const y=py(S.baseline_local+1)+.5;ctx.strokeStyle='#0657c8';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(S.width*scale,y);ctx.stroke();}}
+ if(dragStart&&dragNow){{const x0=Math.min(dragStart.x,dragNow.x),x1=Math.max(dragStart.x,dragNow.x),y0=Math.min(dragStart.y,dragNow.y),y1=Math.max(dragStart.y,dragNow.y);ctx.strokeStyle='#0878cf';ctx.lineWidth=3;ctx.strokeRect(x0*scale,py(y0),(x1-x0+1)*scale,(y1-y0+1)*scale);}}
  renderMatchBand();
 }}
 function chooseRect(a,b){{let x0=Math.min(a.x,b.x),x1=Math.max(a.x,b.x),y0=Math.min(a.y,b.y),y1=Math.max(a.y,b.y);for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){{let k=x+','+y;if(allSource.has(k))chosen.add(k);}}}}
@@ -698,7 +728,7 @@ document.getElementById('copydump').onclick=async function(){{
  }}
 }};
 document.getElementById('clear').onclick=()=>{{chosen.clear();sync();}};
-document.getElementById('grid').onchange=draw;document.getElementById('baseline').onchange=draw;
+document.getElementById('grid').onchange=draw;document.getElementById('baseline').onchange=draw;document.getElementById('neighbors').onchange=draw;
 img.onload=draw;
 document.addEventListener('keydown',e=>{{if(['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName))return;if(e.key==='ArrowLeft'&&S.previous_url)location.href=S.previous_url;if(e.key==='ArrowRight'&&S.next_url)location.href=S.next_url;}});
 </script>
