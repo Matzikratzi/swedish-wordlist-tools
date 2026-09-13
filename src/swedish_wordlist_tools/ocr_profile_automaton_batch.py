@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor
 import json
 import multiprocessing as mp
 import os
@@ -766,107 +766,129 @@ def main() -> int:
     )
 
     batch_started = perf_counter()
-    results: dict[int, dict[str, object]] = {}
+    failed_pages: list[int] = []
+    total_rows = 0
+    total_remaining = 0
+    total_active_remaining = 0
+    total_deferred_remaining = 0
 
     # fork is deliberate on Linux. Worker initializers compile immutable
     # glyph/trie state once; every worker then reuses it for many pages.
     fork_context = mp.get_context("fork")
-    with ProcessPoolExecutor(
-        max_workers=workers,
-        mp_context=fork_context,
-        initializer=_init_worker,
-        initargs=(
-            str(args.jsonl),
-            str(args.facit),
-            args.threshold,
-            args.prefix_len,
-            str(args.debug_stalls),
-            str(args.debug_deferred),
-            args.trace_page,
-            args.trace_column,
-            args.trace_x_min,
-            args.trace_x_max,
-        ),
-    ) as pool:
-        future_to_page = {
-            pool.submit(_ocr_page, page, args.frontier_slack, args.cluster_diag): page
-            for page in pages
-        }
-        for future in as_completed(future_to_page):
-            page = future_to_page[future]
-            result = future.result()
-            results[page] = result
-            overlay = result.get("deferred_overlay")
-            if overlay:
-                print(
-                    f"batch-deferred-overlay: page={page} "
-                    f"pixels={result['deferred_remaining']} output={overlay}",
-                    flush=True,
-                )
-            print(
-                f"batch-page-done: page={page} columns={result['column_count']} "
-                f"rows={result['row_count']} "
-                f"remaining={result['remaining']} "
-                f"active_remaining={result['active_remaining']} "
-                f"deferred_remaining={result['deferred_remaining']} "
-                f"load={float(result['load_seconds']):.3f}s "
-                f"ocr={float(result['ocr_seconds']):.3f}s "
-                f"total={float(result['total_seconds']):.3f}s",
-                flush=True,
-            )
-            for column in result["columns"]:
-                for event in column.get("cluster_events", []):
-                    print(
-                        f"cluster-diag: page={page} column={column['column']} "
-                        f"step={event['step']} accepted={event['accepted_label']!r}/"
-                        f"{event['accepted_style']} seed=({event['seed_x']},{event['seed_y']}) "
-                        f"baseline={event['baseline']} bbox={event['bbox']} "
-                        f"nearby_deferred={event['nearby_deferred']} "
-                        f"cluster_candidates={event['cluster_alternatives'][:8]}",
-                        flush=True,
-                    )
-                if int(column["remaining"]) == 0:
-                    continue
-                stuck = column.get("stuck") or {}
-                print(
-                    f"batch-column-stuck: page={page} column={column['column']} "
-                    f"rows={column['row_count']} "
-                    f"steps={column['steps']} remaining={column['remaining']} "
-                    f"active_remaining={column['active_remaining']} "
-                    f"deferred_remaining={column['deferred_remaining']} "
-                    f"x={stuck.get('x')} ys={stuck.get('ys')} "
-                    f"best_survivors={stuck.get('best_survivors')} "
-                    f"checks_2d={column['checks_2d']} "
-                    f"debug={stuck.get('debug_image')}",
-                    flush=True,
-                )
-                for candidate in (stuck.get("failure_candidates") or [])[:5]:
-                    print(
-                        f"batch-stall-candidate: page={page} column={column['column']} "
-                        f"seed_y={candidate['seed_y']} label={candidate['label']!r}/"
-                        f"{candidate['style']} baseline={candidate['baseline']} "
-                        f"tx={candidate['tx']} support={candidate['support']} "
-                        f"missing={candidate['missing_count']}/{candidate['pixels']} "
-                        f"missing_pixels={candidate['missing']}",
-                        flush=True,
-                    )
+    # Keep only a small sliding window of page results alive.  A page result
+    # contains every matched glyph and its pixel coordinates, so retaining a
+    # whole 500-page packet grows to gigabytes even though each worker itself
+    # stays bounded.  Results are consumed and written in deterministic page
+    # order; workers may still execute ahead within the bounded window.
+    max_in_flight = max(workers, workers * 2)
+    page_iter = iter(pages)
+    pending: dict[int, object] = {}
 
-    # Deterministic, restart-friendly output: rewrite the requested page packet
-    # in page order only after all tasks have completed successfully.
+    def submit_next(pool: ProcessPoolExecutor) -> bool:
+        try:
+            page = next(page_iter)
+        except StopIteration:
+            return False
+        pending[page] = pool.submit(
+            _ocr_page,
+            page,
+            args.frontier_slack,
+            args.cluster_diag,
+        )
+        return True
+
     with args.output.open("w", encoding="utf-8") as handle:
-        for page in pages:
-            handle.write(json.dumps(results[page], ensure_ascii=False, sort_keys=True))
-            handle.write("\n")
+        with ProcessPoolExecutor(
+            max_workers=workers,
+            mp_context=fork_context,
+            initializer=_init_worker,
+            initargs=(
+                str(args.jsonl),
+                str(args.facit),
+                args.threshold,
+                args.prefix_len,
+                str(args.debug_stalls),
+                str(args.debug_deferred),
+                args.trace_page,
+                args.trace_column,
+                args.trace_x_min,
+                args.trace_x_max,
+            ),
+        ) as pool:
+            for _ in range(min(max_in_flight, len(pages))):
+                submit_next(pool)
+
+            for page in pages:
+                future = pending.pop(page)
+                result = future.result()
+                handle.write(json.dumps(result, ensure_ascii=False, sort_keys=True))
+                handle.write("\n")
+                handle.flush()
+
+                total_rows += int(result["row_count"])
+                total_remaining += int(result["remaining"])
+                total_active_remaining += int(result["active_remaining"])
+                total_deferred_remaining += int(result["deferred_remaining"])
+                if int(result["active_remaining"]) != 0:
+                    failed_pages.append(page)
+
+                submit_next(pool)
+                overlay = result.get("deferred_overlay")
+                if overlay:
+                    print(
+                        f"batch-deferred-overlay: page={page} "
+                        f"pixels={result['deferred_remaining']} output={overlay}",
+                        flush=True,
+                    )
+                print(
+                    f"batch-page-done: page={page} columns={result['column_count']} "
+                    f"rows={result['row_count']} "
+                    f"remaining={result['remaining']} "
+                    f"active_remaining={result['active_remaining']} "
+                    f"deferred_remaining={result['deferred_remaining']} "
+                    f"load={float(result['load_seconds']):.3f}s "
+                    f"ocr={float(result['ocr_seconds']):.3f}s "
+                    f"total={float(result['total_seconds']):.3f}s",
+                    flush=True,
+                )
+                for column in result["columns"]:
+                    for event in column.get("cluster_events", []):
+                        print(
+                            f"cluster-diag: page={page} column={column['column']} "
+                            f"step={event['step']} accepted={event['accepted_label']!r}/"
+                            f"{event['accepted_style']} seed=({event['seed_x']},{event['seed_y']}) "
+                            f"baseline={event['baseline']} bbox={event['bbox']} "
+                            f"nearby_deferred={event['nearby_deferred']} "
+                            f"cluster_candidates={event['cluster_alternatives'][:8]}",
+                            flush=True,
+                        )
+                    if int(column["remaining"]) == 0:
+                        continue
+                    stuck = column.get("stuck") or {}
+                    print(
+                        f"batch-column-stuck: page={page} column={column['column']} "
+                        f"rows={column['row_count']} "
+                        f"steps={column['steps']} remaining={column['remaining']} "
+                        f"active_remaining={column['active_remaining']} "
+                        f"deferred_remaining={column['deferred_remaining']} "
+                        f"x={stuck.get('x')} ys={stuck.get('ys')} "
+                        f"best_survivors={stuck.get('best_survivors')} "
+                        f"checks_2d={column['checks_2d']} "
+                        f"debug={stuck.get('debug_image')}",
+                        flush=True,
+                    )
+                    for candidate in (stuck.get("failure_candidates") or [])[:5]:
+                        print(
+                            f"batch-stall-candidate: page={page} column={column['column']} "
+                            f"seed_y={candidate['seed_y']} label={candidate['label']!r}/"
+                            f"{candidate['style']} baseline={candidate['baseline']} "
+                            f"tx={candidate['tx']} support={candidate['support']} "
+                            f"missing={candidate['missing_count']}/{candidate['pixels']} "
+                            f"missing_pixels={candidate['missing']}",
+                            flush=True,
+                        )
 
     elapsed = perf_counter() - batch_started
-    failed_pages = [
-        page for page in pages
-        if int(results[page]["active_remaining"]) != 0
-    ]
-    total_rows = sum(int(results[page]["row_count"]) for page in pages)
-    total_remaining = sum(int(results[page]["remaining"]) for page in pages)
-    total_active_remaining = sum(int(results[page]["active_remaining"]) for page in pages)
-    total_deferred_remaining = sum(int(results[page]["deferred_remaining"]) for page in pages)
 
     print(
         f"batch-done: pages={len(pages)} failed_pages={failed_pages} "
