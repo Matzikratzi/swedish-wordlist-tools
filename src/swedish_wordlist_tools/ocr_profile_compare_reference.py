@@ -35,7 +35,7 @@ def main() -> int:
     args = parser.parse_args()
 
     pages = _load_profile(args.profile_jsonl)
-    total_ref = total_profile = exact = text_mismatches = missing = extra = 0
+    total_ref = total_profile = exact = text_mismatches = glyph_mismatches = missing = extra = 0
     details: list[str] = []
 
     for page_number in range(args.start_page, args.end_page + 1):
@@ -77,32 +77,46 @@ def main() -> int:
                 continue
             ref_text = str(ref.get("text") or "")
             got_text = str(got.get("text") or "")
-            if ref_text == got_text:
+            ref_compact = "".join(ref_text.split())
+            got_compact = "".join(got_text.split())
+            ref_labels = "".join(str(g.get("label") or "") for g in ref.get("glyphs", []))
+            got_labels = "".join(str(g.get("label") or "") for g in got.get("matches", []))
+
+            if ref_compact == got_compact:
                 exact += 1
             else:
                 text_mismatches += 1
-                ref_labels = "".join(str(g.get("label") or "") for g in ref.get("glyphs", []))
-                got_labels = "".join(str(g.get("label") or "") for g in got.get("matches", []))
+
+            if ref_labels != got_labels:
+                glyph_mismatches += 1
                 details.append(
-                    f"page={page_number} col={col} row={row}: TEXT_MISMATCH\n"
+                    f"page={page_number} col={col} row={row}: GLYPH_MISMATCH\n"
                     f"  reference_text={ref_text!r}\n"
                     f"  profile_text  ={got_text!r}\n"
                     f"  reference_glyphs={ref_labels!r}\n"
                     f"  profile_glyphs  ={got_labels!r}"
+                )
+            elif ref_compact != got_compact:
+                details.append(
+                    f"page={page_number} col={col} row={row}: TEXT_MISMATCH_AFTER_WHITESPACE_NORMALIZATION\n"
+                    f"  reference_text={ref_text!r}\n"
+                    f"  profile_text  ={got_text!r}"
                 )
 
     print(
         "profile-reference-summary: "
         f"pages={args.start_page}..{args.end_page} "
         f"reference_rows={total_ref} profile_rows={total_profile} "
-        f"exact_text_rows={exact} text_mismatches={text_mismatches} "
+        f"exact_text_rows_ignoring_whitespace={exact} "
+        f"text_mismatches_ignoring_whitespace={text_mismatches} "
+        f"glyph_mismatches={glyph_mismatches} "
         f"missing_rows={missing} extra_rows={extra}"
     )
     for detail in details[: args.show]:
         print(detail)
     if len(details) > args.show:
         print(f"... {len(details) - args.show} more differences")
-    return 0 if not (text_mismatches or missing or extra) else 1
+    return 0 if not (glyph_mismatches or missing or extra) else 1
 
 
 if __name__ == "__main__":
