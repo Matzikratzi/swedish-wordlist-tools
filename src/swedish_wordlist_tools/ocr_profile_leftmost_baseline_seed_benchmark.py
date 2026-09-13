@@ -82,8 +82,69 @@ def _reconstruct_rows_from_accepted_streams(
         else:
             groups.append([baseline])
 
+    row_groups: list[list[int]] = [list(group) for group in groups]
+
+    def geometry(group: list[int]) -> tuple[int, int, int, int]:
+        entries = [
+            entry
+            for baseline in group
+            for entry in accepted_streams[baseline]
+        ]
+        top = min(entry[6] for entry in entries)
+        bottom = max(entry[7] for entry in entries)
+        representative = max(
+            group,
+            key=lambda b: (
+                len(accepted_streams[b]),
+                -abs(b - group[len(group) // 2]),
+            ),
+        )
+        return top, bottom, representative, len(entries)
+
+    # A baseline hypothesis can occasionally peel a tiny glyph fragment into a
+    # separate "row" even though all of its ink sits vertically inside the real
+    # physical row. Merge such contained rows conservatively. Merely overlapping
+    # rows are never merged; the contained row's representative baseline must
+    # also lie inside the containing row's ink extent.
+    changed = True
+    while changed:
+        changed = False
+        for small_index, small_group in enumerate(row_groups):
+            small_top, small_bottom, small_baseline, small_count = geometry(small_group)
+            best_container = None
+            for large_index, large_group in enumerate(row_groups):
+                if large_index == small_index:
+                    continue
+                large_top, large_bottom, _large_baseline, large_count = geometry(large_group)
+                strictly_contained = (
+                    large_top <= small_top
+                    and small_bottom <= large_bottom
+                    and (large_top < small_top or small_bottom < large_bottom)
+                )
+                baseline_inside = large_top <= small_baseline <= large_bottom
+                if not strictly_contained or not baseline_inside:
+                    continue
+                candidate = (
+                    large_bottom - large_top,
+                    large_count,
+                    -large_index,
+                    large_index,
+                )
+                if best_container is None or candidate > best_container:
+                    best_container = candidate
+            if best_container is None:
+                continue
+            large_index = best_container[-1]
+            merged = sorted(set(row_groups[large_index]) | set(small_group))
+            row_groups[large_index] = merged
+            del row_groups[small_index]
+            changed = True
+            break
+
+    row_groups.sort(key=lambda group: geometry(group)[2])
+
     rows: list[tuple[int, tuple[int, ...], int, int, str, int]] = []
-    for group in groups:
+    for group in row_groups:
         representative = max(
             group,
             key=lambda b: (len(accepted_streams[b]), -abs(b - group[len(group) // 2])),
