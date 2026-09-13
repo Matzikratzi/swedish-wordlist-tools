@@ -415,6 +415,36 @@ def _ocr_column(
                             f"first-defer-seeds {seed_diagnostics}",
                             flush=True,
                         )
+                        nearby_accepted = []
+                        for accepted_baseline, entries in accepted_streams.items():
+                            for entry in entries:
+                                left, right = int(entry[0]), int(entry[1])
+                                top, bottom = int(entry[6]), int(entry[7])
+                                if (
+                                    min_x - 40 <= right
+                                    and left <= quarantine_right + 40
+                                    and min(min_ys) - 24 <= bottom
+                                    and top <= max(min_ys) + 24
+                                ):
+                                    nearby_accepted.append({
+                                        "baseline": int(accepted_baseline),
+                                        "left": left,
+                                        "right": right,
+                                        "label": str(entry[4]),
+                                        "style": str(entry[5]),
+                                        "top": top,
+                                        "bottom": bottom,
+                                        "pixels": int(entry[8]),
+                                    })
+                        nearby_accepted.sort(
+                            key=lambda item: (
+                                item["baseline"], item["left"], item["right"], item["label"]
+                            )
+                        )
+                        print(
+                            f"first-defer-nearby-accepted {nearby_accepted}",
+                            flush=True,
+                        )
                         for rejected in profile_rejections:
                             print(
                                 "first-defer-profile-reject "
