@@ -542,7 +542,8 @@ class ProfilePageEditor:
         left, top, _right, _bottom = state["crop_box"]
         page_points = {(left + x, top + y) for x, y in local_points}
         glyph_left = min(x for x, _y in page_points)
-        baseline = int(state["baseline_page"])
+        glyph_baseline_raw = (form.get("glyph_baseline") or [str(state["baseline_page"])])[0]
+        baseline = int(glyph_baseline_raw)
         normalized = sorted(
             (x - glyph_left, y - baseline)
             for x, y in page_points
@@ -652,7 +653,7 @@ deferred=<span class="red">{state['deferred_remaining']}</span>.</div>
 <label class="inline"><input id="baseline" type="checkbox" checked> baseline</label>
 <label class="inline"><input id="neighbors" type="checkbox"> grannrader i samma kolumn</label>
 <button type="button" id="clear">Rensa pixelval</button>
-<span id="count">0 valda pixlar</span>
+<span id="count">0 valda pixlar</span><span id="selectionInfo"></span>
 </div>
 <div class="coverage">{state['matched_pixels']}/{state['source_pixels']} px matchade</div>
 <div class="rowbox"><div class="pixel-wrap"><canvas id="row"></canvas><div id="matchband" class="matchband"></div></div></div>
@@ -663,12 +664,14 @@ deferred=<span class="red">{state['deferred_remaining']}</span>.</div>
 <div class="controls">
 <label>Glyph<input name="label" size="7" required autofocus></label>
 <label>Stil<select name="style" id="styleSelect"><option>roman</option><option>italic</option><option>bold</option></select></label>
+<label>Glyph-baseline (sid-y)<input name="glyph_baseline" id="glyphBaseline" type="number" value="{state['baseline_page']}" style="width:8em"></label>
 <button type="submit">Spara glyph och räkna om hela sidan</button>
 </div>
 </form>
 <p class="hint">Dra en rektangel över svarta pixlar för att välja dem. Shift-klick lägger till en enskild svart pixel; Alt-klick tar bort. Röda rutor är deferred-pixlar från profil-OCR:n. Röda horisontella linjer visar radgränserna direkt under föregående rads lägsta matchade pixel. Huvudrastret läser alltid råa faksimilpixlar över föregående, aktuell och nästa rads fulla vertikala område, så omatchade pixlar kapas inte bort. De tre små raderna ovan visar föregående, aktuell och nästa rad. "Ickeklar" betyder att raden innehåller deferred-pixlar. Efter sparning byggs facit/trie om, hela sidan OCR:as om och editorn återgår till raden närmast samma baseline.</p>
 <script>
 const S={data}, scale=9, topPad=28;
+const cropLeft=S.crop_box[0], cropTop=S.crop_box[1];
 const canvas=document.getElementById('row'),ctx=canvas.getContext('2d'),matchband=document.getElementById('matchband');
 const source=new Set(S.source_points.map(p=>p[0]+','+p[1]));
 const allSource=new Set(S.all_source_points.map(p=>p[0]+','+p[1]));
@@ -708,6 +711,14 @@ function preselectStyleFromPrevious(){{
 function sync(){{
  document.getElementById('selectedPixels').value=[...chosen].join(';');
  document.getElementById('count').textContent=chosen.size+' valda pixlar';
+ const info=document.getElementById('selectionInfo');
+ if(chosen.size){{
+   const pts=[...chosen].map(k=>k.split(',').map(Number));
+   const xs=pts.map(p=>p[0]+cropLeft), ys=pts.map(p=>p[1]+cropTop);
+   info.textContent=' absolut bbox x='+Math.min(...xs)+'..'+Math.max(...xs)+
+     ' y='+Math.min(...ys)+'..'+Math.max(...ys)+
+     ' · baseline='+document.getElementById('glyphBaseline').value;
+ }} else info.textContent='';
  preselectStyleFromPrevious();
  draw();
 }}
@@ -799,6 +810,7 @@ document.getElementById('copydump').onclick=async function(){{
  }}
 }};
 document.getElementById('clear').onclick=()=>{{chosen.clear();sync();}};
+document.getElementById('glyphBaseline').addEventListener('input',sync);
 const viewSettingIds=['grid','baseline','neighbors'];
 for(const id of viewSettingIds){{
  const element=document.getElementById(id);
