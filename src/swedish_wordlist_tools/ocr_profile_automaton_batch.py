@@ -60,6 +60,7 @@ def _ocr_column(
     page_number: int,
     *,
     frontier_slack: int,
+    cluster_diag: bool = False,
 ) -> dict[str, object]:
     prefix_trie = _WORKER_TRIE
     if prefix_trie is None:
@@ -195,7 +196,7 @@ def _ocr_column(
                         })
                     continue
                 cluster_alternatives = []
-                if len(str(item.model.label)) == 1:
+                if cluster_diag and len(str(item.model.label)) == 1:
                     for alt_item, alt_tx, alt_baseline, alt_support in survivors:
                         alt_label = str(alt_item.model.label)
                         if len(alt_label) <= 1:
@@ -323,7 +324,7 @@ def _ocr_column(
         top = min(y for _x, y in placed)
         bottom = max(y for _x, y in placed)
 
-        if len(str(item.model.label)) == 1:
+        if cluster_diag and len(str(item.model.label)) == 1:
             window_left = min(x for x, _y in placed)
             window_right = max(x for x, _y in placed) + 12
             window_top = min(y for _x, y in placed) - 6
@@ -431,18 +432,19 @@ def _ocr_column(
     active_remaining = residual.pixels - deferred_frontier_pixels
 
     relevant_cluster_events = []
-    for event in cluster_events:
-        left, top, right, bottom = event["bbox"]
-        nearby_deferred = sorted(
-            (x, y)
-            for x, y in unresolved_deferred
-            if left - 2 <= x <= right + 14
-            and top - 7 <= y <= bottom + 9
-        )
-        if not nearby_deferred:
-            continue
-        event["nearby_deferred"] = [list(point) for point in nearby_deferred]
-        relevant_cluster_events.append(event)
+    if cluster_diag:
+      for event in cluster_events:
+          left, top, right, bottom = event["bbox"]
+          nearby_deferred = sorted(
+              (x, y)
+              for x, y in unresolved_deferred
+              if left - 2 <= x <= right + 14
+              and top - 7 <= y <= bottom + 9
+          )
+          if not nearby_deferred:
+              continue
+          event["nearby_deferred"] = [list(point) for point in nearby_deferred]
+          relevant_cluster_events.append(event)
 
     return {
         "column": column,
@@ -467,7 +469,11 @@ def _ocr_column(
     }
 
 
-def _ocr_page(page_number: int, frontier_slack: int) -> dict[str, object]:
+def _ocr_page(
+    page_number: int,
+    frontier_slack: int,
+    cluster_diag: bool = False,
+) -> dict[str, object]:
     if _WORKER_JSONL is None:
         raise RuntimeError("worker JSONL path is not initialized")
 
@@ -487,6 +493,7 @@ def _ocr_page(page_number: int, frontier_slack: int) -> dict[str, object]:
             column,
             page_number,
             frontier_slack=frontier_slack,
+            cluster_diag=cluster_diag,
         )
         for column in range(len(columns))
     ]
@@ -553,6 +560,11 @@ def main() -> int:
         help="At a 2D stall, allow the logical left profile to defer blocking ink by at most this many x pixels.",
     )
     ap.add_argument(
+        "--cluster-diag",
+        action="store_true",
+        help="Enable expensive cluster-alternative diagnostics. Off by default for normal OCR.",
+    )
+    ap.add_argument(
         "--workers",
         type=int,
         default=0,
@@ -593,6 +605,7 @@ def main() -> int:
         f"logical_cpus={logical_cpus} workers={workers} "
         f"reserved_cpus={max(0, logical_cpus-workers)} prefix_len={args.prefix_len} "
         f"frontier_slack={args.frontier_slack} "
+        f"cluster_diag={args.cluster_diag} "
         f"output={args.output}",
         flush=True,
     )
@@ -617,7 +630,7 @@ def main() -> int:
         ),
     ) as pool:
         future_to_page = {
-            pool.submit(_ocr_page, page, args.frontier_slack): page
+            pool.submit(_ocr_page, page, args.frontier_slack, args.cluster_diag): page
             for page in pages
         }
         for future in as_completed(future_to_page):
