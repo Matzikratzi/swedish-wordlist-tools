@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-from collections import defaultdict
 from pathlib import Path
 
 from .ocr_baseline_up import CompiledGlyphLibrary, ResidualInk
@@ -32,7 +31,9 @@ def _candidate_data(entry, residual, deferred):
         "support": support,
         "placed": placed,
         "missing": missing,
-        "missing_deferred": missing & deferred,
+        # Deferred pixels remain in residual.pixels. This reports whether a
+        # candidate relies on pixels that the logical frontier has quarantined.
+        "placed_deferred": placed & deferred,
     }
 
 
@@ -133,7 +134,8 @@ def trace_column(
 
             if trace_here:
                 contains_target_baseline = any(
-                    baseline == trace_baseline for _item, _tx, baseline, _support in survivors
+                    baseline == trace_baseline
+                    for _item, _tx, baseline, _support in survivors
                 )
                 print(
                     f"decision-seed index={seed_index} seed_y={seed_y} "
@@ -151,7 +153,7 @@ def trace_column(
                         f"support={data['support']} px={len(data['placed'])} "
                         f"missing={len(data['missing'])} "
                         f"missing_pixels={sorted(data['missing'])} "
-                        f"missing_deferred={sorted(data['missing_deferred'])}",
+                        f"placed_deferred={sorted(data['placed_deferred'])}",
                         flush=True,
                     )
 
@@ -164,7 +166,8 @@ def trace_column(
                         f"label={item.model.label!r} style={_style(item.model)} "
                         f"tx={data['tx']} baseline={data['baseline']} "
                         f"result={'REJECT_MISSING' if data['missing'] else 'PASS'} "
-                        f"missing_pixels={sorted(data['missing'])}",
+                        f"missing_pixels={sorted(data['missing'])} "
+                        f"placed_deferred={sorted(data['placed_deferred'])}",
                         flush=True,
                     )
                 if data["missing"]:
@@ -196,7 +199,8 @@ def trace_column(
                 for page_y in min_ys:
                     xs = residual.rows.get(page_y) or set()
                     blocked = [
-                        x for x in xs
+                        x
+                        for x in xs
                         if min_x <= x <= quarantine_right
                         and (x, page_y) not in deferred_frontier_pixels
                     ]
@@ -218,9 +222,14 @@ def trace_column(
                             f"pixels={sorted(newly_deferred)}",
                             flush=True,
                         )
+                    # The same x can remain the global frontier on other rows;
+                    # keep tracing until this x is either committed or disappears.
                     continue
             if trace_here:
-                print("decision-stall no_exact_2d_candidate_and_no_deferral", flush=True)
+                print(
+                    "decision-stall no_exact_2d_candidate_and_no_deferral",
+                    flush=True,
+                )
             break
 
         data, accepted_seed_y, accepted_rank = accepted
@@ -246,8 +255,7 @@ def trace_column(
                 profile_left[page_y] = next_x
         steps += 1
 
-        # Once the requested frontier has made its decision, there is no reason
-        # to spam later x positions. The exact commit/defer path is now known.
+        # A real commit at the requested x answers which candidate consumed ink.
         if trace_here:
             return 0
 
