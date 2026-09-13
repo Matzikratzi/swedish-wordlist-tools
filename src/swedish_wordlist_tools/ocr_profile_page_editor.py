@@ -231,9 +231,8 @@ class ProfilePageEditor:
             if next_row is not None else col_bottom
         )
 
-        pad_y = 3
-        top = max(0, row_top - pad_y)
-        bottom = min(self.context["gray"].height, row_bottom + pad_y)
+        top = max(col_top, ownership_top)
+        bottom = min(col_bottom, ownership_bottom)
         left = col_left
         right = col_right
         gray = self.context["gray"]
@@ -248,23 +247,33 @@ class ProfilePageEditor:
 
         row_source_pixels = sum(
             1
-            for y in range(max(col_top, ownership_top), min(col_bottom, ownership_bottom))
-            for x in range(col_left, col_right)
+            for y in range(top, bottom)
+            for x in range(left, right)
             if int(pixels[x, y]) < self.threshold
         )
         row_matches = []
+        matched_page_points: set[tuple[int, int]] = set()
         for match in row.get("matches") or []:
-            local_left = int(match["left"]) - left
-            local_right = int(match["right"]) - left
+            owned_points = {
+                (int(x), int(y))
+                for x, y in match.get("points") or []
+                if left <= int(x) < right
+                and top <= int(y) < bottom
+            }
+            if not owned_points:
+                continue
+            matched_page_points.update(owned_points)
+            match_left = min(x for x, _y in owned_points)
+            match_right = max(x for x, _y in owned_points) + 1
             row_matches.append({
-                "left": local_left,
-                "right": local_right,
+                "left": match_left - left,
+                "right": match_right - left,
                 "label": str(match["label"]),
                 "style": str(match.get("style") or "roman"),
-                "width": max(0, int(match["right"]) - int(match["left"])),
-                "pixels": int(match.get("pixels") or 0),
+                "width": match_right - match_left,
+                "pixels": len(owned_points),
             })
-        matched_pixels = sum(int(match["pixels"]) for match in row_matches)
+        matched_pixels = len(matched_page_points)
 
         column_result = self.result["columns"][column]
         deferred_page = {
@@ -416,9 +425,12 @@ h1{{font-size:21px;margin:0 0 8px}} code{{background:#eee;padding:2px 4px}}
 .disabled{{opacity:.35}} .rowbox{{overflow:auto;border:1px solid #aaa;background:white;padding:8px}}
 .pixel-wrap{{display:inline-block;min-width:max-content}}
 canvas{{display:block;image-rendering:pixelated;cursor:crosshair;touch-action:none}}
-.matchband{{position:relative;height:58px;margin-top:2px;background:#fafafa;border-top:1px solid #bbb;font:10px/11px monospace}}
-.match-label{{position:absolute;top:1px;text-align:center;overflow:visible;white-space:nowrap;border-left:1px solid rgba(0,0,0,.15);border-right:1px solid rgba(0,0,0,.15);box-sizing:border-box}}
-.match-label .glyph{{font-size:12px;line-height:13px}}
+.matchband{{position:relative;height:68px;margin-top:2px;background:#fafafa;border-top:1px solid #bbb;font:12px/13px monospace}}
+.match-label{{position:absolute;top:2px;text-align:center;overflow:visible;white-space:nowrap;border-left:1px solid rgba(0,0,0,.15);border-right:1px solid rgba(0,0,0,.15);box-sizing:border-box}}
+.match-label .glyph{{font-size:16px;line-height:17px}}
+.match-label.roman{{color:#0b57d0}}
+.match-label.italic{{color:#188038}}
+.match-label.bold{{color:#111}}
 .match-label.italic .glyph{{font-style:italic}}
 .match-label.bold .glyph{{font-weight:700}}
 .coverage{{font-size:18px;font-weight:700;margin:8px 0 4px}}
