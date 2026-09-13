@@ -685,7 +685,13 @@ def main() -> int:
     ap.add_argument("--facit", type=Path, required=True)
     ap.add_argument("--page", type=int, required=True)
     ap.add_argument("--column", type=int, default=0, choices=(0, 1, 2))
-    ap.add_argument("--baseline", type=int)
+    target = ap.add_mutually_exclusive_group()
+    target.add_argument(
+        "--row",
+        type=int,
+        help="Start on reconstructed row number (1-based across the whole page).",
+    )
+    target.add_argument("--baseline", type=int)
     ap.add_argument("--threshold", type=int, default=210)
     ap.add_argument("--prefix-len", type=int, default=5)
     ap.add_argument("--frontier-slack", type=int, default=5)
@@ -703,14 +709,24 @@ def main() -> int:
         frontier_slack=args.frontier_slack,
     )
 
+    editor.recompute("initial page")
+    initial_column = args.column
+    initial_baseline = args.baseline
+    if args.row is not None:
+        rows = editor.rows_flat()
+        if args.row < 1 or args.row > len(rows):
+            ap.error(f"--row must be 1..{len(rows)} for page {args.page}")
+        initial_column, initial_row = rows[args.row - 1]
+        initial_baseline = int(initial_row["baseline"])
+
     class Handler(BaseHTTPRequestHandler):
         def _params(self):
             return parse_qs(urlparse(self.path).query)
 
         def _target(self):
             query = self._params()
-            column = int((query.get("column") or [str(args.column)])[0])
-            raw = (query.get("baseline") or [str(args.baseline) if args.baseline is not None else ""])[0]
+            column = int((query.get("column") or [str(initial_column)])[0])
+            raw = (query.get("baseline") or [str(initial_baseline) if initial_baseline is not None else ""])[0]
             baseline = int(raw) if raw else None
             if (query.get("refresh") or ["0"])[0] == "1":
                 editor.recompute("manual refresh")
@@ -774,7 +790,7 @@ def main() -> int:
             print("profile-editor:", fmt % values)
 
     server = ThreadingHTTPServer((args.host, args.port), Handler)
-    initial = editor.row_state(args.column, args.baseline)
+    initial = editor.row_state(initial_column, initial_baseline)
     url = f"http://{args.host}:{args.port}/?" + urlencode({
         "column": initial["column"],
         "baseline": initial["baseline_page"],
