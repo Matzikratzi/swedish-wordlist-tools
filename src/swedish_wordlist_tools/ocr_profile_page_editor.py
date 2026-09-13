@@ -478,6 +478,8 @@ class ProfilePageEditor:
             "neighbor_points": neighbor_points,
             "neighbor_min_y": context_top - top,
             "neighbor_max_y": context_bottom - top,
+            "row_boundary_top": ownership_top - top,
+            "row_boundary_bottom": ownership_bottom - top,
             "image": _png_data_uri(raster),
             "previous_url": link_for(previous),
             "next_url": link_for(following),
@@ -637,7 +639,7 @@ deferred=<span class="red">{state['deferred_remaining']}</span>.</div>
 <button type="submit">Spara glyph och räkna om hela sidan</button>
 </div>
 </form>
-<p class="hint">Dra en rektangel över svarta pixlar för att välja dem. Shift-klick lägger till en enskild svart pixel; Alt-klick tar bort. Röda rutor är deferred-pixlar från profil-OCR:n. De tre små raderna ovan visar föregående, aktuell och nästa rad. "Ickeklar" betyder att raden innehåller deferred-pixlar. Efter sparning byggs facit/trie om, hela sidan OCR:as om och editorn återgår till raden närmast samma baseline.</p>
+<p class="hint">Dra en rektangel över svarta pixlar för att välja dem. Shift-klick lägger till en enskild svart pixel; Alt-klick tar bort. Röda rutor är deferred-pixlar från profil-OCR:n. Röda horisontella linjer visar radgränserna mitt emellan närmaste baselines. De tre små raderna ovan visar föregående, aktuell och nästa rad. "Ickeklar" betyder att raden innehåller deferred-pixlar. Efter sparning byggs facit/trie om, hela sidan OCR:as om och editorn återgår till raden närmast samma baseline.</p>
 <script>
 const S={data}, scale=9, topPad=28;
 const canvas=document.getElementById('row'),ctx=canvas.getContext('2d'),matchband=document.getElementById('matchband');
@@ -648,8 +650,18 @@ const deferred=new Set(S.deferred_points.map(p=>p[0]+','+p[1]));
 const neighborPoints=new Set(S.neighbor_points.map(p=>p[0]+','+p[1]));
 const chosen=new Set(); let selectedMatch=null; let dragStart=null,dragNow=null;
 const img=new Image();img.src=S.image;
-function viewOriginY(){{return document.getElementById('neighbors').checked?Math.min(0,S.neighbor_min_y):0;}}
-function viewBottomY(){{return document.getElementById('neighbors').checked?Math.max(S.height,S.neighbor_max_y):S.height;}}
+function viewOriginY(){{
+ const boundaryTop=Math.min(0,S.row_boundary_top);
+ return document.getElementById('neighbors').checked
+   ? Math.min(boundaryTop,S.neighbor_min_y)
+   : boundaryTop;
+}}
+function viewBottomY(){{
+ const boundaryBottom=Math.max(S.height,S.row_boundary_bottom);
+ return document.getElementById('neighbors').checked
+   ? Math.max(boundaryBottom,S.neighbor_max_y)
+   : boundaryBottom;
+}}
 function point(e){{const r=canvas.getBoundingClientRect(), originY=viewOriginY(), bottomY=viewBottomY();return {{
  x:Math.max(0,Math.min(S.width-1,Math.floor((e.clientX-r.left)*(canvas.width/r.width)/scale))),
  y:Math.max(originY,Math.min(bottomY-1,originY+Math.floor(((e.clientY-r.top)*(canvas.height/r.height)-topPad)/scale)))
@@ -699,7 +711,14 @@ function draw(){{
  for(const key of chosen){{const [x,y]=key.split(',').map(Number);ctx.fillStyle='rgba(0,145,230,.52)';ctx.fillRect(x*scale,py(y),scale,scale);}}
  if(document.getElementById('grid').checked){{ctx.strokeStyle='rgba(80,80,80,.23)';ctx.lineWidth=1;
   for(let x=0;x<=S.width;x++){{let q=x*scale+.5;ctx.beginPath();ctx.moveTo(q,topPad);ctx.lineTo(q,topPad+viewHeight*scale);ctx.stroke();}}
-  for(let y=0;y<=S.height;y++){{let q=py(y)+.5;ctx.beginPath();ctx.moveTo(0,q);ctx.lineTo(S.width*scale,q);ctx.stroke();}}
+  for(let y=originY;y<=bottomY;y++){{let q=py(y)+.5;ctx.beginPath();ctx.moveTo(0,q);ctx.lineTo(S.width*scale,q);ctx.stroke();}}
+ }}
+ for(const boundary of [S.row_boundary_top,S.row_boundary_bottom]){{
+   if(boundary>=originY && boundary<=bottomY){{
+     const y=py(boundary)+.5;
+     ctx.save();ctx.strokeStyle='#d00000';ctx.lineWidth=2;
+     ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(S.width*scale,y);ctx.stroke();ctx.restore();
+   }}
  }}
  if(document.getElementById('baseline').checked){{const y=py(S.baseline_local+1)+.5;ctx.strokeStyle='#0657c8';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(S.width*scale,y);ctx.stroke();}}
  if(dragStart&&dragNow){{const x0=Math.min(dragStart.x,dragNow.x),x1=Math.max(dragStart.x,dragNow.x),y0=Math.min(dragStart.y,dragNow.y),y1=Math.max(dragStart.y,dragNow.y);ctx.strokeStyle='#0878cf';ctx.lineWidth=3;ctx.strokeRect(x0*scale,py(y0),(x1-x0+1)*scale,(y1-y0+1)*scale);}}
@@ -728,7 +747,16 @@ document.getElementById('copydump').onclick=async function(){{
  }}
 }};
 document.getElementById('clear').onclick=()=>{{chosen.clear();sync();}};
-document.getElementById('grid').onchange=draw;document.getElementById('baseline').onchange=draw;document.getElementById('neighbors').onchange=draw;
+const viewSettingIds=['grid','baseline','neighbors'];
+for(const id of viewSettingIds){{
+ const element=document.getElementById(id);
+ const saved=localStorage.getItem('saol14-profile-editor-'+id);
+ if(saved!==null) element.checked=(saved==='1');
+ element.addEventListener('change',()=>{{
+   localStorage.setItem('saol14-profile-editor-'+id,element.checked?'1':'0');
+   draw();
+ }});
+}}
 img.onload=draw;
 document.addEventListener('keydown',e=>{{if(['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName))return;if(e.key==='ArrowLeft'&&S.previous_url)location.href=S.previous_url;if(e.key==='ArrowRight'&&S.next_url)location.href=S.next_url;}});
 </script>
