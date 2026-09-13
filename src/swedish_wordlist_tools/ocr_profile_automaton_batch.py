@@ -30,6 +30,64 @@ _WORKER_DEFERRED_DIR: Path | None = None
 _WORKER_TRACE: tuple[int | None, int | None, int | None, int | None] = (None, None, None, None)
 
 
+def _column_bounds_with_virtual_first_row_predecessor(
+    context: dict,
+    column: int,
+    *,
+    header_cutoff_y: int = 50,
+    min_slab_height: int = 20,
+) -> tuple[int, int, int, int]:
+    """Choose the upper OCR envelope for the first real row.
+
+    Below the fixed page-header cutoff, ordinary columns start at their first
+    black pixel. Only the leftmost column can contain the leading ink slab.
+    That slab is recognized by an exact invariant: its left profile stays at
+    exactly one x value for more than min_slab_height raster rows. When that
+    long fixed profile finally moves to a larger x, OCR starts there.
+
+    If column 0 does not satisfy that invariant, the first black pixel below the
+    header cutoff belongs to the first real text row. No synthetic baseline or
+    reconstructed row is ever created.
+    """
+    left, right, segmented_top, bottom = _minimal_column_bounds(context, column)
+    search_top = max(0, int(header_cutoff_y))
+    if search_top >= segmented_top:
+        return left, right, segmented_top, bottom
+
+    gray = context["gray"]
+    threshold = int(context["threshold"])
+    pixels = gray.load()
+
+    profile: list[tuple[int, int]] = []
+    for y in range(search_top, segmented_top + 1):
+        xs = [x for x in range(left, right) if int(pixels[x, y]) < threshold]
+        if xs:
+            profile.append((y, min(xs)))
+
+    if not profile:
+        return left, right, segmented_top, bottom
+
+    first_ink_y, fixed_x = profile[0]
+
+    # The ink slab exists only in the leftmost column.
+    if column != 0:
+        return left, right, first_ink_y, bottom
+
+    fixed_rows = 0
+    for y, profile_x in profile:
+        if profile_x == fixed_x:
+            fixed_rows += 1
+            continue
+
+        if profile_x > fixed_x and fixed_rows > min_slab_height:
+            return left, right, y, bottom
+
+        # A short fixed run, or any move to the left, means that the first ink
+        # was already part of the real first text row rather than the slab.
+        return left, right, first_ink_y, bottom
+
+    return left, right, first_ink_y, bottom
+
 def _profile_point_is_visible(actual_x: int | None, expected_x: int) -> bool:
     """Require each glyph left-profile point to be the live column frontier.
 
@@ -115,7 +173,7 @@ def _ocr_column(
         raise RuntimeError("worker trie is not initialized")
 
     started = perf_counter()
-    bounds = _minimal_column_bounds(context, column)
+    bounds = _column_bounds_with_virtual_first_row_predecessor(context, column)
     black = _minimal_black_pixels(context, bounds)
     residual = ResidualInk(black)
     column_left, column_right, column_top, column_bottom = bounds
