@@ -25,7 +25,7 @@ class ProfileFirstRowVirtualPredecessorTest(unittest.TestCase):
                     {
                         "crop_left": 5,
                         "crop_right": 15,
-                        "crop_top": 2,
+                        "crop_top": 0,
                         "rows": [
                             {"page_top": 8, "page_bottom": 12},
                             {"page_top": 14, "page_bottom": 18},
@@ -35,33 +35,38 @@ class ProfileFirstRowVirtualPredecessorTest(unittest.TestCase):
             },
         }
 
-    def test_first_row_top_expands_to_nearby_upper_ink(self) -> None:
+    def test_ignores_header_ink_above_cutoff(self) -> None:
         bounds = _column_bounds_with_virtual_first_row_predecessor(
-            self._context((7,)),
+            self._context((3, 6)),
             0,
+            header_cutoff_y=5,
         )
-        self.assertEqual(bounds, (5, 15, 7, 18))
+        self.assertEqual(bounds, (5, 15, 6, 18))
 
-    def test_small_blank_gap_allows_dot_or_diacritic(self) -> None:
+    def test_uses_highest_ink_at_or_below_cutoff(self) -> None:
         bounds = _column_bounds_with_virtual_first_row_predecessor(
-            self._context((5,)),
+            self._context((5, 7)),
             0,
-            max_blank_gap=2,
+            header_cutoff_y=5,
         )
         self.assertEqual(bounds, (5, 15, 5, 18))
 
-    def test_real_separator_stops_before_unrelated_upper_ink(self) -> None:
+    def test_no_ink_between_cutoff_and_segmented_top_keeps_original_top(self) -> None:
         bounds = _column_bounds_with_virtual_first_row_predecessor(
             self._context((3,)),
             0,
-            max_blank_gap=2,
+            header_cutoff_y=5,
         )
         self.assertEqual(bounds, (5, 15, 8, 18))
 
     def test_helper_does_not_create_or_modify_rows(self) -> None:
-        context = self._context((7,))
+        context = self._context((6,))
         before = list(context["row_map"]["columns"][0]["rows"])
-        _column_bounds_with_virtual_first_row_predecessor(context, 0)
+        _column_bounds_with_virtual_first_row_predecessor(
+            context,
+            0,
+            header_cutoff_y=5,
+        )
         self.assertEqual(context["row_map"]["columns"][0]["rows"], before)
         self.assertEqual(len(context["row_map"]["columns"][0]["rows"]), 2)
 
