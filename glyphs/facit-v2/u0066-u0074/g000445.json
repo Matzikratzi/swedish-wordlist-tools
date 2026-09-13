@@ -1,6 +1,7 @@
 {
-  "label": "fr",
-  "role": "roman",
+  "label": "ft",
+  "role": "unknown",
+  "style": "roman",
   "pixels_relative_to_baseline": [
     [
       0,
@@ -71,8 +72,8 @@
       -5
     ],
     [
-      3,
-      0
+      4,
+      -6
     ],
     [
       4,
@@ -95,10 +96,6 @@
       -1
     ],
     [
-      4,
-      0
-    ],
-    [
       5,
       -5
     ],
@@ -109,22 +106,26 @@
     [
       6,
       -5
+    ],
+    [
+      6,
+      0
     ]
   ],
   "sources": [
     {
-      "source_id": "synthetic:g000188+g000101",
-      "expected_word": "fr",
-      "generated_from": [
-        "g000188",
-        "g000101"
+      "page": 34,
+      "column": 0,
+      "baseline": 784,
+      "page_bbox": [
+        197,
+        774,
+        204,
+        785
       ],
-      "right_dx": 3,
-      "contacts": 2,
-      "enclosed_white_pixels": 8,
-      "rule": "same baseline; no overlap; orthogonal contacts; creates enclosed white hole"
+      "source": "profile-page-editor"
     }
   ],
   "reviewed": true,
-  "model_id": "g000444"
+  "model_id": "g000445"
 }
