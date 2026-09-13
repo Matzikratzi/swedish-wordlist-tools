@@ -430,6 +430,7 @@ class ProfilePageEditor:
                 "style": str(match.get("style") or "roman"),
                 "width": match_right - match_left,
                 "pixels": len(owned_points),
+                "baseline": int(match.get("baseline", row["baseline"])),
                 "points": [
                     [x - left, y - top]
                     for x, y in sorted(owned_points, key=lambda p: (p[1], p[0]))
@@ -577,6 +578,51 @@ class ProfilePageEditor:
         self.recompute(f"{outcome} {label!r}/{style}; facit={count}, nya id={assigned}")
         return f"{outcome}: {label!r}/{style} ({len(page_points)} px)"
 
+    def delete_match_model(self, state: dict, form: dict[str, list[str]]) -> str:
+        raw = (form.get("selected_match") or [""])[0]
+        if raw == "":
+            raise ValueError("klicka först på match-etiketten för mallen som ska tas bort")
+        index = int(raw)
+        matches = state.get("matches") or []
+        if not 0 <= index < len(matches):
+            raise ValueError("vald match finns inte längre; räkna om sidan")
+        match = matches[index]
+
+        points = {tuple(point) for point in match.get("points") or []}
+        if not points:
+            raise ValueError("vald match saknar pixlar")
+        left, top, _right, _bottom = state["crop_box"]
+        page_points = {(left + x, top + y) for x, y in points}
+        glyph_left = min(x for x, _y in page_points)
+        baseline = int(match["baseline"])
+        normalized = tuple(sorted((x - glyph_left, y - baseline) for x, y in page_points))
+
+        store = canonical_store_for_facit(self.facit)
+        if store is None:
+            raise ValueError("editorn kräver canonical saol14-manual-glyph-facit-v2.json")
+        payload = load_split_facit(store)
+        candidates = []
+        for glyph_index, glyph in enumerate(payload.get("glyphs") or []):
+            glyph_pixels = tuple(
+                sorted(tuple(point) for point in glyph.get("pixels_relative_to_baseline") or [])
+            )
+            if (
+                str(glyph.get("label") or "") == str(match["label"])
+                and str(glyph.get("style") or "roman") == str(match["style"])
+                and glyph_pixels == normalized
+            ):
+                candidates.append(glyph_index)
+        if len(candidates) != 1:
+            raise ValueError(
+                f"förväntade exakt en facitmall för {match['label']!r}/{match['style']}, "
+                f"hittade {len(candidates)}"
+            )
+
+        del payload["glyphs"][candidates[0]]
+        count, _assigned = persist_facit_payload(self.facit, payload, store_dir=store)
+        self.recompute(f"removed {match['label']!r}/{match['style']}; facit={count}")
+        return f"tog bort mall: {match['label']!r}/{match['style']} ({len(page_points)} px)"
+
 
 def render_html(state: dict, message: str = "") -> str:
     data = json.dumps(state, ensure_ascii=False).replace("</", "<\\/")
@@ -635,6 +681,7 @@ label{{display:flex;flex-direction:column;gap:3px}} input,select,button{{font:in
 .context-card.incomplete{{box-shadow:inset 0 0 0 2px #b00020}}
 .context-card img{{width:100%;height:72px;object-fit:contain;object-position:left center;image-rendering:pixelated;background:white}}
 .context-text{{font:12px monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+.delete-model{{border:2px solid #a40000;background:#fff5f5;color:#7a0000;font-weight:700}}
 @media(max-width:900px){{.context{{grid-template-columns:1fr}}}}
 </style></head><body>
 <h1>SAOL profil-OCR – sida {state['page']}, kolumn {state['column']}, baseline {state['baseline_page']}</h1>
@@ -659,13 +706,15 @@ deferred=<span class="red">{state['deferred_remaining']}</span>.</div>
 <div class="rowbox"><div class="pixel-wrap"><canvas id="row"></canvas><div id="matchband" class="matchband"></div></div></div>
 <form method="post">
 <input type="hidden" name="selected_pixels" id="selectedPixels">
+<input type="hidden" name="selected_match" id="selectedMatch">
 <input type="hidden" name="column" value="{state['column']}">
 <input type="hidden" name="baseline" value="{state['baseline_page']}">
 <div class="controls">
 <label>Glyph<input name="label" size="7" required autofocus></label>
 <label>Stil<select name="style" id="styleSelect"><option>roman</option><option>italic</option><option>bold</option></select></label>
 <label>Glyph-baseline (sid-y)<input name="glyph_baseline" id="glyphBaseline" type="number" value="{state['baseline_page']}" style="width:8em"></label>
-<button type="submit">Spara glyph och räkna om hela sidan</button>
+<button type="submit" name="action" value="add">Spara glyph och räkna om hela sidan</button>
+<button class="delete-model" type="submit" name="action" value="delete" formnovalidate onclick="return selectedMatch!==null && confirm('Ta bort vald mall ur facit?')">Ta bort vald mall</button>
 </div>
 </form>
 <p class="hint">Dra en rektangel över svarta pixlar för att välja dem. Shift-klick lägger till en enskild svart pixel; Alt-klick tar bort. Röda rutor är deferred-pixlar från profil-OCR:n. Röda horisontella linjer visar radgränserna direkt under föregående rads lägsta matchade pixel. Huvudrastret läser alltid råa faksimilpixlar över föregående, aktuell och nästa rads fulla vertikala område, så omatchade pixlar kapas inte bort. De tre små raderna ovan visar föregående, aktuell och nästa rad. "Ickeklar" betyder att raden innehåller deferred-pixlar. Efter sparning byggs facit/trie om, hela sidan OCR:as om och editorn återgår till raden närmast samma baseline.</p>
@@ -710,6 +759,7 @@ function preselectStyleFromPrevious(){{
 }}
 function sync(){{
  document.getElementById('selectedPixels').value=[...chosen].join(';');
+ document.getElementById('selectedMatch').value=selectedMatch===null?'':String(selectedMatch);
  document.getElementById('count').textContent=chosen.size+' valda pixlar';
  const info=document.getElementById('selectionInfo');
  if(chosen.size){{
@@ -740,7 +790,7 @@ function renderMatchBand(){{
    if(selectedMatch===index) el.style.background='#dbeafe';
    el.onclick=()=>{{
      selectedMatch=(selectedMatch===index)?null:index;
-     draw();
+     sync();
    }};
    el.append(glyph,style,width,px);
    matchband.appendChild(el);
@@ -1069,7 +1119,11 @@ def main() -> int:
                 column = int((form.get("column") or [str(initial_column)])[0])
                 baseline = int((form.get("baseline") or ["0"])[0])
                 state = editor.row_state(column, baseline)
-                editor.message = editor.add_glyph(state, form)
+                action = (form.get("action") or ["add"])[0]
+                if action == "delete":
+                    editor.message = editor.delete_match_model(state, form)
+                else:
+                    editor.message = editor.add_glyph(state, form)
                 target = editor.row_state(column, baseline)
                 location = "/?" + urlencode({
                     "page": target["page"],
