@@ -346,7 +346,7 @@ class ProfilePageEditor:
             "active_remaining": int(self.result["active_remaining"]),
             "deferred_remaining": int(self.result["deferred_remaining"]),
             "row_count": int(self.result["row_count"]),
-            "dump_url": "/dump?" + urlencode({
+            "dump_text_url": "/dump.txt?" + urlencode({
                 "column": column,
                 "baseline": int(row["baseline"]),
             }),
@@ -468,7 +468,7 @@ label{{display:flex;flex-direction:column;gap:3px}} input,select,button{{font:in
 <h1>SAOL profil-OCR – sida {state['page']}, kolumn {state['column']}, baseline {state['baseline_page']}</h1>
 <div class="navbar">{prev_link}{next_link}{prev_incomplete}{next_incomplete}
 <a class="nav" href="/?column={state['column']}&baseline={state['baseline_page']}&refresh=1">↻ räkna om hela sidan</a>
-<a class="nav" href="{state['dump_url']}">⬇ Dumpa raster</a>
+<a class="nav" href="{state['dump_text_url']}">Dumpa raster som text</a>
 </div>
 <div class="context">{context_cards}</div>
 <div class="stats">Rekonstruerad rad {state['row_index']}; y={state['row_page_top']}..{state['row_page_bottom']-1};
@@ -549,6 +549,67 @@ img.onload=draw;
 document.addEventListener('keydown',e=>{{if(['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName))return;if(e.key==='ArrowLeft'&&S.previous_url)location.href=S.previous_url;if(e.key==='ArrowRight'&&S.next_url)location.href=S.next_url;}});
 </script>
 </body></html>"""
+
+
+def _render_dump_text(state: dict) -> str:
+    source = {tuple(point) for point in state["source_points"]}
+    deferred = {tuple(point) for point in state["deferred_points"]}
+    matched: set[tuple[int, int]] = set()
+    for match in state.get("matches") or []:
+        # Exact accepted points are not local in state, so derive the visible
+        # matched footprint from source pixels covered horizontally by each
+        # accepted glyph; detailed glyph geometry follows below.
+        left = int(match["left"])
+        right = int(match["right"])
+        matched.update((x, y) for x, y in source if left <= x < right)
+
+    lines = [
+        "SAOL14 PROFILE OCR RASTER DUMP",
+        f"page={state['page']} column={state['column']} baseline_page={state['baseline_page']}",
+        f"crop_left={state['left']} crop_top={state['top']} width={state['width']} height={state['height']}",
+        f"baseline_local={state['baseline_local']}",
+        f"coverage={state['matched_pixels']}/{state['source_pixels']}",
+        "legend: #=black source pixel  X=deferred pixel  .=white",
+        "",
+        "RASTER:",
+    ]
+    width = int(state["width"])
+    height = int(state["height"])
+    # Include absolute x coordinates every 10 pixels so a pasted dump remains
+    # useful for debugging without the browser.
+    tens = "".join(str(((int(state["left"]) + x) // 10) % 10) for x in range(width))
+    ones = "".join(str((int(state["left"]) + x) % 10) for x in range(width))
+    lines.extend(["x10 " + tens, "x01 " + ones])
+    for y in range(height):
+        chars = []
+        for x in range(width):
+            point = (x, y)
+            if point in deferred:
+                chars.append("X")
+            elif point in source:
+                chars.append("#")
+            else:
+                chars.append(".")
+        lines.append(f"{int(state['top']) + y:04d} " + "".join(chars))
+
+    lines.extend(["", "MATCHES:"])
+    for index, match in enumerate(state.get("matches") or [], 1):
+        lines.append(
+            f"{index:03d} label={match['label']!r} style={match['style']} "
+            f"x={int(state['left']) + int(match['left'])}.."
+            f"{int(state['left']) + int(match['right']) - 1} "
+            f"width={match['width']} matched_pixels={match['pixels']}"
+        )
+    lines.extend([
+        "",
+        "DEFERRED ABSOLUTE PIXELS:",
+        " ".join(
+            f"({int(state['left']) + x},{int(state['top']) + y})"
+            for x, y in sorted(deferred, key=lambda p: (p[1], p[0]))
+        ) or "(none)",
+        "",
+    ])
+    return "\n".join(lines)
 
 
 def _render_dump_png(state: dict) -> bytes:
@@ -657,20 +718,20 @@ def main() -> int:
 
         def do_GET(self):
             path = urlparse(self.path).path
-            if path not in {"/", "/dump"}:
+            if path not in {"/", "/dump.txt"}:
                 self.send_error(404)
                 return
             try:
                 column, baseline = self._target()
                 state = editor.row_state(column, baseline)
-                if path == "/dump":
-                    body = _render_dump_png(state)
+                if path == "/dump.txt":
+                    body = _render_dump_text(state).encode("utf-8")
                     filename = (
                         f"saol14-page-{state['page']:04d}-col-{state['column']}-"
-                        f"baseline-{state['baseline_page']}-raster.png"
+                        f"baseline-{state['baseline_page']}-raster.txt"
                     )
                     self.send_response(200)
-                    self.send_header("Content-Type", "image/png")
+                    self.send_header("Content-Type", "text/plain; charset=utf-8")
                     self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
                     self.send_header("Content-Length", str(len(body)))
                     self.end_headers()
