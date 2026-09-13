@@ -805,7 +805,7 @@ def main() -> int:
                 )
             print(
                 f"batch-page-done: page={page} columns={result['column_count']} "
-                f"rows={result['row_count']}/{result['reference_row_count']} "
+                f"rows={result['row_count']} "
                 f"remaining={result['remaining']} "
                 f"active_remaining={result['active_remaining']} "
                 f"deferred_remaining={result['deferred_remaining']} "
@@ -830,7 +830,7 @@ def main() -> int:
                 stuck = column.get("stuck") or {}
                 print(
                     f"batch-column-stuck: page={page} column={column['column']} "
-                    f"rows={column['row_count']}/{column['reference_row_count']} "
+                    f"rows={column['row_count']} "
                     f"steps={column['steps']} remaining={column['remaining']} "
                     f"active_remaining={column['active_remaining']} "
                     f"deferred_remaining={column['deferred_remaining']} "
