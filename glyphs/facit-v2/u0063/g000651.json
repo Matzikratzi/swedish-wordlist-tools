@@ -1,0 +1,67 @@
+{
+  "label": "c",
+  "role": "unknown",
+  "style": "italic",
+  "pixels_relative_to_baseline": [
+    [
+      0,
+      -1
+    ],
+    [
+      0,
+      0
+    ],
+    [
+      0,
+      1
+    ],
+    [
+      1,
+      -2
+    ],
+    [
+      1,
+      2
+    ],
+    [
+      2,
+      -3
+    ],
+    [
+      2,
+      2
+    ],
+    [
+      3,
+      -3
+    ],
+    [
+      3,
+      1
+    ],
+    [
+      4,
+      -3
+    ],
+    [
+      4,
+      1
+    ]
+  ],
+  "sources": [
+    {
+      "page": 947,
+      "column": 0,
+      "baseline": 906,
+      "page_bbox": [
+        66,
+        903,
+        71,
+        909
+      ],
+      "source": "profile-page-editor"
+    }
+  ],
+  "reviewed": true,
+  "model_id": "g000651"
+}
