@@ -377,6 +377,7 @@ def _ocr_column(
                 top,
                 bottom,
                 len(placed),
+                tuple(sorted(placed)),
             )
         )
         steps += 1
@@ -398,6 +399,7 @@ def _ocr_column(
                 "label": str(entry[4]),
                 "style": str(entry[5]),
                 "pixels": int(entry[8]) if len(entry) > 8 else 0,
+                "points": [list(point) for point in (entry[9] if len(entry) > 9 else ())],
                 "top": int(entry[6]),
                 "bottom": int(entry[7]) + 1,
                 "baseline": int(member),
