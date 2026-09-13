@@ -207,9 +207,30 @@ class ProfilePageEditor:
         column, row = self.locate(column, baseline)
         row_top = int(row["page_top"])
         row_bottom = int(row["page_bottom"])
-        col_left, col_right, _col_top, _col_bottom = _minimal_column_bounds(
+        col_left, col_right, col_top, col_bottom = _minimal_column_bounds(
             self.context, column
         )
+
+        same_column_rows = sorted(
+            [candidate for c, candidate in self.rows_flat() if c == column],
+            key=lambda candidate: int(candidate["baseline"]),
+        )
+        current_pos = next(
+            i for i, candidate in enumerate(same_column_rows)
+            if int(candidate["baseline"]) == int(row["baseline"])
+        )
+        previous_row = same_column_rows[current_pos - 1] if current_pos > 0 else None
+        next_row = same_column_rows[current_pos + 1] if current_pos + 1 < len(same_column_rows) else None
+        baseline_page = int(row["baseline"])
+        ownership_top = (
+            (int(previous_row["baseline"]) + baseline_page) // 2 + 1
+            if previous_row is not None else col_top
+        )
+        ownership_bottom = (
+            (baseline_page + int(next_row["baseline"])) // 2 + 1
+            if next_row is not None else col_bottom
+        )
+
         pad_y = 3
         top = max(0, row_top - pad_y)
         bottom = min(self.context["gray"].height, row_bottom + pad_y)
@@ -224,6 +245,26 @@ class ProfilePageEditor:
             for x in range(left, right)
             if int(pixels[x, y]) < self.threshold
         ]
+
+        row_source_pixels = sum(
+            1
+            for y in range(max(col_top, ownership_top), min(col_bottom, ownership_bottom))
+            for x in range(col_left, col_right)
+            if int(pixels[x, y]) < self.threshold
+        )
+        row_matches = []
+        for match in row.get("matches") or []:
+            local_left = int(match["left"]) - left
+            local_right = int(match["right"]) - left
+            row_matches.append({
+                "left": local_left,
+                "right": local_right,
+                "label": str(match["label"]),
+                "style": str(match.get("style") or "roman"),
+                "width": max(0, int(match["right"]) - int(match["left"])),
+                "pixels": int(match.get("pixels") or 0),
+            })
+        matched_pixels = sum(int(match["pixels"]) for match in row_matches)
 
         column_result = self.result["columns"][column]
         deferred_page = {
@@ -267,6 +308,9 @@ class ProfilePageEditor:
             "height": bottom - top,
             "text": str(row.get("text") or ""),
             "glyphs": int(row.get("glyphs") or 0),
+            "matched_pixels": matched_pixels,
+            "source_pixels": row_source_pixels,
+            "matches": row_matches,
             "source_points": source_points,
             "deferred_points": deferred_local,
             "image": _png_data_uri(raster),
@@ -370,7 +414,14 @@ h1{{font-size:21px;margin:0 0 8px}} code{{background:#eee;padding:2px 4px}}
 .navbar,.controls{{display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin:10px 0}}
 .nav{{padding:6px 10px;border:1px solid #888;background:white;color:#111;text-decoration:none;border-radius:4px}}
 .disabled{{opacity:.35}} .rowbox{{overflow:auto;border:1px solid #aaa;background:white;padding:8px}}
-canvas{{image-rendering:pixelated;cursor:crosshair;touch-action:none}}
+.pixel-wrap{{display:inline-block;min-width:max-content}}
+canvas{{display:block;image-rendering:pixelated;cursor:crosshair;touch-action:none}}
+.matchband{{position:relative;height:58px;margin-top:2px;background:#fafafa;border-top:1px solid #bbb;font:10px/11px monospace}}
+.match-label{{position:absolute;top:1px;text-align:center;overflow:visible;white-space:nowrap;border-left:1px solid rgba(0,0,0,.15);border-right:1px solid rgba(0,0,0,.15);box-sizing:border-box}}
+.match-label .glyph{{font-size:12px;line-height:13px}}
+.match-label.italic .glyph{{font-style:italic}}
+.match-label.bold .glyph{{font-weight:700}}
+.coverage{{font-size:18px;font-weight:700;margin:8px 0 4px}}
 label{{display:flex;flex-direction:column;gap:3px}} input,select,button{{font:inherit;padding:6px}}
 .msg{{font-weight:700;margin:8px 0}} .stats{{margin:6px 0}}
 .hint{{max-width:1100px}} .red{{color:#b00020;font-weight:700}}
@@ -399,7 +450,8 @@ deferred=<span class="red">{state['deferred_remaining']}</span>.</div>
 <button type="button" id="clear">Rensa pixelval</button>
 <span id="count">0 valda pixlar</span>
 </div>
-<div class="rowbox"><canvas id="row"></canvas></div>
+<div class="coverage">{state['matched_pixels']}/{state['source_pixels']} px matchade</div>
+<div class="rowbox"><div class="pixel-wrap"><canvas id="row"></canvas><div id="matchband" class="matchband"></div></div></div>
 <form method="post">
 <input type="hidden" name="selected_pixels" id="selectedPixels">
 <input type="hidden" name="column" value="{state['column']}">
@@ -413,7 +465,7 @@ deferred=<span class="red">{state['deferred_remaining']}</span>.</div>
 <p class="hint">Dra en rektangel över svarta pixlar för att välja dem. Shift-klick lägger till en enskild svart pixel; Alt-klick tar bort. Röda rutor är deferred-pixlar från profil-OCR:n. De tre små raderna ovan visar föregående, aktuell och nästa rad. "Ickeklar" betyder att raden innehåller deferred-pixlar. Efter sparning byggs facit/trie om, hela sidan OCR:as om och editorn återgår till raden närmast samma baseline.</p>
 <script>
 const S={data}, scale=9, topPad=28;
-const canvas=document.getElementById('row'),ctx=canvas.getContext('2d');
+const canvas=document.getElementById('row'),ctx=canvas.getContext('2d'),matchband=document.getElementById('matchband');
 const source=new Set(S.source_points.map(p=>p[0]+','+p[1]));
 const deferred=new Set(S.deferred_points.map(p=>p[0]+','+p[1]));
 const chosen=new Set(); let dragStart=null,dragNow=null;
@@ -423,6 +475,24 @@ function point(e){{const r=canvas.getBoundingClientRect();return {{
  y:Math.max(0,Math.min(S.height-1,Math.floor(((e.clientY-r.top)*(canvas.height/r.height)-topPad)/scale)))
 }};}}
 function sync(){{document.getElementById('selectedPixels').value=[...chosen].join(';');document.getElementById('count').textContent=chosen.size+' valda pixlar';draw();}}
+function renderMatchBand(){{
+ matchband.style.width=(S.width*scale)+'px';
+ matchband.innerHTML='';
+ for(const m of S.matches){{
+   const el=document.createElement('div');
+   el.className='match-label '+m.style;
+   el.style.left=(m.left*scale)+'px';
+   el.style.width=Math.max((m.right-m.left)*scale,18)+'px';
+   const styleLetter=m.style==='italic'?'i':m.style==='bold'?'b':'r';
+   const glyph=document.createElement('div');glyph.className='glyph';glyph.textContent=m.label;
+   const style=document.createElement('div');style.textContent=styleLetter;
+   const width=document.createElement('div');width.textContent=String(m.width);
+   const px=document.createElement('div');px.textContent='px';
+   el.title=m.label+' / '+m.style+' / '+m.pixels+' matchade pixlar';
+   el.append(glyph,style,width,px);
+   matchband.appendChild(el);
+ }}
+}}
 function draw(){{
  canvas.width=S.width*scale;canvas.height=S.height*scale+topPad;ctx.imageSmoothingEnabled=false;
  ctx.fillStyle='white';ctx.fillRect(0,0,canvas.width,canvas.height);
@@ -435,6 +505,7 @@ function draw(){{
  }}
  if(document.getElementById('baseline').checked){{const y=topPad+(S.baseline_local+1)*scale+.5;ctx.strokeStyle='#0657c8';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(S.width*scale,y);ctx.stroke();}}
  if(dragStart&&dragNow){{const x0=Math.min(dragStart.x,dragNow.x),x1=Math.max(dragStart.x,dragNow.x),y0=Math.min(dragStart.y,dragNow.y),y1=Math.max(dragStart.y,dragNow.y);ctx.strokeStyle='#0878cf';ctx.lineWidth=3;ctx.strokeRect(x0*scale,topPad+y0*scale,(x1-x0+1)*scale,(y1-y0+1)*scale);}}
+ renderMatchBand();
 }}
 function chooseRect(a,b){{let x0=Math.min(a.x,b.x),x1=Math.max(a.x,b.x),y0=Math.min(a.y,b.y),y1=Math.max(a.y,b.y);for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){{let k=x+','+y;if(source.has(k))chosen.add(k);}}}}
 canvas.addEventListener('mousedown',e=>{{let p=point(e);if(e.shiftKey||e.altKey){{let k=p.x+','+p.y;if(source.has(k)){{if(e.altKey)chosen.delete(k);else chosen.add(k);sync();}}e.preventDefault();return;}}dragStart=p;dragNow=p;e.preventDefault();draw();}});
