@@ -28,6 +28,7 @@ _WORKER_THRESHOLD = 210
 _WORKER_DEBUG_DIR: Path | None = None
 _WORKER_DEFERRED_DIR: Path | None = None
 _WORKER_TRACE: tuple[int | None, int | None, int | None, int | None] = (None, None, None, None)
+_WORKER_TRACE_FIRST_DEFER = False
 
 
 def _profile_point_is_visible(actual_x: int | None, expected_x: int) -> bool:
@@ -83,10 +84,12 @@ def _init_worker(
     trace_column: int | None,
     trace_x_min: int | None,
     trace_x_max: int | None,
+    trace_first_defer: bool = False,
 ) -> None:
     """Compile immutable OCR data once per long-lived worker."""
     global _WORKER_TRIE, _WORKER_TRIE_NODES, _WORKER_TRIE_EDGES
     global _WORKER_JSONL, _WORKER_THRESHOLD, _WORKER_DEBUG_DIR, _WORKER_DEFERRED_DIR, _WORKER_TRACE
+    global _WORKER_TRACE_FIRST_DEFER
 
     models = tuple(load_canonical_facit_with_typography(Path(facit)))
     library = CompiledGlyphLibrary(models)
@@ -100,6 +103,7 @@ def _init_worker(
     _WORKER_DEBUG_DIR = Path(debug_dir) if debug_dir else None
     _WORKER_DEFERRED_DIR = Path(deferred_dir) if deferred_dir else None
     _WORKER_TRACE = (trace_page, trace_column, trace_x_min, trace_x_max)
+    _WORKER_TRACE_FIRST_DEFER = bool(trace_first_defer)
 
 
 def _ocr_column(
@@ -139,6 +143,7 @@ def _ocr_column(
     deferred_frontier_pixels: set[tuple[int, int]] = set()
     frontier_deferrals = 0
     cluster_events: list[dict[str, object]] = []
+    first_defer_traced = False
 
     trace_page, trace_column, trace_x_min, trace_x_max = _WORKER_TRACE
     def trace_enabled(x: int) -> bool:
@@ -175,6 +180,7 @@ def _ocr_column(
         best_survivors = 0
         seed_diagnostics = []
         failure_candidates = []
+        profile_rejections = []
         for seed_y in min_ys:
             survivors = []
             seen: set[tuple[int, int, int]] = set()
@@ -207,6 +213,23 @@ def _ocr_column(
                         expected_x = tx + model_left
                         profile_rows_checked += 1
                         if not _profile_point_is_visible(actual_x, expected_x):
+                            if (
+                                _WORKER_TRACE_FIRST_DEFER
+                                and trace_page == page_number
+                                and trace_column == column
+                                and len(profile_rejections) < 80
+                            ):
+                                profile_rejections.append({
+                                    "seed_y": seed_y,
+                                    "label": str(item.model.label),
+                                    "style": str(item.model.style),
+                                    "tx": tx,
+                                    "baseline": baseline,
+                                    "support_before_reject": support,
+                                    "model_y": model_y,
+                                    "actual_x": actual_x,
+                                    "expected_x": expected_x,
+                                })
                             contradicted = True
                             break
                         support += 1
@@ -367,6 +390,54 @@ def _ocr_column(
                         advanced = True
                 if advanced:
                     frontier_deferrals += 1
+                    if (
+                        _WORKER_TRACE_FIRST_DEFER
+                        and not first_defer_traced
+                        and trace_page == page_number
+                        and trace_column == column
+                    ):
+                        first_defer_traced = True
+                        newly_deferred = sorted(
+                            (x, y)
+                            for y in min_ys
+                            for x in (residual.rows.get(y) or set())
+                            if min_x <= x <= quarantine_right
+                            and (x, y) in deferred_frontier_pixels
+                        )
+                        print(
+                            f"first-defer page={page_number} col={column} step={steps} "
+                            f"min_x={min_x} min_ys={list(min_ys)} "
+                            f"quarantine_right={quarantine_right} "
+                            f"newly_deferred={newly_deferred}",
+                            flush=True,
+                        )
+                        print(
+                            f"first-defer-seeds {seed_diagnostics}",
+                            flush=True,
+                        )
+                        for rejected in profile_rejections:
+                            print(
+                                "first-defer-profile-reject "
+                                f"seed_y={rejected['seed_y']} "
+                                f"label={rejected['label']!r}/{rejected['style']} "
+                                f"tx={rejected['tx']} baseline={rejected['baseline']} "
+                                f"support_before_reject={rejected['support_before_reject']} "
+                                f"model_y={rejected['model_y']} "
+                                f"actual_x={rejected['actual_x']} "
+                                f"expected_x={rejected['expected_x']}",
+                                flush=True,
+                            )
+                        for candidate in failure_candidates:
+                            print(
+                                "first-defer-2d-reject "
+                                f"seed_y={candidate['seed_y']} "
+                                f"label={candidate['label']!r}/{candidate['style']} "
+                                f"tx={candidate['tx']} baseline={candidate['baseline']} "
+                                f"support={candidate['support']} "
+                                f"missing={candidate['missing_count']}/{candidate['pixels']} "
+                                f"missing_pixels={candidate['missing']}",
+                                flush=True,
+                            )
                     continue
 
             debug_image = None
@@ -662,6 +733,11 @@ def main() -> int:
     ap.add_argument("--trace-x-min", type=int)
     ap.add_argument("--trace-x-max", type=int)
     ap.add_argument(
+        "--trace-first-defer",
+        action="store_true",
+        help="Trace only the first frontier deferral on the selected trace page/column.",
+    )
+    ap.add_argument(
         "--workers",
         type=int,
         default=0,
@@ -728,6 +804,7 @@ def main() -> int:
             args.trace_column,
             args.trace_x_min,
             args.trace_x_max,
+            args.trace_first_defer,
         ),
     ) as pool:
         future_to_page = {
