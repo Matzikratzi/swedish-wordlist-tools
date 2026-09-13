@@ -27,6 +27,7 @@ _WORKER_JSONL: Path | None = None
 _WORKER_THRESHOLD = 210
 _WORKER_DEBUG_DIR: Path | None = None
 _WORKER_DEFERRED_DIR: Path | None = None
+_WORKER_TRACE: tuple[int | None, int | None, int | None, int | None] = (None, None, None, None)
 
 
 def _init_worker(
@@ -36,10 +37,14 @@ def _init_worker(
     prefix_len: int,
     debug_dir: str,
     deferred_dir: str,
+    trace_page: int | None,
+    trace_column: int | None,
+    trace_x_min: int | None,
+    trace_x_max: int | None,
 ) -> None:
     """Compile immutable OCR data once per long-lived worker."""
     global _WORKER_TRIE, _WORKER_TRIE_NODES, _WORKER_TRIE_EDGES
-    global _WORKER_JSONL, _WORKER_THRESHOLD, _WORKER_DEBUG_DIR, _WORKER_DEFERRED_DIR
+    global _WORKER_JSONL, _WORKER_THRESHOLD, _WORKER_DEBUG_DIR, _WORKER_DEFERRED_DIR, _WORKER_TRACE
 
     models = tuple(load_canonical_facit_with_typography(Path(facit)))
     library = CompiledGlyphLibrary(models)
@@ -52,6 +57,7 @@ def _init_worker(
     _WORKER_THRESHOLD = int(threshold)
     _WORKER_DEBUG_DIR = Path(debug_dir) if debug_dir else None
     _WORKER_DEFERRED_DIR = Path(deferred_dir) if deferred_dir else None
+    _WORKER_TRACE = (trace_page, trace_column, trace_x_min, trace_x_max)
 
 
 def _ocr_column(
@@ -92,6 +98,16 @@ def _ocr_column(
     frontier_deferrals = 0
     cluster_events: list[dict[str, object]] = []
 
+    trace_page, trace_column, trace_x_min, trace_x_max = _WORKER_TRACE
+    def trace_enabled(x: int) -> bool:
+        return (
+            trace_page == page_number
+            and trace_column == column
+            and trace_x_min is not None
+            and trace_x_max is not None
+            and trace_x_min <= x <= trace_x_max
+        )
+
     def next_profile_x(page_y: int) -> int | None:
         xs = residual.rows.get(page_y) or set()
         visible = [
@@ -106,6 +122,12 @@ def _ocr_column(
             break
         min_x = min(profile_left.values())
         min_ys = tuple(sorted(y for y, x in profile_left.items() if x == min_x))
+        if trace_enabled(min_x):
+            print(
+                f"trace-frontier page={page_number} col={column} step={steps} "
+                f"min_x={min_x} min_ys={list(min_ys)} residual={len(residual.pixels)}",
+                flush=True,
+            )
 
         accepted = None
         best_survivors = 0
@@ -164,6 +186,17 @@ def _ocr_column(
                 "y": seed_y,
                 "survivors": len(survivors),
             })
+
+            if trace_enabled(min_x):
+                for item, tx, baseline, support in survivors:
+                    placed = frozenset((tx + x, baseline + y) for x, y in item.model.pixels)
+                    missing = len(placed - residual.pixels)
+                    print(
+                        f"trace-candidate label={item.model.label!r} style={item.model.style} "
+                        f"tx={tx} baseline={baseline} support={support} px={len(placed)} "
+                        f"missing={missing}",
+                        flush=True,
+                    )
 
             survivors.sort(
                 key=lambda entry: (
@@ -564,6 +597,10 @@ def main() -> int:
         action="store_true",
         help="Enable expensive cluster-alternative diagnostics. Off by default for normal OCR.",
     )
+    ap.add_argument("--trace-page", type=int)
+    ap.add_argument("--trace-column", type=int)
+    ap.add_argument("--trace-x-min", type=int)
+    ap.add_argument("--trace-x-max", type=int)
     ap.add_argument(
         "--workers",
         type=int,
@@ -627,6 +664,10 @@ def main() -> int:
             args.prefix_len,
             str(args.debug_stalls),
             str(args.debug_deferred),
+            args.trace_page,
+            args.trace_column,
+            args.trace_x_min,
+            args.trace_x_max,
         ),
     ) as pool:
         future_to_page = {
