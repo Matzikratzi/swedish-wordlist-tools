@@ -30,6 +30,40 @@ _WORKER_DEFERRED_DIR: Path | None = None
 _WORKER_TRACE: tuple[int | None, int | None, int | None, int | None] = (None, None, None, None)
 
 
+def _column_bounds_with_virtual_first_row_predecessor(
+    context: dict,
+    column: int,
+) -> tuple[int, int, int, int]:
+    """Extend only the first row upward to the highest ink in the column crop.
+
+    The ordinary row machinery gives every row except the first one an upper
+    neighbour whose lower boundary limits ownership.  Treat the first row as
+    if it had a virtual predecessor ending one raster row above the highest
+    black pixel in the column crop.  No synthetic baseline or reconstructed row
+    is created; this only widens the OCR pixel envelope above the segmented
+    first-row top.
+    """
+    left, right, segmented_top, bottom = _minimal_column_bounds(context, column)
+    columns = context["row_map"].get("columns") or []
+    column_entry = columns[column]
+    crop_top = max(0, int(column_entry.get("crop_top", 0)))
+    if crop_top >= segmented_top:
+        return left, right, segmented_top, bottom
+
+    gray = context["gray"]
+    threshold = int(context["threshold"])
+    pixels = gray.load()
+    first_ink_y = None
+    for y in range(crop_top, segmented_top):
+        if any(int(pixels[x, y]) < threshold for x in range(left, right)):
+            first_ink_y = y
+            break
+
+    if first_ink_y is None:
+        return left, right, segmented_top, bottom
+    return left, right, first_ink_y, bottom
+
+
 def _profile_point_is_visible(actual_x: int | None, expected_x: int) -> bool:
     """Require each glyph left-profile point to be the live column frontier.
 
@@ -115,7 +149,7 @@ def _ocr_column(
         raise RuntimeError("worker trie is not initialized")
 
     started = perf_counter()
-    bounds = _minimal_column_bounds(context, column)
+    bounds = _column_bounds_with_virtual_first_row_predecessor(context, column)
     black = _minimal_black_pixels(context, bounds)
     residual = ResidualInk(black)
     column_left, column_right, column_top, column_bottom = bounds
