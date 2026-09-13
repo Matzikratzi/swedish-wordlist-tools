@@ -231,26 +231,41 @@ class ProfilePageEditor:
             if next_row is not None else col_bottom
         )
 
-        top = max(col_top, ownership_top)
-        bottom = min(col_bottom, ownership_bottom)
+        match_tops = [int(match["top"]) for match in row.get("matches") or []]
+        match_bottoms = [int(match["bottom"]) for match in row.get("matches") or []]
+        top = max(col_top, min(match_tops) if match_tops else row_top)
+        bottom = min(col_bottom, max(match_bottoms) if match_bottoms else row_bottom)
         left = col_left
         right = col_right
         gray = self.context["gray"]
         pixels = gray.load()
 
+        # source_points is filled after excluding pixels already explained
+        # by matched glyphs on neighbouring reconstructed rows.
+        source_points = []
+
+        other_owned_points: set[tuple[int, int]] = set()
+        for other in same_column_rows:
+            if int(other["baseline"]) == baseline_page:
+                continue
+            for match in other.get("matches") or []:
+                other_owned_points.update(
+                    (int(x), int(y))
+                    for x, y in match.get("points") or []
+                )
+
+        row_source_page_points = {
+            (x, y)
+            for y in range(top, bottom)
+            for x in range(left, right)
+            if int(pixels[x, y]) < self.threshold
+            and (x, y) not in other_owned_points
+        }
+        row_source_pixels = len(row_source_page_points)
         source_points = [
             [x - left, y - top]
-            for y in range(top, bottom)
-            for x in range(left, right)
-            if int(pixels[x, y]) < self.threshold
+            for x, y in sorted(row_source_page_points, key=lambda p: (p[1], p[0]))
         ]
-
-        row_source_pixels = sum(
-            1
-            for y in range(top, bottom)
-            for x in range(left, right)
-            if int(pixels[x, y]) < self.threshold
-        )
         row_matches = []
         matched_page_points: set[tuple[int, int]] = set()
         for match in row.get("matches") or []:
@@ -331,6 +346,10 @@ class ProfilePageEditor:
             "active_remaining": int(self.result["active_remaining"]),
             "deferred_remaining": int(self.result["deferred_remaining"]),
             "row_count": int(self.result["row_count"]),
+            "dump_url": "/dump?" + urlencode({
+                "column": column,
+                "baseline": int(row["baseline"]),
+            }),
         }
 
     def add_glyph(self, state: dict, form: dict[str, list[str]]) -> str:
@@ -449,6 +468,7 @@ label{{display:flex;flex-direction:column;gap:3px}} input,select,button{{font:in
 <h1>SAOL profil-OCR – sida {state['page']}, kolumn {state['column']}, baseline {state['baseline_page']}</h1>
 <div class="navbar">{prev_link}{next_link}{prev_incomplete}{next_incomplete}
 <a class="nav" href="/?column={state['column']}&baseline={state['baseline_page']}&refresh=1">↻ räkna om hela sidan</a>
+<a class="nav" href="{state['dump_url']}">⬇ Dumpa raster</a>
 </div>
 <div class="context">{context_cards}</div>
 <div class="stats">Rekonstruerad rad {state['row_index']}; y={state['row_page_top']}..{state['row_page_bottom']-1};
@@ -531,6 +551,73 @@ document.addEventListener('keydown',e=>{{if(['INPUT','SELECT','TEXTAREA'].includ
 </body></html>"""
 
 
+def _render_dump_png(state: dict) -> bytes:
+    from PIL import ImageDraw, ImageFont
+
+    scale = 9
+    top_pad = 34
+    band_height = 72
+    width = int(state["width"])
+    height = int(state["height"])
+    image = Image.new(
+        "RGB",
+        (width * scale, top_pad + height * scale + band_height),
+        "white",
+    )
+    draw = ImageDraw.Draw(image)
+
+    source = {tuple(point) for point in state["source_points"]}
+    deferred = {tuple(point) for point in state["deferred_points"]}
+
+    for y in range(height):
+        for x in range(width):
+            x0 = x * scale
+            y0 = top_pad + y * scale
+            fill = (0, 0, 0) if (x, y) in source else (255, 255, 255)
+            if (x, y) in deferred:
+                fill = (255, 0, 0)
+            draw.rectangle((x0, y0, x0 + scale - 1, y0 + scale - 1), fill=fill)
+
+    for x in range(width + 1):
+        q = x * scale
+        draw.line((q, top_pad, q, top_pad + height * scale), fill=(205, 205, 205), width=1)
+    for y in range(height + 1):
+        q = top_pad + y * scale
+        draw.line((0, q, width * scale, q), fill=(205, 205, 205), width=1)
+
+    baseline_y = top_pad + (int(state["baseline_local"]) + 1) * scale
+    draw.line((0, baseline_y, width * scale, baseline_y), fill=(0, 90, 210), width=2)
+
+    draw.text(
+        (4, 4),
+        f"{state['matched_pixels']}/{state['source_pixels']} px matchade  "
+        f"page={state['page']} col={state['column']} baseline={state['baseline_page']}",
+        fill=(0, 0, 0),
+    )
+
+    band_top = top_pad + height * scale + 2
+    draw.line((0, band_top, width * scale, band_top), fill=(150, 150, 150), width=1)
+    style_colors = {
+        "roman": (11, 87, 208),
+        "italic": (24, 128, 56),
+        "bold": (17, 17, 17),
+    }
+    for match in state.get("matches") or []:
+        x0 = int(match["left"]) * scale
+        x1 = max(x0 + 18, int(match["right"]) * scale)
+        colour = style_colors.get(str(match.get("style") or "roman"), (17, 17, 17))
+        style_letter = {"roman": "r", "italic": "i", "bold": "b"}.get(
+            str(match.get("style") or "roman"), "r"
+        )
+        label = str(match["label"])
+        text = f"{label}\n{style_letter}\n{match['width']}\npx"
+        draw.multiline_text((x0 + 2, band_top + 2), text, fill=colour, spacing=0)
+
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    return buf.getvalue()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Edit glyphs while rerunning whole-page profile OCR.")
     ap.add_argument("jsonl", type=Path)
@@ -569,12 +656,26 @@ def main() -> int:
             return column, baseline
 
         def do_GET(self):
-            if urlparse(self.path).path != "/":
+            path = urlparse(self.path).path
+            if path not in {"/", "/dump"}:
                 self.send_error(404)
                 return
             try:
                 column, baseline = self._target()
                 state = editor.row_state(column, baseline)
+                if path == "/dump":
+                    body = _render_dump_png(state)
+                    filename = (
+                        f"saol14-page-{state['page']:04d}-col-{state['column']}-"
+                        f"baseline-{state['baseline_page']}-raster.png"
+                    )
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/png")
+                    self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
                 body = render_html(state, editor.message).encode("utf-8")
                 editor.message = ""
                 self.send_response(200)
