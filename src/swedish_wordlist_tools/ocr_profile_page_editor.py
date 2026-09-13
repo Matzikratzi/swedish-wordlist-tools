@@ -684,12 +684,12 @@ def main() -> int:
     ap.add_argument("jsonl", type=Path)
     ap.add_argument("--facit", type=Path, required=True)
     ap.add_argument("--page", type=int, required=True)
-    ap.add_argument("--column", type=int, default=0, choices=(0, 1, 2))
+    ap.add_argument("--column", type=int, choices=(0, 1, 2))
     target = ap.add_mutually_exclusive_group()
     target.add_argument(
         "--row",
         type=int,
-        help="Start on reconstructed row number (1-based across the whole page).",
+        help="Start on row number (1-based; within --column when column is given, otherwise across the whole page).",
     )
     target.add_argument("--baseline", type=int)
     ap.add_argument("--threshold", type=int, default=210)
@@ -710,12 +710,18 @@ def main() -> int:
     )
 
     editor.recompute("initial page")
-    initial_column = args.column
+    initial_column = args.column if args.column is not None else 0
     initial_baseline = args.baseline
     if args.row is not None:
-        rows = editor.rows_flat()
+        all_rows = editor.rows_flat()
+        if args.column is not None:
+            rows = [pair for pair in all_rows if pair[0] == args.column]
+            scope = f"column {args.column}"
+        else:
+            rows = all_rows
+            scope = f"page {args.page}"
         if args.row < 1 or args.row > len(rows):
-            ap.error(f"--row must be 1..{len(rows)} for page {args.page}")
+            ap.error(f"--row must be 1..{len(rows)} for {scope}")
         initial_column, initial_row = rows[args.row - 1]
         initial_baseline = int(initial_row["baseline"])
 
@@ -770,7 +776,7 @@ def main() -> int:
                 keep_blank_values=True,
             )
             try:
-                column = int((form.get("column") or [str(args.column)])[0])
+                column = int((form.get("column") or [str(initial_column)])[0])
                 baseline = int((form.get("baseline") or ["0"])[0])
                 state = editor.row_state(column, baseline)
                 editor.message = editor.add_glyph(state, form)
