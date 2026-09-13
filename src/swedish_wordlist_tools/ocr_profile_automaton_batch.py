@@ -766,36 +766,73 @@ def main() -> int:
     )
 
     batch_started = perf_counter()
-    results: dict[int, dict[str, object]] = {}
+    failed_pages: list[int] = []
+    total_rows = 0
+    total_remaining = 0
+    total_active_remaining = 0
+    total_deferred_remaining = 0
 
     # fork is deliberate on Linux. Worker initializers compile immutable
     # glyph/trie state once; every worker then reuses it for many pages.
     fork_context = mp.get_context("fork")
-    with ProcessPoolExecutor(
-        max_workers=workers,
-        mp_context=fork_context,
-        initializer=_init_worker,
-        initargs=(
-            str(args.jsonl),
-            str(args.facit),
-            args.threshold,
-            args.prefix_len,
-            str(args.debug_stalls),
-            str(args.debug_deferred),
-            args.trace_page,
-            args.trace_column,
-            args.trace_x_min,
-            args.trace_x_max,
-        ),
-    ) as pool:
-        future_to_page = {
-            pool.submit(_ocr_page, page, args.frontier_slack, args.cluster_diag): page
-            for page in pages
-        }
-        for future in as_completed(future_to_page):
-            page = future_to_page[future]
-            result = future.result()
-            results[page] = result
+    # Keep only a small sliding window of page results alive.  A page result
+    # contains every matched glyph and its pixel coordinates, so retaining a
+    # whole 500-page packet grows to gigabytes even though each worker itself
+    # stays bounded.  Results are consumed and written in deterministic page
+    # order; workers may still execute ahead within the bounded window.
+    max_in_flight = max(workers, workers * 2)
+    page_iter = iter(pages)
+    pending: dict[int, object] = {}
+
+    def submit_next(pool: ProcessPoolExecutor) -> bool:
+        try:
+            page = next(page_iter)
+        except StopIteration:
+            return False
+        pending[page] = pool.submit(
+            _ocr_page,
+            page,
+            args.frontier_slack,
+            args.cluster_diag,
+        )
+        return True
+
+    with args.output.open("w", encoding="utf-8") as handle:
+        with ProcessPoolExecutor(
+            max_workers=workers,
+            mp_context=fork_context,
+            initializer=_init_worker,
+            initargs=(
+                str(args.jsonl),
+                str(args.facit),
+                args.threshold,
+                args.prefix_len,
+                str(args.debug_stalls),
+                str(args.debug_deferred),
+                args.trace_page,
+                args.trace_column,
+                args.trace_x_min,
+                args.trace_x_max,
+            ),
+        ) as pool:
+            for _ in range(min(max_in_flight, len(pages))):
+                submit_next(pool)
+
+            for page in pages:
+                future = pending.pop(page)
+                result = future.result()
+                handle.write(json.dumps(result, ensure_ascii=False, sort_keys=True))
+                handle.write("\n")
+                handle.flush()
+
+                total_rows += int(result["row_count"])
+                total_remaining += int(result["remaining"])
+                total_active_remaining += int(result["active_remaining"])
+                total_deferred_remaining += int(result["deferred_remaining"])
+                if int(result["active_remaining"]) != 0:
+                    failed_pages.append(page)
+
+                submit_next(pool)
             overlay = result.get("deferred_overlay")
             if overlay:
                 print(
@@ -851,22 +888,7 @@ def main() -> int:
                         flush=True,
                     )
 
-    # Deterministic, restart-friendly output: rewrite the requested page packet
-    # in page order only after all tasks have completed successfully.
-    with args.output.open("w", encoding="utf-8") as handle:
-        for page in pages:
-            handle.write(json.dumps(results[page], ensure_ascii=False, sort_keys=True))
-            handle.write("\n")
-
     elapsed = perf_counter() - batch_started
-    failed_pages = [
-        page for page in pages
-        if int(results[page]["active_remaining"]) != 0
-    ]
-    total_rows = sum(int(results[page]["row_count"]) for page in pages)
-    total_remaining = sum(int(results[page]["remaining"]) for page in pages)
-    total_active_remaining = sum(int(results[page]["active_remaining"]) for page in pages)
-    total_deferred_remaining = sum(int(results[page]["deferred_remaining"]) for page in pages)
 
     print(
         f"batch-done: pages={len(pages)} failed_pages={failed_pages} "
