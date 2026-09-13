@@ -554,6 +554,7 @@ document.addEventListener('keydown',e=>{{if(['INPUT','SELECT','TEXTAREA'].includ
 def _render_dump_text(state: dict) -> str:
     source = {tuple(point) for point in state["source_points"]}
     deferred = {tuple(point) for point in state["deferred_points"]}
+    crop_left, crop_top, _crop_right, _crop_bottom = map(int, state["crop_box"])
     matched: set[tuple[int, int]] = set()
     for match in state.get("matches") or []:
         # Exact accepted points are not local in state, so derive the visible
@@ -577,8 +578,8 @@ def _render_dump_text(state: dict) -> str:
     height = int(state["height"])
     # Include absolute x coordinates every 10 pixels so a pasted dump remains
     # useful for debugging without the browser.
-    tens = "".join(str(((int(state["left"]) + x) // 10) % 10) for x in range(width))
-    ones = "".join(str((int(state["left"]) + x) % 10) for x in range(width))
+    tens = "".join(str(((crop_left + x) // 10) % 10) for x in range(width))
+    ones = "".join(str((crop_left + x) % 10) for x in range(width))
     lines.extend(["x10 " + tens, "x01 " + ones])
     for y in range(height):
         chars = []
@@ -590,21 +591,21 @@ def _render_dump_text(state: dict) -> str:
                 chars.append("#")
             else:
                 chars.append(".")
-        lines.append(f"{int(state['top']) + y:04d} " + "".join(chars))
+        lines.append(f"{crop_top + y:04d} " + "".join(chars))
 
     lines.extend(["", "MATCHES:"])
     for index, match in enumerate(state.get("matches") or [], 1):
         lines.append(
             f"{index:03d} label={match['label']!r} style={match['style']} "
-            f"x={int(state['left']) + int(match['left'])}.."
-            f"{int(state['left']) + int(match['right']) - 1} "
+            f"x={crop_left + int(match['left'])}.."
+            f"{crop_left + int(match['right']) - 1} "
             f"width={match['width']} matched_pixels={match['pixels']}"
         )
     lines.extend([
         "",
         "DEFERRED ABSOLUTE PIXELS:",
         " ".join(
-            f"({int(state['left']) + x},{int(state['top']) + y})"
+            f"({crop_left + x},{crop_top + y})"
             for x, y in sorted(deferred, key=lambda p: (p[1], p[0]))
         ) or "(none)",
         "",
