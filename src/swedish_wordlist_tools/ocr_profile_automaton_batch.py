@@ -36,15 +36,16 @@ def _column_bounds_with_virtual_first_row_predecessor(
     *,
     header_cutoff_y: int = 50,
 ) -> tuple[int, int, int, int]:
-    """Give the first OCR row a virtual predecessor below the page header.
+    """Start first-row OCR after the fixed-left ink slab below the header.
 
-    SAOL pages have header material near the top, followed by a long blank band
-    before the text columns begin.  For the first real row only, ignore all ink
-    above header_cutoff_y and let the OCR envelope start at the highest black
-    pixel at or below that cutoff.  This is equivalent to a virtual predecessor
-    whose lower boundary is one raster row above that first column pixel.
+    Starting at header_cutoff_y, find the first raster row with ink in the
+    column.  If the column left profile then stays at exactly the same x while
+    descending, treat that as the leading ink slab/rule.  The slab ends at the
+    first raster row whose left-profile x is greater than that fixed x.  OCR
+    begins there.
 
-    No synthetic baseline, accepted stream, or reconstructed row is created.
+    No synthetic baseline or reconstructed row is created; only the upper OCR
+    envelope for the first real row is adjusted.
     """
     left, right, segmented_top, bottom = _minimal_column_bounds(context, column)
     search_top = max(0, int(header_cutoff_y))
@@ -55,9 +56,31 @@ def _column_bounds_with_virtual_first_row_predecessor(
     threshold = int(context["threshold"])
     pixels = gray.load()
 
+    first_ink_y = None
+    fixed_x = None
     for y in range(search_top, segmented_top):
-        if any(int(pixels[x, y]) < threshold for x in range(left, right)):
+        xs = [x for x in range(left, right) if int(pixels[x, y]) < threshold]
+        if xs:
+            first_ink_y = y
+            fixed_x = min(xs)
+            break
+
+    if first_ink_y is None or fixed_x is None:
+        return left, right, segmented_top, bottom
+
+    saw_fixed_profile = False
+    for y in range(first_ink_y, segmented_top):
+        xs = [x for x in range(left, right) if int(pixels[x, y]) < threshold]
+        if not xs:
+            continue
+        profile_x = min(xs)
+        if profile_x == fixed_x:
+            saw_fixed_profile = True
+            continue
+        if saw_fixed_profile and profile_x > fixed_x:
             return left, right, y, bottom
+        if not saw_fixed_profile:
+            return left, right, segmented_top, bottom
 
     return left, right, segmented_top, bottom
 
