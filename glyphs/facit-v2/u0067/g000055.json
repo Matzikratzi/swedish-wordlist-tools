@@ -185,6 +185,18 @@
         22
       ],
       "suggestion": ""
+    },
+    {
+      "page": 53,
+      "column": 0,
+      "baseline": 253,
+      "page_bbox": [
+        103,
+        246,
+        112,
+        258
+      ],
+      "source": "profile-page-editor"
     }
   ],
   "role": "unknown",
