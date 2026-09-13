@@ -266,6 +266,24 @@ class ProfilePageEditor:
             [x - left, y - top]
             for x, y in sorted(row_source_page_points, key=lambda p: (p[1], p[0]))
         ]
+        all_source_points = [
+            [x - left, y - top]
+            for y in range(top, bottom)
+            for x in range(left, right)
+            if int(pixels[x, y]) < self.threshold
+        ]
+        foreign_points = [
+            [x - left, y - top]
+            for x, y in sorted(
+                {
+                    (x, y)
+                    for x, y in other_owned_points
+                    if left <= x < right and top <= y < bottom
+                    and int(pixels[x, y]) < self.threshold
+                },
+                key=lambda p: (p[1], p[0]),
+            )
+        ]
         row_matches = []
         matched_page_points: set[tuple[int, int]] = set()
         for match in row.get("matches") or []:
@@ -336,6 +354,8 @@ class ProfilePageEditor:
             "source_pixels": row_source_pixels,
             "matches": row_matches,
             "source_points": source_points,
+            "all_source_points": all_source_points,
+            "foreign_points": foreign_points,
             "deferred_points": deferred_local,
             "image": _png_data_uri(raster),
             "previous_url": link_for(previous),
@@ -364,7 +384,7 @@ class ProfilePageEditor:
         if not local_points:
             raise ValueError("markera minst en svart pixel")
 
-        source = {tuple(point) for point in state["source_points"]}
+        source = {tuple(point) for point in state["all_source_points"]}
         if not local_points <= source:
             raise ValueError("pixelvalet innehåller pixel som inte är svart i OCR-rastret")
 
@@ -499,6 +519,8 @@ deferred=<span class="red">{state['deferred_remaining']}</span>.</div>
 const S={data}, scale=9, topPad=28;
 const canvas=document.getElementById('row'),ctx=canvas.getContext('2d'),matchband=document.getElementById('matchband');
 const source=new Set(S.source_points.map(p=>p[0]+','+p[1]));
+const allSource=new Set(S.all_source_points.map(p=>p[0]+','+p[1]));
+const foreign=new Set(S.foreign_points.map(p=>p[0]+','+p[1]));
 const deferred=new Set(S.deferred_points.map(p=>p[0]+','+p[1]));
 const chosen=new Set(); let dragStart=null,dragNow=null;
 const img=new Image();img.src=S.image;
@@ -528,8 +550,8 @@ function renderMatchBand(){{
 function draw(){{
  canvas.width=S.width*scale;canvas.height=S.height*scale+topPad;ctx.imageSmoothingEnabled=false;
  ctx.fillStyle='white';ctx.fillRect(0,0,canvas.width,canvas.height);
- ctx.drawImage(img,0,topPad,S.width*scale,S.height*scale);
- for(const key of deferred){{const [x,y]=key.split(',').map(Number);ctx.fillStyle='rgba(255,0,0,.60)';ctx.fillRect(x*scale,topPad+y*scale,scale,scale);}}
+ for(const key of allSource){{const [x,y]=key.split(',').map(Number);ctx.fillStyle=foreign.has(key)?'#b5b5b5':'#000';ctx.fillRect(x*scale,topPad+y*scale,scale,scale);}}
+ for(const key of deferred){{const [x,y]=key.split(',').map(Number);ctx.fillStyle='rgba(255,0,0,.75)';ctx.fillRect(x*scale,topPad+y*scale,scale,scale);}}
  for(const key of chosen){{const [x,y]=key.split(',').map(Number);ctx.fillStyle='rgba(0,145,230,.52)';ctx.fillRect(x*scale,topPad+y*scale,scale,scale);}}
  if(document.getElementById('grid').checked){{ctx.strokeStyle='rgba(80,80,80,.23)';ctx.lineWidth=1;
   for(let x=0;x<=S.width;x++){{let q=x*scale+.5;ctx.beginPath();ctx.moveTo(q,topPad);ctx.lineTo(q,topPad+S.height*scale);ctx.stroke();}}
@@ -539,8 +561,8 @@ function draw(){{
  if(dragStart&&dragNow){{const x0=Math.min(dragStart.x,dragNow.x),x1=Math.max(dragStart.x,dragNow.x),y0=Math.min(dragStart.y,dragNow.y),y1=Math.max(dragStart.y,dragNow.y);ctx.strokeStyle='#0878cf';ctx.lineWidth=3;ctx.strokeRect(x0*scale,topPad+y0*scale,(x1-x0+1)*scale,(y1-y0+1)*scale);}}
  renderMatchBand();
 }}
-function chooseRect(a,b){{let x0=Math.min(a.x,b.x),x1=Math.max(a.x,b.x),y0=Math.min(a.y,b.y),y1=Math.max(a.y,b.y);for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){{let k=x+','+y;if(source.has(k))chosen.add(k);}}}}
-canvas.addEventListener('mousedown',e=>{{let p=point(e);if(e.shiftKey||e.altKey){{let k=p.x+','+p.y;if(source.has(k)){{if(e.altKey)chosen.delete(k);else chosen.add(k);sync();}}e.preventDefault();return;}}dragStart=p;dragNow=p;e.preventDefault();draw();}});
+function chooseRect(a,b){{let x0=Math.min(a.x,b.x),x1=Math.max(a.x,b.x),y0=Math.min(a.y,b.y),y1=Math.max(a.y,b.y);for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){{let k=x+','+y;if(allSource.has(k))chosen.add(k);}}}}
+canvas.addEventListener('mousedown',e=>{{let p=point(e);if(e.shiftKey||e.altKey){{let k=p.x+','+p.y;if(allSource.has(k)){{if(e.altKey)chosen.delete(k);else chosen.add(k);sync();}}e.preventDefault();return;}}dragStart=p;dragNow=p;e.preventDefault();draw();}});
 canvas.addEventListener('mousemove',e=>{{if(dragStart){{dragNow=point(e);draw();}}}});
 window.addEventListener('mouseup',e=>{{if(!dragStart)return;dragNow=point(e);chooseRect(dragStart,dragNow);dragStart=null;dragNow=null;sync();}});
 document.getElementById('copydump').onclick=async function(){{
@@ -571,6 +593,8 @@ document.addEventListener('keydown',e=>{{if(['INPUT','SELECT','TEXTAREA'].includ
 
 def _render_dump_text(state: dict) -> str:
     source = {tuple(point) for point in state["source_points"]}
+    all_source = {tuple(point) for point in state["all_source_points"]}
+    foreign = {tuple(point) for point in state["foreign_points"]}
     deferred = {tuple(point) for point in state["deferred_points"]}
     crop_left, crop_top, _crop_right, _crop_bottom = map(int, state["crop_box"])
     matched: set[tuple[int, int]] = set()
@@ -588,7 +612,7 @@ def _render_dump_text(state: dict) -> str:
         f"crop_left={crop_left} crop_top={crop_top} width={state['width']} height={state['height']}",
         f"baseline_local={state['baseline_local']}",
         f"coverage={state['matched_pixels']}/{state['source_pixels']}",
-        "legend: #=black source pixel  X=deferred pixel  .=white",
+        "legend: #=current-row black pixel  o=black pixel already explained by another row  X=deferred pixel  .=white",
         "",
         "RASTER:",
     ]
@@ -605,7 +629,9 @@ def _render_dump_text(state: dict) -> str:
             point = (x, y)
             if point in deferred:
                 chars.append("X")
-            elif point in source:
+            elif point in foreign:
+                chars.append("o")
+            elif point in all_source:
                 chars.append("#")
             else:
                 chars.append(".")
