@@ -302,14 +302,28 @@ class ProfilePageEditor:
         previous_row = same_column_rows[current_pos - 1] if current_pos > 0 else None
         next_row = same_column_rows[current_pos + 1] if current_pos + 1 < len(same_column_rows) else None
         baseline_page = int(row["baseline"])
+
+        def row_match_top(candidate: dict) -> int:
+            matches = candidate.get("matches") or []
+            return min(
+                (int(match["top"]) for match in matches),
+                default=int(candidate["page_top"]),
+            )
+
+        def row_match_bottom(candidate: dict) -> int:
+            matches = candidate.get("matches") or []
+            # match["bottom"] is exclusive: this is already the first y directly
+            # below the row's lowest accepted glyph pixel.
+            return max(
+                (int(match["bottom"]) for match in matches),
+                default=int(candidate["page_bottom"]),
+            )
+
         ownership_top = (
-            (int(previous_row["baseline"]) + baseline_page) // 2 + 1
+            row_match_bottom(previous_row)
             if previous_row is not None else col_top
         )
-        ownership_bottom = (
-            (baseline_page + int(next_row["baseline"])) // 2 + 1
-            if next_row is not None else col_bottom
-        )
+        ownership_bottom = row_match_bottom(row)
 
         match_tops = [int(match["top"]) for match in row.get("matches") or []]
         match_bottoms = [int(match["bottom"]) for match in row.get("matches") or []]
@@ -639,7 +653,7 @@ deferred=<span class="red">{state['deferred_remaining']}</span>.</div>
 <button type="submit">Spara glyph och räkna om hela sidan</button>
 </div>
 </form>
-<p class="hint">Dra en rektangel över svarta pixlar för att välja dem. Shift-klick lägger till en enskild svart pixel; Alt-klick tar bort. Röda rutor är deferred-pixlar från profil-OCR:n. Röda horisontella linjer visar radgränserna mitt emellan närmaste baselines. De tre små raderna ovan visar föregående, aktuell och nästa rad. "Ickeklar" betyder att raden innehåller deferred-pixlar. Efter sparning byggs facit/trie om, hela sidan OCR:as om och editorn återgår till raden närmast samma baseline.</p>
+<p class="hint">Dra en rektangel över svarta pixlar för att välja dem. Shift-klick lägger till en enskild svart pixel; Alt-klick tar bort. Röda rutor är deferred-pixlar från profil-OCR:n. Röda horisontella linjer visar radgränserna direkt under föregående rads lägsta matchade pixel. De tre små raderna ovan visar föregående, aktuell och nästa rad. "Ickeklar" betyder att raden innehåller deferred-pixlar. Efter sparning byggs facit/trie om, hela sidan OCR:as om och editorn återgår till raden närmast samma baseline.</p>
 <script>
 const S={data}, scale=9, topPad=28;
 const canvas=document.getElementById('row'),ctx=canvas.getContext('2d'),matchband=document.getElementById('matchband');
