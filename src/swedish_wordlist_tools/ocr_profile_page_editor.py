@@ -182,6 +182,10 @@ class ProfilePageEditor:
             self.prefix_len,
             "",
             "",
+            None,
+            None,
+            None,
+            None,
         )
         self.context = _build_minimal_page_context(
             self.jsonl,
@@ -325,28 +329,41 @@ class ProfilePageEditor:
         )
         ownership_bottom = row_match_bottom(row)
 
-        match_tops = [int(match["top"]) for match in row.get("matches") or []]
-        match_bottoms = [int(match["bottom"]) for match in row.get("matches") or []]
-        top = max(col_top, min(match_tops) if match_tops else row_top)
-        bottom = min(col_bottom, max(match_bottoms) if match_bottoms else row_bottom)
+        def row_visual_extent(candidate: dict) -> tuple[int, int]:
+            matches = candidate.get("matches") or []
+            candidate_top = min(
+                (int(match["top"]) for match in matches),
+                default=int(candidate["page_top"]),
+            )
+            candidate_bottom = max(
+                (int(match["bottom"]) for match in matches),
+                default=int(candidate["page_bottom"]),
+            )
+            return candidate_top, candidate_bottom
+
+        # Never crop from only the glyphs already accepted on the current row.
+        # If a glyph is entirely missing, doing so can hide exactly the pixels
+        # the reviewer needs to capture.  Build a safe three-row envelope first,
+        # then read raw thresholded facsimile pixels from that full envelope.
+        visual_rows = [
+            candidate
+            for candidate in (previous_row, row, next_row)
+            if candidate is not None
+        ]
+        visual_extents = [row_visual_extent(candidate) for candidate in visual_rows]
+        top = max(col_top, min(extent[0] for extent in visual_extents))
+        bottom = min(col_bottom, max(extent[1] for extent in visual_extents))
         left = col_left
         right = col_right
         gray = self.context["gray"]
         pixels = gray.load()
 
-        # Optional visual context: previous/next reconstructed row in the SAME
-        # column. Coordinates are relative to the current row crop, so y may be
-        # negative or larger than the current crop height.
         neighbor_rows = [candidate for candidate in (previous_row, next_row) if candidate is not None]
         neighbor_points: list[list[int]] = []
         context_top = top
         context_bottom = bottom
         for neighbor in neighbor_rows:
-            n_matches = neighbor.get("matches") or []
-            n_top = min((int(match["top"]) for match in n_matches), default=int(neighbor["page_top"]))
-            n_bottom = max((int(match["bottom"]) for match in n_matches), default=int(neighbor["page_bottom"]))
-            context_top = min(context_top, n_top)
-            context_bottom = max(context_bottom, n_bottom)
+            n_top, n_bottom = row_visual_extent(neighbor)
             for y in range(max(col_top, n_top), min(col_bottom, n_bottom)):
                 for x in range(left, right):
                     if int(pixels[x, y]) < self.threshold:
@@ -417,6 +434,7 @@ class ProfilePageEditor:
                 "style": str(match.get("style") or "roman"),
                 "width": match_right - match_left,
                 "pixels": len(owned_points),
+                "baseline": int(match.get("baseline", row["baseline"])),
                 "points": [
                     [x - left, y - top]
                     for x, y in sorted(owned_points, key=lambda p: (p[1], p[0]))
@@ -490,8 +508,8 @@ class ProfilePageEditor:
             "foreign_points": foreign_points,
             "deferred_points": deferred_local,
             "neighbor_points": neighbor_points,
-            "neighbor_min_y": context_top - top,
-            "neighbor_max_y": context_bottom - top,
+            "neighbor_min_y": 0,
+            "neighbor_max_y": bottom - top,
             "row_boundary_top": ownership_top - top,
             "row_boundary_bottom": ownership_bottom - top,
             "image": _png_data_uri(raster),
@@ -529,7 +547,8 @@ class ProfilePageEditor:
         left, top, _right, _bottom = state["crop_box"]
         page_points = {(left + x, top + y) for x, y in local_points}
         glyph_left = min(x for x, _y in page_points)
-        baseline = int(state["baseline_page"])
+        glyph_baseline_raw = (form.get("glyph_baseline") or [str(state["baseline_page"])])[0]
+        baseline = int(glyph_baseline_raw)
         normalized = sorted(
             (x - glyph_left, y - baseline)
             for x, y in page_points
@@ -562,6 +581,51 @@ class ProfilePageEditor:
         count, assigned = persist_facit_payload(self.facit, payload, store_dir=store)
         self.recompute(f"{outcome} {label!r}/{style}; facit={count}, nya id={assigned}")
         return f"{outcome}: {label!r}/{style} ({len(page_points)} px)"
+
+    def delete_match_model(self, state: dict, form: dict[str, list[str]]) -> str:
+        raw = (form.get("selected_match") or [""])[0]
+        if raw == "":
+            raise ValueError("klicka först på match-etiketten för mallen som ska tas bort")
+        index = int(raw)
+        matches = state.get("matches") or []
+        if not 0 <= index < len(matches):
+            raise ValueError("vald match finns inte längre; räkna om sidan")
+        match = matches[index]
+
+        points = {tuple(point) for point in match.get("points") or []}
+        if not points:
+            raise ValueError("vald match saknar pixlar")
+        left, top, _right, _bottom = state["crop_box"]
+        page_points = {(left + x, top + y) for x, y in points}
+        glyph_left = min(x for x, _y in page_points)
+        baseline = int(match["baseline"])
+        normalized = tuple(sorted((x - glyph_left, y - baseline) for x, y in page_points))
+
+        store = canonical_store_for_facit(self.facit)
+        if store is None:
+            raise ValueError("editorn kräver canonical saol14-manual-glyph-facit-v2.json")
+        payload = load_split_facit(store)
+        candidates = []
+        for glyph_index, glyph in enumerate(payload.get("glyphs") or []):
+            glyph_pixels = tuple(
+                sorted(tuple(point) for point in glyph.get("pixels_relative_to_baseline") or [])
+            )
+            if (
+                str(glyph.get("label") or "") == str(match["label"])
+                and str(glyph.get("style") or "roman") == str(match["style"])
+                and glyph_pixels == normalized
+            ):
+                candidates.append(glyph_index)
+        if len(candidates) != 1:
+            raise ValueError(
+                f"förväntade exakt en facitmall för {match['label']!r}/{match['style']}, "
+                f"hittade {len(candidates)}"
+            )
+
+        del payload["glyphs"][candidates[0]]
+        count, _assigned = persist_facit_payload(self.facit, payload, store_dir=store)
+        self.recompute(f"removed {match['label']!r}/{match['style']}; facit={count}")
+        return f"tog bort mall: {match['label']!r}/{match['style']} ({len(page_points)} px)"
 
 
 def render_html(state: dict, message: str = "") -> str:
@@ -621,6 +685,7 @@ label{{display:flex;flex-direction:column;gap:3px}} input,select,button{{font:in
 .context-card.incomplete{{box-shadow:inset 0 0 0 2px #b00020}}
 .context-card img{{width:100%;height:72px;object-fit:contain;object-position:left center;image-rendering:pixelated;background:white}}
 .context-text{{font:12px monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+.delete-model{{border:2px solid #a40000;background:#fff5f5;color:#7a0000;font-weight:700}}
 @media(max-width:900px){{.context{{grid-template-columns:1fr}}}}
 </style></head><body>
 <h1>SAOL profil-OCR – sida {state['page']}, kolumn {state['column']}, baseline {state['baseline_page']}</h1>
@@ -639,23 +704,27 @@ deferred=<span class="red">{state['deferred_remaining']}</span>.</div>
 <label class="inline"><input id="baseline" type="checkbox" checked> baseline</label>
 <label class="inline"><input id="neighbors" type="checkbox"> grannrader i samma kolumn</label>
 <button type="button" id="clear">Rensa pixelval</button>
-<span id="count">0 valda pixlar</span>
+<span id="count">0 valda pixlar</span><span id="selectionInfo"></span>
 </div>
 <div class="coverage">{state['matched_pixels']}/{state['source_pixels']} px matchade</div>
 <div class="rowbox"><div class="pixel-wrap"><canvas id="row"></canvas><div id="matchband" class="matchband"></div></div></div>
 <form method="post">
 <input type="hidden" name="selected_pixels" id="selectedPixels">
+<input type="hidden" name="selected_match" id="selectedMatch">
 <input type="hidden" name="column" value="{state['column']}">
 <input type="hidden" name="baseline" value="{state['baseline_page']}">
 <div class="controls">
 <label>Glyph<input name="label" size="7" required autofocus></label>
 <label>Stil<select name="style" id="styleSelect"><option>roman</option><option>italic</option><option>bold</option></select></label>
-<button type="submit">Spara glyph och räkna om hela sidan</button>
+<label>Glyph-baseline (sid-y)<input name="glyph_baseline" id="glyphBaseline" type="number" value="{state['baseline_page']}" style="width:8em"></label>
+<button type="submit" name="action" value="add">Spara glyph och räkna om hela sidan</button>
+<button class="delete-model" type="submit" name="action" value="delete" formnovalidate onclick="return selectedMatch!==null && confirm('Ta bort vald mall ur facit?')">Ta bort vald mall</button>
 </div>
 </form>
-<p class="hint">Dra en rektangel över svarta pixlar för att välja dem. Shift-klick lägger till en enskild svart pixel; Alt-klick tar bort. Röda rutor är deferred-pixlar från profil-OCR:n. Röda horisontella linjer visar radgränserna direkt under föregående rads lägsta matchade pixel. De tre små raderna ovan visar föregående, aktuell och nästa rad. "Ickeklar" betyder att raden innehåller deferred-pixlar. Efter sparning byggs facit/trie om, hela sidan OCR:as om och editorn återgår till raden närmast samma baseline.</p>
+<p class="hint">Dra en rektangel över svarta pixlar för att välja dem. Shift-klick lägger till en enskild svart pixel; Alt-klick tar bort. Röda rutor är deferred-pixlar från profil-OCR:n. Röda horisontella linjer visar radgränserna direkt under föregående rads lägsta matchade pixel. Huvudrastret läser alltid råa faksimilpixlar över föregående, aktuell och nästa rads fulla vertikala område, så omatchade pixlar kapas inte bort. De tre små raderna ovan visar föregående, aktuell och nästa rad. "Ickeklar" betyder att raden innehåller deferred-pixlar. Efter sparning byggs facit/trie om, hela sidan OCR:as om och editorn återgår till raden närmast samma baseline.</p>
 <script>
 const S={data}, scale=9, topPad=28;
+const cropLeft=S.crop_box[0], cropTop=S.crop_box[1];
 const canvas=document.getElementById('row'),ctx=canvas.getContext('2d'),matchband=document.getElementById('matchband');
 const source=new Set(S.source_points.map(p=>p[0]+','+p[1]));
 const allSource=new Set(S.all_source_points.map(p=>p[0]+','+p[1]));
@@ -694,7 +763,16 @@ function preselectStyleFromPrevious(){{
 }}
 function sync(){{
  document.getElementById('selectedPixels').value=[...chosen].join(';');
+ document.getElementById('selectedMatch').value=selectedMatch===null?'':String(selectedMatch);
  document.getElementById('count').textContent=chosen.size+' valda pixlar';
+ const info=document.getElementById('selectionInfo');
+ if(chosen.size){{
+   const pts=[...chosen].map(k=>k.split(',').map(Number));
+   const xs=pts.map(p=>p[0]+cropLeft), ys=pts.map(p=>p[1]+cropTop);
+   info.textContent=' absolut bbox x='+Math.min(...xs)+'..'+Math.max(...xs)+
+     ' y='+Math.min(...ys)+'..'+Math.max(...ys)+
+     ' · baseline='+document.getElementById('glyphBaseline').value;
+ }} else info.textContent='';
  preselectStyleFromPrevious();
  draw();
 }}
@@ -716,7 +794,7 @@ function renderMatchBand(){{
    if(selectedMatch===index) el.style.background='#dbeafe';
    el.onclick=()=>{{
      selectedMatch=(selectedMatch===index)?null:index;
-     draw();
+     sync();
    }};
    el.append(glyph,style,width,px);
    matchband.appendChild(el);
@@ -786,6 +864,7 @@ document.getElementById('copydump').onclick=async function(){{
  }}
 }};
 document.getElementById('clear').onclick=()=>{{chosen.clear();sync();}};
+document.getElementById('glyphBaseline').addEventListener('input',sync);
 const viewSettingIds=['grid','baseline','neighbors'];
 for(const id of viewSettingIds){{
  const element=document.getElementById(id);
@@ -1044,7 +1123,11 @@ def main() -> int:
                 column = int((form.get("column") or [str(initial_column)])[0])
                 baseline = int((form.get("baseline") or ["0"])[0])
                 state = editor.row_state(column, baseline)
-                editor.message = editor.add_glyph(state, form)
+                action = (form.get("action") or ["add"])[0]
+                if action == "delete":
+                    editor.message = editor.delete_match_model(state, form)
+                else:
+                    editor.message = editor.add_glyph(state, form)
                 target = editor.row_state(column, baseline)
                 location = "/?" + urlencode({
                     "page": target["page"],

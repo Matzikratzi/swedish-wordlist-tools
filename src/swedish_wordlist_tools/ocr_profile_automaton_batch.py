@@ -27,6 +27,49 @@ _WORKER_JSONL: Path | None = None
 _WORKER_THRESHOLD = 210
 _WORKER_DEBUG_DIR: Path | None = None
 _WORKER_DEFERRED_DIR: Path | None = None
+_WORKER_TRACE: tuple[int | None, int | None, int | None, int | None] = (None, None, None, None)
+
+
+def _profile_point_is_visible(actual_x: int | None, expected_x: int) -> bool:
+    """Require each glyph left-profile point to be the live column frontier.
+
+    Physical text rows do not interleave vertically. Once earlier glyphs on the
+    same row are consumed, every left-profile point of the next correct glyph
+    must therefore be visible in profile_left. Allowing actual_x < expected_x
+    lets a lower-row glyph borrow interior pixels from the row above.
+    """
+    return actual_x == expected_x
+
+
+def _established_baseline_distance(
+    baseline: int,
+    accepted_streams,
+    *,
+    max_distance: int = 3,
+) -> int:
+    """Distance to an already established text-row baseline.
+
+    Superscript/subscript models can share exactly the same page raster with an
+    ordinary glyph while encoding a different model baseline.  Once a row has
+    preceding accepted glyphs, prefer the variant whose stored baseline lands
+    on that established row.  Distances beyond max_distance are deliberately
+    treated as unanchored so another physical row cannot attract the choice.
+    """
+    if not accepted_streams:
+        return max_distance + 1
+    distance = min(abs(int(baseline) - int(existing)) for existing in accepted_streams)
+    return distance if distance <= max_distance else max_distance + 1
+
+
+def _choose_same_raster_variant(candidates, accepted_streams):
+    """Choose among candidates that explain the identical physical pixel set."""
+    return min(
+        candidates,
+        key=lambda candidate: (
+            _established_baseline_distance(candidate[2], accepted_streams),
+            candidate[4],
+        ),
+    )
 
 
 def _init_worker(
@@ -36,10 +79,14 @@ def _init_worker(
     prefix_len: int,
     debug_dir: str,
     deferred_dir: str,
+    trace_page: int | None,
+    trace_column: int | None,
+    trace_x_min: int | None,
+    trace_x_max: int | None,
 ) -> None:
     """Compile immutable OCR data once per long-lived worker."""
     global _WORKER_TRIE, _WORKER_TRIE_NODES, _WORKER_TRIE_EDGES
-    global _WORKER_JSONL, _WORKER_THRESHOLD, _WORKER_DEBUG_DIR, _WORKER_DEFERRED_DIR
+    global _WORKER_JSONL, _WORKER_THRESHOLD, _WORKER_DEBUG_DIR, _WORKER_DEFERRED_DIR, _WORKER_TRACE
 
     models = tuple(load_canonical_facit_with_typography(Path(facit)))
     library = CompiledGlyphLibrary(models)
@@ -52,6 +99,7 @@ def _init_worker(
     _WORKER_THRESHOLD = int(threshold)
     _WORKER_DEBUG_DIR = Path(debug_dir) if debug_dir else None
     _WORKER_DEFERRED_DIR = Path(deferred_dir) if deferred_dir else None
+    _WORKER_TRACE = (trace_page, trace_column, trace_x_min, trace_x_max)
 
 
 def _ocr_column(
@@ -92,6 +140,16 @@ def _ocr_column(
     frontier_deferrals = 0
     cluster_events: list[dict[str, object]] = []
 
+    trace_page, trace_column, trace_x_min, trace_x_max = _WORKER_TRACE
+    def trace_enabled(x: int) -> bool:
+        return (
+            trace_page == page_number
+            and trace_column == column
+            and trace_x_min is not None
+            and trace_x_max is not None
+            and trace_x_min <= x <= trace_x_max
+        )
+
     def next_profile_x(page_y: int) -> int | None:
         xs = residual.rows.get(page_y) or set()
         visible = [
@@ -106,6 +164,12 @@ def _ocr_column(
             break
         min_x = min(profile_left.values())
         min_ys = tuple(sorted(y for y, x in profile_left.items() if x == min_x))
+        if trace_enabled(min_x):
+            print(
+                f"trace-frontier page={page_number} col={column} step={steps} "
+                f"min_x={min_x} min_ys={list(min_ys)} residual={len(residual.pixels)}",
+                flush=True,
+            )
 
         accepted = None
         best_survivors = 0
@@ -142,11 +206,10 @@ def _ocr_column(
                         actual_x = profile_left.get(baseline + model_y)
                         expected_x = tx + model_left
                         profile_rows_checked += 1
-                        if actual_x is None or actual_x > expected_x:
+                        if not _profile_point_is_visible(actual_x, expected_x):
                             contradicted = True
                             break
-                        if actual_x == expected_x:
-                            support += 1
+                        support += 1
                     if not contradicted:
                         survivors.append((item, tx, baseline, support))
 
@@ -154,9 +217,9 @@ def _ocr_column(
                     actual_x = profile_left.get(seed_y + dy)
                     expected_x = min_x + dx
                     profile_rows_checked += 1
-                    if actual_x is None or actual_x > expected_x:
+                    if not _profile_point_is_visible(actual_x, expected_x):
                         continue
-                    child_support = prefix_support + (1 if actual_x == expected_x else 0)
+                    child_support = prefix_support + 1
                     stack.append((child, child_support))
 
             best_survivors = max(best_survivors, len(survivors))
@@ -164,6 +227,17 @@ def _ocr_column(
                 "y": seed_y,
                 "survivors": len(survivors),
             })
+
+            if trace_enabled(min_x):
+                for item, tx, baseline, support in survivors:
+                    placed = frozenset((tx + x, baseline + y) for x, y in item.model.pixels)
+                    missing = len(placed - residual.pixels)
+                    print(
+                        f"trace-candidate label={item.model.label!r} style={item.model.style} "
+                        f"tx={tx} baseline={baseline} support={support} px={len(placed)} "
+                        f"missing={missing}",
+                        flush=True,
+                    )
 
             survivors.sort(
                 key=lambda entry: (
@@ -174,7 +248,7 @@ def _ocr_column(
                     entry[0].model.style,
                 )
             )
-            for item, tx, baseline, support in survivors:
+            for survivor_rank, (item, tx, baseline, support) in enumerate(survivors):
                 checks_2d += 1
                 placed = frozenset(
                     (tx + x, baseline + y)
@@ -195,6 +269,25 @@ def _ocr_column(
                             "missing": [list(point) for point in sorted(missing)[:24]],
                         })
                     continue
+
+                # If multiple labels/models explain precisely the same physical
+                # pixels, geometry alone cannot distinguish e.g. ordinary u
+                # from superscript ᵘ. Use the already established row baseline
+                # as the semantic tie-break, preserving the original ranking
+                # when no nearby baseline has yet been established.
+                same_raster = []
+                for alt_rank, (alt_item, alt_tx, alt_baseline, alt_support) in enumerate(survivors):
+                    alt_placed = frozenset(
+                        (alt_tx + x, alt_baseline + y)
+                        for x, y in alt_item.model.pixels
+                    )
+                    if alt_placed == placed and not (alt_placed - residual.pixels):
+                        same_raster.append(
+                            (alt_item, alt_tx, alt_baseline, alt_support, alt_rank)
+                        )
+                if len(same_raster) > 1:
+                    chosen = _choose_same_raster_variant(same_raster, accepted_streams)
+                    item, tx, baseline, support, _chosen_rank = chosen
                 cluster_alternatives = []
                 if cluster_diag and len(str(item.model.label)) == 1:
                     for alt_item, alt_tx, alt_baseline, alt_support in survivors:
@@ -564,6 +657,10 @@ def main() -> int:
         action="store_true",
         help="Enable expensive cluster-alternative diagnostics. Off by default for normal OCR.",
     )
+    ap.add_argument("--trace-page", type=int)
+    ap.add_argument("--trace-column", type=int)
+    ap.add_argument("--trace-x-min", type=int)
+    ap.add_argument("--trace-x-max", type=int)
     ap.add_argument(
         "--workers",
         type=int,
@@ -627,6 +724,10 @@ def main() -> int:
             args.prefix_len,
             str(args.debug_stalls),
             str(args.debug_deferred),
+            args.trace_page,
+            args.trace_column,
+            args.trace_x_min,
+            args.trace_x_max,
         ),
     ) as pool:
         future_to_page = {
