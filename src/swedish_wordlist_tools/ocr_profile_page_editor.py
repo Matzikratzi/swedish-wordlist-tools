@@ -649,7 +649,7 @@ deferred=<span class="red">{state['deferred_remaining']}</span>.</div>
 <input type="hidden" name="baseline" value="{state['baseline_page']}">
 <div class="controls">
 <label>Glyph<input name="label" size="7" required autofocus></label>
-<label>Stil<select name="style"><option>roman</option><option>italic</option><option>bold</option></select></label>
+<label>Stil<select name="style" id="styleSelect"><option>roman</option><option>italic</option><option>bold</option></select></label>
 <button type="submit">Spara glyph och räkna om hela sidan</button>
 </div>
 </form>
@@ -680,7 +680,24 @@ function point(e){{const r=canvas.getBoundingClientRect(), originY=viewOriginY()
  x:Math.max(0,Math.min(S.width-1,Math.floor((e.clientX-r.left)*(canvas.width/r.width)/scale))),
  y:Math.max(originY,Math.min(bottomY-1,originY+Math.floor(((e.clientY-r.top)*(canvas.height/r.height)-topPad)/scale)))
 }};}}
-function sync(){{document.getElementById('selectedPixels').value=[...chosen].join(';');document.getElementById('count').textContent=chosen.size+' valda pixlar';draw();}}
+function preselectStyleFromPrevious(){{
+ if(chosen.size===0) return;
+ const xs=[...chosen].map(k=>Number(k.split(',')[0]));
+ const selectionLeft=Math.min(...xs);
+ let previous=null;
+ for(const m of S.matches){{
+   if(m.right<=selectionLeft && (previous===null || m.right>previous.right)) previous=m;
+ }}
+ if(previous!==null && ['roman','italic','bold'].includes(previous.style)){{
+   document.getElementById('styleSelect').value=previous.style;
+ }}
+}}
+function sync(){{
+ document.getElementById('selectedPixels').value=[...chosen].join(';');
+ document.getElementById('count').textContent=chosen.size+' valda pixlar';
+ preselectStyleFromPrevious();
+ draw();
+}}
 function renderMatchBand(){{
  matchband.style.width=(S.width*scale)+'px';
  matchband.innerHTML='';
