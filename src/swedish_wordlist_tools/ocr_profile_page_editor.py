@@ -392,6 +392,30 @@ class ProfilePageEditor:
             i for i, candidate in enumerate(same_column_rows)
             if int(candidate["baseline"]) == int(row["baseline"])
         )
+
+        # Review only the printed content width of this column.  The geometric
+        # column crop can include a large page margin (especially column 0), so
+        # derive a stable content envelope from accepted glyphs across all
+        # reconstructed rows in the selected column.
+        column_match_lefts = [
+            int(match["left"])
+            for candidate in same_column_rows
+            for match in candidate.get("matches") or []
+        ]
+        column_match_rights = [
+            int(match["right"])
+            for candidate in same_column_rows
+            for match in candidate.get("matches") or []
+        ]
+        content_left = (
+            max(col_left, min(column_match_lefts) - 2)
+            if column_match_lefts else col_left
+        )
+        content_right = (
+            min(col_right, max(column_match_rights) + 2)
+            if column_match_rights else col_right
+        )
+
         previous_rows = same_column_rows[max(0, current_pos - 3):current_pos]
         next_rows = same_column_rows[current_pos + 1:current_pos + 4]
         previous_row = previous_rows[-1] if previous_rows else None
@@ -441,10 +465,11 @@ class ProfilePageEditor:
         # rows on either side.
         visual_rows = [*previous_rows, row, *next_rows]
         visual_extents = [row_visual_extent(candidate) for candidate in visual_rows]
-        top = max(col_top, min(extent[0] for extent in visual_extents))
-        bottom = min(col_bottom, max(extent[1] for extent in visual_extents))
-        left = col_left
-        right = col_right
+        page_height = self.context["gray"].height
+        top = max(0, min(extent[0] for extent in visual_extents))
+        bottom = min(page_height, max(extent[1] for extent in visual_extents))
+        left = content_left
+        right = content_right
         gray = self.context["gray"]
         pixels = gray.load()
 
@@ -454,7 +479,7 @@ class ProfilePageEditor:
         context_bottom = bottom
         for neighbor in neighbor_rows:
             n_top, n_bottom = row_visual_extent(neighbor)
-            for y in range(max(col_top, n_top), min(col_bottom, n_bottom)):
+            for y in range(max(0, n_top), min(page_height, n_bottom)):
                 for x in range(left, right):
                     if int(pixels[x, y]) < self.threshold:
                         neighbor_points.append([x - left, y - top])
