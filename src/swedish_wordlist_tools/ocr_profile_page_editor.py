@@ -392,8 +392,9 @@ class ProfilePageEditor:
             i for i, candidate in enumerate(same_column_rows)
             if int(candidate["baseline"]) == int(row["baseline"])
         )
-        previous_row = same_column_rows[current_pos - 1] if current_pos > 0 else None
-        next_row = same_column_rows[current_pos + 1] if current_pos + 1 < len(same_column_rows) else None
+        previous_rows = same_column_rows[max(0, current_pos - 2):current_pos]
+        next_rows = same_column_rows[current_pos + 1:current_pos + 3]
+        previous_row = previous_rows[-1] if previous_rows else None
         baseline_page = int(row["baseline"])
 
         def row_match_top(candidate: dict) -> int:
@@ -432,13 +433,10 @@ class ProfilePageEditor:
 
         # Never crop from only the glyphs already accepted on the current row.
         # If a glyph is entirely missing, doing so can hide exactly the pixels
-        # the reviewer needs to capture.  Build a safe three-row envelope first,
-        # then read raw thresholded facsimile pixels from that full envelope.
-        visual_rows = [
-            candidate
-            for candidate in (previous_row, row, next_row)
-            if candidate is not None
-        ]
+        # the reviewer needs to capture.  Build a safe five-row envelope first
+        # (two rows above and two below), then read raw thresholded facsimile
+        # pixels from that full envelope.
+        visual_rows = [*previous_rows, row, *next_rows]
         visual_extents = [row_visual_extent(candidate) for candidate in visual_rows]
         top = max(col_top, min(extent[0] for extent in visual_extents))
         bottom = min(col_bottom, max(extent[1] for extent in visual_extents))
@@ -447,7 +445,7 @@ class ProfilePageEditor:
         gray = self.context["gray"]
         pixels = gray.load()
 
-        neighbor_rows = [candidate for candidate in (previous_row, next_row) if candidate is not None]
+        neighbor_rows = [*previous_rows, *next_rows]
         neighbor_points: list[list[int]] = []
         context_top = top
         context_bottom = bottom
