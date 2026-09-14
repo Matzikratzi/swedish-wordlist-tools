@@ -120,11 +120,42 @@ def _established_baseline_distance(
 
 
 def _choose_same_raster_variant(candidates, accepted_streams):
-    """Choose among candidates that explain the identical physical pixel set."""
+    """Choose among candidates that explain the identical physical pixel set.
+
+    Geometry cannot distinguish identical rasters carrying different typography.
+    When the candidate baseline already has accepted glyphs, prefer the style of
+    the nearest accepted glyph on that baseline.  Otherwise preserve the old
+    baseline/rank ordering.
+    """
+    def nearby_style(candidate):
+        item, tx, baseline, _support, _rank = candidate
+        stream = accepted_streams.get(baseline) or []
+        if not stream:
+            return None
+        candidate_left = tx + item.model.min_x
+        nearest = min(
+            stream,
+            key=lambda entry: (
+                abs(int(entry[1]) - candidate_left),
+                -int(entry[1]),
+            ),
+        )
+        return str(nearest[5])
+
+    def style_penalty(candidate):
+        established = nearby_style(candidate)
+        if established is None:
+            return 0
+        candidate_style = getattr(candidate[0].model.style, "typographic_style", None)
+        if candidate_style not in {"roman", "italic", "bold"}:
+            candidate_style = str(candidate[0].model.style)
+        return 0 if candidate_style == established else 1
+
     return min(
         candidates,
         key=lambda candidate: (
             _established_baseline_distance(candidate[2], accepted_streams),
+            style_penalty(candidate),
             candidate[4],
         ),
     )
