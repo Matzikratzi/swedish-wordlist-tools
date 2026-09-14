@@ -986,9 +986,46 @@ function chooseRect(a,b){{let x0=Math.min(a.x,b.x),x1=Math.max(a.x,b.x),y0=Math.
 canvas.addEventListener('mousedown',e=>{{let p=point(e);if(e.shiftKey||e.altKey){{let k=p.x+','+p.y;if(allSource.has(k)){{if(e.altKey)chosen.delete(k);else chosen.add(k);sync();}}e.preventDefault();return;}}dragStart=p;dragNow=p;e.preventDefault();draw();}});
 canvas.addEventListener('mousemove',e=>{{if(dragStart){{dragNow=point(e);draw();}}}});
 window.addEventListener('mouseup',e=>{{if(!dragStart)return;dragNow=point(e);chooseRect(dragStart,dragNow);dragStart=null;dragNow=null;sync();}});
-const rasterDump={dump_text};
+const rasterDumpBase={dump_text};
+function rasterDumpWithSelection(){{
+ let dump=rasterDumpBase;
+ if(chosen.size===0) return dump;
+ const labelInput=document.querySelector('input[name="label"]');
+ const styleSelect=document.getElementById('styleSelect');
+ const baselineInput=document.getElementById('glyphBaseline');
+ const pts=[...chosen].map(k=>k.split(',').map(Number));
+ pts.sort((a,b)=>a[1]-b[1]||a[0]-b[0]);
+ const abs=pts.map(([x,y])=>[x+cropLeft,y+cropTop]);
+ const baseline=Number(baselineInput.value);
+ const left=Math.min(...abs.map(p=>p[0]));
+ const norm=abs.map(([x,y])=>[x-left,y-baseline]);
+ dump += '\nSELECTION:\n';
+ dump += 'label='+JSON.stringify(labelInput.value)+'\n';
+ dump += 'style='+styleSelect.value+'\n';
+ dump += 'baseline='+baseline+'\n';
+ dump += 'selected_pixels='+abs.length+'\n';
+ dump += 'page_bbox=['+
+   Math.min(...abs.map(p=>p[0]))+','+
+   Math.min(...abs.map(p=>p[1]))+','+
+   (Math.max(...abs.map(p=>p[0]))+1)+','+
+   (Math.max(...abs.map(p=>p[1]))+1)+']\n';
+ dump += 'pixels_absolute:\n'+abs.map(([x,y])=>'('+x+','+y+')').join(' ')+'\n';
+ dump += 'pixels_relative_to_baseline:\n'+norm.map(([x,y])=>'('+x+','+y+')').join(' ')+'\n';
+ const selected=new Set(pts.map(([x,y])=>x+','+y));
+ dump += 'selection_raster (@=selected):\n';
+ for(let y=0;y<S.height;y++){{
+   let line='';
+   for(let x=0;x<S.width;x++){{
+     const key=x+','+y;
+     line += selected.has(key) ? '@' : '.';
+   }}
+   if(line.includes('@')) dump += String(cropTop+y).padStart(4,'0')+' '+line+'\n';
+ }}
+ return dump;
+}}
 document.getElementById('copydump').onclick=function(){{
  const button=this, old=button.textContent;
+ const rasterDump=rasterDumpWithSelection();
  try {{
    if(navigator.clipboard && navigator.clipboard.writeText) {{
      const promise=navigator.clipboard.writeText(rasterDump);
