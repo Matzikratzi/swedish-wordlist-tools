@@ -299,9 +299,29 @@ class ProfilePageEditor:
                 out.append((c, row))
         return out
 
+    def _column_rows_in_content(self, column: int) -> list[dict]:
+        """Rows the editor is allowed to navigate/review inside one column.
+
+        The segmented column top/bottom define the logical content extent.
+        Pixels outside it may still be shown as visual context, but reconstructed
+        rows outside it are not editor rows.
+        """
+        assert self.context is not None
+        _left, _right, col_top, col_bottom = _minimal_column_bounds(
+            self.context, int(column)
+        )
+        return sorted(
+            [
+                row
+                for c, row in self.rows_flat()
+                if c == int(column)
+                and col_top <= int(row["baseline"]) < col_bottom
+            ],
+            key=lambda row: int(row["baseline"]),
+        )
+
     def locate(self, column: int, baseline: int | None) -> tuple[int, dict]:
-        rows = self.rows_flat()
-        same = [(c, row) for c, row in rows if c == int(column)]
+        same = [(int(column), row) for row in self._column_rows_in_content(column)]
         if not same:
             raise ValueError(f"kolumn {column} har inga rekonstruerade rader")
         if baseline is None:
@@ -315,7 +335,11 @@ class ProfilePageEditor:
         )
 
     def nav(self, current: tuple[int, dict], delta: int) -> tuple[int, dict] | None:
-        rows = self.rows_flat()
+        rows = [
+            (column, row)
+            for column in range(len(self.result["columns"]))
+            for row in self._column_rows_in_content(column)
+        ]
         current_key = (current[0], int(current[1]["baseline"]))
         keys = [(c, int(row["baseline"])) for c, row in rows]
         try:
@@ -337,7 +361,11 @@ class ProfilePageEditor:
         return any(top <= y < bottom for _x, y in deferred)
 
     def incomplete_nav(self, current: tuple[int, dict], delta: int) -> tuple[int, dict] | None:
-        rows = self.rows_flat()
+        rows = [
+            (column, row)
+            for column in range(len(self.result["columns"]))
+            for row in self._column_rows_in_content(column)
+        ]
         keys = [(c, int(row["baseline"])) for c, row in rows]
         current_key = (current[0], int(current[1]["baseline"]))
         try:
@@ -384,10 +412,7 @@ class ProfilePageEditor:
             self.context, column
         )
 
-        same_column_rows = sorted(
-            [candidate for c, candidate in self.rows_flat() if c == column],
-            key=lambda candidate: int(candidate["baseline"]),
-        )
+        same_column_rows = self._column_rows_in_content(column)
         current_pos = next(
             i for i, candidate in enumerate(same_column_rows)
             if int(candidate["baseline"]) == int(row["baseline"])
@@ -466,8 +491,8 @@ class ProfilePageEditor:
         visual_rows = [*previous_rows, row, *next_rows]
         visual_extents = [row_visual_extent(candidate) for candidate in visual_rows]
         page_height = self.context["gray"].height
-        top = max(0, min(extent[0] for extent in visual_extents))
-        bottom = min(page_height, max(extent[1] for extent in visual_extents))
+        top = max(col_top, min(extent[0] for extent in visual_extents))
+        bottom = min(col_bottom, max(extent[1] for extent in visual_extents))
         left = content_left
         right = content_right
         gray = self.context["gray"]
@@ -479,7 +504,7 @@ class ProfilePageEditor:
         context_bottom = bottom
         for neighbor in neighbor_rows:
             n_top, n_bottom = row_visual_extent(neighbor)
-            for y in range(max(0, n_top), min(page_height, n_bottom)):
+            for y in range(max(col_top, n_top), min(col_bottom, n_bottom)):
                 for x in range(left, right):
                     if int(pixels[x, y]) < self.threshold:
                         neighbor_points.append([x - left, y - top])
