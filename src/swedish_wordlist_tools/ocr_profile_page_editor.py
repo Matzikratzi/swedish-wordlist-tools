@@ -582,6 +582,8 @@ class ProfilePageEditor:
             "baseline_local": int(row["baseline"]) - top,
             "row_page_top": row_top,
             "row_page_bottom": row_bottom,
+            "compact_top": max(0, row_match_top(row) - top),
+            "compact_bottom": min(bottom - top, row_match_bottom(row) - top),
             "crop_box": [left, top, right, bottom],
             "width": right - left,
             "height": bottom - top,
@@ -789,7 +791,7 @@ deferred=<span class="red">{state['deferred_remaining']}</span>.</div>
 <div class="controls">
 <label class="inline"><input id="grid" type="checkbox" checked> rutnät</label>
 <label class="inline"><input id="baseline" type="checkbox" checked> baseline</label>
-<label class="inline"><input id="neighbors" type="checkbox"> grannrader i samma kolumn</label>
+<label class="inline"><input id="neighbors" type="checkbox"> visa 5 rader</label>
 <button type="button" id="clear">Rensa pixelval</button>
 <span id="count">0 valda pixlar</span><span id="selectionInfo"></span>
 </div>
@@ -808,7 +810,7 @@ deferred=<span class="red">{state['deferred_remaining']}</span>.</div>
 <button class="delete-model" type="submit" name="action" value="delete" formnovalidate onclick="return selectedMatch!==null && confirm('Ta bort vald mall ur facit?')">Ta bort vald mall</button>
 </div>
 </form>
-<p class="hint">Dra en rektangel över svarta pixlar för att välja dem. Shift-klick lägger till en enskild svart pixel; Alt-klick tar bort. Röda rutor är deferred-pixlar från profil-OCR:n. Röda horisontella linjer visar radgränserna direkt under föregående rads lägsta matchade pixel. Huvudrastret läser alltid råa faksimilpixlar över föregående, aktuell och nästa rads fulla vertikala område, så omatchade pixlar kapas inte bort. De tre små raderna ovan visar föregående, aktuell och nästa rad. "Ickeklar" betyder att raden innehåller deferred-pixlar. Efter sparning byggs facit/trie om, hela sidan OCR:as om och editorn återgår till raden närmast samma baseline.</p>
+<p class="hint">Dra en rektangel över svarta pixlar för att välja dem. Shift-klick lägger till en enskild svart pixel; Alt-klick tar bort. Röda rutor är deferred-pixlar från profil-OCR:n. Röda horisontella linjer visar radgränserna direkt under föregående rads lägsta matchade pixel. Huvudrastret läser alltid råa faksimilpixlar över två rader ovanför, aktuell rad och två rader nedanför, så omatchade pixlar kapas inte bort. Normalt visas bara aktuell rad; kryssa i "visa 5 rader" för hela kontexten. De tre små raderna ovan visar föregående, aktuell och nästa rad. "Ickeklar" betyder att raden innehåller deferred-pixlar. Efter sparning byggs facit/trie om, hela sidan OCR:as om och editorn återgår till raden närmast samma baseline.</p>
 <script>
 const S={data}, scale=9, topPad=28;
 const cropLeft=S.crop_box[0], cropTop=S.crop_box[1];
@@ -821,16 +823,14 @@ const neighborPoints=new Set(S.neighbor_points.map(p=>p[0]+','+p[1]));
 const chosen=new Set(); let selectedMatch=null; let dragStart=null,dragNow=null;
 const img=new Image();img.src=S.image;
 function viewOriginY(){{
- const boundaryTop=Math.min(0,S.row_boundary_top);
  return document.getElementById('neighbors').checked
-   ? Math.min(boundaryTop,S.neighbor_min_y)
-   : boundaryTop;
+   ? 0
+   : S.compact_top;
 }}
 function viewBottomY(){{
- const boundaryBottom=Math.max(S.height,S.row_boundary_bottom);
  return document.getElementById('neighbors').checked
-   ? Math.max(boundaryBottom,S.neighbor_max_y)
-   : boundaryBottom;
+   ? S.height
+   : S.compact_bottom;
 }}
 function point(e){{const r=canvas.getBoundingClientRect(), originY=viewOriginY(), bottomY=viewBottomY();return {{
  x:Math.max(0,Math.min(S.width-1,Math.floor((e.clientX-r.left)*(canvas.width/r.width)/scale))),
