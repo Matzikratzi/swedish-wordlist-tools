@@ -392,8 +392,8 @@ class ProfilePageEditor:
             i for i, candidate in enumerate(same_column_rows)
             if int(candidate["baseline"]) == int(row["baseline"])
         )
-        previous_rows = same_column_rows[max(0, current_pos - 2):current_pos]
-        next_rows = same_column_rows[current_pos + 1:current_pos + 3]
+        previous_rows = same_column_rows[max(0, current_pos - 3):current_pos]
+        next_rows = same_column_rows[current_pos + 1:current_pos + 4]
         previous_row = previous_rows[-1] if previous_rows else None
         baseline_page = int(row["baseline"])
 
@@ -421,13 +421,14 @@ class ProfilePageEditor:
 
         def row_visual_extent(candidate: dict) -> tuple[int, int]:
             matches = candidate.get("matches") or []
+            candidate_baseline = int(candidate["baseline"])
             candidate_top = min(
-                (int(match["top"]) for match in matches),
-                default=int(candidate["page_top"]),
+                [int(candidate["page_top"]), candidate_baseline]
+                + [int(match["top"]) for match in matches]
             )
             candidate_bottom = max(
-                (int(match["bottom"]) for match in matches),
-                default=int(candidate["page_bottom"]),
+                [int(candidate["page_bottom"]), candidate_baseline + 1]
+                + [int(match["bottom"]) for match in matches]
             )
             return candidate_top, candidate_bottom
 
@@ -435,7 +436,9 @@ class ProfilePageEditor:
         # If a glyph is entirely missing, doing so can hide exactly the pixels
         # the reviewer needs to capture.  Build a safe five-row envelope first
         # (two rows above and two below), then read raw thresholded facsimile
-        # pixels from that full envelope.
+        # pixels from that full envelope.  The expanded view is always
+        # anchored on the selected row and includes up to three reconstructed
+        # rows on either side.
         visual_rows = [*previous_rows, row, *next_rows]
         visual_extents = [row_visual_extent(candidate) for candidate in visual_rows]
         top = max(col_top, min(extent[0] for extent in visual_extents))
@@ -810,7 +813,7 @@ deferred=<span class="red">{state['deferred_remaining']}</span>.</div>
 <button class="delete-model" type="submit" name="action" value="delete" formnovalidate onclick="return selectedMatch!==null && confirm('Ta bort vald mall ur facit?')">Ta bort vald mall</button>
 </div>
 </form>
-<p class="hint">Dra en rektangel över svarta pixlar för att välja dem. Shift-klick lägger till en enskild svart pixel; Alt-klick tar bort. Röda rutor är deferred-pixlar från profil-OCR:n. Röda horisontella linjer visar radgränserna direkt under föregående rads lägsta matchade pixel. Huvudrastret läser alltid råa faksimilpixlar över två rader ovanför, aktuell rad och två rader nedanför, så omatchade pixlar kapas inte bort. Normalt visas bara aktuell rad; kryssa i "visa 5 rader" för hela kontexten. De tre små raderna ovan visar föregående, aktuell och nästa rad. "Ickeklar" betyder att raden innehåller deferred-pixlar. Efter sparning byggs facit/trie om, hela sidan OCR:as om och editorn återgår till raden närmast samma baseline.</p>
+<p class="hint">Dra en rektangel över svarta pixlar för att välja dem. Shift-klick lägger till en enskild svart pixel; Alt-klick tar bort. Röda rutor är deferred-pixlar från profil-OCR:n. Röda horisontella linjer visar radgränserna direkt under föregående rads lägsta matchade pixel. Huvudrastret läser alltid råa faksimilpixlar över två rader ovanför, aktuell rad och två rader nedanför, så omatchade pixlar kapas inte bort. Normalt visas bara aktuell rad; kryssa i "visa 5 rader" för en utökad kontext med upp till tre rader ovanför och tre under. De tre små raderna ovan visar föregående, aktuell och nästa rad. "Ickeklar" betyder att raden innehåller deferred-pixlar. Efter sparning byggs facit/trie om, hela sidan OCR:as om och editorn återgår till raden närmast samma baseline.</p>
 <script>
 const S={data}, scale=9, topPad=28;
 const cropLeft=S.crop_box[0], cropTop=S.crop_box[1];
